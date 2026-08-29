@@ -1,0 +1,360 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Pictaria — Activity</title>
+  <link rel="icon" type="image/png" sizes="32x32" href="/brand/favicon-32.png">
+  <link rel="apple-touch-icon" href="/brand/apple-touch-icon.png">
+  <script src="/theme.js"></script>
+  <script src="/auth-gate.js" defer></script>
+  <script src="/nav.js" defer></script>
+  <link rel="stylesheet" href="/pictaria.css">
+  <style>
+    main { max-width: var(--p-page-w); margin: 0 auto; padding: 26px 18px 60px; }
+    h1 { font-size: 20px; font-weight: 800; letter-spacing: 0.2px; margin: 8px 0 6px; }
+    .page-note { color: var(--p-muted); font-size: 13px; line-height: 1.5; margin: 0 0 18px; }
+    .filters { padding: 14px 16px; margin-bottom: 14px; }
+    .filter-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+      gap: 10px;
+      align-items: end;
+    }
+    .filter label { display: block; color: var(--p-muted); font-size: 11.5px; font-weight: 750; margin: 0 0 5px; }
+    .filter .p-input { width: 100%; }
+    .filter-actions { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 12px; align-items: center; }
+    .filter-actions .downloads { display: flex; gap: 7px; margin-left: auto; }
+    .filter-summary { color: var(--p-muted); font-size: 12px; }
+    .history { overflow: hidden; }
+    .event {
+      display: grid;
+      grid-template-columns: minmax(116px, 150px) minmax(0, 1fr);
+      gap: 16px;
+      padding: 14px 16px;
+      border-bottom: 1px solid var(--p-line);
+    }
+    .event:last-child { border-bottom: none; }
+    .event-time { color: var(--p-muted); font-size: 12px; font-variant-numeric: tabular-nums; line-height: 1.45; }
+    .event-main { min-width: 0; }
+    .event-title { font-size: 14px; font-weight: 750; overflow-wrap: anywhere; }
+    .event-meta { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 7px; }
+    .event-meta .p-chip { font-size: 11px; padding: 3px 7px; max-width: 100%; overflow-wrap: anywhere; }
+    .event-meta .category { color: var(--p-accent); }
+    .event-detail { color: var(--p-muted); font-size: 12px; line-height: 1.45; margin-top: 7px; overflow-wrap: anywhere; }
+    .outcome-succeeded, .outcome-delivered, .outcome-reported { color: var(--p-ok); }
+    .outcome-failed, .outcome-undelivered { color: var(--p-danger); }
+    .outcome-interrupted, .outcome-cancelled, .outcome-skipped { color: var(--p-gold); }
+    .empty, .error { color: var(--p-muted); font-size: 13px; padding: 30px 18px; text-align: center; }
+    .error { color: var(--p-danger); }
+    .signal { color: var(--p-gold); font-size: 12.5px; padding: 10px 14px; margin-bottom: 14px; }
+    .load-row { display: flex; justify-content: center; margin-top: 14px; }
+    .retention-note { color: var(--p-muted); font-size: 12px; line-height: 1.5; margin: 14px 2px 0; }
+    @media (max-width: 600px) {
+      .event { grid-template-columns: 1fr; gap: 4px; }
+      .filter-actions .downloads { width: 100%; margin-left: 0; }
+    }
+  </style>
+</head>
+<body>
+  <header class="p-topbar">
+    <a class="p-brand" href="/">
+      <img src="/brand/mark-128.png" alt="">
+      <img class="p-brand-word" src="/brand/wordmark.png" alt="Pictaria">
+      <span class="p-brand-service">Activity</span>
+    </a>
+    <span class="p-supporter-slot" aria-live="polite"></span>
+    <nav class="p-nav">
+      <a href="/insights.html">Insights</a>
+      <a href="/enrich.html">Enrich</a>
+      <a href="/curate.html">Curate</a>
+      <a href="/albums.html">Albums</a>
+      <a href="/metrics.html">Frame</a>
+      <a href="/remote.html">Remote</a>
+    </nav>
+    <div class="p-grow"></div>
+    <span id="connStatus" class="p-chip p-conn" hidden><span class="p-dot ok"></span> Connected</span>
+    <a class="p-gear" href="/settings.html" title="Settings" aria-label="Settings">&#9881;</a>
+  </header>
+
+  <main>
+    <h1><span class="glyph">◷</span> Activity</h1>
+    <p class="page-note">A local, chronological view of what Pictaria Server has done — including Enrich and Curate history, Frame and voice commands, settings changes, and server lifecycle events.</p>
+
+    <section class="p-panel filters" aria-label="Activity filters">
+      <div class="filter-grid">
+        <div class="filter">
+          <label for="timeFilter">Time</label>
+          <select id="timeFilter" class="p-input">
+            <option value="24">Last 24 hours</option>
+            <option value="168" selected>Last 7 days</option>
+            <option value="720">Last 30 days</option>
+            <option value="2160">Last 90 days</option>
+            <option value="">All retained history</option>
+          </select>
+        </div>
+        <div class="filter">
+          <label for="categoryFilter">Category</label>
+          <select id="categoryFilter" class="p-input">
+            <option value="">All categories</option>
+            <option value="system">System</option>
+            <option value="settings">Settings</option>
+            <option value="frame">Frame</option>
+            <option value="voice">Voice</option>
+            <option value="enrich">Enrich</option>
+            <option value="curation">Curate</option>
+          </select>
+        </div>
+        <div class="filter">
+          <label for="typeFilter">Event</label>
+          <select id="typeFilter" class="p-input"><option value="">All events</option></select>
+        </div>
+        <div class="filter">
+          <label for="providerFilter">Provider</label>
+          <input id="providerFilter" class="p-input" list="providerOptions" placeholder="Any provider">
+          <datalist id="providerOptions"></datalist>
+        </div>
+        <div class="filter">
+          <label for="modelFilter">Model</label>
+          <input id="modelFilter" class="p-input" list="modelOptions" placeholder="Any model">
+          <datalist id="modelOptions"></datalist>
+        </div>
+      </div>
+      <div class="filter-actions">
+        <button id="applyFilters" class="p-btn primary">Apply filters</button>
+        <button id="clearFilters" class="p-btn">Clear</button>
+        <span id="filterSummary" class="filter-summary"></span>
+        <div class="downloads">
+          <button id="downloadJson" class="p-btn">Download JSON</button>
+          <button id="downloadCsv" class="p-btn">Download CSV</button>
+        </div>
+      </div>
+    </section>
+
+    <div id="voiceSignal" class="p-panel signal" hidden></div>
+    <section id="history" class="p-panel history" aria-live="polite"></section>
+    <div class="load-row"><button id="loadMore" class="p-btn" hidden>Load more</button></div>
+    <p class="retention-note">Operational events are kept for 90 days. Existing Enrich and Curate domain history follows those features’ own retention and may reach further back. Downloads use the same filters and are capped at 5,000 events.</p>
+  </main>
+
+  <script>
+    const el = (id) => document.getElementById(id);
+    const TYPE_LABELS = {
+      'system.start': 'Server started',
+      'system.stop': 'Server stopped',
+      'settings.changed': 'Settings changed',
+      'frame.command': 'Remote command',
+      'voice.command': 'Voice command',
+      'voice.tell-me': 'Tell Me answer',
+      'voice.interesting': 'Interesting answer',
+      'voice.tts': 'Voice synthesis',
+      'enrich.photo': 'Photo enrichment',
+      'enrich.run': 'Enrichment run',
+      'curation.favorite': 'Frame favorite',
+      'curation.never-show': 'Frame Never Show',
+      'curation.discard': 'Enrich discard',
+      'curation.restore': 'Enrich restore',
+      'curation.decision': 'Curate decision',
+      'curation.referee': 'Curate referee',
+    };
+    let nextCursor = null;
+    let activeParams = new URLSearchParams();
+    let loadedCount = 0;
+    let loadGeneration = 0;
+    const knownProviders = new Set();
+    const knownModels = new Set();
+
+    function syncTypeOptions() {
+      const category = el('categoryFilter').value;
+      const selected = el('typeFilter').value;
+      el('typeFilter').replaceChildren(new Option('All events', ''));
+      for (const [type, label] of Object.entries(TYPE_LABELS)) {
+        if (!category || type.startsWith(`${category}.`)) {
+          el('typeFilter').append(new Option(label, type));
+        }
+      }
+      if ([...el('typeFilter').options].some((option) => option.value === selected)) {
+        el('typeFilter').value = selected;
+      }
+    }
+
+    function selectedParams() {
+      const params = new URLSearchParams();
+      const hours = Number(el('timeFilter').value);
+      if (hours > 0) params.set('since', new Date(Date.now() - hours * 3600000).toISOString());
+      for (const [id, key] of [
+        ['categoryFilter', 'category'],
+        ['typeFilter', 'type'],
+        ['providerFilter', 'provider'],
+        ['modelFilter', 'model'],
+      ]) {
+        const value = el(id).value.trim();
+        if (value) params.set(key, value);
+      }
+      return params;
+    }
+
+    async function getJson(url) {
+      const response = await fetch(url, { headers: { Accept: 'application/json' }, cache: 'no-store' });
+      if (response.status === 401 || response.status === 403) {
+        window.pictariaGate?.show();
+        throw new Error('unauthorized');
+      }
+      const body = await response.json().catch(() => null);
+      if (!response.ok) throw new Error(body?.error?.message || `Request failed: ${response.status}`);
+      return body;
+    }
+
+    function localTime(iso) {
+      const date = new Date(iso);
+      if (Number.isNaN(date.getTime())) return { date: 'Unknown time', time: '' };
+      return {
+        date: date.toLocaleDateString(undefined, { dateStyle: 'medium' }),
+        time: date.toLocaleTimeString(undefined, { timeStyle: 'short' }),
+      };
+    }
+
+    function chip(text, className = '') {
+      const node = document.createElement('span');
+      node.className = `p-chip ${className}`.trim();
+      node.textContent = text;
+      return node;
+    }
+
+    function detailText(detail) {
+      if (!detail || typeof detail !== 'object') return '';
+      return Object.entries(detail).map(([key, value]) => {
+        const label = key.replace(/([A-Z])/g, ' $1').replace(/^./, (letter) => letter.toUpperCase());
+        return `${label}: ${Array.isArray(value) ? value.join(', ') : String(value ?? '—')}`;
+      }).join(' · ');
+    }
+
+    function addKnownOptions(events) {
+      for (const event of events) {
+        if (event.provider) knownProviders.add(event.provider);
+        if (event.model) knownModels.add(event.model);
+      }
+      for (const [id, values] of [['providerOptions', knownProviders], ['modelOptions', knownModels]]) {
+        el(id).replaceChildren(...[...values].sort().map((value) => new Option(value, value)));
+      }
+    }
+
+    function renderEvent(event) {
+      const row = document.createElement('article');
+      row.className = 'event';
+      const when = localTime(event.at);
+      const time = document.createElement('time');
+      time.className = 'event-time';
+      time.dateTime = event.at;
+      time.append(document.createTextNode(when.date), document.createElement('br'), document.createTextNode(when.time));
+
+      const main = document.createElement('div');
+      main.className = 'event-main';
+      const title = document.createElement('div');
+      title.className = 'event-title';
+      title.textContent = event.summary;
+      const meta = document.createElement('div');
+      meta.className = 'event-meta';
+      meta.append(chip(event.category === 'curation' ? 'Curate' : event.category, 'category'));
+      meta.append(chip(TYPE_LABELS[event.type] || event.type));
+      if (event.outcome) meta.append(chip(event.outcome, `outcome-${event.outcome}`));
+      if (event.provider) meta.append(chip(`Provider: ${event.provider}`));
+      if (event.model) meta.append(chip(`Model: ${event.model}`));
+      if (event.deviceId) meta.append(chip(`Device: ${event.deviceId}`));
+      if (event.assetId) meta.append(chip(`Photo: ${event.assetId}`));
+      const detail = detailText(event.detail);
+      main.append(title, meta);
+      if (detail) {
+        const detailNode = document.createElement('div');
+        detailNode.className = 'event-detail';
+        detailNode.textContent = detail;
+        main.append(detailNode);
+      }
+      row.append(time, main);
+      el('history').append(row);
+    }
+
+    function showMessage(text, className) {
+      const node = document.createElement('div');
+      node.className = className;
+      node.textContent = text;
+      el('history').replaceChildren(node);
+    }
+
+    async function load({ append = false } = {}) {
+      const generation = ++loadGeneration;
+      el('loadMore').disabled = true;
+      if (!append) {
+        loadedCount = 0;
+        nextCursor = null;
+        showMessage('Loading activity…', 'empty');
+      }
+      const params = new URLSearchParams(activeParams);
+      params.set('limit', '50');
+      if (append && nextCursor) params.set('cursor', nextCursor);
+      try {
+        const data = await getJson(`/api/activity?${params}`);
+        if (generation !== loadGeneration) return;
+        if (!append) el('history').replaceChildren();
+        addKnownOptions(data.items || []);
+        for (const event of data.items || []) renderEvent(event);
+        loadedCount += data.items?.length ?? 0;
+        nextCursor = data.nextCursor;
+        el('loadMore').hidden = !nextCursor;
+        el('filterSummary').textContent = `${loadedCount.toLocaleString()} event${loadedCount === 1 ? '' : 's'} loaded${nextCursor ? ' · more available' : ''}`;
+        const unrecognized = Number(data.signals?.unrecognizedVoiceCommands7d ?? 0);
+        const voiceTotal = Number(data.signals?.voiceCommands7d ?? 0);
+        el('voiceSignal').hidden = unrecognized === 0;
+        el('voiceSignal').textContent = unrecognized > 0
+          ? `Voice recognition check: ${unrecognized.toLocaleString()} of ${voiceTotal.toLocaleString()} reported voice commands were unrecognized in the last 7 days.`
+          : '';
+        if (loadedCount === 0) showMessage('No activity matches these filters.', 'empty');
+      } catch (error) {
+        if (generation !== loadGeneration) return;
+        if (error.message !== 'unauthorized') showMessage(error.message, 'error');
+        el('loadMore').hidden = true;
+      } finally {
+        if (generation === loadGeneration) el('loadMore').disabled = false;
+      }
+    }
+
+    function applyFilters() {
+      activeParams = selectedParams();
+      void load();
+    }
+
+    function clearFilters() {
+      el('timeFilter').value = '168';
+      el('categoryFilter').value = '';
+      el('providerFilter').value = '';
+      el('modelFilter').value = '';
+      syncTypeOptions();
+      el('typeFilter').value = '';
+      applyFilters();
+    }
+
+    function download(format) {
+      const params = new URLSearchParams(activeParams);
+      params.set('format', format);
+      window.location.assign(`/api/activity/export?${params}`);
+    }
+
+    el('categoryFilter').addEventListener('change', syncTypeOptions);
+    el('applyFilters').addEventListener('click', applyFilters);
+    el('clearFilters').addEventListener('click', clearFilters);
+    el('loadMore').addEventListener('click', () => void load({ append: true }));
+    el('downloadJson').addEventListener('click', () => download('json'));
+    el('downloadCsv').addEventListener('click', () => download('csv'));
+    for (const id of ['providerFilter', 'modelFilter']) {
+      el(id).addEventListener('keydown', (event) => { if (event.key === 'Enter') applyFilters(); });
+    }
+
+    syncTypeOptions();
+    activeParams = selectedParams();
+    void load();
+    getJson('/api/health').then((health) => {
+      el('connStatus').hidden = health?.immich !== 'connected';
+    }).catch(() => {});
+  </script>
+</body>
+</html>

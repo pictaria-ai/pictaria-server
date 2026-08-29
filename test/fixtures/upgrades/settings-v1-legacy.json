@@ -1,0 +1,23 @@
+{
+  "version": 1,
+  "server": {
+    "immichBaseUrl": "http://immich.example:2283",
+    "immichApiKey": "fixture-immich-key"
+  },
+  "enrich": {
+    "defaultProvider": "local_lmstudio",
+    "lmStudioBaseUrl": "http://models.example:1234/v1",
+    "lmStudioModel": "fixture-vision-model"
+  },
+  "voice": {
+    "openAiApiKey": "fixture-openai-key",
+    "openAiAskModel": "gpt-4o-mini",
+    "openAiAskMaxOutputTokens": 750,
+    "ttsProvider": "openai"
+  },
+  "backup": {
+    "enabled": true,
+    "intervalHours": 24,
+    "keep": 7
+  }
+}

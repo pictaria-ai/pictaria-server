@@ -1,0 +1,17 @@
+{
+  "name": "pictaria-server",
+  "version": "1.0.0",
+  "private": true,
+  "license": "AGPL-3.0-only",
+  "type": "module",
+  "description": "Pictaria Server: self-hosted companion for Pictaria Frame. Voice, Smart Albums, Enrich, and Remote for Immich libraries.",
+  "engines": {
+    "node": "^22.16.0 || >=23.8.0"
+  },
+  "scripts": {
+    "check:dco": "node scripts/check-dco.mjs",
+    "check:publication": "node scripts/check-publication.mjs",
+    "start": "node --env-file-if-exists=.env src/server.mjs",
+    "test": "node --test"
+  }
+}

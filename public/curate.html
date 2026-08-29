@@ -1,0 +1,262 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Pictaria — Curate</title>
+  <link rel="icon" type="image/png" sizes="32x32" href="/brand/favicon-32.png">
+  <link rel="apple-touch-icon" href="/brand/apple-touch-icon.png">
+  <script src="/theme.js"></script>
+  <script src="/auth-gate.js" defer></script>
+  <script src="/nav.js" defer></script>
+  <link rel="stylesheet" href="/pictaria.css">
+  <style>
+    main { padding: 26px 18px 110px; }
+    h1 { font-size: 20px; font-weight: 800; letter-spacing: 0.2px; margin: 8px 0 6px; }
+    .intro { color: var(--p-muted); font-size: 13px; margin: 0 0 14px; line-height: 1.5; }
+    .toolbar { display: flex; align-items: center; gap: 12px; margin: 12px 0; flex-wrap: wrap; }
+    .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: 12px; }
+    .card-thumb-wrap { position: relative; cursor: zoom-in; }
+    .card-thumb { width: 100%; aspect-ratio: 4 / 3; object-fit: cover; display: block; background: var(--p-panel-2); }
+    .card-check { position: absolute; top: 8px; right: 8px; width: 19px; height: 19px; accent-color: var(--p-accent); }
+    .card-body { padding: 9px 10px 10px; display: grid; gap: 7px; }
+    .card-file { font-size: 12px; font-weight: 700; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .card-chips { display: flex; gap: 4px; flex-wrap: wrap; max-height: 42px; overflow: hidden; }
+    .card-actions { display: grid; grid-template-columns: repeat(4, 1fr); gap: 5px; }
+    .card-actions .p-btn { height: 27px; padding: 0; font-size: 11px; }
+    .bulkbar {
+      position: fixed; left: 0; right: 0; bottom: 0; z-index: 30;
+      display: flex; align-items: center; gap: 8px; padding: 11px 18px;
+      background: var(--p-topbar-bg); border-top: 1px solid var(--p-line);
+    }
+    .empty { padding: 44px; text-align: center; color: var(--p-muted); }
+    /* Burst stacks: one card per "same moment" group, pile-of-photos edges */
+    .stack-edge { height: 6px; background: var(--p-panel-2); border: 1px solid var(--p-strong-line, var(--p-line)); border-bottom: none; border-radius: 8px 8px 0 0; }
+    .stack-edge.e2 { margin: 0 18px; opacity: 0.7; }
+    .stack-edge.e1 { margin: 0 9px; opacity: 0.9; }
+    .p-card.stack { border-color: var(--p-strong-line, var(--p-line)); }
+    /* "Keep, skip N" always gets its own full-width, centered row. */
+    .card-actions .keep-best { grid-column: 1 / -1; }
+    /* Compare view: all members of one group side by side */
+    .burstbox { position: fixed; inset: 0; z-index: 40; display: none; background: rgba(8, 10, 13, 0.94); }
+    .burstbox.open { display: flex; align-items: center; justify-content: center; padding: 18px; }
+    .bb-panel { background: var(--p-panel); border: 1px solid var(--p-line); border-radius: var(--p-radius); width: min(1280px, 96vw); max-height: 94vh; display: flex; flex-direction: column; box-shadow: var(--p-shadow); }
+    .bb-head { display: flex; gap: 10px; align-items: center; padding: 12px 16px; border-bottom: 1px solid var(--p-line); }
+    /* Rows must size to content: the cells' overflow:hidden zeroes their
+       automatic minimum, so without this a height-capped grid compresses the
+       tracks equally and clips every card's buttons instead of scrolling. */
+    .bb-grid { padding: 14px; display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); grid-auto-rows: max-content; gap: 12px; overflow-y: auto; }
+    .bb-cell { position: relative; border: 1px solid var(--p-line); border-radius: var(--p-radius-sm); overflow: hidden; background: var(--p-panel-2); }
+    .bb-cell.best { border-color: rgba(251, 191, 36, 0.65); }
+    /* Decided during this compare session: the cell holds its grid slot so
+       the remaining photos never reflow, it just goes quiet. */
+    .bb-cell.decided { opacity: 0.38; }
+    .bb-cell.decided img { cursor: default; }
+    .bb-cell img { width: 100%; aspect-ratio: 4 / 3; object-fit: contain; background: #000; display: block; cursor: zoom-in; }
+    .bb-body { padding: 8px 10px 10px; display: grid; gap: 6px; }
+    /* Referee why-line: the model's one-sentence reason under each member */
+    .bb-why { display: flex; align-items: flex-start; gap: 6px; font-size: 11.5px; color: var(--p-muted); line-height: 1.45; }
+    .bb-why .p-chip.warn { flex: none; }
+    .bb-body .card-actions { grid-template-columns: repeat(4, 1fr); }
+    /* Lightbox */
+    .lightbox { position: fixed; inset: 0; z-index: 50; display: none; background: rgba(8, 10, 13, 0.94); }
+    .lightbox.open { display: grid; grid-template-columns: minmax(0, 1fr) 320px; }
+    .lb-stage { display: flex; align-items: center; justify-content: center; min-width: 0; padding: 18px; }
+    .lb-stage img { max-width: 100%; max-height: calc(100vh - 36px); border-radius: 6px; box-shadow: var(--p-shadow); }
+    /* The sidebar is a fixed-width grid item. Its single implicit column
+       otherwise uses the largest child's min-content width: a UUID filename
+       can make every row wider than the rail and turn it into a horizontal
+       scroller. Keep the track shrinkable and contain every long value. */
+    .lb-side { border-left: 1px solid var(--p-line); background: var(--p-panel); padding: 16px; min-width: 0; overflow-x: hidden; overflow-y: auto; display: grid; grid-template-columns: minmax(0, 1fr); gap: 12px; align-content: start; }
+    .lb-side > * { min-width: 0; }
+    /* Fixed vertical budget so buttons and tags below never shift between
+       photos as caption/reason lengths change (muscle-memory positioning). */
+    /* Fixed height on purpose: sized to fit a typical 2–3 sentence caption
+       in full, and constant so the action buttons never move with caption
+       length. Outliers scroll. */
+    .lb-caption { font-size: 14px; height: 13.8em; overflow-y: auto; line-height: 1.45; }
+    #lbReasons { min-height: 26px; align-content: start; }
+    .lb-tags { display: flex; gap: 4px; flex-wrap: wrap; }
+    .lb-tags .p-chip { max-width: 100%; overflow: hidden; text-overflow: ellipsis; }
+    .lb-actions { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 7px; }
+    /* .p-btn assumes <button>; anchors need the link styling stripped. */
+    .lb-side a.p-btn { display: flex; align-items: center; justify-content: center; text-decoration: none; }
+    .lb-keys, #lbModel { overflow-wrap: anywhere; }
+    .lb-keys { font-size: 11px; color: var(--p-muted); line-height: 1.8; }
+    .lb-keys kbd { border: 1px solid var(--p-line); border-radius: 4px; padding: 0 5px; background: var(--p-panel-2); font-family: inherit; }
+    @media (max-width: 860px) {
+      .lightbox.open { grid-template-columns: 1fr; grid-template-rows: 1fr auto; }
+      .lb-side { border-left: none; border-top: 1px solid var(--p-line); max-height: 45vh; }
+      /* The sidebar is capped at 45vh here; keep the caption block shorter
+         so buttons stay reachable. Still fixed, still scrolls. */
+      .lb-caption { height: 6.9em; }
+    }
+    .ref-strip {
+      display: flex; align-items: center; gap: 10px;
+      font-size: 13px; color: var(--p-muted);
+      padding: 11px 14px; margin-bottom: 12px;
+      border: 1px solid var(--p-line); border-radius: var(--p-radius-sm);
+    }
+    .ref-strip .info-i {
+      display: inline-block; color: var(--p-muted); text-decoration: none;
+      border: 1px solid var(--p-line); border-radius: 50%;
+      width: 15px; height: 15px; line-height: 14px; text-align: center;
+      font-size: 10px; font-weight: 700; flex-shrink: 0;
+    }
+    .ref-strip .info-i:hover { color: var(--p-accent); border-color: var(--p-accent); }
+    .ref-progress { display: flex; align-items: center; gap: 8px; flex: 1; max-width: 340px; margin-left: auto; }
+    .ref-progress .p-score-track { flex: 1; height: 6px; border-radius: 3px; }
+    .ref-progress .p-muted { font-size: 12px; font-variant-numeric: tabular-nums; white-space: nowrap; }
+    .ref-activity-btn { font-size: 12px; padding: 3px 10px; flex-shrink: 0; }
+    .ref-act-pop { position: fixed; inset: 0; background: rgba(8, 11, 14, 0.6); display: flex; align-items: center; justify-content: center; z-index: 45; }
+    .ref-act-pop[hidden] { display: none; }
+    .ref-act-box { width: min(640px, 92vw); max-height: 80vh; display: flex; flex-direction: column; padding: 16px 18px; }
+    .ref-act-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 10px; }
+    .ref-act-head h2 { font-size: 12.5px; font-weight: 800; text-transform: uppercase; letter-spacing: 0.8px; color: var(--p-muted); margin: 0; }
+    .ref-act-list { overflow-y: auto; font-size: 13px; }
+    .ref-act-list .row { display: flex; gap: 10px; padding: 7px 2px; border-bottom: 1px solid var(--p-line); align-items: baseline; }
+    .ref-act-list .row:last-child { border-bottom: none; }
+    .ref-act-list .when { color: var(--p-muted); font-size: 12px; white-space: nowrap; width: 118px; flex-shrink: 0; }
+    .ref-act-list .row.err .what { color: var(--p-danger, #d66); }
+    .ref-act-list .none { color: var(--p-muted); padding: 8px 2px; }
+  </style>
+</head>
+<body>
+  <header class="p-topbar">
+    <a class="p-brand" href="/">
+      <img src="/brand/mark-128.png" alt="">
+      <img class="p-brand-word" src="/brand/wordmark.png" alt="Pictaria">
+      <span class="p-brand-service">Curate</span>
+    </a>
+    <span class="p-supporter-slot" aria-live="polite"></span>
+    <nav class="p-nav">
+      <a href="/insights.html">Insights</a>
+      <a href="/enrich.html">Enrich</a>
+      <a href="/curate.html" class="active">Curate</a>
+      <a href="/albums.html">Albums</a>
+      <a href="/metrics.html">Frame</a>
+      <a href="/remote.html">Remote</a>
+    </nav>
+    <div class="p-grow"></div>
+    <span id="syncPill" class="p-chip" hidden></span>
+    <span id="connStatus" class="p-chip p-conn" hidden><span class="p-dot ok"></span> Connected</span>
+    <a class="p-gear" href="/settings.html" title="Settings" aria-label="Settings">&#9881;</a>
+  </header>
+
+  <main>
+    <h1><span class="glyph">◈</span> Curate</h1>
+    <p class="intro">Review photos and decide how your photos are human-tagged for selection into Albums
+      and other uses (e.g., showing only your best photos in Pictaria Frame). Nothing changes
+      until you choose.
+      <a href="https://github.com/pictaria-ai/pictaria-server/blob/main/docs/ENRICH.md#human-tags" target="_blank" rel="noopener" style="color: var(--p-accent)">More on human tags.</a></p>
+    <p class="intro">Same-moment shots collapse into Stacks with a suggested best pick: silver &#9733; from
+      photo scores, gold &#9733; when the AI referee has compared the Stack side by side.
+      <a href="https://github.com/pictaria-ai/pictaria-server/blob/main/docs/ENRICH.md#stacks-and-the-ai-referee" target="_blank" rel="noopener" style="color: var(--p-accent)">More on the AI referee.</a></p>
+    <div id="refStrip" class="ref-strip" hidden>
+      <span id="refDot" class="p-dot"></span>
+      <a id="refInfo" class="info-i" href="/settings.html#sec-curate"
+         title="The AI referee looks at each Stack's photos side by side with a vision model and suggests the best one (the gold star), with a short reason per photo. Suggestions only — you decide. Toggle it under Settings &rarr; Curate.">i</a>
+      <span id="refLine"></span>
+      <span id="refProgress" class="ref-progress" hidden>
+        <span class="p-score-track"><span id="refBar" class="p-score-fill" style="width: 0%"></span></span>
+        <span id="refBarText" class="p-muted"></span>
+        <span class="info-i" title="Progress through the current batch: stacks judged since the queue was last empty, out of those judged plus still waiting. The bar appears when new stacks arrive, fills as the referee works, and goes away once the batch is done. The all-time total at the end of the line keeps counting for good.">i</span>
+      </span>
+      <button id="refPause" class="p-btn ref-activity-btn"
+              title="Pause the referee so it stops using the AI model (for example to free up memory). A stack already being judged finishes first. Lasts until you resume or the server restarts; to turn the referee off for good use Settings &rarr; Curate.">Pause</button>
+      <button id="refActivity" class="p-btn ref-activity-btn">Activity</button>
+    </div>
+    <div class="p-row">
+      <nav id="tabs" class="p-tabs"></nav>
+      <span class="p-tab-divider" style="align-self: stretch"></span>
+      <input id="search" class="p-input" type="search" placeholder="Search this tab" style="width: min(280px, 30vw)">
+      <div class="p-grow"></div>
+    </div>
+    <div class="toolbar">
+      <nav id="groupFilter" class="p-tabs" title="Work through stacks and single photos as separate passes">
+        <button class="p-tab active" data-group="all">All</button>
+        <button class="p-tab" data-group="stacks">Stacks</button>
+        <button class="p-tab" data-group="singles">Singles</button>
+      </nav>
+      <label class="p-row" style="gap: 7px"><input id="selectVisible" type="checkbox"> Check visible</label>
+      <span id="meta" class="p-muted"></span>
+      <span id="metaEnrich" style="color: var(--p-danger); font-size: 12px; margin-left: 6px" hidden>Note: Enrich is running — Stacks may change as photos are added.</span>
+      <div class="p-grow"></div>
+      <button id="loadMore" class="p-btn">Load more</button>
+    </div>
+
+    <div id="refActPop" class="ref-act-pop" hidden>
+      <div class="ref-act-box p-panel">
+        <div class="ref-act-head">
+          <h2>Referee activity</h2>
+          <button id="refActClose" class="p-btn">Close</button>
+        </div>
+        <div id="refActList" class="ref-act-list"></div>
+      </div>
+    </div>
+    <section id="grid" class="grid"></section>
+  </main>
+
+  <div id="bulkbar" class="bulkbar" hidden>
+    <button class="p-btn gold" data-bulk="favorite">Fav</button>
+    <button class="p-btn primary" data-bulk="approve">Yes</button>
+    <button class="p-btn" data-bulk="reviewed">Skip</button>
+    <button class="p-btn danger" data-bulk="reject">No</button>
+    <button id="bulkUndo" class="p-btn quiet" data-bulk="clear" hidden>Undo decision</button>
+    <div class="p-grow"></div>
+    <span id="selectedCount" class="p-muted"></span>
+  </div>
+
+  <div id="lightbox" class="lightbox" aria-modal="true" role="dialog">
+    <div class="lb-stage"><img id="lbImage" alt=""></div>
+    <aside class="lb-side">
+      <div class="p-row">
+        <strong id="lbFile" class="p-grow" style="overflow: hidden; text-overflow: ellipsis; white-space: nowrap"></strong>
+        <button id="lbClose" class="p-btn quiet">Esc</button>
+      </div>
+      <div id="lbCaption" class="lb-caption p-muted"></div>
+      <div id="lbScore"></div>
+      <div id="lbReasons" class="lb-tags"></div>
+      <div class="lb-actions">
+        <button class="p-btn gold" data-lb="favorite">(F)av</button>
+        <button class="p-btn primary" data-lb="approve">(Y)es</button>
+        <button class="p-btn" data-lb="reviewed">(S)kip</button>
+        <button class="p-btn danger" data-lb="reject">(N)o</button>
+      </div>
+      <div id="lbBurst" hidden>
+        <button id="lbKeepBest" class="p-btn gold" style="width: 100%" hidden></button>
+        <label class="p-row" style="gap: 7px; margin-top: 8px"><input id="lbBurstApply" type="checkbox"> <span id="lbBurstLabel"></span></label>
+      </div>
+      <div>
+        <div class="p-muted" style="font-size: 11px; margin-bottom: 5px">AI TAGS</div>
+        <div id="lbAiTags" class="lb-tags"></div>
+      </div>
+      <div>
+        <div class="p-muted" style="font-size: 11px; margin-bottom: 5px">DECISION</div>
+        <div id="lbFrameTags" class="lb-tags"></div>
+      </div>
+      <a id="lbImmich" class="p-btn" target="_blank" rel="noopener" hidden>Open in Immich ↗</a>
+      <div class="lb-keys"><kbd>←</kbd> <kbd>→</kbd> navigate · <kbd>K</kbd> keep best · <kbd>Esc</kbd> close · letter keys press the buttons</div>
+      <div id="lbModel" class="p-muted" style="font-size: 11px" hidden></div>
+    </aside>
+  </div>
+
+  <div id="burstbox" class="burstbox" aria-modal="true" role="dialog">
+    <div class="bb-panel">
+      <div class="bb-head">
+        <strong id="bbTitle"></strong>
+        <span id="bbSub" class="p-muted" style="font-size: 12px"></span>
+        <div class="p-grow"></div>
+        <button id="bbYesAll" class="p-btn primary" hidden></button>
+        <button id="bbSkipAll" class="p-btn" hidden></button>
+        <button id="bbKeepBest" class="p-btn gold" hidden></button>
+        <button id="bbClose" class="p-btn quiet">Esc</button>
+      </div>
+      <div id="bbGrid" class="bb-grid"></div>
+    </div>
+  </div>
+
+  <div id="toast" class="p-toast"></div>
+  <script src="/curate.js"></script>
+</body>
+</html>

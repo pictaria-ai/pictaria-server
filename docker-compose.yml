@@ -1,0 +1,86 @@
+services:
+  pictaria:
+    # Release files default to their matching versioned image tag. A tag is a
+    # release name, not a cryptographic digest. Set PICTARIA_IMAGE_TAG only
+    # when deliberately testing another published tag.
+    image: ghcr.io/pictaria-ai/pictaria-server:${PICTARIA_IMAGE_TAG:-1.0.0}
+    build: .
+    container_name: pictaria
+    restart: unless-stopped
+    ports:
+      - "4080:4080"
+    environment:
+      # Required — point Pictaria at your Immich server.
+      IMMICH_BASE_URL: ${IMMICH_BASE_URL:?Set IMMICH_BASE_URL in .env}
+      IMMICH_API_KEY: ${IMMICH_API_KEY:?Set IMMICH_API_KEY in .env}
+      # Strongly recommended: protects the API and web UI on your network.
+      # Blank or missing refuses to start unless the separate dangerous
+      # open-mode switch is explicitly true.
+      APP_PASSWORD: ${APP_PASSWORD:-}
+      ALLOW_INSECURE_OPEN: ${ALLOW_INSECURE_OPEN:-false}
+      SESSION_COOKIE_SECURE: ${SESSION_COOKIE_SECURE:-false}
+      BROWSER_ALLOWED_HOSTS: ${BROWSER_ALLOWED_HOSTS:-}
+      TRUSTED_PROXY_IPS: ${TRUSTED_PROXY_IPS:-}
+      # The image owns the trusted /data/backups default. BACKUP_DIR stays
+      # empty unless the operator selects a separately mounted container path
+      # such as /backups; an explicit empty BACKUP_ENABLED still means false.
+      BACKUP_DIR: ${BACKUP_DIR:-}
+      BACKUP_ENABLED: ${BACKUP_ENABLED-true}
+      BACKUP_INTERVAL_HOURS: ${BACKUP_INTERVAL_HOURS:-24}
+      BACKUP_KEEP: ${BACKUP_KEEP:-7}
+      # Optional providers (see .env.example for the full list). Connections
+      # and models can also be set under Settings → AI Providers; the active
+      # enrichment provider is selected and remembered on the Enrich page.
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      DEFAULT_PROVIDER: ${DEFAULT_PROVIDER:-cloud_openai}
+      TTS_PROVIDER: ${TTS_PROVIDER:-}
+      STT_PROVIDER: ${STT_PROVIDER:-}
+      ELEVENLABS_API_KEY: ${ELEVENLABS_API_KEY:-}
+      ELEVENLABS_VOICE_ID: ${ELEVENLABS_VOICE_ID:-}
+      # Spoken voice answers: provider, per-command models, and the interactive
+      # deadline. Settings → Voice can set these too.
+      VOICE_PROSE_PROVIDER: ${VOICE_PROSE_PROVIDER:-}
+      VOICE_INTERESTING_MODEL: ${VOICE_INTERESTING_MODEL:-}
+      VOICE_ASK_MODEL: ${VOICE_ASK_MODEL:-}
+      VOICE_PROSE_TIMEOUT_MS: ${VOICE_PROSE_TIMEOUT_MS:-}
+      # AI provider connections, used by Enrich, the Curate referee and the
+      # spoken voice answers alike. Without these a .env-only install can
+      # select a provider it then has no way to reach.
+      VENICE_API_KEY: ${VENICE_API_KEY:-}
+      VENICE_MODEL: ${VENICE_MODEL:-}
+      VENICE_BASE_URL: ${VENICE_BASE_URL:-}
+      OPENROUTER_API_KEY: ${OPENROUTER_API_KEY:-}
+      OPENROUTER_MODEL: ${OPENROUTER_MODEL:-}
+      OPENROUTER_BASE_URL: ${OPENROUTER_BASE_URL:-}
+      OPENAI_MODEL: ${OPENAI_MODEL:-}
+      OLLAMA_API_KEY: ${OLLAMA_API_KEY:-}
+      OLLAMA_MODEL: ${OLLAMA_MODEL:-}
+      OLLAMA_BASE_URL: ${OLLAMA_BASE_URL:-}
+      OLLAMA_LOCAL_API_KEY: ${OLLAMA_LOCAL_API_KEY:-}
+      OLLAMA_LOCAL_MODEL: ${OLLAMA_LOCAL_MODEL:-}
+      # Container-local by default: point at host.docker.internal to reach a
+      # model server running on the host.
+      OLLAMA_LOCAL_BASE_URL: ${OLLAMA_LOCAL_BASE_URL:-}
+      LMSTUDIO_MODEL: ${LMSTUDIO_MODEL:-}
+      LMSTUDIO_BASE_URL: ${LMSTUDIO_BASE_URL:-}
+      LMSTUDIO_API_KEY: ${LMSTUDIO_API_KEY:-}
+      GEOCODING_PROVIDER: ${GEOCODING_PROVIDER:-}
+      GEOAPIFY_API_KEY: ${GEOAPIFY_API_KEY:-}
+    # Using LM Studio on the Docker host for local enrichment? Inside the
+    # container 127.0.0.1 is the container itself — set the LM Studio base
+    # URL (Settings → AI Providers) to http://host.docker.internal:1234/v1.
+    # On Linux, also uncomment these two lines so that hostname resolves:
+    # extra_hosts:
+    #   - "host.docker.internal:host-gateway"
+    volumes:
+      - pictaria-data:/data
+      # Backups default to /data/backups inside the volume. For real safety
+      # (surviving disk loss), bind-mount a NAS or synced folder at a
+      # SEPARATE path and point BACKUP_DIR at it — never over /data/backups,
+      # which is the implicitly-trusted default and must stay on the volume.
+      # Then adopt it once: docker exec pictaria node bin/backup.mjs --adopt
+      # - /mnt/nas/pictaria-backups:/backups
+      # ...and set BACKUP_DIR=/backups in .env.
+
+volumes:
+  pictaria-data:

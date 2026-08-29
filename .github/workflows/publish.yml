@@ -1,0 +1,71 @@
+name: Publish image
+
+on:
+  push:
+    tags:
+      - 'v*.*.*'
+
+permissions:
+  contents: read
+  packages: write
+
+concurrency:
+  group: publish-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    name: Publish versioned container
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 22
+      - name: Verify release tag and source
+        env:
+          RELEASE_TAG: ${{ github.ref_name }}
+        run: |
+          PACKAGE_VERSION="$(node -p "JSON.parse(require('fs').readFileSync('package.json')).version")"
+          test "$RELEASE_TAG" = "v$PACKAGE_VERSION"
+          npm run check:publication
+          npm test
+      - uses: docker/setup-qemu-action@c7c53464625b32c7a7e944ae62b3e17d2b600130 # v3
+      - uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3
+      - uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - id: meta
+        uses: docker/metadata-action@c299e40c65443455700f0fdfc63efafe5b349051 # v5
+        with:
+          images: ghcr.io/${{ github.repository }}
+          flavor: |
+            latest=auto
+          tags: |
+            type=semver,pattern={{version}}
+          labels: |
+            org.opencontainers.image.licenses=AGPL-3.0-only
+      - id: build
+        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6
+        with:
+          context: .
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+      - name: Record published manifest digest
+        env:
+          IMAGE: ghcr.io/${{ github.repository }}
+          IMAGE_DIGEST: ${{ steps.build.outputs.digest }}
+        run: |
+          test -n "$IMAGE_DIGEST"
+          {
+            echo "## Published container"
+            echo
+            echo 'Copy this verified multi-platform manifest digest into the GitHub Release:'
+            echo
+            echo "\`$IMAGE@$IMAGE_DIGEST\`"
+          } >> "$GITHUB_STEP_SUMMARY"

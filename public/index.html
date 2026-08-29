@@ -1,0 +1,401 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Pictaria</title>
+  <link rel="icon" type="image/png" sizes="32x32" href="/brand/favicon-32.png">
+  <link rel="apple-touch-icon" href="/brand/apple-touch-icon.png">
+  <script src="/theme.js"></script>
+  <script src="/auth-gate.js" defer></script>
+  <script src="/nav.js" defer></script>
+  <link rel="stylesheet" href="/pictaria.css">
+  <style>
+    main { max-width: var(--p-page-w); margin: 0 auto; padding: 26px 18px 60px; }
+    .hero { margin: 26px 0 0; }
+    /* The butterfly and the word are crops of the same lockup so they can be
+       sized independently — the word keeps the lockup's original 96px, the
+       butterfly sits a bit smaller. */
+    .hero-lockup { display: flex; align-items: center; gap: 8px; }
+    .hero-lockup .hero-mark { display: block; height: 80px; width: auto; }
+    .hero-lockup .hero-word { display: block; height: 96px; width: auto; max-width: calc(100% - 130px); object-fit: contain; }
+    .tagline { margin: 12px 0 0; color: var(--p-muted); font-size: 15px; }
+    .separator { border: 0; border-top: 1px solid var(--p-line); margin: 24px 0; }
+    .page-title { font-size: 20px; font-weight: 800; letter-spacing: 0.2px; margin: 0 0 4px; }
+    .status-box { padding: 12px 16px 13px; margin: 16px 0 22px; }
+    .status-box h2 {
+      font-size: 12.5px;
+      font-weight: 800;
+      text-transform: uppercase;
+      letter-spacing: 0.8px;
+      color: var(--p-muted);
+      margin: 0 0 7px;
+    }
+    .server-line { display: flex; align-items: center; gap: 8px; font-size: 13px; color: var(--p-ink); flex-wrap: wrap; }
+    .server-line + .server-line { margin-top: 6px; }
+    .cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 14px; }
+    .feature { display: block; text-decoration: none; color: var(--p-ink); padding: 16px; transition: border-color 120ms, transform 120ms; }
+    .feature:hover, .feature.flow-hover { border-color: var(--p-accent-deep); transform: translateY(-1px); }
+    .feature h2 { margin: 0 0 4px; font-size: 16px; display: flex; align-items: center; gap: 8px; }
+    .feature p { margin: 0 0 10px; color: var(--p-muted); font-size: 13px; min-height: 36px; }
+    .feature .status { display: flex; align-items: center; gap: 7px; font-size: 12px; color: var(--p-muted); }
+    .feature .glyph { color: var(--p-accent); font-size: 15px; }
+    .feature .glyph-gear { font-size: 19px; }
+    .locked { text-align: center; padding: 60px 20px; }
+    .locked .p-input { width: 220px; }
+    .setup-callout {
+      display: flex; align-items: center; gap: 14px; flex-wrap: wrap;
+      border-color: var(--p-accent-deep);
+      padding: 14px 16px; margin: 0 0 22px;
+    }
+    .setup-callout .txt { flex: 1; min-width: 260px; }
+    .setup-callout .txt strong { display: block; margin-bottom: 2px; }
+    .setup-callout .txt span { color: var(--p-muted); font-size: 13px; }
+    .setup-callout .p-btn { text-decoration: none; display: inline-flex; align-items: center; }
+    /* How-it-fits-together flow strip */
+    .flow { padding: 14px 16px; margin: 0 0 14px; }
+    .flow svg { display: block; width: 100%; max-width: 816px; height: auto; margin: 0 auto; font-family: var(--p-font); }
+    .flow svg a:hover rect { stroke: var(--p-accent); }
+    #flowEnrich.off { opacity: 0.45; }
+    .flow-bypass { display: block; color: var(--p-muted); font-size: 11.5px; padding: 8px 2px 0; }
+    .feature.off { opacity: 0.55; }
+    .feature.off:hover { opacity: 0.8; }
+  </style>
+</head>
+<body>
+  <header class="p-topbar">
+    <a class="p-brand" href="/">
+      <img src="/brand/mark-128.png" alt="">
+      <img class="p-brand-word" src="/brand/wordmark.png" alt="Pictaria">
+      <span class="p-brand-service">Server</span>
+    </a>
+    <span class="p-supporter-slot" aria-live="polite"></span>
+    <nav class="p-nav">
+      <a href="/insights.html">Insights</a>
+      <a href="/enrich.html">Enrich</a>
+      <a href="/curate.html">Curate</a>
+      <a href="/albums.html">Albums</a>
+      <a href="/metrics.html">Frame</a>
+      <a href="/remote.html">Remote</a>
+    </nav>
+    <div class="p-grow"></div>
+    <span id="connStatus" class="p-chip p-conn" hidden><span class="p-dot ok"></span> Connected</span>
+    <a class="p-gear" href="/settings.html" title="Settings" aria-label="Settings">&#9881;</a>
+  </header>
+
+  <main>
+    <div class="hero">
+      <span class="hero-lockup">
+        <img class="hero-mark" src="/brand/lockup-mark.png" alt="">
+        <img class="hero-word" src="/brand/lockup-word.png" alt="Pictaria">
+      </span>
+      <p class="tagline">The complete solution for getting the most out of your Immich collection.</p>
+      <p class="tagline">The <strong>Pictaria Server</strong> helps you manage, enrich and curate your collection.<br>
+        The <a href="https://pictaria.ai/frame" target="_blank" rel="noopener" style="color: var(--p-accent)"><strong>Pictaria Frame</strong></a> app
+        displays your photos in a beautiful, fully-featured digital photo frame.</p>
+    </div>
+
+    <hr class="separator">
+
+    <h1 class="page-title">Pictaria Server</h1>
+
+    <div id="setupCallout" class="p-panel setup-callout" hidden>
+      <div class="txt">
+        <strong>Connect Pictaria to Immich</strong>
+        <span>Pictaria needs your Immich server's URL and an API key before it can do anything useful. Both live in Settings — it takes a minute.</span>
+      </div>
+      <a class="p-btn primary" href="/settings.html#sec-server">Set up Immich</a>
+    </div>
+
+    <section class="p-panel status-box">
+      <h2>Status</h2>
+      <div class="server-line">
+        <span id="healthDot" class="p-dot"></span>
+        <span id="healthLine">Checking server…</span>
+      </div>
+      <div class="server-line">
+        <span id="immichDot" class="p-dot"></span>
+        <span id="immichLine">Checking Immich…</span>
+      </div>
+    </section>
+
+    <div id="flow" class="p-panel flow" hidden>
+      <svg viewBox="0 0 816 86" role="img" aria-label="Insights, Enrich, Curate and Albums feed into Pictaria Frame">
+        <defs>
+          <marker id="flowArrow" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+            <path d="M2 1L8 5L2 9" fill="none" stroke="var(--p-muted)" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+          </marker>
+        </defs>
+        <a href="/insights.html">
+          <rect x="2" y="8" width="140" height="70" rx="10" fill="var(--p-panel-2)" stroke="var(--p-line)"/>
+          <text x="68" y="44" text-anchor="middle" dominant-baseline="central" font-size="18" font-weight="600" fill="var(--p-ink)"><tspan fill="var(--p-accent)" font-size="16">◎</tspan> Insights</text>
+        </a>
+        <line x1="146" y1="43" x2="164" y2="43" stroke="var(--p-muted)" stroke-width="1.5" marker-end="url(#flowArrow)"/>
+        <a id="flowEnrich" href="/enrich.html">
+          <rect x="170" y="8" width="140" height="70" rx="10" fill="var(--p-panel-2)" stroke="var(--p-line)"/>
+          <text x="236" y="44" text-anchor="middle" dominant-baseline="central" font-size="18" font-weight="600" fill="var(--p-ink)"><tspan fill="var(--p-accent)" font-size="16">✦</tspan> Enrich</text>
+        </a>
+        <line x1="314" y1="43" x2="332" y2="43" stroke="var(--p-muted)" stroke-width="1.5" marker-end="url(#flowArrow)"/>
+        <a href="/curate.html">
+          <rect x="338" y="8" width="140" height="70" rx="10" fill="var(--p-panel-2)" stroke="var(--p-line)"/>
+          <text x="404" y="44" text-anchor="middle" dominant-baseline="central" font-size="18" font-weight="600" fill="var(--p-ink)"><tspan fill="var(--p-accent)" font-size="16">◈</tspan> Curate</text>
+        </a>
+        <line x1="482" y1="43" x2="500" y2="43" stroke="var(--p-muted)" stroke-width="1.5" marker-end="url(#flowArrow)"/>
+        <a href="/albums.html">
+          <rect x="506" y="8" width="140" height="70" rx="10" fill="var(--p-panel-2)" stroke="var(--p-line)"/>
+          <text x="576" y="44" text-anchor="middle" dominant-baseline="central" font-size="18" font-weight="600" fill="var(--p-ink)"><tspan fill="var(--p-accent)" font-size="16">▦</tspan> Albums</text>
+        </a>
+        <line x1="650" y1="43" x2="668" y2="43" stroke="var(--p-muted)" stroke-width="1.5" marker-end="url(#flowArrow)"/>
+        <g id="flowFrame">
+          <rect x="674" y="8" width="140" height="70" rx="10" fill="var(--p-accent)" fill-opacity="0.08" stroke="var(--p-accent-deep)" stroke-width="1.2"/>
+          <image href="/brand/lockup-word.png" x="701.7" y="18" width="76.5" height="24"/>
+          <text x="744" y="59" text-anchor="middle" dominant-baseline="central" font-size="17" font-weight="700" fill="var(--p-ink)">Frame</text>
+        </g>
+      </svg>
+      <span id="flowBypass" class="flow-bypass" title="With enrichment off, Insights sends photo groups straight to Curate.">Insights ⇢ Curate when enrichment is off</span>
+    </div>
+
+    <div id="cards" class="cards">
+      <a class="p-card feature" href="/insights.html">
+        <h2><span class="glyph">◎</span> Insights</h2>
+        <p>Understand your collection — people, places, and trends.</p>
+        <div class="status"><span id="insightsDot" class="p-dot"></span><span id="insightsStatus">—</span></div>
+      </a>
+      <a id="enrichCard" class="p-card feature" href="/enrich.html">
+        <h2><span class="glyph">✦</span> Enrich</h2>
+        <p>AI models propose tags for your photos — cloud or operator-hosted.</p>
+        <div class="status"><span id="enrichDot" class="p-dot"></span><span id="enrichStatus">—</span></div>
+      </a>
+      <a class="p-card feature" href="/curate.html">
+        <h2><span class="glyph">◈</span> Curate</h2>
+        <p>Review, decide and tag your photos so they can be best displayed, including in Pictaria Frame.</p>
+        <div class="status"><span id="reviewDot" class="p-dot"></span><span id="reviewStatus">—</span></div>
+      </a>
+      <a class="p-card feature" href="/albums.html">
+        <h2><span class="glyph">▦</span> Albums</h2>
+        <p>Create smart Immich albums that stay up to date.</p>
+        <div class="status"><span id="albumsDot" class="p-dot"></span><span id="albumsStatus">—</span></div>
+      </a>
+      <a class="p-card feature" href="/metrics.html">
+        <h2><span class="glyph">▣</span> Frame</h2>
+        <p>Information on what your Pictaria Frame devices have shown and which voice commands get used.</p>
+        <div class="status"><span id="frameMetricsDot" class="p-dot"></span><span id="frameMetricsStatus">—</span></div>
+      </a>
+      <a class="p-card feature" href="/remote.html">
+        <h2><span class="glyph">▷</span> Remote</h2>
+        <p>View and control your Pictaria Frame devices from your phone.</p>
+        <div class="status"><span id="frameDot" class="p-dot"></span><span id="frameStatus">—</span></div>
+      </a>
+      <a class="p-card feature" href="/settings.html">
+        <h2><span class="glyph glyph-gear">&#9881;</span> Settings</h2>
+        <p>Configure Pictaria Server — appearance, voice, location groups and much more.</p>
+        <div class="status"><span id="settingsDot" class="p-dot"></span><span id="settingsStatus">—</span></div>
+      </a>
+      <a class="p-card feature" href="/activity.html">
+        <h2><span class="glyph">◷</span> Activity</h2>
+        <p>See a chronological, privacy-safe history of what Pictaria Server has done.</p>
+        <div class="status"><span class="p-dot ok"></span><span>Stored locally</span></div>
+      </a>
+    </div>
+  </main>
+
+  <div id="toast" class="p-toast"></div>
+
+  <script>
+    const el = (id) => document.getElementById(id);
+
+    async function api(path) {
+      const response = await fetch(path);
+      if (response.status === 401) throw Object.assign(new Error('unauthorized'), { unauthorized: true });
+      if (!response.ok) throw new Error(`Request failed: ${response.status}`);
+      return response.json();
+    }
+
+    function showLogin() {
+      el('connStatus').hidden = true;
+      window.pictariaGate.show();
+    }
+
+    function showConnected() {
+      el('connStatus').hidden = false;
+    }
+
+    function setStatus(prefix, dotClass, text) {
+      const dot = el(`${prefix}Dot`);
+      dot.className = `p-dot ${dotClass}`.trim();
+      el(`${prefix}Status`).textContent = text;
+    }
+
+    function formatUptime(value) {
+      const seconds = Number(value);
+      if (!Number.isFinite(seconds) || seconds < 0) return '';
+
+      const minutes = Math.floor(seconds / 60);
+      if (minutes < 1) return 'Up less than a minute';
+      if (minutes < 60) return `Up ${minutes} minute${minutes === 1 ? '' : 's'}`;
+
+      const hours = Math.floor(minutes / 60);
+      if (hours < 24) {
+        const remainingMinutes = minutes % 60;
+        return `Up ${hours} hour${hours === 1 ? '' : 's'}`
+          + (remainingMinutes ? ` ${remainingMinutes} minute${remainingMinutes === 1 ? '' : 's'}` : '');
+      }
+
+      const days = Math.floor(hours / 24);
+      const remainingHours = hours % 24;
+      return `Up ${days} day${days === 1 ? '' : 's'}`
+        + (remainingHours ? ` ${remainingHours} hour${remainingHours === 1 ? '' : 's'}` : '');
+    }
+
+    async function loadFrameMetricsStatus() {
+      try {
+        const stats = await fetch('/api/frame/stats').then((r) => r.json());
+        const ledger = stats.ledger ?? stats;
+        if (ledger.ledgerAvailable === false) {
+          setStatus('frameMetrics', 'warn', 'Display ledger unavailable');
+          return;
+        }
+        setStatus('frameMetrics', 'ok', `${Number(ledger.distinctAssetsShown ?? 0).toLocaleString()} photos shown · ${Number(ledger.totalDisplays ?? 0).toLocaleString()} displays`);
+      } catch {
+        setStatus('frameMetrics', '', 'Metrics unavailable');
+      }
+    }
+
+    async function loadHealth() {
+      try {
+        const health = await fetch('/api/health').then((r) => r.json());
+        el('healthDot').className = 'p-dot ok';
+        // The version rides here so bug reports can ask "what's on your
+        // server's home page" — authed health only, so it appears once the
+        // session cookie is in place.
+        const serverStatus = ['Server healthy'];
+        if (health.serverVersion) serverStatus.push(`v${health.serverVersion}`);
+        const uptime = formatUptime(health.uptimeSeconds);
+        if (uptime) serverStatus.push(uptime);
+        el('healthLine').textContent = serverStatus.join(' · ');
+        const version = health.immichVersion ? `v${health.immichVersion}` : '';
+        const connectedVersion = version ? ` · ${version}` : '';
+        const immichVersion = version ? `Immich ${version}` : 'Immich';
+        const immich = {
+          connected: ['ok', `Immich connected${connectedVersion}`],
+          unreachable: ['bad', 'Immich unreachable'],
+          unauthorized: ['bad', 'Immich rejected the API key'],
+          missing_permissions: ['warn', 'Immich key is missing permissions'],
+          incompatible_version: ['bad', `${immichVersion} is unsupported — requires 2.0 or newer`],
+          incompatible_api: ['bad', `${immichVersion} has an incompatible API`],
+          not_configured: ['warn', 'Immich not configured'],
+        }[health.immich] ?? ['warn', 'Immich status unknown'];
+        el('immichDot').className = `p-dot ${immich[0]}`;
+        el('immichLine').textContent = immich[1];
+        el('setupCallout').hidden = health.immich !== 'not_configured';
+        loadFrameMetricsStatus();
+        return health;
+      } catch {
+        el('healthDot').className = 'p-dot bad';
+        el('healthLine').textContent = 'Server unreachable';
+        el('immichDot').className = 'p-dot';
+        el('immichLine').textContent = 'Immich status unknown';
+        return null;
+      }
+    }
+
+    async function loadFeatureStatus() {
+      try {
+        const enrich = await api('/api/enrich/status');
+        showConnected();
+        const library = enrich.library || {};
+        const enrichOff = enrich.enabled === false;
+        el('enrichCard').classList.toggle('off', enrichOff);
+        el('flowEnrich').classList.toggle('off', enrichOff);
+        el('flowBypass').hidden = !enrichOff;
+        el('flow').hidden = false;
+        if (enrichOff) {
+          setStatus('enrich', '', 'Off — enable in Settings');
+        } else if (enrich.running) {
+          const live = enrich.liveCounters || {};
+          const analyzed = (live.succeeded || 0) + (live.failed || 0);
+          const budget = enrich.options?.maxAnalyzed || enrich.options?.targeted;
+          setStatus('enrich', 'ok', `Running · ${analyzed}${budget ? `/${budget}` : ' analyzed'}`);
+        } else {
+          setStatus('enrich', library.enrichedTotal ? 'ok' : '', `${(library.enrichedTotal ?? 0).toLocaleString()} enriched`);
+        }
+        setStatus('review', library.curatedTotal ? 'ok' : '', `${(library.curatedTotal ?? 0).toLocaleString()} curated`);
+      } catch (error) {
+        if (error.unauthorized) { showLogin(); setStatus('review', '', 'Locked'); setStatus('enrich', '', 'Locked'); return false; }
+        setStatus('review', 'bad', 'Unavailable');
+        setStatus('enrich', 'bad', 'Unavailable');
+      }
+
+      try {
+        const { jobs } = await api('/api/albums/jobs');
+        const scheduled = jobs.filter((job) => job.smart && job.enabled && !job.scheduleQuarantined).length;
+        setStatus('albums', jobs.length ? 'ok' : '', jobs.length
+          ? `${jobs.length} album${jobs.length === 1 ? '' : 's'} · ${scheduled} scheduled`
+          : 'No smart albums yet');
+      } catch (error) {
+        if (!error.unauthorized) setStatus('albums', 'bad', 'Unavailable');
+      }
+
+      try {
+        const insights = await api('/api/insights');
+        if (insights.status?.running) {
+          setStatus('insights', 'ok', 'Refreshing…');
+        } else if (insights.snapshot) {
+          const total = (insights.snapshot.totals?.photos ?? 0) + (insights.snapshot.totals?.videos ?? 0);
+          setStatus('insights', 'ok', `${total.toLocaleString()} assets analyzed`);
+        } else {
+          setStatus('insights', 'warn', 'Not computed yet');
+        }
+      } catch (error) {
+        if (!error.unauthorized) setStatus('insights', 'bad', 'Unavailable');
+      }
+
+      try {
+        const frame = await api('/api/frame/status');
+        setStatus('frame', frame.frameConnected ? 'ok' : '', frame.frameConnected ? 'Frame online' : 'Frame offline');
+      } catch (error) {
+        if (!error.unauthorized) setStatus('frame', 'bad', 'Unavailable');
+      }
+      setStatus('settings', 'ok', 'Ready');
+      return true;
+    }
+
+    async function boot() {
+      const health = await loadHealth();
+      if (!health) return;
+      // Trimmed health (no immichConfigured field) means our credentials —
+      // session cookie or header — did not authorize.
+      if (health.authRequired && !('immichConfigured' in health)) {
+        showLogin();
+        setStatus('insights', '', 'Locked');
+        setStatus('enrich', '', 'Locked');
+        setStatus('review', '', 'Locked');
+        setStatus('albums', '', 'Locked');
+        setStatus('frame', '', 'Locked');
+        setStatus('settings', '', 'Locked');
+        return;
+      }
+      await loadFeatureStatus();
+    }
+
+    // Hovering a diagram box mirrors the hover effect onto its feature card.
+    for (const node of document.querySelectorAll('#flow a[href]')) {
+      const card = document.querySelector(`#cards .p-card[href="${node.getAttribute('href')}"]`);
+      if (!card) continue;
+      node.addEventListener('mouseenter', () => card.classList.add('flow-hover'));
+      node.addEventListener('mouseleave', () => card.classList.remove('flow-hover'));
+    }
+    {
+      // The Frame box is the app itself — light up both app-facing cards.
+      const appCards = ['/metrics.html', '/remote.html']
+        .map((href) => document.querySelector(`#cards .p-card[href="${href}"]`))
+        .filter(Boolean);
+      const frameNode = document.getElementById('flowFrame');
+      frameNode.addEventListener('mouseenter', () => appCards.forEach((c) => c.classList.add('flow-hover')));
+      frameNode.addEventListener('mouseleave', () => appCards.forEach((c) => c.classList.remove('flow-hover')));
+    }
+
+    boot();
+  </script>
+</body>
+</html>

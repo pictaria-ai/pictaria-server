@@ -1,0 +1,382 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Pictaria — Albums</title>
+  <link rel="icon" type="image/png" sizes="32x32" href="/brand/favicon-32.png">
+  <link rel="apple-touch-icon" href="/brand/apple-touch-icon.png">
+  <script src="/theme.js"></script>
+  <script src="/auth-gate.js" defer></script>
+  <script src="/nav.js" defer></script>
+  <link rel="stylesheet" href="/pictaria.css">
+  <style>
+    main { max-width: var(--p-page-w); margin: 0 auto; padding: 26px 18px 48px; }
+    .hidden { display: none !important; }
+    h1 { font-size: 20px; font-weight: 800; letter-spacing: 0.2px; margin: 8px 0 4px; }
+    .intro { color: var(--p-muted); font-size: 13px; margin: 0 0 14px; line-height: 1.5; }
+    h2 { margin: 0; font-size: 12.5px; font-weight: 800; text-transform: uppercase; letter-spacing: 0.8px; color: var(--p-muted); line-height: 1.4; }
+    h3 { margin: 0; color: var(--p-muted); font-size: 11px; font-weight: 800; text-transform: uppercase; letter-spacing: 0.7px; }
+    p { margin: 0; }
+
+    .panel { margin-top: 14px; padding: 16px; }
+
+    /* ---- Create form ---- */
+    .create-panel > summary {
+      display: flex; align-items: center; gap: 8px;
+      cursor: pointer; list-style: none; user-select: none;
+    }
+    .create-panel > summary::-webkit-details-marker { display: none; }
+    .create-panel > summary .chev { color: var(--p-muted); font-size: 11px; transition: transform 120ms; }
+    .create-panel[open] > summary .chev { transform: rotate(90deg); }
+    .album-form { display: grid; gap: 16px; margin-top: 14px; }
+    .form-section { display: grid; gap: 12px; border-top: 1px solid var(--p-line); padding-top: 16px; }
+    .form-section:first-child { border-top: 0; padding-top: 0; }
+    .section-grid { display: grid; gap: 14px; }
+    .section-grid.two-column { grid-template-columns: minmax(220px, 1fr) minmax(220px, 1fr); }
+    .form-separator { grid-column: 1 / -1; border-top: 1px solid var(--p-line); margin: 2px 0; }
+    .compact-section { max-width: 480px; }
+
+    .album-form .p-input,
+    .album-form .p-select { width: 100%; }
+    .p-input:disabled, .p-select:disabled { opacity: 0.45; cursor: not-allowed; }
+
+    label span { display: block; margin-bottom: 6px; color: var(--p-muted); font-size: 12px; font-weight: 700; }
+
+    .checkbox-label { display: inline-flex; align-items: center; gap: 8px; cursor: pointer; }
+    .checkbox-label input { width: 15px; height: 15px; margin: 0; accent-color: var(--p-accent); }
+    .checkbox-label span { margin: 0; color: var(--p-ink); font-size: 13px; font-weight: 600; }
+
+    .schedule-field { display: flex; align-items: center; gap: 16px; justify-content: flex-start; padding-top: 22px; }
+    .interval-label { display: grid; grid-template-columns: auto 80px auto; align-items: center; gap: 8px; }
+    .interval-label span { margin: 0; color: var(--p-ink); font-size: 13px; font-weight: 600; }
+
+    .limit-field { display: grid; grid-template-columns: auto 1px minmax(96px, 1fr); align-items: end; gap: 14px; }
+    .limit-field .checkbox-label { min-height: 32px; }
+    .limit-separator { width: 1px; min-height: 32px; align-self: end; background: var(--p-line); }
+
+    .advanced-section summary { color: var(--p-accent); cursor: pointer; font-size: 13px; font-weight: 800; }
+    .advanced-section label { display: block; margin-top: 12px; }
+    .query-field { display: grid; gap: 10px; }
+    .query-field > label { max-width: 480px; }
+    .best-of-toggle input:disabled + span { opacity: 0.45; }
+    .query-notes { margin: 0; padding-left: 18px; }
+    .query-notes li { margin: 2px 0; }
+    .field-note { max-width: 680px; color: var(--p-muted); font-size: 12px; line-height: 1.5; }
+    .exclude-tag-field { margin-top: 12px; }
+
+    .actions { display: flex; align-items: center; gap: 10px; }
+
+    /* ---- Autocomplete pickers ---- */
+    .people-field, .tag-field, .exclude-tag-field { position: relative; }
+    .people-search-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 8px; }
+    .people-results {
+      position: absolute; z-index: 4; top: calc(100% + 6px); left: 0; right: 0;
+      overflow: hidden; border: 1px solid var(--p-line); border-radius: var(--p-radius-sm);
+      background: var(--p-panel-2); box-shadow: var(--p-shadow);
+    }
+    .people-result {
+      display: block; width: 100%; min-height: 34px; border: 0; border-radius: 0;
+      background: transparent; color: var(--p-ink); font: inherit; font-size: 13px;
+      padding: 6px 10px; text-align: left; cursor: pointer;
+    }
+    .people-result:hover { background: var(--p-line); }
+    .people-empty { padding: 10px; color: var(--p-muted); font-size: 12px; }
+
+    .selected-people {
+      display: flex; flex-wrap: wrap; min-height: 30px; max-height: 76px; overflow-y: auto;
+      gap: 6px; margin-top: 8px; align-content: flex-start;
+    }
+    .pick-chip {
+      display: inline-flex; align-items: center; gap: 5px;
+      border: 1px solid var(--p-accent-deep); border-radius: 999px;
+      background: var(--p-panel-2); color: var(--p-accent);
+      padding: 3px 6px 3px 10px; font-size: 12px; font-weight: 700;
+    }
+    .pick-chip button {
+      width: 18px; height: 18px; border: 0; border-radius: 50%;
+      background: transparent; color: var(--p-muted); padding: 0;
+      font: inherit; font-size: 12px; line-height: 1; cursor: pointer;
+    }
+    .pick-chip button:hover { background: var(--p-line); color: var(--p-ink); }
+
+    /* ---- Rule summary ---- */
+    .rule-summary {
+      min-height: 40px; border: 1px solid var(--p-accent-deep); border-radius: var(--p-radius-sm);
+      background: rgba(45, 212, 191, 0.06); color: var(--p-ink);
+      padding: 10px 12px; font-size: 13px; overflow-wrap: anywhere;
+    }
+    .rule-summary.is-empty { border-color: var(--p-line); background: var(--p-bg); color: var(--p-muted); }
+    .rule-summary-title { font-weight: 800; margin-bottom: 2px; }
+    .rule-summary-scope { color: var(--p-muted); font-weight: 700; }
+    .rule-summary-list { margin: 6px 0 0; padding-left: 18px; }
+    .rule-summary-list li + li { margin-top: 3px; }
+
+    /* ---- Preview grid ---- */
+    .section-header { display: flex; align-items: center; gap: 10px; }
+    .preview-grid {
+      display: grid; grid-template-columns: repeat(auto-fill, minmax(112px, 1fr));
+      gap: 10px; margin-top: 14px;
+    }
+    .preview-tile {
+      overflow: hidden; border: 1px solid var(--p-line); border-radius: var(--p-radius-sm);
+      background: var(--p-panel-2); aspect-ratio: 1;
+    }
+    .preview-tile img { width: 100%; height: 100%; display: block; object-fit: cover; }
+
+    /* ---- Jobs list ---- */
+    .jobs-list { display: grid; gap: 12px; margin-top: 14px; }
+    .job-row {
+      display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 12px;
+      border: 1px solid var(--p-line); border-radius: var(--p-radius-sm);
+      background: var(--p-bg); padding: 14px;
+    }
+    .job-title { display: flex; flex-wrap: wrap; align-items: baseline; gap: 8px; }
+    .job-title strong { font-size: 15px; }
+    .job-query { margin-top: 6px; color: var(--p-muted); font-size: 13px; overflow-wrap: anywhere; }
+    .job-meta { display: grid; gap: 5px; margin-top: 10px; color: var(--p-muted); font-size: 12px; }
+    .job-meta-row { display: flex; flex-wrap: wrap; gap: 6px; }
+    .job-meta-row span + span::before { content: "|"; margin-right: 6px; color: var(--p-line); }
+    .job-controls { display: flex; flex-wrap: wrap; align-items: center; justify-content: flex-end; gap: 8px; }
+    .mini-input { width: 72px; }
+    .mini-checkbox-label { min-height: 32px; }
+
+    .empty { color: var(--p-muted); padding: 8px 0; }
+
+    @media (max-width: 720px) {
+      .section-grid.two-column, .job-row { grid-template-columns: 1fr; }
+      .schedule-field, .actions { align-items: stretch; flex-direction: column; }
+      .schedule-field { padding-top: 0; }
+      .limit-field { grid-template-columns: 1fr; }
+      .limit-separator { width: 100%; min-height: 1px; }
+      .job-controls { justify-content: stretch; }
+      .job-controls .p-btn { flex: 1; }
+    }
+  </style>
+</head>
+<body>
+  <header class="p-topbar">
+    <a class="p-brand" href="/">
+      <img src="/brand/mark-128.png" alt="">
+      <img class="p-brand-word" src="/brand/wordmark.png" alt="Pictaria">
+      <span class="p-brand-service">Albums</span>
+    </a>
+    <span class="p-supporter-slot" aria-live="polite"></span>
+    <nav class="p-nav">
+      <a href="/insights.html">Insights</a>
+      <a href="/enrich.html">Enrich</a>
+      <a href="/curate.html">Curate</a>
+      <a href="/albums.html" class="active">Albums</a>
+      <a href="/metrics.html">Frame</a>
+      <a href="/remote.html">Remote</a>
+    </nav>
+    <div class="p-grow"></div>
+    <span id="immichChip" class="p-chip warn" hidden>Immich not configured</span>
+    <span id="connStatus" class="p-chip p-conn" hidden><span class="p-dot ok"></span> Connected</span>
+    <a class="p-gear" href="/settings.html" title="Settings" aria-label="Settings">&#9881;</a>
+  </header>
+
+  <main>
+    <h1><span class="glyph">▦</span> Albums</h1>
+    <p class="intro">Create real Immich albums from saved searches — people, tags, places, dates, cameras,
+      or a text search — and keep them updated automatically on a schedule.
+      <a href="/insights.html" style="color: var(--p-accent)">Insights</a> can hand any photo group here as a starting point.
+      Any Immich albums, including these, are easily selected for display in Pictaria Frame.</p>
+    <details id="createAlbumPanel" class="p-panel panel create-panel" open>
+      <summary><span class="chev" aria-hidden="true">&#9654;</span><h2>Create Filtered Album</h2></summary>
+      <form id="createForm" class="album-form">
+        <section class="form-section">
+          <div class="section-grid two-column">
+            <label>
+              <span>Album Name</span>
+              <input id="albumNameInput" class="p-input" name="albumName" type="text" placeholder="Summer in Colorado" required>
+            </label>
+
+            <div class="schedule-field">
+              <label class="checkbox-label">
+                <input id="smartInput" name="smart" type="checkbox" checked>
+                <span>Update Automatically</span>
+              </label>
+
+              <label class="interval-label">
+                <span>Every</span>
+                <input id="intervalInput" class="p-input" name="intervalDays" type="number" min="1" max="365" step="1" value="7">
+                <span>days</span>
+              </label>
+            </div>
+          </div>
+        </section>
+
+        <section class="form-section">
+          <h3>Match Photos</h3>
+          <div class="query-field">
+            <label>
+              <span>Immich Text Search</span>
+              <input id="queryInput" class="p-input" name="query" type="text" placeholder="skiing, birthday cake, beach at sunset...">
+            </label>
+            <label class="checkbox-label best-of-toggle">
+              <input id="bestOfInput" name="bestOf" type="checkbox">
+              <span>Best of — keep only confirmed matches, ranked by your library</span>
+            </label>
+            <p class="field-note">Immich ranks your whole library by likeness without end, so a text search includes many non-matches. "Best of" double-checks each result against your own enrichment data (AI tags/captions), stops where confirmed matches run out, and ranks the keepers by your Curate decisions and photo scores &mdash; so a Top 50 album is your best 50, not the first 50.</p>
+            <ul class="field-note query-notes">
+              <li>Only enriched photos can be confirmed</li>
+              <li>Without Best of, a Result Size limit is recommended: Immich does not return a bounded set</li>
+              <li>Previewing or creating an album with text search may take 30+ seconds</li>
+            </ul>
+          </div>
+          <div class="form-separator" aria-hidden="true"></div>
+          <div class="section-grid two-column">
+            <div class="people-field">
+              <label>
+                <span>People</span>
+                <div class="people-search-row">
+                  <input id="peopleInput" class="p-input" name="people" type="text" autocomplete="off" placeholder="Search people">
+                  <button id="addPersonButton" type="button" class="p-btn">Add</button>
+                </div>
+              </label>
+              <div id="peopleResults" class="people-results hidden"></div>
+              <div id="selectedPeople" class="selected-people"></div>
+            </div>
+
+            <label>
+              <span>People Match</span>
+              <select id="peopleModeInput" class="p-select" name="peopleMode" disabled>
+                <option value="all">All selected people (AND)</option>
+                <option value="any">Any selected person (OR)</option>
+                <option value="only">Only this person</option>
+              </select>
+            </label>
+
+            <div class="tag-field">
+              <label>
+                <span>Tags</span>
+                <div class="people-search-row">
+                  <input id="tagInput" class="p-input" name="tags" type="text" autocomplete="off" placeholder="Search tags">
+                  <button id="addTagButton" type="button" class="p-btn">Add</button>
+                </div>
+              </label>
+              <div id="tagResults" class="people-results hidden"></div>
+              <div id="selectedTags" class="selected-people"></div>
+            </div>
+
+            <label>
+              <span>Tag Match</span>
+              <select id="tagModeInput" class="p-select" name="tagMode" disabled>
+                <option value="all">All selected tags (AND)</option>
+                <option value="any">Any selected tag (OR)</option>
+              </select>
+            </label>
+
+            <div class="form-separator" aria-hidden="true"></div>
+
+            <label>
+              <span>City / Neighborhood</span>
+              <input id="cityInput" class="p-input" name="city" type="text" placeholder="Lisbon (comma-separate for OR)" title="One city, or several separated by commas — photos matching any of them">
+            </label>
+
+            <label>
+              <span>State / Region</span>
+              <input id="stateInput" class="p-input" name="state" type="text" placeholder="Lisboa">
+            </label>
+
+            <label>
+              <span>Country</span>
+              <input id="countryInput" class="p-input" name="country" type="text" placeholder="United States (comma-separate for OR)" title="One country, or several separated by commas — photos matching any of them. Multiple countries can't be combined with a city or state.">
+            </label>
+
+            <div class="form-separator" aria-hidden="true"></div>
+
+            <label>
+              <span>Camera Make</span>
+              <input id="makeInput" class="p-input" name="make" type="text" placeholder="Canon">
+            </label>
+
+            <label>
+              <span>Camera Model</span>
+              <input id="modelInput" class="p-input" name="model" type="text" placeholder="Canon PowerShot SD500">
+            </label>
+
+            <div class="form-separator" aria-hidden="true"></div>
+
+            <label>
+              <span>Taken From</span>
+              <input id="takenAfterInput" class="p-input" name="takenAfter" type="date">
+            </label>
+
+            <label>
+              <span>Taken To</span>
+              <input id="takenBeforeInput" class="p-input" name="takenBefore" type="date">
+            </label>
+          </div>
+        </section>
+
+        <section class="form-section compact-section">
+          <h3>Result Size</h3>
+          <div class="limit-field">
+            <label class="checkbox-label">
+              <input id="includeAllResultsInput" name="includeAllResults" type="checkbox" checked>
+              <span>All Matching Photos</span>
+            </label>
+            <div class="limit-separator" aria-hidden="true"></div>
+            <label>
+              <span>Limit</span>
+              <input id="maxResultsInput" class="p-input" name="maxResults" type="number" min="1" max="5000" step="1" value="50" required>
+            </label>
+          </div>
+        </section>
+
+        <details class="form-section advanced-section">
+          <summary>Advanced</summary>
+          <div class="exclude-tag-field">
+            <label>
+              <span>Blanket Exclusion</span>
+              <div class="people-search-row">
+                <input id="excludeTagInput" class="p-input" name="excludeTags" type="text" autocomplete="off" placeholder="Search exclusion tags">
+                <button id="addExcludeTagButton" type="button" class="p-btn">Add</button>
+              </div>
+            </label>
+            <div id="excludeTagResults" class="people-results hidden"></div>
+            <div id="selectedExcludeTags" class="selected-people"></div>
+            <p class="field-note">Photos with any selected tag are skipped when creating albums and removed from managed albums during updates.</p>
+          </div>
+        </details>
+
+        <div class="form-separator" aria-hidden="true"></div>
+        <div class="rule-summary" id="ruleSummary">No match criteria selected</div>
+        <div class="actions">
+          <button id="previewButton" type="button" class="p-btn">Preview</button>
+          <button id="createButton" type="submit" class="p-btn primary">Create Album</button>
+        </div>
+      </form>
+    </details>
+
+    <section id="previewPanel" class="p-panel panel hidden">
+      <div class="section-header">
+        <h2>Preview</h2>
+        <span id="previewCount" class="p-chip accent"></span>
+      </div>
+      <div id="previewGrid" class="preview-grid"></div>
+    </section>
+
+    <section class="p-panel panel">
+      <div class="section-header">
+        <h2>Managed Albums</h2>
+        <span id="jobCount" class="p-chip accent">0</span>
+        <div class="p-grow"></div>
+        <select id="jobSort" class="p-input" style="width: auto; font-size: 12.5px" title="Sort managed albums">
+          <option value="name">Name A–Z</option>
+          <option value="photos">Most photos</option>
+          <option value="lastRun">Recently run</option>
+        </select>
+        <button id="refreshButton" class="p-btn" type="button" title="Refresh">Refresh</button>
+      </div>
+      <div id="jobsList" class="jobs-list"></div>
+    </section>
+  </main>
+
+  <div id="toast" class="p-toast" role="status" aria-live="polite"></div>
+
+  <script src="/albums.js"></script>
+</body>
+</html>

@@ -1,0 +1,2134 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Pictaria — Settings</title>
+  <link rel="icon" type="image/png" sizes="32x32" href="/brand/favicon-32.png">
+  <link rel="apple-touch-icon" href="/brand/apple-touch-icon.png">
+  <script src="/theme.js"></script>
+  <script src="/auth-gate.js" defer></script>
+  <script src="/nav.js" defer></script>
+  <link rel="stylesheet" href="/pictaria.css">
+  <style>
+    main { max-width: var(--p-page-w-narrow); margin: 0 auto; padding: 26px 18px 60px; }
+    h1 { font-size: 20px; font-weight: 800; letter-spacing: 0.2px; margin: 8px 0 6px; }
+    .intro { color: var(--p-muted); font-size: 13px; margin: 0 0 14px; line-height: 1.5; }
+    /* Quick nav + collapsible sections */
+    .quick-nav { display: flex; gap: 6px; flex-wrap: wrap; margin: 0 0 16px; }
+    .quick-nav a {
+      color: var(--p-muted); text-decoration: none; font-size: 12px; font-weight: 700;
+      padding: 4px 10px; border: 1px solid var(--p-line); border-radius: 999px;
+    }
+    .quick-nav a:hover { color: var(--p-ink); border-color: var(--p-muted); }
+    details.section { padding: 0 16px; margin-bottom: 14px; scroll-margin-top: 72px; }
+    details.section > summary {
+      list-style: none; cursor: pointer; display: flex; align-items: center; gap: 10px;
+      padding: 13px 0; user-select: none;
+    }
+    details.section > summary::-webkit-details-marker { display: none; }
+    details.section > summary .chev { color: var(--p-muted); font-size: 11px; transition: transform 120ms; }
+    details.section[open] > summary .chev { transform: rotate(90deg); }
+    details.section > summary .sec-sub { color: var(--p-muted); font-size: 12px; font-weight: 500; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    details.section > .sec-body { padding: 2px 0 16px; }
+    .section h2 {
+      font-size: 12.5px;
+      font-weight: 800;
+      text-transform: uppercase;
+      letter-spacing: 0.8px;
+      color: var(--p-muted);
+      margin: 0;
+    }
+    .sub-head { font-size: 11px; font-weight: 800; text-transform: uppercase; letter-spacing: 0.7px; color: var(--p-muted); margin: 16px 0 2px; }
+    .provider-division { padding: 8px 0 2px; }
+    .provider-division.separated { border-top: 1px solid var(--p-line); margin-top: 18px; padding-top: 22px; }
+    .provider-division-title { font-size: 18px; font-weight: 800; color: var(--p-ink); letter-spacing: -0.2px; }
+    .provider-division .setting-desc { margin-top: 5px; }
+    /* Nested collapsible inside a section (SPEC { group } rows) */
+    details.sub-details { margin: 16px 0; }
+    details.sub-details > summary { cursor: pointer; list-style: none; display: flex; align-items: center; gap: 6px; user-select: none; }
+    details.sub-details > summary::-webkit-details-marker { display: none; }
+    details.sub-details > summary .chev { color: var(--p-muted); font-size: 10px; transition: transform 120ms; }
+    details.sub-details[open] > summary .chev { transform: rotate(90deg); }
+    details.sub-details > summary .sub-head { margin: 0; }
+    details.sub-details + details.sub-details { margin-top: 26px; }
+    .setting {
+      display: flex;
+      align-items: center;
+      gap: 14px;
+      padding: 12px 0;
+    }
+    .setting + .setting { border-top: 1px solid var(--p-line); }
+    .setting-text { flex: 1; min-width: 0; }
+    .setting-title { font-weight: 700; font-size: 14px; }
+    .setting-desc { color: var(--p-muted); font-size: 12.5px; margin-top: 2px; }
+    .credential-warning { color: var(--p-danger); font-size: 12.5px; margin-top: 5px; line-height: 1.45; }
+    .field { display: grid; gap: 4px; padding: 9px 0; }
+    .field label { font-weight: 700; font-size: 13px; display: flex; align-items: center; gap: 8px; }
+    .field .from-env { font-weight: 600; font-size: 10.5px; }
+    .field .p-input, .field .p-select { max-width: 340px; }
+    #wwFile {
+      box-sizing: border-box;
+      padding: 0;
+      line-height: 30px;
+    }
+    #wwFile::file-selector-button {
+      height: 30px;
+      margin: 0 10px 0 0;
+      padding: 0 10px;
+      border: 0;
+      border-right: 1px solid var(--p-line);
+      background: var(--p-panel);
+      color: var(--p-ink);
+      font: inherit;
+      cursor: pointer;
+      vertical-align: top;
+    }
+    .field textarea.prompt-edit {
+      max-width: none; width: 100%; height: auto; box-sizing: border-box; resize: vertical;
+      padding: 8px 10px; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px; line-height: 1.5;
+    }
+    .field .load-builtin { justify-self: start; height: 26px; font-size: 12px; margin-top: 2px; }
+    /* Buttons never compress — a long save/error note wraps beside them
+       instead of squeezing them into a two-line pill. */
+    .save-row { display: flex; align-items: center; gap: 10px; padding: 12px 0 4px; }
+    .save-row .p-btn { flex-shrink: 0; }
+    .save-note { font-size: 12px; color: var(--p-muted); flex: 1; min-width: 0; }
+    .save-note.bad { color: var(--p-danger); }
+    /* Show/hide toggle inside API-key fields. The wrapper must
+       share the input's 340px cap — positioned against a full-width
+       wrapper, the eye would float far right of the field on desktop. */
+    .secret-wrap { position: relative; display: block; max-width: 340px; }
+    .secret-wrap .p-input { width: 100%; padding-right: 34px; box-sizing: border-box; }
+    .secret-eye {
+      position: absolute; right: 6px; top: 50%; transform: translateY(-50%);
+      background: none; border: 0; padding: 4px; cursor: pointer;
+      color: var(--p-muted); display: inline-flex; align-items: center;
+    }
+    .secret-eye:hover { color: var(--p-ink); }
+    .secret-eye svg { width: 16px; height: 16px; display: block; }
+    .voice-try { border-top: 1px solid var(--p-line); margin-top: 16px; padding-top: 4px; }
+    .voice-try h3 { font-size: 12px; font-weight: 800; text-transform: uppercase; letter-spacing: 0.7px; color: var(--p-muted); margin: 14px 0 4px; }
+    .try-note { font-size: 12px; color: var(--p-muted); margin: 4px 0 8px; }
+    .try-row { display: flex; gap: 8px; margin: 6px 0 4px; }
+    .try-row .p-input { flex: 1; min-width: 0; }
+    pre.intent-result { background: var(--p-bg); border: 1px solid var(--p-line); border-radius: var(--p-radius-sm); padding: 10px 12px; font-size: 12px; line-height: 1.55; overflow-x: auto; margin: 8px 0 4px; }
+    pre.intent-result[hidden] { display: none; }
+
+    /* Unsaved-changes nudge: a soft slow glow on the save button, an inline
+       note, and a badge that survives collapsing the section. */
+    .dirty-note { font-size: 12px; font-weight: 600; color: var(--p-accent); }
+    .p-btn.primary.attention { animation: save-nudge 2.6s ease-in-out infinite; }
+    @keyframes save-nudge {
+      0%, 100% { box-shadow: 0 0 0 0 transparent; }
+      50% { box-shadow: 0 0 0 5px rgba(45, 212, 191, 0.3); }
+    }
+    @media (prefers-reduced-motion: reduce) {
+      .p-btn.primary.attention { animation: none; box-shadow: 0 0 0 3px rgba(45, 212, 191, 0.3); }
+    }
+    details.section > summary .sec-dirty {
+      margin-left: auto; flex: none; font-size: 11px; font-weight: 700;
+      color: var(--p-accent); text-transform: none; letter-spacing: 0;
+    }
+
+    /* Location groups */
+    .loc-group {
+      display: flex; align-items: center; gap: 10px; padding: 10px 0;
+    }
+    .loc-group + .loc-group { border-top: 1px solid var(--p-line); }
+    .loc-group .g-name { font-weight: 700; font-size: 14px; }
+    .loc-group .g-name .mark { color: var(--p-accent); }
+    .loc-group .g-desc { color: var(--p-muted); font-size: 12px; margin-top: 1px; }
+    .loc-group .p-btn { height: 26px; font-size: 12px; }
+
+    /* Discarded photos */
+    .disc-thumb {
+      width: 44px; height: 44px; object-fit: cover; border-radius: 6px;
+      background: var(--p-panel-2); flex: none;
+    }
+    .disc-thumb.no-media {
+      display: flex; align-items: center; justify-content: center;
+      border: 1px dashed var(--p-danger); color: var(--p-danger);
+      font-size: 9px; text-align: center; line-height: 1.3; box-sizing: border-box;
+    }
+    /* The Immich link is an <a> wearing .p-btn — align its text like the
+       Restore button next to it, and drop the link underline. */
+    #discardedList a.p-btn { display: inline-flex; align-items: center; text-decoration: none; }
+    .loc-editor { border: 1px solid var(--p-line); border-radius: 10px; padding: 12px 14px; margin-top: 12px; }
+    .loc-editor .p-input { box-sizing: border-box; }
+    .loc-tools { display: flex; align-items: center; gap: 9px; margin: 10px 0 8px; flex-wrap: wrap; }
+    .loc-tools .p-input { flex: 0 1 340px; width: 340px; min-width: 160px; }
+    .loc-tools .p-btn { height: 28px; font-size: 12px; white-space: nowrap; }
+    .info {
+      display: inline-flex; align-items: center; justify-content: center;
+      width: 15px; height: 15px; border-radius: 50%; flex-shrink: 0;
+      border: 1px solid var(--p-muted); color: var(--p-muted);
+      font-size: 10px; font-weight: 700; font-style: normal;
+      cursor: help; position: relative;
+    }
+    .info::after {
+      content: attr(data-tip);
+      position: absolute; bottom: calc(100% + 7px); left: 50%; transform: translateX(-50%);
+      background: var(--p-bg); border: 1px solid var(--p-line); border-radius: 7px;
+      color: var(--p-ink); font-size: 12px; font-weight: 500; line-height: 1.45;
+      padding: 7px 10px; width: 240px; white-space: normal; text-align: left;
+      visibility: hidden; z-index: 3; pointer-events: none;
+    }
+    .info:hover::after { visibility: visible; }
+    .loc-count { color: var(--p-muted); font-size: 12px; white-space: nowrap; }
+    .loc-cities { max-height: 300px; overflow-y: auto; border: 1px solid var(--p-line); border-radius: 8px; padding: 4px 0; }
+    .loc-city { display: flex; align-items: center; gap: 9px; padding: 4px 11px; font-size: 12.5px; cursor: pointer; }
+    .loc-city:hover { background: var(--p-panel-2); }
+    .loc-city input { accent-color: var(--p-accent); }
+    .loc-city .c-region { color: var(--p-muted); font-size: 11.5px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .loc-city .c-count { margin-left: auto; color: var(--p-muted); font-size: 11.5px; font-variant-numeric: tabular-nums; flex-shrink: 0; }
+    .loc-city.taken { opacity: 0.45; cursor: default; }
+    .loc-city .c-name { white-space: nowrap; }
+    .loc-hint { color: var(--p-accent); font-size: 12px; margin-top: 7px; }
+  </style>
+</head>
+<body>
+  <header class="p-topbar">
+    <a class="p-brand" href="/">
+      <img src="/brand/mark-128.png" alt="">
+      <img class="p-brand-word" src="/brand/wordmark.png" alt="Pictaria">
+      <span class="p-brand-service">Settings</span>
+    </a>
+    <span class="p-supporter-slot" aria-live="polite"></span>
+    <nav class="p-nav">
+      <a href="/insights.html">Insights</a>
+      <a href="/enrich.html">Enrich</a>
+      <a href="/curate.html">Curate</a>
+      <a href="/albums.html">Albums</a>
+      <a href="/metrics.html">Frame</a>
+      <a href="/remote.html">Remote</a>
+    </nav>
+    <div class="p-grow"></div>
+    <span id="connStatus" class="p-chip p-conn" hidden><span class="p-dot ok"></span> Connected</span>
+    <a class="p-gear active" href="/settings.html" title="Settings" aria-label="Settings">&#9881;</a>
+  </header>
+
+  <main>
+    <h1><span class="glyph glyph-gear">&#9881;</span> Settings</h1>
+    <p class="intro">Configure Pictaria — changes apply immediately, no restart needed.
+      Only the port, data paths, password, and backup location live outside this page, in the server environment.</p>
+
+    <nav class="quick-nav">
+      <a href="#sec-server">Server</a>
+      <a href="#sec-providers">AI Providers</a>
+      <a href="#sec-insights">Insights</a>
+      <a href="#sec-enrich">Enrich</a>
+      <a href="#sec-discarded">Discarded Photos</a>
+      <a href="#sec-curate">Curate</a>
+      <a href="#sec-devices">Devices</a>
+      <a href="#sec-locations">Location Groups</a>
+      <a href="#sec-wakewords">Wake Words</a>
+      <a href="#sec-voice">Voice TTS</a>
+      <a href="#sec-prompts">Prompts</a>
+      <a href="#sec-ambient">Location Names</a>
+      <a href="#sec-backup">Backups</a>
+      <a href="#sec-appearance">Appearance</a>
+      <a href="#sec-support">Support Pictaria</a>
+      <a href="/activity.html">Activity</a>
+      <a href="https://pictaria.ai/docs" target="_blank" rel="noopener">Documentation</a>
+    </nav>
+
+    <div id="allLocked" class="setting-desc" style="padding: 4px 0 14px" hidden>Connect with the app password to edit settings.</div>
+
+    <details id="sec-server" class="p-panel section">
+      <summary><span class="chev">&#9654;</span><h2>Server</h2><span class="sec-sub" id="sub-server"></span></summary>
+      <div class="sec-body">
+        <div class="setting-desc">How Pictaria reaches your Immich library. Values marked <span class="p-chip">env</span> come from the server environment until you override them here. Changes apply immediately — no restart.</div>
+        <div id="fields-server"></div>
+        <div class="save-row">
+          <button id="save-server" class="p-btn primary">Save Server settings</button>
+          <span id="note-server" class="save-note"></span>
+        </div>
+        <div class="setting-desc" id="server-version-line" hidden style="margin-top: 10px"></div>
+      </div>
+    </details>
+
+    <details id="sec-providers" class="p-panel section">
+      <summary><span class="chev">&#9654;</span><h2>AI Providers</h2><span class="sec-sub" id="sub-providers"></span></summary>
+      <div class="sec-body">
+        <div class="setting-desc">Set up only the providers you plan to use. Feature-specific provider choices remain in Enrich, Curate, and Voice TTS.</div>
+        <div class="setting-desc"><strong>NOTE:</strong> Enrich requires vision models with structured output and the Curate referee needs multi-image support.</div>
+        <div id="fields-providers"></div>
+        <div class="save-row">
+          <button id="save-providers" class="p-btn primary">Save AI Providers settings</button>
+          <span id="note-providers" class="save-note"></span>
+        </div>
+      </div>
+    </details>
+
+    <details id="sec-insights" class="p-panel section">
+      <summary><span class="chev">&#9654;</span><h2>Insights</h2><span class="sec-sub" id="sub-insights"></span></summary>
+      <div class="sec-body">
+        <div class="setting-desc">How often the snapshot refreshes, and what counts as a trip on the timeline. Trip thresholds apply at the next refresh. Details in the <a href="https://github.com/pictaria-ai/pictaria-server/blob/main/docs/INSIGHTS.md" target="_blank" rel="noopener" style="color: var(--p-accent)">Insights guide</a>.</div>
+        <div id="fields-insights"></div>
+        <div class="save-row">
+          <button id="save-insights" class="p-btn primary">Save Insights settings</button>
+          <span id="note-insights" class="save-note"></span>
+        </div>
+      </div>
+    </details>
+
+    <details id="sec-enrich" class="p-panel section">
+      <summary><span class="chev">&#9654;</span><h2>Enrich</h2><span class="sec-sub" id="sub-enrich"></span></summary>
+      <div class="sec-body">
+        <div class="setting-desc">Controls enrichment, the image size sent to AI, and the prompts and taxonomy that govern what the model may say. Choose the provider for new runs on the Enrich page; your selection is remembered. Provider connections and model names live under AI Providers. How the pieces fit — prompts, taxonomy, and the response schema — is explained in the <a href="https://github.com/pictaria-ai/pictaria-server/blob/main/docs/ENRICH.md" target="_blank" rel="noopener" style="color: var(--p-accent)">enrichment guide</a>.</div>
+        <div id="fields-enrich"></div>
+        <div id="captionWbLine" class="setting-desc"></div>
+        <div class="save-row">
+          <button id="save-enrich" class="p-btn primary">Save Enrich settings</button>
+          <button id="captionWbNow" class="p-btn accent" type="button" hidden>Write existing captions now</button>
+          <span id="note-enrich" class="save-note"></span>
+        </div>
+      </div>
+    </details>
+
+    <details id="sec-discarded" class="p-panel section">
+      <summary><span class="chev">&#9654;</span><h2>Discarded Photos</h2><span class="sec-sub" id="sub-discarded"></span></summary>
+      <div class="sec-body">
+        <div class="setting-desc">
+          Photos discarded from the Enrich stuck-photos list. Nothing was changed in Immich.
+          Restore a photo and enrichment will try again.
+        </div>
+        <div id="discardedList"></div>
+      </div>
+    </details>
+
+    <details id="sec-curate" class="p-panel section">
+      <summary><span class="chev">&#9654;</span><h2>Curate</h2><span class="sec-sub" id="sub-curate"></span></summary>
+      <div class="sec-body">
+        <div class="setting-desc">How the review queue presents your photos. Changes apply on the next page load — decisions you already made are never affected.</div>
+        <div id="fields-curate"></div>
+        <div id="refereeLine" class="setting-desc"></div>
+        <div class="save-row">
+          <button id="save-curate" class="p-btn primary">Save Curate settings</button>
+          <span id="note-curate" class="save-note"></span>
+        </div>
+      </div>
+    </details>
+
+    <details id="sec-devices" class="p-panel section">
+      <summary><span class="chev">&#9654;</span><h2>Devices</h2><span class="sec-sub" id="sub-devices"></span></summary>
+      <div class="sec-body">
+        <div class="setting-desc">
+          Every device running Pictaria Frame this server has seen — the device names come from the Pictaria Frame setup screen.
+          Deleting a device removes it from the Remote and erases its display history; if it comes back
+          online later it simply registers again. Use it to clean up renamed, re-onboarded, or retired frames.
+        </div>
+        <div id="devForm" hidden>
+          <div id="devList"></div>
+          <div class="save-row">
+            <span id="devNote" class="save-note"></span>
+          </div>
+        </div>
+      </div>
+    </details>
+
+    <details id="sec-locations" class="p-panel section">
+      <summary><span class="chev">&#9654;</span><h2>Location Groups</h2><span class="sec-sub" id="sub-locations"></span></summary>
+      <div class="sec-body">
+      <div class="setting-desc">
+        <p style="margin: 0 0 8px">Group nearby cities into one synthetic location. Useful for handling neighborhoods or suburbs — e.g. a "Bay Area" that includes San Francisco, Burlingame and Oakland.</p>
+        <p style="margin: 0 0 8px">Once created, Insights shows the group (marked <span style="color: var(--p-accent)">&#8277;</span>) instead of its member cities, and also lets you easily create Albums for the group.</p>
+        <p style="margin: 0">NOTE: Groups only relabel in Pictaria — your photos in Immich are untouched, and deleting a group brings the original cities back.</p>
+      </div>
+      <div id="locForm" hidden>
+        <div id="locGroups"></div>
+        <div class="save-row">
+          <button id="locNew" class="p-btn">New group</button>
+        </div>
+        <div id="locEditor" class="loc-editor" hidden>
+          <div class="field" style="padding-top: 0">
+            <label for="locName">Group name</label>
+            <input id="locName" class="p-input" type="text" placeholder="e.g. Bay Area" autocomplete="off">
+          </div>
+          <div class="loc-tools">
+            <input id="locSearch" class="p-input" type="text" placeholder="Filter cities…" autocomplete="off">
+            <button id="locNearby" class="p-btn">+ Add nearby</button>
+            <i class="info" data-tip="Check at least one city first, then Add nearby checks every city whose photos are within ~25 km of the checked ones. Click it again to grow outward from the newly added cities. Cities you uncheck are remembered and won't be re-added.">i</i>
+            <button id="locUncheck" class="p-btn">Uncheck all</button>
+          </div>
+          <div id="locCount" class="loc-count" style="margin: 0 0 8px"></div>
+          <div id="locCities" class="loc-cities"></div>
+          <div id="locHint" class="loc-hint" hidden></div>
+          <div class="save-row">
+            <button id="locSave" class="p-btn primary">Save group</button>
+            <button id="locCancel" class="p-btn">Cancel</button>
+            <span id="locKept" class="save-note" hidden></span>
+            <span id="locNote" class="save-note"></span>
+          </div>
+        </div>
+      </div>
+      </div>
+    </details>
+
+    <details id="sec-wakewords" class="p-panel section">
+      <summary><span class="chev">&#9654;</span><h2>Wake Words</h2><span class="sec-sub" id="sub-wakewords"></span></summary>
+      <div class="sec-body">
+        <div class="setting-desc">
+          Upload an openWakeWord TensorFlow Lite model for Pictaria Frame devices with the one-time Pictaria Connect in-app upgrade. Models stay on this server,
+          download to a frame only when selected, and continue working offline after installation. Pictaria checks
+          the model structure here and the Android runtime validates and smoke-tests it again before activation.
+        </div>
+        <div id="wakeWordForm" hidden>
+          <div class="field">
+            <label for="wwName">Name shown in Pictaria Frame</label>
+            <input id="wwName" class="p-input" type="text" maxlength="60" placeholder="e.g. Hey Kitchen" autocomplete="off">
+          </div>
+          <div class="field">
+            <label for="wwPhrase">Spoken phrase</label>
+            <input id="wwPhrase" class="p-input" type="text" maxlength="100" placeholder="e.g. Hey Kitchen" autocomplete="off">
+          </div>
+          <div class="field">
+            <label for="wwThreshold">Default detection threshold (0.05–0.94)</label>
+            <input id="wwThreshold" class="p-input" type="number" min="0.05" max="0.94" step="0.01" value="0.5" style="width: 110px">
+          </div>
+          <div class="field">
+            <label for="wwFile">openWakeWord model (.tflite, up to 5 MB)</label>
+            <input id="wwFile" class="p-input" type="file" accept=".tflite,application/vnd.tflite,application/octet-stream">
+          </div>
+          <label style="display:flex; gap:10px; align-items:flex-start; margin:12px 0">
+            <input id="wwRights" type="checkbox" style="margin-top:3px">
+            <span class="setting-desc">I confirm that I have the rights needed to use this model, copy it to every connected frame, and include it in Pictaria backups. Pictaria does not grant or verify model licenses.</span>
+          </label>
+          <div class="save-row">
+            <button id="wwUpload" class="p-btn primary" type="button">Upload model</button>
+            <span id="wwNote" class="save-note"></span>
+          </div>
+          <div id="wwList" style="margin-top:16px"></div>
+        </div>
+      </div>
+    </details>
+
+    <details id="sec-voice" class="p-panel section">
+      <summary><span class="chev">&#9654;</span><h2>Voice TTS</h2><span class="sec-sub" id="sub-voice"></span><span id="secdirty-voice" class="sec-dirty" hidden>unsaved changes</span></summary>
+      <div class="sec-body">
+      <div class="setting-desc">Configure how Pictaria answers spoken questions and turns replies into speech. Provider connections live under <a href="#sec-providers" style="color: var(--p-accent)">AI Providers</a>; Voice Commands and the wake phrase are configured in Pictaria Frame. Changes apply immediately.</div>
+      <div id="voiceForm" hidden>
+        <h3>Interesting and Tell Me commands</h3>
+        <div class="setting-desc">
+          Models used to reply to &ldquo;interesting&rdquo; and &ldquo;tell me &hellip;&rdquo; voice commands. Choose a fast provider so Frame can answer promptly. When invoked, &ldquo;Interesting&rdquo; sends the current photo&rsquo;s Immich preview plus its date, location, and filename to this provider, independently of the Enrich switch. It requires a vision model. Selections use the connection info under <a href="#sec-providers" style="color: var(--p-accent)">AI Providers</a>.
+        </div>
+        <div class="field">
+          <label for="f-proseProvider">AI provider <span id="src-proseProvider" class="p-chip from-env" hidden>env</span></label>
+          <select id="f-proseProvider" class="p-select">
+            <option value="cloud_openai">OpenAI (cloud)</option>
+            <option value="venice">Venice (cloud, private models available)</option>
+            <option value="openrouter">OpenRouter (cloud)</option>
+            <option value="cloud_ollama">Ollama (cloud)</option>
+            <option value="local_lmstudio">LM Studio (local — macOS only for "interesting")</option>
+            <option value="local_ollama">Ollama (local)</option>
+          </select>
+          <div class="setting-desc">Uses the connection configured under <a href="#sec-providers" style="color: var(--p-accent)">AI Providers</a>.</div>
+        </div>
+        <div class="field">
+          <label for="f-interestingModel">Interesting command <span id="src-interestingModel" class="p-chip from-env" hidden>env</span></label>
+          <input id="f-interestingModel" class="p-input" type="text" placeholder="empty = the provider’s usual model">
+          <div class="setting-desc">Vision model for photo questions. Leave empty to use the provider&rsquo;s default. LM Studio supports this command only when Pictaria Server runs on macOS.</div>
+        </div>
+        <div class="field">
+          <label for="f-askModel">Tell Me command <span id="src-askModel" class="p-chip from-env" hidden>env</span></label>
+          <input id="f-askModel" class="p-input" type="text" placeholder="empty = the provider’s usual model">
+          <div class="setting-desc">Text model for brief answers. Leave empty to use the provider&rsquo;s default; a small, fast model is usually best.</div>
+        </div>
+        <div class="field">
+          <label for="f-proseTimeoutMs">Answer timeout (ms) <span id="src-proseTimeoutMs" class="p-chip from-env" hidden>env</span></label>
+          <input id="f-proseTimeoutMs" class="p-input" type="number" step="500" min="2000" max="40000" style="width: 110px" placeholder="25000">
+          <div class="setting-desc">Maximum time for the full answer, including Immich lookups. Frame stops waiting after 45 seconds, so the server limit is 40 seconds.</div>
+        </div>
+        <div class="field">
+          <label for="f-interestingMaxOutputTokens">Interesting max output tokens <span id="src-interestingMaxOutputTokens" class="p-chip from-env" hidden>env</span></label>
+          <input id="f-interestingMaxOutputTokens" class="p-input" type="number" step="1" min="50" max="4000" style="width: 110px" placeholder="420">
+        </div>
+        <div class="field">
+          <label for="f-askMaxOutputTokens">Tell Me max output tokens <span id="src-askMaxOutputTokens" class="p-chip from-env" hidden>env</span></label>
+          <input id="f-askMaxOutputTokens" class="p-input" type="number" step="1" min="50" max="4000" style="width: 110px" placeholder="600">
+        </div>
+
+        <h3>Text to speech</h3>
+        <div class="setting-desc">Turns Pictaria&rsquo;s answer into audio for Frame. Choose None to disable spoken replies.</div>
+        <div class="field">
+          <label for="f-ttsProvider">TTS provider <span id="src-ttsProvider" class="p-chip from-env" hidden>env</span></label>
+          <select id="f-ttsProvider" class="p-select">
+            <option value="">None (voice replies disabled)</option>
+            <option value="openai">OpenAI</option>
+            <option value="elevenlabs">ElevenLabs</option>
+          </select>
+        </div>
+
+        <div id="group-openai" hidden>
+          <div class="field">
+            <label for="f-openAiTtsModel">Model <span id="src-openAiTtsModel" class="p-chip from-env" hidden>env</span></label>
+            <input id="f-openAiTtsModel" class="p-input" type="text">
+          </div>
+          <div class="field">
+            <label for="f-openAiTtsVoice">Voice <span id="src-openAiTtsVoice" class="p-chip from-env" hidden>env</span></label>
+            <input id="f-openAiTtsVoice" class="p-input" type="text">
+          </div>
+          <div class="field">
+            <label for="f-openAiTtsSpeed">Speech speed (0.5–2) <span id="src-openAiTtsSpeed" class="p-chip from-env" hidden>env</span></label>
+            <input id="f-openAiTtsSpeed" class="p-input" type="number" step="0.01" min="0.5" max="2" style="width: 110px">
+          </div>
+          <div class="field">
+            <label for="f-openAiTtsInstructions">Voice instructions <span id="src-openAiTtsInstructions" class="p-chip from-env" hidden>env</span></label>
+            <input id="f-openAiTtsInstructions" class="p-input" type="text" placeholder="e.g. Warm, unhurried, like a family storyteller">
+          </div>
+        </div>
+
+        <div id="group-elevenlabs" hidden>
+          <div class="field">
+            <label for="f-elevenLabsVoiceId">Voice ID <span id="src-elevenLabsVoiceId" class="p-chip from-env" hidden>env</span></label>
+            <input id="f-elevenLabsVoiceId" class="p-input" type="text">
+          </div>
+          <div class="field">
+            <label for="f-elevenLabsTtsModel">Model <span id="src-elevenLabsTtsModel" class="p-chip from-env" hidden>env</span></label>
+            <input id="f-elevenLabsTtsModel" class="p-input" type="text">
+          </div>
+          <div class="field">
+            <label for="f-elevenLabsOutputFormat">Output format <span id="src-elevenLabsOutputFormat" class="p-chip from-env" hidden>env</span></label>
+            <input id="f-elevenLabsOutputFormat" class="p-input" type="text">
+          </div>
+        </div>
+
+        <div class="save-row">
+          <button id="voiceSave" class="p-btn primary">Save Voice TTS settings</button>
+          <span id="dirty-voice" class="dirty-note" hidden>Unsaved changes</span>
+          <span id="voiceSaveNote" class="save-note"></span>
+        </div>
+
+        <div class="voice-try">
+          <h3>Try text to speech</h3>
+          <p class="try-note">Generates and plays a test reply through the server.</p>
+          <div class="try-row">
+            <input id="ttsText" class="p-input" type="text" value="Hello from Pictaria." maxlength="200">
+            <button id="ttsSpeak" class="p-btn">Speak</button>
+          </div>
+          <div id="ttsResult" class="try-note"></div>
+
+          <h3>Try a voice command</h3>
+          <p class="try-note">Routes a phrase exactly as Frame would. Tests here don&rsquo;t count toward Frame metrics.</p>
+          <div class="try-row">
+            <input id="intentText" class="p-input" type="text" placeholder="show me photos of Alice in Paris in 2025" maxlength="200">
+            <button id="intentParse" class="p-btn">Parse</button>
+          </div>
+          <pre id="intentResult" class="intent-result" hidden></pre>
+        </div>
+      </div>
+      </div>
+    </details>
+
+    <details id="sec-prompts" class="p-panel section">
+      <summary><span class="chev">&#9654;</span><h2>Prompts</h2><span class="sec-sub" id="sub-prompts"></span></summary>
+      <div class="sec-body">
+        <div class="setting-desc">The exact instructions sent to the AI provider for &ldquo;interesting&rdquo; and &ldquo;tell me&hellip;&rdquo; voice commands. Leave a box empty to use the built-in prompt, or load it, edit what the answers should emphasize, and save. Answers from a custom prompt carry a &ldquo;-custom&rdquo; promptVersion so odd results are traceable. Clear a box and save to return to the built-in prompt.</div>
+        <div id="fields-prompts"></div>
+        <div class="save-row">
+          <button id="save-prompts" class="p-btn primary">Save Prompts settings</button>
+          <span id="note-prompts" class="save-note"></span>
+        </div>
+      </div>
+    </details>
+
+    <details id="sec-ambient" class="p-panel section">
+      <summary><span class="chev">&#9654;</span><h2>Location Names</h2><span class="sec-sub" id="sub-ambient"></span></summary>
+      <div class="sec-body">
+        <div class="setting-desc">How photo GPS becomes place names — the labels on the frame, voice answers like &ldquo;where was this taken?&rdquo;, and Insights' home-base name. Optional place naming sends coordinates to the Geoapify account you configure. Weather sends the frame&rsquo;s city or US ZIP to Open-Meteo for geocoding, then requests the forecast with the resulting coordinates; no key is required.</div>
+        <div id="fields-ambient"></div>
+        <div class="save-row">
+          <button id="save-ambient" class="p-btn primary">Save Location Names settings</button>
+          <span id="note-ambient" class="save-note"></span>
+        </div>
+      </div>
+    </details>
+
+    <details id="sec-backup" class="p-panel section">
+      <summary><span class="chev">&#9654;</span><h2>Backups</h2><span class="sec-sub" id="sub-backup"></span></summary>
+      <div class="sec-body">
+        <div class="setting-desc">Automatic snapshots of Pictaria's own data — your Curate decisions, tags and captions, album rules, location groups, and these settings. Your photos live in Immich and are not part of this. The destination folder is set by <code>BACKUP_DIR</code> in the server environment — point it at a NAS mount or synced folder for real safety. See the <a href="https://github.com/pictaria-ai/pictaria-server/blob/main/docs/BACKUP.md" target="_blank" rel="noopener">backup guide</a>.</div>
+        <div id="fields-backup"></div>
+        <div id="backupStatusLine" class="setting-desc"></div>
+        <div class="save-row">
+          <button id="save-backup" class="p-btn primary">Save Backups settings</button>
+          <button id="backupNow" class="p-btn accent" type="button">Back up now</button>
+          <span id="note-backup" class="save-note"></span>
+        </div>
+      </div>
+    </details>
+
+    <details id="sec-appearance" class="p-panel section">
+      <summary><span class="chev">&#9654;</span><h2>Appearance</h2><span class="sec-sub" id="sub-appearance"></span></summary>
+      <div class="sec-body">
+        <div class="setting">
+          <div class="setting-text">
+            <div class="setting-title">Light mode</div>
+            <div class="setting-desc">Use a white background instead of the dark, photo-first theme. Applies to this browser on every Pictaria page.</div>
+          </div>
+          <label class="p-switch">
+            <input id="lightModeToggle" type="checkbox">
+            <span class="track"></span>
+          </label>
+        </div>
+      </div>
+    </details>
+
+    <details id="sec-support" class="p-panel section">
+      <summary><span class="chev">&#9654;</span><h2>Support Pictaria</h2><span class="sec-sub" id="sub-support"></span></summary>
+      <div class="sec-body">
+        <div class="setting-desc">Pictaria Server has no telemetry, analytics, or Pictaria-operated cloud service. Features you enable can connect to your Immich server and the AI, TTS, weather, or geocoding providers you choose; see the <a href="https://github.com/pictaria-ai/pictaria-server#privacy" target="_blank" rel="noopener">privacy overview</a>. If Pictaria has earned a place in your home, you can support its development with a one-time contribution at <a href="https://pictaria.ai/contribute" target="_blank" rel="noopener">pictaria.ai/contribute</a> — you'll receive a supporter key by email. Paste it here for a small badge and our sincere thanks. Supporting never gates any feature. The key is verified entirely on this server against a pinned public key; verification makes no network request to Pictaria.</div>
+        <div id="supActive" hidden>
+          <div class="setting-desc" id="supActiveLine" style="font-weight: 600"></div>
+          <div class="save-row">
+            <button id="supRemove" class="p-btn" type="button">Remove key</button>
+            <span id="note-support-active" class="save-note"></span>
+          </div>
+        </div>
+        <div id="supEntry" style="margin-top: 18px">
+          <div class="setting-text">
+            <div class="setting-title" style="margin-bottom: 7px">Supporter key</div>
+            <input id="supKeyInput" class="p-input" style="width: 100%; max-width: 620px" placeholder="PICTARIA.xxxxx.xxxxx &mdash; the whole string from your email" autocomplete="off" spellcheck="false">
+          </div>
+          <div class="save-row">
+            <button id="supSave" class="p-btn primary" type="button">Save key</button>
+            <span id="note-support" class="save-note"></span>
+          </div>
+        </div>
+      </div>
+    </details>
+  </main>
+
+  <script>
+    const toggle = document.getElementById('lightModeToggle');
+    toggle.checked = window.pictariaTheme.get() === 'light';
+    toggle.addEventListener('change', () => {
+      window.pictariaTheme.set(toggle.checked ? 'light' : 'dark');
+    });
+
+    const el = (id) => document.getElementById(id);
+    const TEXT_FIELDS = ['ttsProvider', 'openAiTtsModel', 'openAiTtsVoice', 'openAiTtsSpeed', 'openAiTtsInstructions',
+      'proseProvider', 'interestingModel', 'askModel', 'proseTimeoutMs',
+      'interestingMaxOutputTokens', 'askMaxOutputTokens',
+      'elevenLabsTtsModel', 'elevenLabsVoiceId', 'elevenLabsOutputFormat'];
+    const SECRET_FIELDS = [];
+    const ENRICH_PROVIDER_NAMES = {
+      local_lmstudio: 'LM Studio',
+      local_ollama: 'Ollama (local)',
+      cloud_ollama: 'Ollama Cloud',
+      cloud_openai: 'OpenAI',
+      openrouter: 'OpenRouter',
+      venice: 'Venice',
+    };
+
+    // Field layout for the generated sections. Labels come from the server;
+    // descriptions, order, and control types live here.
+    const SPEC = {
+      server: [
+        { key: 'immichBaseUrl', type: 'text', placeholder: 'http://192.168.1.10:2283', desc: 'Your Immich server, as reachable from the machine running Pictaria.' },
+        { key: 'immichApiKey', type: 'secret', desc: 'Create one in Immich under Account Settings → API Keys.' },
+        { key: 'immichPublicUrl', type: 'text', placeholder: 'defaults to the server URL', desc: 'Only needed if your browser reaches Immich at a different address (e.g. behind a reverse proxy) — used for the "Open in Immich" links.' },
+      ],
+      // Presentation-only grouping: sourceSection keeps the persisted/API
+      // shape unchanged while related provider fields share one UI section.
+      providers: [
+        {
+          division: 'Local Models',
+          divisionDesc: 'Model requests stay within infrastructure you operate when these endpoints point to operator-hosted services. If Pictaria runs in Docker and the model server runs on the host, use host.docker.internal instead of 127.0.0.1 (Linux also needs the extra_hosts entry shown in docker-compose.yml). The model server must accept connections from the container; expose it only to networks you trust.',
+        },
+        { head: 'LM Studio' },
+        { key: 'lmStudioBaseUrl', sourceSection: 'enrich', type: 'text', placeholder: 'http://127.0.0.1:1234/v1', desc: 'The address of LM Studio’s OpenAI-compatible server.' },
+        { key: 'lmStudioModel', sourceSection: 'enrich', type: 'text', desc: 'The model identifier exactly as LM Studio lists it — swap it here when trying out models.' },
+        { head: 'Ollama' },
+        { key: 'ollamaLocalBaseUrl', sourceSection: 'enrich', type: 'text', placeholder: 'http://127.0.0.1:11434', desc: 'The address of your local Ollama server.' },
+        { key: 'ollamaLocalModel', sourceSection: 'enrich', type: 'text', desc: 'The model identifier exactly as Ollama lists it — swap it here when trying out models.' },
+        { division: 'Cloud Models', separated: true },
+        { head: 'Ollama Cloud' },
+        { key: 'ollamaApiKey', sourceSection: 'enrich', type: 'secret' },
+        { key: 'ollamaModel', sourceSection: 'enrich', type: 'text' },
+        { head: 'OpenAI' },
+        { key: 'openAiApiKey', sourceSection: 'server', type: 'secret' },
+        { key: 'openAiModel', sourceSection: 'enrich', type: 'text' },
+        { head: 'OpenRouter' },
+        { key: 'openRouterApiKey', sourceSection: 'enrich', type: 'secret' },
+        { key: 'openRouterModel', sourceSection: 'enrich', type: 'text' },
+        { head: 'Venice' },
+        { key: 'veniceApiKey', sourceSection: 'enrich', type: 'secret', desc: 'Venice offers private models. Choose one marked “private” for contractual zero retention; “anonymized” only removes your identity.', docs: 'https://docs.venice.ai/overview/privacy' },
+        { key: 'veniceModel', sourceSection: 'enrich', type: 'text', placeholder: 'e.g. qwen3-vl-235b-a22b' },
+        { head: 'ElevenLabs' },
+        { key: 'elevenLabsApiKey', sourceSection: 'voice', type: 'secret', desc: 'Used only for text-to-speech. Select ElevenLabs as the TTS provider under Voice TTS.' },
+      ],
+      enrich: [
+        { key: 'enabled', type: 'switch', desc: 'Lets a model you choose analyze your photos. Off by default. Local providers keep requests within infrastructure you operate; cloud providers receive them through your account.', docs: 'https://github.com/pictaria-ai/pictaria-server/blob/main/docs/ENRICH.md' },
+        { key: 'captionWriteback', type: 'switch', desc: 'Copies each photo’s AI caption into its Immich description, making photos searchable in Immich by what’s in them. Pictaria fills an empty description or updates its own earlier text and checks immediately before writing; Immich cannot make that check and update atomic, so a narrow concurrent human-edit race remains. Runs in the background; new enrichments follow automatically.', docs: 'https://github.com/pictaria-ai/pictaria-server/blob/main/docs/ENRICH.md#writing-captions-to-immich-descriptions' },
+        { key: 'imageSource', type: 'select', labels: { preview: 'Preview (recommended)', thumbnail: 'Thumbnail (fastest, least detail)', original: 'Original (largest upload)' }, desc: 'The image size sent to the model for analysis.' },
+        { group: 'Prompt & taxonomy', groupDesc: 'Advanced — override the built-in prompts or the tag taxonomy. Empty fields keep the built-ins (viewable on the Enrich page).' },
+        { key: 'systemPrompt', type: 'textarea', builtinPrompt: true, placeholder: 'Using the built-in prompt — paste your own here to override.', desc: 'The model’s standing instructions. Leave empty to use the built-in prompt (viewable on the Enrich page). Runs with a custom prompt are marked "-custom" in the run history. Note: captions and quality scores are demanded by the response schema, not the prompt — see the Response fields list on the Enrich page.', docs: 'https://github.com/pictaria-ai/pictaria-server/blob/main/docs/ENRICH.md#taxonomy-prompts-and-the-response-schema' },
+        { key: 'userTemplate', type: 'textarea', rows: 5, builtinPrompt: true, placeholder: 'Using the built-in prompt — paste your own here to override.', desc: 'The per-photo message. Must include {approved_tags}, which is replaced with the taxonomy tag list.', docs: 'https://github.com/pictaria-ai/pictaria-server/blob/main/docs/ENRICH.md#taxonomy-prompts-and-the-response-schema' },
+        { key: 'taxonomyJson', type: 'textarea', rows: 14, taxonomyLoad: true, placeholder: 'Using the built-in taxonomy — paste an edited copy here to override.', desc: 'The tag vocabulary, thresholds, and exclusions as strict JSON — what the model may say about your photos. Load the current taxonomy, edit it, and bump its "version" string (a content change that keeps the old version is rejected). Already-enriched photos keep their old tags until re-run. Clear the box to return to the built-in taxonomy.', docs: 'https://github.com/pictaria-ai/pictaria-server/blob/main/docs/ENRICH.md#taxonomy-prompts-and-the-response-schema' },
+        { groupEnd: true },
+      ],
+      curate: [
+        { key: 'burstGrouping', type: 'switch', desc: 'Collapses photos of the same moment — rapid bursts, re-shoots, duplicates — into one Stack with a suggested keeper. Turn off for a flat photo-by-photo queue.' },
+        { key: 'refereeEnabled', type: 'switch', desc: 'The gold star: whenever enrichment is idle, an AI model compares each Stack side by side — people-shots beat empty scenes, open eyes beat blinks — and explains its pick in the compare view. Needs enrichment enabled; works through the backlog on its own, most-undecided Stacks first. A background worker with no start or cancel: an enrich run always takes priority (the referee finishes its current Stack, then waits), and it resumes by itself when enrichment is idle. Pause it any time from the Curate strip.', docs: 'https://github.com/pictaria-ai/pictaria-server/blob/main/docs/ENRICH.md' },
+        { key: 'refereeProvider', type: 'select', labels: { '': 'Follow Enrich provider', local_lmstudio: 'LM Studio (local)', local_ollama: 'Ollama (local)', cloud_ollama: 'Ollama (cloud)', cloud_openai: 'OpenAI (cloud)', openrouter: 'OpenRouter (cloud)', venice: 'Venice (cloud)' }, desc: 'Follow Enrich provider uses the provider currently selected on the Enrich page; a change there applies when the next Stack starts. Choose a specific provider here to keep Curate independent.' },
+        { key: 'refereeModel', type: 'text', placeholder: 'empty = the provider’s usual model', desc: 'Optional. Leave blank to use the chosen provider’s configured model. If the referee follows Enrich, this override must also be valid for every provider you select there; clear it or choose a fixed referee provider when switching providers. A smaller vision model works well here, but it must accept multiple images.', docs: 'https://docs.venice.ai/models/overview' },
+      ],
+      insights: [
+        { key: 'refreshIntervalHours', type: 'number', width: 110 },
+        { key: 'tripAwayKm', type: 'number', width: 110, desc: 'Days with photos at least this far from home count as travel.' },
+        { key: 'tripGapDays', type: 'number', width: 110, desc: 'Photo-less days allowed inside one trip before it splits in two.' },
+        { key: 'tripMinDays', type: 'number', width: 110, desc: 'Shorter away-stretches are treated as day outings, not trips.' },
+      ],
+      prompts: [
+        { key: 'interestingPrompt', type: 'textarea', rows: 13, builtinPrompt: true, builtinUrl: '/api/voice/prompts', placeholder: 'Using the built-in prompt — load it below to see and edit.', desc: 'What the "interesting" voice command says about a photo. Must include {context} — replaced with the photo’s date, location, and filename lines. Clear the box to return to the built-in prompt.' },
+        { key: 'askPrompt', type: 'textarea', rows: 10, builtinPrompt: true, builtinUrl: '/api/voice/prompts', placeholder: 'Using the built-in prompt — load it below to see and edit.', desc: 'How "tell me …" questions are answered. Must include {question} — replaced with the spoken question. Clear the box to return to the built-in prompt.' },
+      ],
+      ambient: [
+        { key: 'weatherDefaultLocation', type: 'text', placeholder: 'e.g. San Francisco,US' },
+        { key: 'geocodingProvider', type: 'select', labels: { '': 'None', geoapify: 'Geoapify' } },
+        { key: 'geoapifyApiKey', type: 'secret' },
+        { key: 'immichMetadataWriteback', type: 'switch', desc: 'Write reverse-geocoded location labels back into Immich asset metadata.' },
+      ],
+      backup: [
+        { key: 'enabled', type: 'switch', desc: 'Runs in the background while the server is up; a failed snapshot is retried within the hour.' },
+        { key: 'intervalHours', type: 'number', width: 110 },
+        { key: 'keep', type: 'number', width: 110, desc: 'Older snapshots are deleted automatically.' },
+      ],
+    };
+
+    function headers(extra = {}) {
+      return { ...extra };
+    }
+
+    function showLogin() {
+      el('connStatus').hidden = true;
+      el('voiceForm').hidden = true;
+      el('locForm').hidden = true;
+      el('devForm').hidden = true;
+      el('wakeWordForm').hidden = true;
+      el('allLocked').hidden = false;
+      window.pictariaGate.show();
+    }
+
+    function showConnected() {
+      el('connStatus').hidden = false;
+      el('voiceForm').hidden = false;
+      el('locForm').hidden = false;
+      el('wakeWordForm').hidden = false;
+      el('allLocked').hidden = true;
+    }
+
+    function syncProviderGroups() {
+      const provider = el('f-ttsProvider').value;
+      el('group-openai').hidden = provider !== 'openai';
+      el('group-elevenlabs').hidden = provider !== 'elevenlabs';
+    }
+
+    // --- unsaved-changes nudge ---
+    // Real dirty-tracking: a section is dirty when any field differs from the
+    // last server-rendered value, and comes clean again if the edit is
+    // reverted. Secrets render blank, so any typed text counts as a change.
+    const cleanState = {};
+    const cleanVoice = {};
+
+    function updateVoiceDirty() {
+      const dirty = [...TEXT_FIELDS, ...SECRET_FIELDS].some(
+        (key) => el(`f-${key}`) && (el(`f-${key}`).value ?? '') !== (cleanVoice[key] ?? ''),
+      );
+      el('voiceSave').classList.toggle('attention', dirty);
+      el('dirty-voice').hidden = !dirty;
+      el('secdirty-voice').hidden = !dirty;
+    }
+
+    function fieldValue(row, input) {
+      return row.type === 'switch' ? String(input.checked) : String(input.value ?? '');
+    }
+
+    function updateDirty(section) {
+      const clean = cleanState[section];
+      const save = el(`save-${section}`);
+      if (!clean || !save || save.hidden) return;
+      let dirty = false;
+      for (const row of SPEC[section]) {
+        if (!row.key) continue; // head/group/groupEnd markers
+        const input = el(`f2-${section}-${row.key}`);
+        if (!input) continue;
+        if (fieldValue(row, input) !== clean[row.key]) { dirty = true; break; }
+      }
+      save.classList.toggle('attention', dirty);
+      const note = el(`dirty-${section}`);
+      if (note) note.hidden = !dirty;
+      const badge = el(`secdirty-${section}`);
+      if (badge) badge.hidden = !dirty;
+    }
+
+    function addDirtyMarkers(section) {
+      const save = el(`save-${section}`);
+      const note = document.createElement('span');
+      note.id = `dirty-${section}`;
+      note.className = 'dirty-note';
+      note.textContent = 'Unsaved changes';
+      note.hidden = true;
+      save.insertAdjacentElement('afterend', note);
+      const badge = document.createElement('span');
+      badge.id = `secdirty-${section}`;
+      badge.className = 'sec-dirty';
+      badge.textContent = 'unsaved changes';
+      badge.hidden = true;
+      document.querySelector(`#sec-${section} > summary`)?.append(badge);
+    }
+
+    // --- generated settings sections ---
+
+    function sourceSection(section, row) {
+      return row.sourceSection ?? section;
+    }
+
+    let formsBuilt = false;
+
+    function buildForms(settings) {
+      if (formsBuilt) return;
+      formsBuilt = true;
+      for (const [section, rows] of Object.entries(SPEC)) {
+        const box = el(`fields-${section}`);
+        // Rows between a { group } marker and { groupEnd } render inside a
+        // nested collapsible for advanced groups such as prompt overrides.
+        let target = box;
+        for (const row of rows) {
+          if (row.division) {
+            const division = document.createElement('div');
+            division.className = `provider-division${row.separated ? ' separated' : ''}`;
+            const title = document.createElement('div');
+            title.className = 'provider-division-title';
+            title.textContent = row.division;
+            division.append(title);
+            if (row.divisionDesc) {
+              const desc = document.createElement('div');
+              desc.className = 'setting-desc';
+              desc.textContent = row.divisionDesc;
+              division.append(desc);
+            }
+            target.append(division);
+            continue;
+          }
+          if (row.group) {
+            const sub = document.createElement('details');
+            sub.className = 'sub-details';
+            const summary = document.createElement('summary');
+            const chev = document.createElement('span');
+            chev.className = 'chev';
+            chev.innerHTML = '&#9654;';
+            const title = document.createElement('span');
+            title.className = 'sub-head';
+            title.textContent = row.group;
+            summary.append(chev, title);
+            sub.append(summary);
+            if (row.groupDesc) {
+              const desc = document.createElement('div');
+              desc.className = 'setting-desc';
+              desc.textContent = row.groupDesc;
+              sub.append(desc);
+            }
+            box.append(sub);
+            target = sub;
+            continue;
+          }
+          if (row.groupEnd) {
+            target = box;
+            continue;
+          }
+          if (row.head) {
+            const head = document.createElement('div');
+            head.className = 'sub-head';
+            head.textContent = row.head;
+            target.append(head);
+            continue;
+          }
+          const meta = settings[sourceSection(section, row)]?.[row.key];
+          if (!meta) continue;
+          const field = document.createElement('div');
+          field.className = 'field';
+          const id = `f2-${section}-${row.key}`;
+          const label = document.createElement('label');
+          label.htmlFor = id;
+          label.textContent = meta.label;
+          const chip = document.createElement('span');
+          chip.className = 'p-chip from-env';
+          chip.id = `src2-${section}-${row.key}`;
+          chip.textContent = 'env';
+          chip.hidden = true;
+          label.append(' ', chip);
+          field.append(label);
+          let input;
+          if (row.type === 'select') {
+            input = document.createElement('select');
+            input.className = 'p-select';
+            for (const option of meta.options ?? Object.keys(row.labels ?? {})) {
+              const node = document.createElement('option');
+              node.value = option;
+              node.textContent = row.labels?.[option] ?? option;
+              input.append(node);
+            }
+          } else if (row.type === 'switch') {
+            const wrap = document.createElement('label');
+            wrap.className = 'p-switch';
+            input = document.createElement('input');
+            input.type = 'checkbox';
+            const track = document.createElement('span');
+            track.className = 'track';
+            wrap.append(input, track);
+            input.id = id;
+            field.append(wrap);
+          } else if (row.type === 'textarea') {
+            input = document.createElement('textarea');
+            input.className = 'p-input prompt-edit';
+            input.rows = row.rows ?? 9;
+            input.autocomplete = 'off';
+            input.spellcheck = false;
+            if (row.placeholder) input.placeholder = row.placeholder;
+          } else {
+            input = document.createElement('input');
+            input.className = 'p-input';
+            input.type = row.type === 'secret' ? 'password' : row.type === 'number' ? 'number' : 'text';
+            input.autocomplete = 'off';
+            if (row.placeholder) input.placeholder = row.placeholder;
+            if (row.width) input.style.width = `${row.width}px`;
+          }
+          input.id = id;
+          input.dataset.type = row.type;
+          input.addEventListener('input', () => updateDirty(section));
+          input.addEventListener('change', () => updateDirty(section));
+          if (row.type === 'secret') {
+            // Eye toggle so a key can be checked as it's typed.
+            const EYE = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>';
+            const EYE_OFF = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19m-6.72-1.07a3 3 0 1 1-4.24-4.24"/><line x1="1" y1="1" x2="23" y2="23"/></svg>';
+            const wrap = document.createElement('span');
+            wrap.className = 'secret-wrap';
+            const toggle = document.createElement('button');
+            toggle.type = 'button';
+            toggle.className = 'secret-eye';
+            toggle.title = 'Show key';
+            toggle.setAttribute('aria-label', 'Show key');
+            toggle.innerHTML = EYE;
+            toggle.addEventListener('click', () => {
+              const show = input.type === 'password';
+              input.type = show ? 'text' : 'password';
+              toggle.innerHTML = show ? EYE_OFF : EYE;
+              toggle.title = show ? 'Hide key' : 'Show key';
+              toggle.setAttribute('aria-label', toggle.title);
+            });
+            wrap.append(input, toggle);
+            field.append(wrap);
+          } else if (row.type !== 'switch') field.append(input);
+          if (row.builtinPrompt) {
+            const load = document.createElement('button');
+            load.type = 'button';
+            load.className = 'p-btn quiet load-builtin';
+            load.textContent = 'Load built-in text to edit';
+            load.addEventListener('click', async () => {
+              try {
+                const response = await fetch(row.builtinUrl ?? '/api/enrich/prompts', { headers: headers() });
+                if (!response.ok) throw new Error('Could not fetch the built-in prompt.');
+                input.value = (await response.json()).builtin?.[row.key] ?? input.value;
+                updateDirty(section);
+              } catch (error) {
+                el(`note-${section}`).textContent = error.message;
+              }
+            });
+            field.append(load);
+          }
+          if (row.taxonomyLoad) {
+            const load = document.createElement('button');
+            load.type = 'button';
+            load.className = 'p-btn quiet load-builtin';
+            load.textContent = 'Load current taxonomy to edit';
+            load.addEventListener('click', async () => {
+              try {
+                const response = await fetch('/api/taxonomy', { headers: headers() });
+                if (!response.ok) throw new Error('Could not fetch the current taxonomy.');
+                const raw = (await response.json()).raw;
+                if (raw) input.value = JSON.stringify(raw, null, 2);
+                updateDirty(section);
+              } catch (error) {
+                el(`note-${section}`).textContent = error.message;
+              }
+            });
+            field.append(load);
+          }
+          if (row.desc) {
+            const desc = document.createElement('div');
+            desc.className = 'setting-desc';
+            desc.textContent = row.desc;
+            if (row.docs) {
+              const docsLink = document.createElement('a');
+              docsLink.href = row.docs;
+              docsLink.target = '_blank';
+              docsLink.rel = 'noopener';
+              docsLink.textContent = 'More in the docs ↗';
+              docsLink.style.color = 'var(--p-accent)';
+              desc.append(' ', docsLink);
+            }
+            field.append(desc);
+          }
+          if (row.type === 'secret') {
+            const warning = document.createElement('div');
+            warning.id = `credential-warning-${section}-${row.key}`;
+            warning.className = 'credential-warning';
+            warning.hidden = true;
+            field.append(warning);
+          }
+          target.append(field);
+        }
+        if (!box.querySelector('.field')) {
+          // Server process predates this section — fields will appear after
+          // the next restart; don't offer a save that would only 400.
+          const note = document.createElement('div');
+          note.className = 'setting-desc';
+          note.style.padding = '10px 0';
+          note.textContent = 'This Pictaria Server build predates these settings — restart the server onto the current build to edit them here.';
+          box.append(note);
+          el(`save-${section}`).hidden = true;
+          continue;
+        }
+        el(`save-${section}`).addEventListener('click', () => void saveSection(section));
+        addDirtyMarkers(section);
+      }
+    }
+
+    function render(settings) {
+      buildForms(settings);
+      for (const [section, rows] of Object.entries(SPEC)) {
+        for (const row of rows) {
+          if (!row.key) continue; // head/group/groupEnd markers
+          const meta = settings[sourceSection(section, row)]?.[row.key];
+          const input = el(`f2-${section}-${row.key}`);
+          if (!meta || !input) continue;
+          if (row.type === 'secret') {
+            input.value = '';
+            input.placeholder = meta.credentialUnavailable
+              ? 'unavailable — type to replace'
+              : meta.configured ? '••••••••  (set — type to replace)' : (row.placeholder ?? 'not set');
+          } else if (row.type === 'switch') {
+            input.checked = Boolean(meta.value);
+          } else {
+            input.value = meta.value ?? '';
+          }
+          el(`src2-${section}-${row.key}`).hidden = meta.source !== 'environment';
+          const credentialWarning = el(`credential-warning-${section}-${row.key}`);
+          if (credentialWarning) {
+            credentialWarning.hidden = !meta.credentialUnavailable;
+            credentialWarning.textContent = meta.credentialNotice ?? '';
+          }
+          (cleanState[section] ??= {})[row.key] = fieldValue(row, input);
+        }
+        updateDirty(section);
+      }
+      for (const key of TEXT_FIELDS) {
+        const field = settings.voice[key];
+        if (!field) continue;
+        el(`f-${key}`).value = field.value ?? '';
+        el(`src-${key}`).hidden = field.source !== 'environment';
+        cleanVoice[key] = el(`f-${key}`).value;
+      }
+      for (const key of SECRET_FIELDS) {
+        const field = settings.voice[key];
+        if (!field) continue;
+        el(`f-${key}`).value = '';
+        el(`f-${key}`).placeholder = field.configured ? '••••••••  (set — type to replace)' : 'not set';
+        el(`src-${key}`).hidden = field.source !== 'environment';
+        cleanVoice[key] = '';
+      }
+      updateVoiceDirty();
+      syncProviderGroups();
+      const followOption = el('f2-curate-refereeProvider')?.querySelector('option[value=""]');
+      if (followOption) {
+        const current = settings.enrich?.defaultProvider?.value;
+        const currentName = ENRICH_PROVIDER_NAMES[current] ?? current;
+        followOption.textContent = currentName
+          ? `Follow Enrich provider (${currentName})`
+          : 'Follow Enrich provider';
+      }
+      renderSubs(settings);
+      void loadBackupStatus();
+      void loadCaptionWbStatus();
+      void loadRefereeStatus();
+      void loadServerVersion();
+    }
+
+    // The running build's version (authed health payload) — the findable
+    // spot the bug-report form points people at.
+    async function loadServerVersion() {
+      try {
+        const health = await fetch('/api/health').then((r) => r.json());
+        if (health?.serverVersion) {
+          el('server-version-line').textContent = `Pictaria Server v${health.serverVersion}`;
+          el('server-version-line').hidden = false;
+        }
+      } catch { /* the section simply shows no version line */ }
+    }
+
+    // --- referee status line ---
+
+    async function loadRefereeStatus() {
+      let status;
+      try {
+        const response = await fetch('/api/review/referee/status', { headers: headers() });
+        if (!response.ok) return; // server predates the referee
+        status = await response.json();
+      } catch {
+        return;
+      }
+      if (!status.enabled && !status.groups) {
+        el('refereeLine').textContent = '';
+        return;
+      }
+      el('refereeLine').textContent = [
+        status.groups ? `${status.groups.toLocaleString()} group${status.groups === 1 ? '' : 's'} refereed` : null,
+        status.remaining ? `${status.remaining.toLocaleString()} waiting` : null,
+        status.working ? 'working now' : null,
+        status.lastError ? `last error: ${status.lastError.slice(0, 80)}` : null,
+      ].filter(Boolean).join(' · ');
+    }
+
+    // --- caption writeback status + backfill ---
+
+    async function loadCaptionWbStatus() {
+      let status;
+      try {
+        const response = await fetch('/api/enrich/captions/writeback', { headers: headers() });
+        if (!response.ok) return; // server predates caption writeback
+        status = await response.json();
+      } catch {
+        return;
+      }
+      el('captionWbNow').hidden = !status.enabled;
+      const done = status.written + status.skipped;
+      el('captionWbLine').textContent = !status.enabled && done + status.pending + status.failed === 0 ? '' : [
+        status.pending ? `${status.pending.toLocaleString()} caption${status.pending === 1 ? '' : 's'} queued for Immich` : null,
+        status.written ? `${status.written.toLocaleString()} written` : null,
+        status.skipped ? `${status.skipped.toLocaleString()} kept as-is` : null,
+        status.failed ? `${status.failed.toLocaleString()} failed` : null,
+        status.lastError ? `last error: ${status.lastError}` : null,
+        !status.pending && !done && !status.failed ? 'Descriptions: nothing written yet — use "Write existing captions now" to cover photos enriched before this was on.' : null,
+      ].filter(Boolean).join(' · ');
+    }
+
+    el('captionWbNow').addEventListener('click', async () => {
+      el('captionWbNow').disabled = true;
+      try {
+        const response = await fetch('/api/enrich/captions/writeback/backfill', { method: 'POST', headers: headers() });
+        const body = await response.json().catch(() => null);
+        if (!response.ok) throw new Error(body?.error?.message ?? 'Could not start the backfill');
+        el('note-enrich').textContent = body.queued
+          ? `Queued ${body.queued.toLocaleString()} caption${body.queued === 1 ? '' : 's'} — writes continue in the background.`
+          : 'Nothing new to write — all captions are already in Immich or kept as-is.';
+        void loadCaptionWbStatus();
+      } catch (error) {
+        el('note-enrich').textContent = error.message;
+      } finally {
+        el('captionWbNow').disabled = false;
+        setTimeout(() => { el('note-enrich').textContent = ''; }, 8000);
+      }
+    });
+
+    // --- backup status + on-demand run ---
+
+    async function loadBackupStatus() {
+      let status;
+      try {
+        const response = await fetch('/api/backup/status', { headers: headers() });
+        if (!response.ok) return; // server predates backups
+        status = await response.json();
+      } catch {
+        return;
+      }
+      el('backupStatusLine').textContent = [
+        `Destination: ${status.dir}`,
+        `${status.count} snapshot${status.count === 1 ? '' : 's'} kept`,
+        status.lastAt ? `newest ${new Date(status.lastAt).toLocaleString()}` : 'none yet',
+        status.lastResult?.complete === false
+          ? `last snapshot incomplete: missing ${(status.lastResult.missing ?? []).map((entry) => entry.name).join(', ')}`
+          : null,
+        status.lastResult?.legacy === true
+          ? 'newest snapshot is from an older version; completeness is unknown'
+          : null,
+        status.lastError ? `last attempt failed: ${status.lastError}` : null,
+      ].filter(Boolean).join(' · ');
+    }
+
+    el('backupNow').addEventListener('click', async () => {
+      el('backupNow').disabled = true;
+      el('note-backup').textContent = 'Backing up…';
+      try {
+        const response = await fetch('/api/backup/run', { method: 'POST', headers: headers() });
+        const body = await response.json().catch(() => null);
+        if (!response.ok) throw new Error(body?.error?.message ?? 'Backup failed');
+        el('note-backup').textContent = body.complete === false
+          ? `Backup incomplete — missing ${(body.missing ?? []).map((entry) => entry.name).join(', ')}. Older complete snapshots were preserved.`
+          : `Backed up ${(body.bytes / 1024 / 1024).toFixed(1)} MB (${body.files.length} files).`;
+        void loadBackupStatus();
+      } catch (error) {
+        el('note-backup').textContent = error.message;
+      } finally {
+        el('backupNow').disabled = false;
+        setTimeout(() => { el('note-backup').textContent = ''; }, 6000);
+      }
+    });
+
+    // One-line summaries on the collapsed section headers. Tolerates a server
+    // that predates a section (page deployed before the process restarted).
+    function renderSubs(settings) {
+      const host = (value) => { try { return new URL(value).host; } catch { return value; } };
+      const immich = settings.server?.immichBaseUrl?.value;
+      const immichKeySet = settings.server?.immichApiKey?.configured;
+      if (settings.server) {
+        el('sub-server').textContent = immich && immichKeySet ? host(immich)
+          : immich ? `${host(immich)} — API key missing` : 'not configured';
+      }
+      if (settings.server && settings.enrich && settings.voice) {
+        const configuredProviders = [
+          settings.enrich.lmStudioModel?.value,
+          settings.enrich.ollamaLocalModel?.value,
+          settings.enrich.ollamaApiKey?.configured,
+          settings.server.openAiApiKey?.configured,
+          settings.enrich.openRouterApiKey?.configured,
+          settings.enrich.veniceApiKey?.configured,
+          settings.voice.elevenLabsApiKey?.configured,
+        ].filter(Boolean).length;
+        el('sub-providers').textContent = configuredProviders
+          ? `${configuredProviders} configured`
+          : 'none configured';
+      }
+      if (settings.enrich) {
+        const custom = settings.enrich.systemPrompt?.value || settings.enrich.userTemplate?.value;
+        el('sub-enrich').textContent = settings.enrich.enabled && !settings.enrich.enabled.value
+          ? 'off'
+          : `on${custom ? ' · custom prompt' : ''}`;
+      }
+      if (settings.curate?.burstGrouping) {
+        el('sub-curate').textContent = [
+          settings.curate.burstGrouping.value ? 'same-moment stacks' : 'flat queue',
+          settings.curate.refereeEnabled?.value ? 'referee on' : null,
+        ].filter(Boolean).join(' · ');
+      }
+      if (settings.insights?.refreshIntervalHours) {
+        el('sub-insights').textContent = `refresh every ${settings.insights.refreshIntervalHours.value}h · trips ${settings.insights.tripAwayKm.value}+ km`;
+      }
+      const tts = settings.voice?.ttsProvider?.value;
+      el('sub-voice').textContent = tts || 'off';
+      if (settings.prompts) {
+        const customPrompts = ['interestingPrompt', 'askPrompt'].filter((key) => settings.prompts[key]?.value).length;
+        el('sub-prompts').textContent = customPrompts ? `${customPrompts} customized` : 'built-in';
+      }
+      if (settings.ambient) {
+        const geo = settings.ambient.geocodingProvider.value;
+        el('sub-ambient').textContent = geo ? `geocoding: ${geo}` : 'geocoding off';
+      }
+      if (settings.backup) {
+        el('sub-backup').textContent = settings.backup.enabled.value
+          ? `every ${settings.backup.intervalHours.value}h · keep ${settings.backup.keep.value}`
+          : 'off';
+      }
+      el('sub-appearance').textContent = window.pictariaTheme.get() === 'light' ? 'light' : 'dark';
+      el('sub-locations').textContent = loc.groups.length ? `${loc.groups.length} group${loc.groups.length === 1 ? '' : 's'}` : '';
+      // Only report unconfigured when the server actually says so — a server
+      // that predates the section shouldn't trigger the first-run auto-open.
+      return { immichConfigured: !settings.server || Boolean(immich && immichKeySet) };
+    }
+
+    async function saveSection(section) {
+      const patch = {};
+      const clean = cleanState[section] ?? {};
+      for (const row of SPEC[section]) {
+        if (row.head) continue;
+        const input = el(`f2-${section}-${row.key}`);
+        if (!input) continue;
+        // Effective environment/default values are rendered so users can see
+        // them, but must not become stored overrides merely because another
+        // field in the same presentation section was saved.
+        if (fieldValue(row, input) === clean[row.key]) continue;
+        const values = (patch[sourceSection(section, row)] ??= {});
+        if (row.type === 'secret') {
+          const value = input.value.trim();
+          if (value) values[row.key] = value;   // blank = leave unchanged
+        } else if (row.type === 'switch') {
+          values[row.key] = input.checked;
+        } else if (row.type === 'textarea') {
+          values[row.key] = input.value.trim() ? input.value : null;   // empty = back to built-in
+        } else {
+          values[row.key] = input.value;
+        }
+      }
+      el(`save-${section}`).disabled = true;
+      const note = el(`note-${section}`);
+      note.classList.remove('bad');
+      note.textContent = 'Saving…';
+      try {
+        const response = await fetch('/api/settings', {
+          method: 'PATCH',
+          headers: headers({ 'Content-Type': 'application/json' }),
+          body: JSON.stringify(patch),
+        });
+        const body = await response.json();
+        if (!response.ok) throw new Error(body?.error?.message ?? 'Save failed');
+        render(body);
+        note.textContent = 'Saved — live now.';
+        if (section === 'server') {
+          // The save just re-pointed the server's Immich client and reset
+          // its reachability cache, so this health call performs a fresh
+          // probe — a wrong URL or key warns here instead of failing
+          // silently on some other page.
+          note.textContent = 'Saved — checking the Immich connection…';
+          try {
+            const health = await (await fetch('/api/health', { headers: headers() })).json();
+            if (health.immich === 'connected') {
+              const version = health.immichVersion ? ` v${health.immichVersion}` : '';
+              note.textContent = `Saved — Immich${version} connected ✓`;
+            } else if (health.immich === 'unreachable') {
+              note.classList.add('bad');
+              note.textContent = 'Saved, but Immich is not answering — check the server URL.';
+            } else if (health.immich === 'unauthorized') {
+              note.classList.add('bad');
+              note.textContent = 'Saved, but Immich rejected the API key — check the key.';
+            } else if (health.immich === 'missing_permissions') {
+              note.classList.add('bad');
+              note.textContent = 'Saved — connected, but the API key is missing permissions: '
+                + `${(health.immichMissingPermissions ?? []).join(', ')}.`;
+            } else if (health.immich === 'incompatible_version') {
+              note.classList.add('bad');
+              const version = health.immichVersion ? ` v${health.immichVersion}` : '';
+              note.textContent = `Saved, but Immich${version} is unsupported — Pictaria Server requires Immich 2.0 or newer.`;
+            } else if (health.immich === 'incompatible_api') {
+              note.classList.add('bad');
+              const version = health.immichVersion ? ` v${health.immichVersion}` : '';
+              note.textContent = `Saved, but Immich${version} does not provide the API Pictaria Server requires. Check the URL and Immich version.`;
+            } else if (health.immich === 'not_configured') {
+              note.textContent = 'Saved. Add the Immich URL and API key to connect.';
+            }
+          } catch { /* keep the plain saved note */ }
+        }
+      } catch (error) {
+        note.classList.add('bad');
+        note.textContent = error.message;
+      } finally {
+        el(`save-${section}`).disabled = false;
+        // Warnings stay put until the next action; happy notes fade.
+        setTimeout(() => { if (!note.classList.contains('bad')) note.textContent = ''; }, 4000);
+      }
+    }
+
+    async function loadSettings() {
+      const response = await fetch('/api/settings', { headers: headers() });
+      if (response.status === 401) { showLogin(); return; }
+      showConnected();
+      const settings = await response.json();
+      render(settings);
+      // First run: nothing configured and no explicit target → open Server.
+      const { immichConfigured } = renderSubs(settings);
+      if (!immichConfigured && !location.hash) {
+        el('sec-server').open = true;
+      }
+    }
+
+    async function loadWakeWordModels() {
+      const list = el('wwList');
+      try {
+        const response = await fetch('/api/frame/wake-word-models', { headers: headers() });
+        if (response.status === 401) { showLogin(); return; }
+        const body = await response.json();
+        if (!response.ok) throw new Error(body?.error?.message ?? 'Could not load wake-word models.');
+        list.replaceChildren();
+        const models = Array.isArray(body.models) ? body.models : [];
+        el('sub-wakewords').textContent = models.length ? `${models.length} custom model${models.length === 1 ? '' : 's'}` : 'Built-in phrase only';
+        if (!models.length) {
+          const empty = document.createElement('div');
+          empty.className = 'setting-desc';
+          empty.textContent = 'No custom models uploaded. Frames will use the built-in “Hey Pictaria” model.';
+          list.append(empty);
+          return;
+        }
+        for (const model of models) {
+          const row = document.createElement('div');
+          row.className = 'field';
+          row.style.display = 'flex';
+          row.style.gap = '12px';
+          row.style.alignItems = 'center';
+          const text = document.createElement('div');
+          text.style.flex = '1';
+          const title = document.createElement('strong');
+          title.textContent = model.displayName || 'Unnamed model';
+          const details = document.createElement('div');
+          details.className = 'setting-desc';
+          const size = Number.isFinite(model.byteSize) ? `${Math.ceil(model.byteSize / 1024)} KB` : 'unknown size';
+          details.textContent = `“${model.phrase || ''}” · threshold ${model.defaultThreshold} · ${size}`
+            + (model.available === false ? ` · unavailable: ${model.unavailableReason || 'integrity check failed'}` : '');
+          text.append(title, details);
+          const remove = document.createElement('button');
+          remove.className = 'p-btn';
+          remove.type = 'button';
+          remove.textContent = 'Delete';
+          remove.addEventListener('click', async () => {
+            if (!confirm(`Delete “${model.displayName}” from Pictaria Server? Frames that already downloaded it keep their cached copy until another model is selected.`)) return;
+            remove.disabled = true;
+            try {
+              const response = await fetch(`/api/frame/wake-word-models/${encodeURIComponent(model.id)}`, {
+                method: 'DELETE',
+                headers: headers(),
+              });
+              if (!response.ok) {
+                const body = await response.json().catch(() => ({}));
+                throw new Error(body?.error?.message ?? 'Delete failed.');
+              }
+              await loadWakeWordModels();
+            } catch (error) {
+              el('wwNote').textContent = error.message;
+              remove.disabled = false;
+            }
+          });
+          row.append(text, remove);
+          list.append(row);
+        }
+      } catch (error) {
+        list.replaceChildren();
+        el('wwNote').textContent = error.message;
+      }
+    }
+
+    async function uploadWakeWordModel() {
+      const file = el('wwFile').files?.[0];
+      const note = el('wwNote');
+      note.textContent = '';
+      if (!file) { note.textContent = 'Choose a .tflite model file.'; return; }
+      if (file.size > 5 * 1024 * 1024) { note.textContent = 'The model must be 5 MB or smaller.'; return; }
+      el('wwUpload').disabled = true;
+      note.textContent = 'Validating and uploading…';
+      try {
+        const dataUrl = await new Promise((resolve, reject) => {
+          const reader = new FileReader();
+          reader.onload = () => resolve(String(reader.result));
+          reader.onerror = () => reject(new Error('The selected file could not be read.'));
+          reader.readAsDataURL(file);
+        });
+        const response = await fetch('/api/frame/wake-word-models', {
+          method: 'POST',
+          headers: headers({ 'Content-Type': 'application/json' }),
+          body: JSON.stringify({
+            displayName: el('wwName').value,
+            phrase: el('wwPhrase').value,
+            defaultThreshold: Number(el('wwThreshold').value),
+            filename: file.name,
+            modelBase64: dataUrl.slice(dataUrl.indexOf(',') + 1),
+            rightsConfirmed: el('wwRights').checked,
+          }),
+        });
+        const body = await response.json();
+        if (!response.ok) throw new Error(body?.error?.message ?? 'Upload failed.');
+        el('wwName').value = '';
+        el('wwPhrase').value = '';
+        el('wwFile').value = '';
+        el('wwRights').checked = false;
+        note.textContent = 'Uploaded. It is now available to connected frames.';
+        await loadWakeWordModels();
+      } catch (error) {
+        note.textContent = error.message;
+      } finally {
+        el('wwUpload').disabled = false;
+      }
+    }
+
+    async function saveVoiceSettings() {
+      const voice = {};
+      for (const key of TEXT_FIELDS) voice[key] = el(`f-${key}`).value;
+      for (const key of SECRET_FIELDS) {
+        const value = el(`f-${key}`).value.trim();
+        if (value) voice[key] = value;   // blank = leave unchanged
+      }
+      el('voiceSave').disabled = true;
+      el('voiceSaveNote').textContent = 'Saving…';
+      try {
+        const response = await fetch('/api/settings', {
+          method: 'PATCH',
+          headers: headers({ 'Content-Type': 'application/json' }),
+          body: JSON.stringify({ voice }),
+        });
+        const body = await response.json();
+        if (!response.ok) throw new Error(body?.error?.message ?? 'Save failed');
+        render(body);
+        el('voiceSaveNote').textContent = 'Saved — live now.';
+      } catch (error) {
+        el('voiceSaveNote').textContent = error.message;
+      } finally {
+        el('voiceSave').disabled = false;
+        setTimeout(() => { el('voiceSaveNote').textContent = ''; }, 4000);
+      }
+    }
+
+    // --- collapsible sections: hash targets + remembered open state ---
+
+    function openFromHash() {
+      const target = location.hash && document.getElementById(location.hash.slice(1));
+      if (target?.tagName === 'DETAILS') {
+        target.open = true;
+        target.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      }
+    }
+
+    const OPEN_KEY = 'pictariaSettingsOpen';
+    function restoreOpenState() {
+      let open = [];
+      try { open = JSON.parse(localStorage.getItem(OPEN_KEY)) ?? []; } catch {}
+      for (const id of open) {
+        const node = document.getElementById(id);
+        if (node?.tagName === 'DETAILS') node.open = true;
+      }
+      for (const node of document.querySelectorAll('details.section')) {
+        node.addEventListener('toggle', () => {
+          const openIds = [...document.querySelectorAll('details.section[open]')].map((d) => d.id);
+          localStorage.setItem(OPEN_KEY, JSON.stringify(openIds));
+        });
+      }
+    }
+    restoreOpenState();
+    openFromHash();
+    window.addEventListener('hashchange', openFromHash);
+
+    // --- frame devices ---
+
+    async function loadDevices() {
+      const response = await fetch('/api/frame/devices', { headers: headers() });
+      if (!response.ok) return;
+      renderDevices(((await response.json()).devices ?? []));
+    }
+
+    function renderDevices(devices) {
+      el('devForm').hidden = false;
+      el('sub-devices').textContent = devices.length ? `${devices.length} device${devices.length === 1 ? '' : 's'}` : '';
+      const box = el('devList');
+      box.replaceChildren();
+      if (!devices.length) {
+        const empty = document.createElement('div');
+        empty.className = 'setting-desc';
+        empty.textContent = 'No devices yet — they appear here once Pictaria Frame connects to this server.';
+        box.append(empty);
+        return;
+      }
+      for (const device of devices) {
+        const row = document.createElement('div');
+        row.className = 'loc-group';
+        const text = document.createElement('div');
+        text.style.flex = '1';
+        text.style.minWidth = '0';
+        const name = document.createElement('div');
+        name.className = 'g-name';
+        name.textContent = device.deviceId + (device.connected ? ' · online' : '');
+        const desc = document.createElement('div');
+        desc.className = 'g-desc';
+        const lastSeen = device.lastStateAt || device.lastDisplayAt;
+        desc.textContent = [
+          device.totalDisplays ? `${device.totalDisplays.toLocaleString()} photos shown` : 'no displays recorded',
+          lastSeen ? `last seen ${new Date(lastSeen).toLocaleString()}` : null,
+        ].filter(Boolean).join(' · ');
+        text.append(name, desc);
+        const remove = document.createElement('button');
+        remove.className = 'p-btn';
+        remove.textContent = 'Delete';
+        if (device.connected) {
+          remove.disabled = true;
+          remove.title = 'This device is online right now. Turn it off first, then delete it.';
+        }
+        remove.addEventListener('click', () => deleteDevice(device));
+        row.append(text, remove);
+        box.append(row);
+      }
+    }
+
+    async function deleteDevice(device) {
+      const history = device.totalDisplays
+        ? `Its display history (${device.totalDisplays.toLocaleString()} photos shown) is deleted with it.`
+        : 'It has no recorded display history.';
+      if (!window.confirm(`Delete “${device.deviceId}”? ${history} If the device comes back online it will register again.`)) {
+        return;
+      }
+      try {
+        const response = await fetch(`/api/frame/devices/${encodeURIComponent(device.deviceId)}`, {
+          method: 'DELETE',
+          headers: headers(),
+        });
+        const payload = await response.json().catch(() => ({}));
+        if (!response.ok) throw new Error(payload?.error?.message || `Delete failed (${response.status})`);
+        el('devNote').textContent = `Deleted ${device.deviceId}.`;
+      } catch (error) {
+        el('devNote').textContent = error && error.message ? error.message : 'Delete failed.';
+      }
+      loadDevices();
+    }
+
+    // --- discarded photos ---
+
+    async function loadDiscarded() {
+      const response = await fetch('/api/enrich/discarded', { headers: headers() });
+      if (!response.ok) return;
+      const payload = await response.json();
+      renderDiscarded(payload.assets ?? [], payload.immichUrl ?? null, payload.total ?? (payload.assets ?? []).length);
+    }
+
+    function renderDiscarded(assets, immichUrl, total) {
+      el('sub-discarded').textContent = total
+        ? `${total.toLocaleString()} photo${total === 1 ? '' : 's'}`
+        : '';
+      const box = el('discardedList');
+      box.replaceChildren();
+      if (!assets.length) {
+        const empty = document.createElement('div');
+        empty.className = 'setting-desc';
+        empty.textContent = 'Nothing discarded — photos land here when you discard them from the stuck-photos list on the Enrich page.';
+        box.append(empty);
+        return;
+      }
+      for (const asset of assets) {
+        const row = document.createElement('div');
+        row.className = 'loc-group';
+
+        const img = document.createElement('img');
+        img.className = 'disc-thumb';
+        img.alt = '';
+        img.loading = 'lazy';
+        img.src = `/api/review/thumbnail/${encodeURIComponent(asset.assetId)}`;
+        // No thumbnail usually means the media itself is gone from Immich —
+        // the very reason most of these photos were discarded.
+        img.addEventListener('error', () => {
+          const missing = document.createElement('div');
+          missing.className = 'disc-thumb no-media';
+          missing.textContent = 'no media';
+          img.replaceWith(missing);
+        });
+        row.append(img);
+
+        const text = document.createElement('div');
+        text.style.flex = '1';
+        text.style.minWidth = '0';
+        const name = document.createElement('div');
+        name.className = 'g-name';
+        const file = asset.originalPath ? asset.originalPath.split('/').pop() : asset.assetId;
+        const date = (asset.fileCreatedAt || '').slice(0, 10);
+        name.textContent = date ? `${file} · ${date}` : file;
+        const desc = document.createElement('div');
+        desc.className = 'g-desc';
+        desc.textContent = [
+          asset.discardedAt ? `discarded ${asset.discardedAt.slice(0, 10)}` : null,
+          asset.lastError ? `Error: ${asset.lastError}` : null,
+        ].filter(Boolean).join(' · ');
+        desc.title = asset.lastError || '';
+        text.append(name, desc);
+        row.append(text);
+
+        if (immichUrl) {
+          const link = document.createElement('a');
+          link.className = 'p-btn';
+          link.target = '_blank';
+          link.rel = 'noopener';
+          link.href = `${immichUrl}/photos/${encodeURIComponent(asset.assetId)}`;
+          link.textContent = 'Immich ↗';
+          row.append(link);
+        }
+
+        const restore = document.createElement('button');
+        restore.className = 'p-btn';
+        restore.textContent = 'Restore';
+        restore.title = 'Let enrichment try this photo again.';
+        restore.addEventListener('click', async () => {
+          restore.disabled = true;
+          try {
+            const response = await fetch('/api/enrich/discarded/restore', {
+              method: 'POST',
+              headers: headers({ 'Content-Type': 'application/json' }),
+              body: JSON.stringify({ assetIds: [asset.assetId] }),
+            });
+            if (!response.ok) throw new Error(`Restore failed (${response.status})`);
+          } catch (error) {
+            restore.disabled = false;
+            alert(error && error.message ? error.message : 'Restore failed.');
+            return;
+          }
+          loadDiscarded();
+        });
+        row.append(restore);
+        box.append(row);
+      }
+      if (total > assets.length) {
+        const note = document.createElement('div');
+        note.className = 'setting-desc';
+        note.textContent = `Showing the first ${assets.length.toLocaleString()} of ${total.toLocaleString()} discarded photos — restore some to see the rest.`;
+        box.append(note);
+      }
+    }
+
+    // --- location groups (synthetic locations) ---
+
+    const loc = { groups: [], cities: null, editing: null }; // editing: { original, checked: Set }
+
+    async function loadLocationGroups() {
+      const response = await fetch('/api/insights/location-groups', { headers: headers() });
+      if (!response.ok) return;
+      // Alphabetical on load only: a group created this visit stays at the
+      // bottom where it appeared, and finds its place on the next page load.
+      loc.groups = ((await response.json()).groups ?? []).toSorted((a, b) => a.name.localeCompare(b.name));
+      renderLocGroups();
+    }
+
+    async function ensureCitiesLoaded() {
+      if (loc.cities) return;
+      const response = await fetch('/api/insights/cities', { headers: headers() });
+      if (!response.ok) throw new Error('Could not load cities — has Insights swept yet?');
+      loc.cities = (await response.json()).cities ?? [];
+    }
+
+    function renderLocGroups() {
+      const box = el('locGroups');
+      box.replaceChildren();
+      for (const group of loc.groups) {
+        const row = document.createElement('div');
+        row.className = 'loc-group';
+        const text = document.createElement('div');
+        text.style.flex = '1';
+        text.style.minWidth = '0';
+        const name = document.createElement('div');
+        name.className = 'g-name';
+        name.textContent = group.name + ' ';
+        const mark = document.createElement('span');
+        mark.className = 'mark';
+        mark.textContent = '⁕';
+        name.append(mark);
+        const desc = document.createElement('div');
+        desc.className = 'g-desc';
+        const preview = group.cities.slice(0, 6).join(', ');
+        desc.textContent = `${group.cities.length} cities: ${preview}${group.cities.length > 6 ? '…' : ''}`;
+        desc.title = group.cities.join(', ');
+        text.append(name, desc);
+        const edit = document.createElement('button');
+        edit.className = 'p-btn';
+        edit.textContent = 'Edit';
+        edit.addEventListener('click', () => void openLocEditor(group.name));
+        const del = document.createElement('button');
+        del.className = 'p-btn';
+        del.textContent = 'Delete';
+        del.addEventListener('click', () => void deleteLocGroup(group.name));
+        row.append(text, edit, del);
+        box.append(row);
+      }
+      if (loc.groups.length === 0) {
+        const none = document.createElement('div');
+        none.className = 'setting-desc';
+        none.style.padding = '8px 0';
+        none.textContent = 'No groups yet.';
+        box.append(none);
+      }
+      el('sub-locations').textContent = loc.groups.length
+        ? `${loc.groups.length} group${loc.groups.length === 1 ? '' : 's'}`
+        : '';
+    }
+
+    async function openLocEditor(originalName) {
+      el('locNote').textContent = '';
+      try {
+        await ensureCitiesLoaded();
+      } catch (error) {
+        el('locNote').textContent = error.message;
+        return;
+      }
+      const group = loc.groups.find((candidate) => candidate.name === originalName) ?? null;
+      // `excluded` remembers cities you unchecked this session — Add nearby
+      // won't re-add them. Listed next to Save/Cancel from the moment you
+      // uncheck, so the promise is visible before the next click.
+      loc.editing = { original: group?.name ?? null, checked: new Set(group?.cities ?? []), excluded: new Set() };
+      renderKeptOut();
+      el('locName').value = group?.name ?? '';
+      el('locSearch').value = '';
+      el('locEditor').hidden = false;
+      renderLocCities();
+      el('locName').focus();
+    }
+
+    function closeLocEditor() {
+      loc.editing = null;
+      el('locEditor').hidden = true;
+    }
+
+    function renderLocCities() {
+      const editing = loc.editing;
+      if (!editing) return;
+      const box = el('locCities');
+      box.replaceChildren();
+      const needle = el('locSearch').value.trim().toLowerCase();
+      // Checked cities always stay visible (on top), so a filter never hides
+      // what you've already picked.
+      const takenBy = new Map();
+      for (const group of loc.groups) {
+        if (group.name === editing.original) continue;
+        for (const city of group.cities) takenBy.set(city, group.name);
+      }
+      const visible = loc.cities.filter((city) =>
+        editing.checked.has(city.name) || !needle || city.name.toLowerCase().includes(needle));
+      const ordered = [
+        ...visible.filter((city) => editing.checked.has(city.name)),
+        ...visible.filter((city) => !editing.checked.has(city.name)),
+      ];
+      for (const city of ordered.slice(0, 400)) {
+        const taken = takenBy.get(city.name);
+        const row = document.createElement('label');
+        row.className = taken ? 'loc-city taken' : 'loc-city';
+        const check = document.createElement('input');
+        check.type = 'checkbox';
+        check.checked = editing.checked.has(city.name);
+        check.disabled = Boolean(taken);
+        check.addEventListener('change', () => {
+          if (check.checked) {
+            editing.checked.add(city.name);
+            editing.excluded.delete(city.name);
+          } else {
+            editing.checked.delete(city.name);
+            editing.excluded.add(city.name);
+          }
+          updateLocCount();
+          renderKeptOut();
+          renderLocCities();
+        });
+        const name = document.createElement('span');
+        name.className = 'c-name';
+        name.textContent = city.name;
+        const region = document.createElement('span');
+        region.className = 'c-region';
+        region.textContent = taken
+          ? `in ${taken}`
+          : [city.state, city.country].filter(Boolean).join(', ');
+        const count = document.createElement('span');
+        count.className = 'c-count';
+        count.textContent = Number(city.count).toLocaleString();
+        row.append(check, name, region, count);
+        box.append(row);
+      }
+      if (ordered.length === 0) {
+        const none = document.createElement('div');
+        none.className = 'setting-desc';
+        none.style.padding = '6px 11px';
+        none.textContent = 'No matching cities.';
+        box.append(none);
+      }
+      updateLocCount();
+      updateLocHint();
+    }
+
+    function updateLocCount() {
+      const editing = loc.editing;
+      if (!editing) return;
+      const photos = loc.cities
+        .filter((city) => editing.checked.has(city.name))
+        .reduce((sum, city) => sum + Number(city.count), 0);
+      el('locCount').textContent = editing.checked.size > 0
+        ? `${editing.checked.size} cities · ${photos.toLocaleString()} photos`
+        : '';
+    }
+
+    // Naming a group after a real city (e.g. "San Francisco") without
+    // including that city would show a group that silently excludes its
+    // namesake — nudge to include it.
+    function updateLocHint() {
+      const editing = loc.editing;
+      const hint = el('locHint');
+      const name = el('locName').value.trim();
+      const namesake = name && loc.cities?.find((city) => city.name.toLowerCase() === name.toLowerCase());
+      if (editing && namesake && !editing.checked.has(namesake.name)) {
+        hint.textContent = `There's also a city called ${namesake.name} (${Number(namesake.count).toLocaleString()} photos) — check it to include it in this group.`;
+        hint.hidden = false;
+      } else {
+        hint.hidden = true;
+      }
+    }
+
+    // The cities you've unchecked this session (Add nearby won't re-add
+    // them) — persistent next to Save/Cancel, so it never disappears
+    // mid-thought.
+    function renderKeptOut() {
+      const kept = el('locKept');
+      const names = [...(loc.editing?.excluded ?? [])];
+      if (names.length === 0) {
+        kept.hidden = true;
+        return;
+      }
+      const shown = names.slice(0, 6).join(', ');
+      kept.textContent = `Kept unchecked: ${shown}${names.length > 6 ? ` +${names.length - 6} more` : ''}`;
+      kept.title = names.join(', ');
+      kept.hidden = false;
+    }
+
+    function kmBetween(a, b) {
+      const toRad = (deg) => (deg * Math.PI) / 180;
+      const dLat = toRad(b.lat - a.lat);
+      const dLon = toRad(b.lon - a.lon);
+      const h = Math.sin(dLat / 2) ** 2 + Math.cos(toRad(a.lat)) * Math.cos(toRad(b.lat)) * Math.sin(dLon / 2) ** 2;
+      return 6371 * 2 * Math.atan2(Math.sqrt(h), Math.sqrt(1 - h));
+    }
+
+    function addNearbyCities() {
+      const editing = loc.editing;
+      if (!editing) return;
+      const anchors = loc.cities.filter((city) => editing.checked.has(city.name) && city.lat !== null);
+      if (anchors.length === 0) {
+        el('locNote').textContent = 'Check at least one city first — nearby is measured from the checked ones.';
+        setTimeout(() => { el('locNote').textContent = ''; }, 4000);
+        return;
+      }
+      const takenCities = new Set();
+      for (const group of loc.groups) {
+        if (group.name === editing.original) continue;
+        for (const city of group.cities) takenCities.add(city);
+      }
+      let added = 0;
+      for (const city of loc.cities) {
+        if (editing.checked.has(city.name) || takenCities.has(city.name) || city.lat === null) continue;
+        if (anchors.some((anchor) => kmBetween(anchor, city) <= 25)) {
+          if (editing.excluded.has(city.name)) {
+            continue;
+          }
+          editing.checked.add(city.name);
+          added += 1;
+        }
+      }
+      renderKeptOut();
+      el('locNote').textContent = added > 0
+        ? `Added ${added} nearby cities — uncheck any strays.`
+        : 'No new cities within 25 km.';
+      setTimeout(() => { el('locNote').textContent = ''; }, 4000);
+      renderLocCities();
+    }
+
+    async function saveLocGroups(groups, note) {
+      const response = await fetch('/api/insights/location-groups', {
+        method: 'PUT',
+        headers: headers({ 'Content-Type': 'application/json' }),
+        body: JSON.stringify({ groups }),
+      });
+      const body = await response.json();
+      if (!response.ok) throw new Error(body?.error?.message ?? 'Save failed');
+      loc.groups = body.groups ?? [];
+      renderLocGroups();
+      el('locNote').textContent = note;
+      setTimeout(() => { el('locNote').textContent = ''; }, 4000);
+    }
+
+    async function saveLocEditor() {
+      const editing = loc.editing;
+      if (!editing) return;
+      const name = el('locName').value.trim();
+      if (!name) { el('locNote').textContent = 'Give the group a name.'; return; }
+      if (editing.checked.size === 0) { el('locNote').textContent = 'Check at least one city.'; return; }
+      const next = loc.groups.filter((group) => group.name !== editing.original);
+      next.push({ name, cities: [...editing.checked] });
+      el('locSave').disabled = true;
+      try {
+        await saveLocGroups(next, 'Saved — Insights reflects it now.');
+        closeLocEditor();
+      } catch (error) {
+        el('locNote').textContent = error.message;
+      } finally {
+        el('locSave').disabled = false;
+      }
+    }
+
+    async function deleteLocGroup(name) {
+      try {
+        await saveLocGroups(loc.groups.filter((group) => group.name !== name), `Deleted ${name} — original cities restored.`);
+        if (loc.editing?.original === name) closeLocEditor();
+      } catch (error) {
+        el('locNote').textContent = error.message;
+      }
+    }
+
+    el('locNew').addEventListener('click', () => void openLocEditor(null));
+    el('locUncheck').addEventListener('click', () => {
+      if (!loc.editing) return;
+      loc.editing.checked.clear();
+      loc.editing.excluded.clear(); // fresh start: nothing pinned out either
+      renderKeptOut();
+      renderLocCities();
+    });
+    el('locCancel').addEventListener('click', closeLocEditor);
+    el('locSave').addEventListener('click', () => void saveLocEditor());
+    el('locNearby').addEventListener('click', addNearbyCities);
+    el('locSearch').addEventListener('input', renderLocCities);
+    el('locName').addEventListener('input', updateLocHint);
+
+    el('f-ttsProvider').addEventListener('change', syncProviderGroups);
+    // --- Voice testers (moved here from the retired Voice page) ---
+    let ttsPlayer = null;
+    async function trySpeak() {
+      const text = el('ttsText').value.trim();
+      if (!text) return;
+      el('ttsSpeak').disabled = true;
+      el('ttsResult').textContent = 'Synthesizing…';
+      try {
+        const response = await fetch('/api/voice/tts', {
+          method: 'POST',
+          headers: headers({ 'Content-Type': 'application/json' }),
+          body: JSON.stringify({ text }),
+        });
+        if (response.status === 401) { window.pictariaGate.show(); throw new Error('App password required'); }
+        if (!response.ok) {
+          const body = await response.json().catch(() => null);
+          throw new Error(body?.error?.message ?? `Failed with status ${response.status}`);
+        }
+        const blob = await response.blob();
+        const provider = response.headers.get('x-tts-provider');
+        const voice = response.headers.get('x-tts-voice');
+        if (ttsPlayer) { ttsPlayer.pause(); URL.revokeObjectURL(ttsPlayer.src); }
+        ttsPlayer = new Audio(URL.createObjectURL(blob));
+        await ttsPlayer.play();
+        el('ttsResult').textContent = `Playing — ${provider}${voice ? ` · ${voice}` : ''} · ${(blob.size / 1024).toFixed(0)} KB`;
+      } catch (error) {
+        el('ttsResult').textContent = error.message;
+      } finally {
+        el('ttsSpeak').disabled = false;
+      }
+    }
+
+    async function tryParseIntent() {
+      const transcript = el('intentText').value.trim() || el('intentText').placeholder;
+      el('intentParse').disabled = true;
+      el('intentResult').hidden = false;
+      el('intentResult').textContent = 'Working…';
+      try {
+        // Mirror Pictaria Frame's routing: "show ..." phrases are photo
+        // searches; everything else is a command for the intent parser.
+        if (/^show\s+(?:me\s+)?/i.test(transcript)) {
+          const response = await fetch('/api/photos/show-search', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ query: transcript, limit: 5 }),
+          });
+          if (response.status === 401) { window.pictariaGate.show(); throw new Error('App password required'); }
+          const body = await response.json();
+          if (!response.ok) throw new Error(body?.error?.message ?? 'Photo search failed');
+          el('intentResult').textContent = JSON.stringify({
+            route: 'photo-search',
+            displayTitle: body.displayTitle,
+            spokenSummary: body.spokenSummary,
+            criteria: body.criteria,
+            matches: body.assets.length,
+          }, null, 2);
+          return;
+        }
+        const response = await fetch('/api/voice/intent', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ transcript }),
+        });
+        if (response.status === 401) { window.pictariaGate.show(); throw new Error('App password required'); }
+        const body = await response.json();
+        if (!response.ok) throw new Error(body?.error?.message ?? 'Intent request failed');
+        el('intentResult').textContent = JSON.stringify({ route: 'command', ...body.intent }, null, 2);
+      } catch (error) {
+        el('intentResult').textContent = error.message;
+      } finally {
+        el('intentParse').disabled = false;
+      }
+    }
+
+    el('ttsSpeak').addEventListener('click', trySpeak);
+    el('ttsText').addEventListener('keydown', (e) => { if (e.key === 'Enter') trySpeak(); });
+    el('intentParse').addEventListener('click', tryParseIntent);
+    el('intentText').addEventListener('keydown', (e) => { if (e.key === 'Enter') tryParseIntent(); });
+
+    el('voiceSave').addEventListener('click', saveVoiceSettings);
+    for (const key of [...TEXT_FIELDS, ...SECRET_FIELDS]) {
+      el(`f-${key}`)?.addEventListener('input', updateVoiceDirty);
+      el(`f-${key}`)?.addEventListener('change', updateVoiceDirty);
+    }
+
+    // ---------- Support Pictaria ----------
+    // The key rides the settings store (support.supporterKey, a secret —
+    // never echoed back); this section shows only the parsed badge facts
+    // from /api/support/status.
+    const TIER_LABELS = { supporter: 'Supporter', patron: 'Patron' };
+    function supporterSince(iso) {
+      const date = new Date(iso);
+      // timeZone UTC: date-only iat parses as UTC midnight — local
+      // rendering shows the previous month anywhere west of UTC.
+      return Number.isNaN(date.getTime())
+        ? iso
+        : date.toLocaleDateString(undefined, { year: 'numeric', month: 'long', timeZone: 'UTC' });
+    }
+
+    async function loadSupportStatus() {
+      try {
+        const response = await fetch('/api/support/status', { headers: headers() });
+        if (!response.ok) return;
+        const { supporter } = await response.json();
+        el('supActive').hidden = !supporter;
+        el('supEntry').hidden = Boolean(supporter);
+        if (supporter) {
+          const tierName = TIER_LABELS[supporter.tier] ?? supporter.tier;
+          const mark = document.createElement('img');
+          mark.src = '/brand/mark-128.png';
+          mark.alt = '';
+          mark.style.cssText = 'height: 14px; width: auto; vertical-align: -2px; margin-right: 6px';
+          el('supActiveLine').replaceChildren(
+            mark,
+            // "id", not "key": the full key is deliberately never shown
+            // again, and labeling this fragment "key" tempts people to
+            // copy it as one.
+            `${tierName} — supporting Pictaria since ${supporterSince(supporter.since)} (id ${supporter.keyId}). Thank you!`,
+          );
+          el('sub-support').textContent = tierName.toLowerCase();
+        } else {
+          el('sub-support').textContent = '';
+        }
+        window.pictariaSupporter?.refresh?.();
+      } catch { /* leave the section in its current state */ }
+    }
+
+    // Errors show on the side that invoked the action; SUCCESS notes go to
+    // the OTHER side's note element — loadSupportStatus flips which subtree
+    // is visible, so a note written to the invoking side would render into
+    // a hidden container and never be seen.
+    async function patchSupporterKey(value, errorNoteId, successNoteId) {
+      el(errorNoteId).textContent = 'Saving…';
+      try {
+        const response = await fetch('/api/settings', {
+          method: 'PATCH',
+          headers: headers({ 'Content-Type': 'application/json' }),
+          body: JSON.stringify({ support: { supporterKey: value } }),
+        });
+        const body = await response.json();
+        if (!response.ok) throw new Error(body?.error?.message ?? 'Save failed');
+        el('supKeyInput').value = '';
+        el(errorNoteId).textContent = '';
+        await loadSupportStatus();
+        el(successNoteId).textContent = value ? 'Saved — thank you for supporting Pictaria!' : 'Key removed.';
+        setTimeout(() => { el(successNoteId).textContent = ''; }, 6000);
+      } catch (error) {
+        // Errors stay put until the next attempt — a message that vanishes
+        // mid-read while you're squinting at a 160-char key helps nobody.
+        el(errorNoteId).textContent = error.message;
+      }
+    }
+
+    el('supSave').addEventListener('click', () => {
+      const value = el('supKeyInput').value.trim();
+      if (value) patchSupporterKey(value, 'note-support', 'note-support-active');
+    });
+    el('supKeyInput').addEventListener('keydown', (e) => { if (e.key === 'Enter') el('supSave').click(); });
+    el('supRemove').addEventListener('click', () => patchSupporterKey(null, 'note-support-active', 'note-support'));
+    el('wwUpload').addEventListener('click', uploadWakeWordModel);
+
+    loadSettings().then(() => {
+      loadLocationGroups();
+      loadDevices();
+      loadDiscarded();
+      loadSupportStatus();
+      loadWakeWordModels();
+    });
+  </script>
+</body>
+</html>

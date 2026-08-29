@@ -1,0 +1,598 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Insights · Pictaria</title>
+  <link rel="icon" type="image/png" sizes="32x32" href="/brand/favicon-32.png">
+  <link rel="apple-touch-icon" href="/brand/apple-touch-icon.png">
+  <script src="/theme.js"></script>
+  <script src="/auth-gate.js" defer></script>
+  <script src="/nav.js" defer></script>
+  <link rel="stylesheet" href="/pictaria.css">
+  <style>
+    main { max-width: var(--p-page-w); margin: 0 auto; padding: 26px 18px 80px; }
+    .page-head { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; margin: 6px 0 18px; }
+    .intro { color: var(--p-muted); font-size: 13px; margin: -10px 0 18px; line-height: 1.5; }
+    .page-head h1 { font-size: 20px; font-weight: 800; letter-spacing: 0.2px; margin: 0; }
+    .freshness { color: var(--p-muted); font-size: 13px; }
+    .hero-tiles { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 12px; margin-bottom: 22px; }
+    .tile { padding: 14px 16px; }
+    .tile .num { font-size: 24px; font-weight: 800; letter-spacing: 0.2px; }
+    .tile .lbl { color: var(--p-muted); font-size: 12px; text-transform: uppercase; letter-spacing: 0.7px; margin-top: 2px; }
+    .tile.clickable { cursor: pointer; transition: border-color 0.15s; }
+    .tile.clickable:hover { border-color: var(--p-accent); }
+    .tile { position: relative; }
+    .tile .gear {
+      position: absolute; top: 7px; right: 8px; background: none; border: none;
+      color: var(--p-muted); font-size: 14px; cursor: pointer; padding: 2px 4px;
+      opacity: 0; transition: opacity 0.15s;
+    }
+    .tile:hover .gear { opacity: 1; }
+    .tile .gear:hover { color: var(--p-ink); }
+    .fav-popover {
+      position: fixed; z-index: 30; width: 270px;
+      background: var(--p-bg); border: 1px solid var(--p-line); border-radius: 10px;
+      padding: 13px 14px; box-shadow: 0 8px 30px rgba(0, 0, 0, 0.45);
+    }
+    .fav-popover .fav-title { font-size: 13px; font-weight: 800; margin-bottom: 4px; }
+    .fav-popover .fav-desc { color: var(--p-muted); font-size: 12px; margin: 0 0 9px; line-height: 1.4; }
+    .fav-popover .p-input { width: 100%; box-sizing: border-box; }
+    .fav-results { display: flex; flex-direction: column; gap: 2px; margin-top: 7px; max-height: 190px; overflow-y: auto; }
+    .fav-results button {
+      text-align: left; background: none; border: none; color: var(--p-ink);
+      font-size: 12.5px; padding: 5px 7px; border-radius: 6px; cursor: pointer;
+    }
+    .fav-results button:hover { background: var(--p-panel-2); }
+    .fav-results .none { color: var(--p-muted); font-size: 12px; padding: 5px 7px; }
+    .fav-actions { margin-top: 10px; display: flex; justify-content: space-between; align-items: center; gap: 8px; }
+    .fav-actions .current { color: var(--p-muted); font-size: 11.5px; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .section { margin-bottom: 22px; padding: 16px 18px; }
+    .section h2 { font-size: 12.5px; margin: 0 0 12px; text-transform: uppercase; letter-spacing: 0.8px; color: var(--p-muted); font-weight: 800; }
+    @media (max-width: 900px) { .top-grid { grid-template-columns: 1fr; } }
+    .columns { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 18px 28px; }
+    .histogram { display: flex; gap: 3px; height: 176px; padding-top: 22px; }
+    .histogram .col { flex: 1; display: flex; flex-direction: column; align-items: center; min-width: 0; position: relative; cursor: pointer; }
+    .histogram .col:hover .bar, .histogram .col.active .bar { opacity: 1; }
+    .histogram .tip {
+      position: absolute; top: -22px; left: 50%; transform: translateX(-50%);
+      font-size: 11px; color: var(--p-ink); background: var(--p-panel, rgba(0,0,0,0.55));
+      border: 1px solid var(--p-line); border-radius: 5px; padding: 1px 6px;
+      white-space: nowrap; visibility: hidden; z-index: 2; pointer-events: none;
+      font-variant-numeric: tabular-nums;
+    }
+    .histogram .col:hover .tip { visibility: visible; }
+    .histogram .barwrap { flex: 1; width: 100%; display: flex; align-items: flex-end; }
+    .histogram .bar { width: 100%; background: var(--p-accent); border-radius: 3px 3px 0 0; min-height: 2px; opacity: 0.85; }
+    .histogram .yr { font-size: 10px; color: var(--p-muted); transform: rotate(-50deg); white-space: nowrap; height: 26px; margin-top: 6px; }
+    .rows { display: flex; flex-direction: column; gap: 7px; }
+    .row-line { position: relative; padding: 5px 8px 6px; border-radius: 6px; overflow: hidden; cursor: pointer; }
+    .row-line:hover { outline: 1px solid var(--p-accent); }
+    .row-line .fill { position: absolute; inset: 0; background: var(--p-accent); opacity: 0.14; border-radius: 6px; }
+    .row-line .txt { position: relative; display: flex; justify-content: space-between; align-items: center; gap: 12px; font-size: 13.5px; }
+    .row-line .txt .name-side { display: flex; align-items: center; gap: 8px; min-width: 0; }
+    .row-line .txt .n { color: var(--p-muted); font-variant-numeric: tabular-nums; flex-shrink: 0; }
+    .face { width: 26px; height: 26px; border-radius: 50%; object-fit: cover; flex-shrink: 0; background: var(--p-line); }
+    .face.small { width: 22px; height: 22px; }
+    .facepair { display: flex; flex-shrink: 0; }
+    .facepair .face:last-child { margin-left: -9px; }
+    .ext-link { color: var(--p-muted); text-decoration: none; font-size: 12px; padding: 0 3px; border-radius: 4px; flex-shrink: 0; white-space: nowrap; }
+    .ext-link:hover { color: var(--p-accent); }
+    .info {
+      display: inline-flex; align-items: center; justify-content: center;
+      width: 15px; height: 15px; border-radius: 50%;
+      border: 1px solid var(--p-muted); color: var(--p-muted);
+      font-size: 10px; font-weight: 700; font-style: normal; text-transform: none;
+      letter-spacing: 0; cursor: help; position: relative; vertical-align: 1px; margin-left: 5px;
+    }
+    .info::after {
+      content: attr(data-tip);
+      position: absolute; bottom: calc(100% + 7px); left: 50%; transform: translateX(-50%);
+      background: var(--p-bg); border: 1px solid var(--p-line); border-radius: 7px;
+      color: var(--p-ink); font-size: 12px; font-weight: 500; line-height: 1.45;
+      padding: 7px 10px; width: 230px; white-space: normal; text-align: left;
+      visibility: hidden; z-index: 3; pointer-events: none;
+    }
+    .info:hover::after { visibility: visible; }
+    .empty { text-align: center; padding: 70px 20px; }
+    .empty p { color: var(--p-muted); }
+    .darkmatter .txt a { color: var(--p-accent); text-decoration: none; }
+    .darkmatter .row-line { cursor: default; }
+    .darkmatter .row-line:hover { outline: none; }
+    .runchip { font-size: 12.5px; }
+    .locked { text-align: center; padding: 60px 20px; }
+
+    /* Records (superlatives) render as hero tiles: big value, uppercase label,
+       small detail line. The label row keeps room for info icons / map link. */
+    .record .v { font-size: 20px; font-weight: 800; letter-spacing: 0.2px; }
+    .record .k { display: flex; align-items: center; gap: 5px; color: var(--p-muted); font-size: 12px; text-transform: uppercase; letter-spacing: 0.7px; margin-top: 2px; }
+    .record .k .ext-link { margin-left: auto; text-transform: none; letter-spacing: 0; }
+    .record .d { color: var(--p-muted); font-size: 12.5px; margin-top: 2px; }
+
+    /* Histogram lens */
+    .sect-head { display: flex; align-items: center; gap: 10px; margin-bottom: 12px; }
+    .sect-head h2 { margin: 0; }
+    .lens-btn { font-size: 12.5px; height: 28px; }
+    .lens-btn.active { border-color: var(--p-accent); color: var(--p-accent); }
+    .histogram .bar.ghost { opacity: 0.16; }
+    .histogram .col:hover .bar.ghost, .histogram .col.active .bar.ghost { opacity: 0.28; }
+    .histogram .barwrap { position: relative; }
+    .histogram .bar.lens {
+      position: absolute; left: 0; bottom: 0; width: 100%;
+      background: var(--p-accent); border-radius: 3px 3px 0 0; opacity: 0.95;
+    }
+    .lens-popover {
+      position: fixed; z-index: 30; width: 300px;
+      background: var(--p-bg); border: 1px solid var(--p-line); border-radius: 10px;
+      padding: 13px 14px; box-shadow: 0 8px 30px rgba(0, 0, 0, 0.45);
+    }
+    .lens-popover .p-input { width: 100%; box-sizing: border-box; }
+    .lens-results { display: flex; flex-direction: column; gap: 2px; margin-top: 8px; max-height: 300px; overflow-y: auto; }
+    .lens-results .group { color: var(--p-muted); font-size: 10.5px; text-transform: uppercase; letter-spacing: 0.7px; padding: 7px 7px 2px; }
+    .lens-results button {
+      display: flex; align-items: center; gap: 8px; text-align: left; background: none; border: none;
+      color: var(--p-ink); font-size: 12.5px; padding: 4px 7px; border-radius: 6px; cursor: pointer;
+    }
+    .lens-results button:hover { background: var(--p-panel-2); }
+    .lens-results .n { color: var(--p-muted); margin-left: auto; }
+    .lens-results .none { color: var(--p-muted); font-size: 12px; padding: 5px 7px; }
+
+    /* Timeline */
+    .tl-subhead { margin-top: 18px !important; }
+    .tl-overview { width: 100%; height: 44px; display: block; cursor: crosshair; border-radius: 6px; }
+    .tl-connect { width: 100%; height: 13px; display: block; }
+    .tl-ribbon {
+      display: flex; height: 46px; border-radius: 7px; overflow: hidden;
+      background: var(--p-panel-2); user-select: none;
+    }
+    .tl-ribbon .seg { position: relative; min-width: 1px; display: flex; align-items: center; justify-content: center; overflow: hidden; }
+    .tl-ribbon .seg.gap { background: transparent; }
+    .tl-ribbon .seg.loc { opacity: 0.86; cursor: pointer; }
+    .tl-ribbon .seg.loc:hover { opacity: 1; }
+    .tl-ribbon .seg + .seg { border-left: 1px solid var(--p-bg); }
+    .tl-ribbon .seg .seg-label {
+      font-size: 11px; font-weight: 700; color: rgba(0, 0, 0, 0.72); white-space: nowrap;
+      padding: 0 6px; pointer-events: none;
+    }
+    .tl-ticks { display: flex; justify-content: space-between; margin-top: 5px; color: var(--p-muted); font-size: 10.5px; }
+    .tl-loc-head { display: flex; align-items: center; gap: 10px; margin: 18px 0 14px; min-height: 30px; }
+    .tl-loc-head .tl-subhead { margin: 0 !important; }
+    .tl-rangebar {
+      display: flex; align-items: center; gap: 9px;
+      padding: 2px 5px 2px 11px; border: 1px solid var(--p-accent); border-radius: 999px; font-size: 12.5px;
+    }
+    .tl-rangebar .p-btn { height: 23px; font-size: 11.5px; padding: 0 9px; }
+    /* Show every location at once — a hidden scroll made the list look
+       complete when it wasn't. */
+    .trips-list { display: grid; grid-template-columns: repeat(auto-fill, minmax(235px, 1fr)); gap: 3px 14px; }
+    .trips-list button {
+      text-align: left; background: none; border: none; color: var(--p-ink); cursor: pointer;
+      padding: 5px 8px; border-radius: 6px; font-size: 12.5px; line-height: 1.35;
+    }
+    .trips-list button:hover { background: var(--p-panel-2); }
+    .trips-list .t-place { font-weight: 700; display: flex; align-items: center; gap: 7px; min-width: 0; }
+    .trips-list .t-place .txt { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .trips-list .t-dot { width: 9px; height: 9px; border-radius: 50%; flex-shrink: 0; }
+    .trips-list .t-when { color: var(--p-muted); font-size: 11.5px; display: block; margin-left: 16px; }
+    .trips-list .none { color: var(--p-muted); font-size: 12px; padding: 5px 8px; }
+    .trips-list button.noclick { cursor: default; }
+    .trips-list button.noclick:hover { background: none; }
+
+    /* Constellation */
+    #constellation { width: 100%; height: 440px; display: block; cursor: default; }
+    .const-tip {
+      position: fixed; z-index: 25; pointer-events: none;
+      background: var(--p-bg); border: 1px solid var(--p-line); border-radius: 7px;
+      color: var(--p-ink); font-size: 12.5px; padding: 5px 10px; white-space: nowrap;
+    }
+
+    /* Year drill-down */
+    .year-panel { margin-top: 16px; border-top: 1px solid var(--p-line); padding-top: 14px; }
+    .year-panel-head { display: flex; align-items: baseline; gap: 12px; flex-wrap: wrap; }
+    .year-panel-head h3 { margin: 0; font-size: 17px; }
+    .year-panel-head .sub { color: var(--p-muted); font-size: 13px; }
+    .year-panel-head .p-grow { flex: 1; }
+    .year-close { background: none; border: none; color: var(--p-muted); font-size: 17px; cursor: pointer; padding: 2px 6px; }
+    .year-close:hover { color: var(--p-ink); }
+    .year-cols { display: grid; grid-template-columns: repeat(auto-fit, minmax(230px, 1fr)); gap: 16px 26px; margin-top: 12px; }
+    .year-cols h4 { margin: 0 0 8px; font-size: 12px; text-transform: uppercase; letter-spacing: 0.7px; color: var(--p-muted); }
+    .months { display: flex; gap: 3px; height: 74px; align-items: flex-end; padding-top: 20px; }
+    .months .mcol { flex: 1; display: flex; flex-direction: column; align-items: center; gap: 3px; height: 100%; justify-content: flex-end; position: relative; cursor: pointer; }
+    .months .mbar { width: 100%; background: var(--p-accent); opacity: 0.85; border-radius: 2px 2px 0 0; min-height: 2px; }
+    .months .mcol:hover .mbar { opacity: 1; }
+    .months .mcol.active .mbar { opacity: 1; box-shadow: 0 0 0 2px var(--p-panel), 0 0 0 3.5px var(--p-accent); }
+    .months .mcol.active .mlbl { color: var(--p-accent); font-weight: 800; }
+    .months .mlbl { font-size: 9px; color: var(--p-muted); }
+    .months .tip {
+      position: absolute; top: -20px; left: 50%; transform: translateX(-50%);
+      font-size: 11px; color: var(--p-ink); background: var(--p-panel, rgba(0,0,0,0.55));
+      border: 1px solid var(--p-line); border-radius: 5px; padding: 1px 6px;
+      white-space: nowrap; visibility: hidden; z-index: 2; pointer-events: none;
+      font-variant-numeric: tabular-nums;
+    }
+    .months .mcol:hover .tip { visibility: visible; }
+    .chips { display: flex; flex-wrap: wrap; gap: 7px; }
+    .chip-person {
+      display: inline-flex; align-items: center; gap: 7px; padding: 3px 10px 3px 4px;
+      border: 1px solid var(--p-line); border-radius: 999px; font-size: 12.5px; cursor: pointer;
+    }
+    .chip-person:hover { border-color: var(--p-accent); }
+    .chip-person .n { color: var(--p-muted); }
+    .mini-rows .row-line { padding: 3px 8px 4px; }
+    .mini-rows .txt { font-size: 12.5px; }
+    .year-actions { display: flex; gap: 9px; margin-top: 14px; }
+
+    /* Person card */
+    .pc-backdrop { z-index: 36; } /* below the photo browser (40): photos open on top, closing returns here */
+    .modal.pc { width: min(620px, 100%); }
+    .pc-head { display: flex; align-items: center; gap: 13px; padding: 16px 18px 0; }
+    .pc-head h3 { margin: 0; font-size: 17px; }
+    .pc-face { width: 58px; height: 58px; border-radius: 50%; object-fit: cover; background: var(--p-line); flex-shrink: 0; }
+    .pc-meta { color: var(--p-muted); font-size: 12.5px; margin-top: 3px; }
+    .pc-back { background: none; border: none; color: var(--p-muted); font-size: 22px; cursor: pointer; padding: 2px 8px 4px; margin-left: -8px; border-radius: 7px; }
+    .pc-back:hover { color: var(--p-ink); background: var(--p-panel-2); }
+    .pc-actions { display: flex; gap: 8px; padding: 13px 18px 15px; border-bottom: 1px solid var(--p-line); flex-wrap: wrap; }
+    .pc-actions .p-btn { text-decoration: none; display: inline-flex; align-items: center; }
+    .pc-body h4 { margin: 0 0 8px; font-size: 12px; text-transform: uppercase; letter-spacing: 0.7px; color: var(--p-muted); }
+    .pc-years { display: flex; gap: 2px; height: 74px; align-items: flex-end; margin-bottom: 18px; padding-top: 20px; box-sizing: border-box; }
+    .pc-years .yb { flex: 1; height: 100%; display: flex; align-items: flex-end; position: relative; cursor: pointer; }
+    .pc-years .yb.zero { cursor: default; }
+    .pc-years .b { width: 100%; background: var(--p-accent); opacity: 0.8; border-radius: 2px 2px 0 0; }
+    .pc-years .yb:hover .b { opacity: 1; }
+    .pc-years .yb.zero .b { background: var(--p-line); opacity: 0.45; }
+    .pc-years .tip {
+      position: absolute; top: -20px; left: 50%; transform: translateX(-50%);
+      font-size: 11px; color: var(--p-ink); background: var(--p-panel, rgba(0,0,0,0.55));
+      border: 1px solid var(--p-line); border-radius: 5px; padding: 1px 6px;
+      white-space: nowrap; visibility: hidden; z-index: 2; pointer-events: none;
+      font-variant-numeric: tabular-nums;
+    }
+    .pc-years .yb:hover .tip { visibility: visible; }
+    .pc-cols { display: grid; grid-template-columns: 1.3fr 1fr; gap: 16px 26px; }
+    @media (max-width: 620px) { .pc-cols { grid-template-columns: 1fr; } }
+    .pc-conn { display: flex; flex-direction: column; gap: 3px; }
+    .pc-row { display: flex; align-items: stretch; gap: 6px; }
+    .pc-who {
+      display: flex; align-items: center; gap: 8px; flex: 1; min-width: 0; text-align: left;
+      background: none; border: none; color: var(--p-ink); font-size: 13px;
+      padding: 3px 7px; border-radius: 6px; cursor: pointer;
+    }
+    .pc-who:hover { background: var(--p-panel-2); }
+    .pc-who .nm { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .pc-shared {
+      position: relative; width: 104px; flex-shrink: 0; overflow: hidden;
+      display: flex; align-items: center; justify-content: flex-end;
+      background: none; border: none; border-radius: 6px; cursor: pointer;
+      color: var(--p-muted); font-size: 12.5px; font-variant-numeric: tabular-nums; padding: 0 9px;
+    }
+    .pc-shared:hover { outline: 1px solid var(--p-accent); color: var(--p-ink); }
+    .pc-shared .fill { position: absolute; left: 0; top: 0; bottom: 0; background: var(--p-accent); opacity: 0.16; border-radius: 6px; }
+    .pc-shared .n { position: relative; }
+    .pc-none { color: var(--p-muted); font-size: 12.5px; padding: 3px 0; }
+    .grp-mark { color: var(--p-accent); cursor: help; margin-left: 4px; }
+
+    /* Location card (shares the person-card look) */
+    .plc-backdrop { z-index: 34; } /* below the person card (36): people open on top, closing returns here */
+    .plc-dot { width: 46px; height: 46px; border-radius: 50%; flex-shrink: 0; opacity: 0.9; }
+    .plc-busiest { color: var(--p-muted); font-size: 12.5px; margin-top: 14px; }
+    .plc-busiest a { color: var(--p-accent); text-decoration: none; cursor: pointer; }
+    .row-line .face.linkable, .chip-person .face.linkable, .lens-results .face.linkable { cursor: pointer; }
+    .row-line .face.linkable:hover, .chip-person .face.linkable:hover, .lens-results .face.linkable:hover { outline: 2px solid var(--p-accent); }
+
+    /* Photo browser modal */
+    .modal-backdrop {
+      position: fixed; inset: 0; background: rgba(0, 0, 0, 0.55); z-index: 40;
+      display: flex; align-items: center; justify-content: center; padding: 26px;
+    }
+    .modal {
+      background: var(--p-bg); border: 1px solid var(--p-line); border-radius: 13px;
+      width: min(980px, 100%); max-height: calc(100vh - 60px); display: flex; flex-direction: column;
+    }
+    .modal-head { padding: 12px 18px 14px; border-bottom: 1px solid var(--p-line); }
+    .modal-head .mh-row { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+    .modal-head .mh-row + .mh-row { margin-top: 8px; min-height: 32px; }
+    .modal-head h3 { margin: 0; font-size: 16px; }
+    .modal-head .sub { color: var(--p-muted); font-size: 13px; }
+    .modal-close { background: none; border: none; color: var(--p-muted); font-size: 19px; cursor: pointer; padding: 2px 6px; }
+    .modal-close:hover { color: var(--p-ink); }
+    .modal-body { overflow-y: auto; padding: 14px 18px 18px; }
+    .photo-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(118px, 1fr)); gap: 6px; }
+    .photo-grid .ph {
+      position: relative; aspect-ratio: 1; border-radius: 7px; overflow: hidden;
+      background: var(--p-line); cursor: pointer; border: none; padding: 0;
+    }
+    .photo-grid .ph img { width: 100%; height: 100%; object-fit: cover; display: block; }
+    .photo-grid .ph .vid {
+      position: absolute; right: 5px; bottom: 5px; font-size: 11px;
+      background: rgba(0, 0, 0, 0.6); color: #fff; border-radius: 4px; padding: 1px 5px;
+    }
+    /* Coverage marks: done-states only (✦ enriched, ✓ curated) — absence
+       means "not yet", so an untouched library never screams. */
+    .photo-grid .ph .cov {
+      position: absolute; font-size: 10px; line-height: 1; padding: 3px 4px;
+      background: rgba(0, 0, 0, 0.62); color: var(--p-accent); border-radius: 4px;
+      pointer-events: none;
+    }
+    .photo-grid .ph .cov.enr { left: 4px; bottom: 4px; }
+    .photo-grid .ph .cov.cur { right: 4px; top: 4px; }
+    .grid-more { display: flex; justify-content: center; padding: 16px 0 4px; }
+
+    /* Lightbox */
+    .lightbox {
+      position: fixed; inset: 0; background: rgba(0, 0, 0, 0.88); z-index: 50;
+      display: flex; align-items: center; justify-content: center;
+    }
+    .lightbox img { max-width: calc(100vw - 110px); max-height: calc(100vh - 90px); border-radius: 6px; }
+    .lightbox .cap {
+      position: absolute; bottom: 16px; left: 50%; transform: translateX(-50%);
+      color: #ddd; font-size: 13px; background: rgba(0, 0, 0, 0.55); padding: 3px 12px; border-radius: 999px;
+    }
+    .lightbox .nav {
+      position: absolute; top: 50%; transform: translateY(-50%);
+      background: rgba(255, 255, 255, 0.08); color: #eee; border: none; font-size: 23px;
+      width: 42px; height: 66px; cursor: pointer; border-radius: 8px;
+    }
+    .lightbox .nav:hover { background: rgba(255, 255, 255, 0.18); }
+    .lightbox .nav.prev { left: 14px; }
+    .lightbox .nav.next { right: 14px; }
+    .lightbox .lb-close { position: absolute; top: 12px; right: 16px; background: none; border: none; color: #ccc; font-size: 25px; cursor: pointer; }
+    .lightbox .lb-immich {
+      position: absolute; top: 16px; right: 56px; color: #ccc; text-decoration: none;
+      font-size: 13px; border: 1px solid rgba(255, 255, 255, 0.25); border-radius: 7px; padding: 4px 11px;
+    }
+    .lightbox .lb-immich:hover { color: #fff; border-color: rgba(255, 255, 255, 0.6); }
+    .modal-head a.p-btn { text-decoration: none; display: inline-flex; align-items: center; }
+  </style>
+</head>
+<body>
+  <header class="p-topbar">
+    <a class="p-brand" href="/">
+      <img src="/brand/mark-128.png" alt="">
+      <img class="p-brand-word" src="/brand/wordmark.png" alt="Pictaria">
+      <span class="p-brand-service">Insights</span>
+    </a>
+    <span class="p-supporter-slot" aria-live="polite"></span>
+    <nav class="p-nav">
+      <a href="/insights.html" class="active">Insights</a>
+      <a href="/enrich.html">Enrich</a>
+      <a href="/curate.html">Curate</a>
+      <a href="/albums.html">Albums</a>
+      <a href="/metrics.html">Frame</a>
+      <a href="/remote.html">Remote</a>
+    </nav>
+    <div class="p-grow"></div>
+    <span id="runChip" class="p-chip runchip" hidden></span>
+    <span id="connStatus" class="p-chip p-conn" hidden><span class="p-dot ok"></span> Connected</span>
+    <a class="p-gear" href="/settings.html" title="Settings" aria-label="Settings">&#9881;</a>
+  </header>
+
+  <main>
+    <div class="page-head">
+      <h1><span class="glyph">◎</span> Insights</h1>
+      <span id="freshness" class="freshness"></span>
+      <div class="p-grow"></div>
+      <button id="refreshBtn" class="p-btn">Refresh</button>
+    </div>
+    <p class="intro">Analyze and understand your Immich collection. Click on any year, month, person, tag
+      or location to see details and send groups to
+      <a href="/enrich.html" style="color: var(--p-accent)">Enrich</a> or
+      <a href="/curate.html" style="color: var(--p-accent)">Curate</a>.</p>
+
+    <div id="empty" class="p-panel empty" hidden>
+      <h2>No snapshot yet</h2>
+      <p>Insights sweeps your library once, then keeps itself fresh automatically.</p>
+      <button id="firstRunBtn" class="p-btn primary">Compute Insights</button>
+    </div>
+
+    <div id="content" hidden>
+      <div id="heroTiles" class="hero-tiles"></div>
+
+      <section class="p-panel section">
+        <div class="sect-head">
+          <h2>Your Timeline</h2>
+          <div class="p-grow"></div>
+          <button id="lensBtn" class="p-btn lens-btn">All photos ▾</button>
+        </div>
+        <h2 class="tl-subhead" style="margin-top: 0 !important">Photos per year <i class="info" data-tip="Click a bar to explore that year — its months, people, and places — and scope the timeline below to it. Use the lens to see the per-year story of one person, place, or tag.">i</i></h2>
+        <div id="histogram" class="histogram"></div>
+        <div id="yearPanel" class="year-panel" hidden></div>
+        <div id="timelineBlock" hidden>
+          <h2 class="tl-subhead"><span id="tlHead">Where you were</span> <i class="info" data-tip="Aligned with the years above; every place gets its own color. Drag on the strip (or click a year bar) to zoom the ribbon below; hover the ribbon for places, click a segment for its photos, or drag across it to pick any range.">i</i></h2>
+          <canvas id="tlOverview" class="tl-overview"></canvas>
+          <canvas id="tlConnect" class="tl-connect"></canvas>
+          <div id="tlRibbon" class="tl-ribbon"></div>
+          <div id="tlTicks" class="tl-ticks"></div>
+          <div class="tl-loc-head">
+            <h2 class="tl-subhead" id="tripsHead">Locations</h2>
+            <div class="p-grow"></div>
+            <div id="tlRange" class="tl-rangebar" hidden>
+              <span id="tlRangeLabel"></span>
+              <button id="tlRangeView" class="p-btn">View photos</button>
+              <button id="tlRangeClear" class="p-btn" aria-label="Clear selection">×</button>
+            </div>
+          </div>
+          <div id="tripsList" class="trips-list"></div>
+          <div id="tlTip" class="const-tip" hidden></div>
+        </div>
+      </section>
+
+      <section class="p-panel section">
+        <h2>People</h2>
+        <div id="constellationSection" hidden>
+          <h2 class="tl-subhead" style="margin-top: 0 !important">Constellation <i class="info" data-tip="Your named people, linked by how many photos they share. Bigger circles = more photos; thicker lines = more photos together. Drag a face to pin it in place (double-click to release); click a face for that person's card, or a line for the photos two people share.">i</i></h2>
+          <canvas id="constellation"></canvas>
+          <div id="constellationTip" class="const-tip" hidden></div>
+        </div>
+        <div class="columns" style="margin-top: 16px">
+          <div>
+            <h2>Most photographed <i class="info" data-tip="Photos each person appears in — alone or alongside other people.">i</i></h2>
+            <div id="peopleRows" class="rows"></div>
+          </div>
+          <div>
+            <h2>Together <i class="info" data-tip="Photos where both people appear. Others may be in the photo too.">i</i></h2>
+            <div id="pairRows" class="rows"></div>
+          </div>
+        </div>
+      </section>
+
+      <section class="p-panel section">
+        <h2>Places</h2>
+        <div class="columns">
+          <div>
+            <h2>Cities</h2>
+            <div id="cityRows" class="rows"></div>
+          </div>
+          <div>
+            <h2>Countries</h2>
+            <div id="countryRows" class="rows"></div>
+          </div>
+        </div>
+      </section>
+
+      <section class="p-panel section">
+        <h2>Cameras &amp; Tags</h2>
+        <div class="columns">
+          <div>
+            <h2>Cameras</h2>
+            <div id="cameraRows" class="rows"></div>
+          </div>
+          <div>
+            <h2>Top tags</h2>
+            <div id="tagRows" class="rows"></div>
+          </div>
+        </div>
+      </section>
+
+      <section class="p-panel section darkmatter">
+        <h2>Dark matter</h2>
+        <div id="darkRows" class="rows"></div>
+      </section>
+    </div>
+  </main>
+
+  <div id="placeCard" class="modal-backdrop plc-backdrop" hidden>
+    <div class="modal pc" role="dialog" aria-modal="true">
+      <div class="pc-head">
+        <div id="plcDot" class="plc-dot"></div>
+        <div>
+          <h3 id="plcName"></h3>
+          <div id="plcMeta" class="pc-meta"></div>
+        </div>
+        <div class="p-grow"></div>
+        <button id="plcClose" class="modal-close" aria-label="Close">&times;</button>
+      </div>
+      <div class="pc-actions">
+        <button id="plcView" class="p-btn primary">View photos</button>
+        <a id="plcAlbum" class="p-btn accent" target="_blank" rel="noopener" hidden>Create Album</a>
+        <a id="plcImmich" class="p-btn" target="_blank" rel="noopener" hidden>Open in Immich &#8599;</a>
+      </div>
+      <div class="modal-body pc-body">
+        <div id="plcYearsWrap" hidden>
+          <h4>By year</h4>
+          <div id="plcYears" class="pc-years"></div>
+        </div>
+        <div class="pc-cols">
+          <div>
+            <h4>People here</h4>
+            <div id="plcPeople" class="pc-conn"></div>
+          </div>
+          <div id="plcMembersWrap" hidden>
+            <h4>Made up of</h4>
+            <div id="plcMembers" class="rows mini-rows"></div>
+          </div>
+        </div>
+        <div id="plcBusiest" class="plc-busiest" hidden></div>
+      </div>
+    </div>
+  </div>
+
+  <div id="personCard" class="modal-backdrop pc-backdrop" hidden>
+    <div class="modal pc" role="dialog" aria-modal="true">
+      <div class="pc-head">
+        <button id="pcBack" class="pc-back" aria-label="Back" title="Back" hidden>&#8249;</button>
+        <img id="pcFace" class="pc-face" alt="">
+        <div>
+          <h3 id="pcName"></h3>
+          <div id="pcMeta" class="pc-meta"></div>
+        </div>
+        <div class="p-grow"></div>
+        <button id="pcClose" class="modal-close" aria-label="Close">&times;</button>
+      </div>
+      <div class="pc-actions">
+        <button id="pcView" class="p-btn primary">View photos</button>
+        <a id="pcAlbum" class="p-btn accent" target="_blank" rel="noopener" hidden>Create Album</a>
+        <a id="pcImmich" class="p-btn" target="_blank" rel="noopener" hidden>Open in Immich &#8599;</a>
+      </div>
+      <div class="modal-body pc-body">
+        <div id="pcYearsWrap" hidden>
+          <h4>By year</h4>
+          <div id="pcYears" class="pc-years"></div>
+        </div>
+        <div class="pc-cols">
+          <div>
+            <h4>Most photographed with</h4>
+            <div id="pcConnections" class="pc-conn"></div>
+          </div>
+          <div>
+            <h4>Top places</h4>
+            <div id="pcPlaces" class="rows mini-rows"></div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div id="photoModal" class="modal-backdrop" hidden>
+    <div class="modal" role="dialog" aria-modal="true">
+      <div class="modal-head">
+        <div class="mh-row">
+          <h3 id="modalTitle"></h3>
+          <div class="p-grow"></div>
+          <a id="modalImmich" class="p-btn" target="_blank" rel="noopener" hidden>Open in Immich ↗</a>
+          <button id="modalClose" class="modal-close" aria-label="Close">&times;</button>
+        </div>
+        <div class="mh-row">
+          <span id="modalSub" class="sub"></span>
+          <span id="modalCoverage" class="sub" title="✦ enriched · ✓ curated — computed from your local Pictaria database"></span>
+          <div class="p-grow"></div>
+          <button id="modalEnrichBtn" class="p-btn accent" hidden>Send to Enrich</button>
+          <button id="modalCurateBtn" class="p-btn accent" hidden>Send to Curate</button>
+          <a id="modalAlbumBtn" class="p-btn accent" target="_blank" rel="noopener" hidden>Create Album</a>
+        </div>
+      </div>
+      <div class="modal-body">
+        <div id="photoGrid" class="photo-grid"></div>
+        <div class="grid-more"><button id="gridMore" class="p-btn" hidden>Load more</button></div>
+      </div>
+    </div>
+  </div>
+
+  <div id="lightbox" class="lightbox" hidden>
+    <a id="lbImmich" class="lb-immich" target="_blank" rel="noopener" hidden>Open in Immich ↗</a>
+    <button class="lb-close" id="lbClose" aria-label="Close">&times;</button>
+    <button class="nav prev" id="lbPrev" aria-label="Previous">&#8249;</button>
+    <img id="lbImg" alt="">
+    <button class="nav next" id="lbNext" aria-label="Next">&#8250;</button>
+    <div class="cap" id="lbCap"></div>
+  </div>
+
+  <div id="lensPopover" class="lens-popover" hidden>
+    <input id="lensSearch" class="p-input" type="text" placeholder="Person, place, or tag…" autocomplete="off">
+    <div id="lensResults" class="lens-results"></div>
+  </div>
+
+  <div id="favPopover" class="fav-popover" hidden>
+    <div class="fav-title">Favorites definition</div>
+    <p class="fav-desc">Not using Immich favorites? Pick a tag and the Favorites tile will count photos with that tag instead.</p>
+    <input id="favTagSearch" class="p-input" type="text" placeholder="Search tags…" autocomplete="off">
+    <div id="favTagResults" class="fav-results"></div>
+    <div class="fav-actions">
+      <span id="favCurrent" class="current"></span>
+      <button id="favUseImmich" class="p-btn">Use Immich favorites</button>
+    </div>
+  </div>
+
+  <div id="toast" class="p-toast"></div>
+  <script src="/insights.js"></script>
+</body>
+</html>

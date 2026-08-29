@@ -1,0 +1,345 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Pictaria — Frame</title>
+  <link rel="icon" type="image/png" sizes="32x32" href="/brand/favicon-32.png">
+  <link rel="apple-touch-icon" href="/brand/apple-touch-icon.png">
+  <script src="/theme.js"></script>
+  <script src="/auth-gate.js" defer></script>
+  <script src="/nav.js" defer></script>
+  <link rel="stylesheet" href="/pictaria.css">
+  <style>
+    main { max-width: var(--p-page-w-narrow); margin: 0 auto; padding: 26px 18px 60px; }
+    h1 { font-size: 20px; font-weight: 800; letter-spacing: 0.2px; margin: 8px 0 6px; }
+    .page-note { color: var(--p-muted); font-size: 13px; margin: 0 0 18px; }
+    .section { padding: 4px 16px 16px; margin-bottom: 14px; }
+    .section h2 {
+      font-size: 12.5px;
+      font-weight: 800;
+      text-transform: uppercase;
+      letter-spacing: 0.8px;
+      color: var(--p-muted);
+      margin: 14px 0 10px;
+    }
+    .tiles { display: grid; grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); gap: 12px; margin: 4px 0 14px; }
+    .tile { padding: 12px 14px; border: 1px solid var(--p-line); border-radius: var(--p-radius-sm); background: var(--p-bg); }
+    .tile .num { font-size: 22px; font-weight: 800; letter-spacing: 0.2px; }
+    .tile .lbl { color: var(--p-muted); font-size: 11.5px; text-transform: uppercase; letter-spacing: 0.7px; margin-top: 2px; }
+    table.m { width: 100%; border-collapse: collapse; font-size: 13px; }
+    table.m th { text-align: left; font-size: 11.5px; text-transform: uppercase; letter-spacing: 0.6px; color: var(--p-muted); font-weight: 700; padding: 6px 8px; border-bottom: 1px solid var(--p-line); }
+    table.m td { padding: 7px 8px; border-bottom: 1px solid var(--p-line); }
+    table.m tr:last-child td { border-bottom: none; }
+    table.m td.n, table.m th.n { text-align: right; font-variant-numeric: tabular-nums; }
+    .thumb-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(104px, 1fr)); gap: 10px; margin-top: 4px; }
+    .thumb-grid a { position: relative; display: block; aspect-ratio: 1; border-radius: var(--p-radius-sm); overflow: hidden; border: 1px solid var(--p-line); }
+    .thumb-grid img { width: 100%; height: 100%; object-fit: cover; display: block; }
+    .thumb-grid .ct {
+      position: absolute; right: 5px; bottom: 5px;
+      background: rgba(10, 14, 18, 0.72); color: #e8eef4;
+      font-size: 11px; font-weight: 700; padding: 2px 7px; border-radius: 999px;
+    }
+    .empty-note { color: var(--p-muted); font-size: 13px; padding: 6px 0 4px; }
+    .info-i { display: inline-block; margin-left: 5px; color: var(--p-muted); border: 1px solid var(--p-line); border-radius: 50%; width: 14px; height: 14px; line-height: 13px; text-align: center; font-size: 10px; font-weight: 700; cursor: help; text-transform: none; }
+    .lightbox {
+      position: fixed; inset: 0; background: rgba(0, 0, 0, 0.88); z-index: 50;
+      display: flex; align-items: center; justify-content: center;
+    }
+    .lightbox[hidden] { display: none; }
+    .lightbox img { max-width: calc(100vw - 110px); max-height: calc(100vh - 90px); border-radius: 6px; }
+    .lightbox .cap {
+      position: absolute; bottom: 16px; left: 18px;
+      color: #ddd; font-size: 13px; background: rgba(0, 0, 0, 0.55); padding: 3px 12px; border-radius: 999px;
+    }
+    .lightbox .lb-close { position: absolute; top: 12px; right: 16px; background: none; border: none; color: #ccc; font-size: 25px; cursor: pointer; }
+    .lightbox .lb-immich {
+      position: absolute; top: 16px; right: 56px; color: #ccc; text-decoration: none;
+      font-size: 13px; border: 1px solid rgba(255, 255, 255, 0.25); border-radius: 7px; padding: 4px 11px;
+    }
+    .lightbox .lb-immich:hover { color: #fff; border-color: rgba(255, 255, 255, 0.6); }
+    .privacy-note { color: var(--p-muted); font-size: 12px; margin-top: 10px; }
+  </style>
+</head>
+<body>
+  <header class="p-topbar">
+    <a class="p-brand" href="/">
+      <img src="/brand/mark-128.png" alt="">
+      <img class="p-brand-word" src="/brand/wordmark.png" alt="Pictaria">
+      <span class="p-brand-service">Frame</span>
+    </a>
+    <span class="p-supporter-slot" aria-live="polite"></span>
+    <nav class="p-nav">
+      <a href="/insights.html">Insights</a>
+      <a href="/enrich.html">Enrich</a>
+      <a href="/curate.html">Curate</a>
+      <a href="/albums.html">Albums</a>
+      <a href="/metrics.html" class="active">Frame</a>
+      <a href="/remote.html">Remote</a>
+    </nav>
+    <div class="p-grow"></div>
+    <span id="connStatus" class="p-chip p-conn" hidden><span class="p-dot ok"></span> Connected</span>
+    <a class="p-gear" href="/settings.html" title="Settings" aria-label="Settings">&#9881;</a>
+  </header>
+
+  <main>
+    <h1><span class="glyph">▣</span> Frame Metrics</h1>
+    <p class="page-note">How Pictaria Frame is actually being used — what your frames have shown and which voice commands get used. Everything is counted locally and stays on your server; voice transcripts are never stored.</p>
+
+    <section class="p-panel section">
+      <h2>Display ledger</h2>
+      <div id="ledgerTiles" class="tiles"></div>
+      <div id="ledgerUnavailable" class="empty-note" hidden>The display ledger is unavailable on this install.</div>
+      <table class="m" id="deviceTable" hidden>
+        <thead><tr><th>Device<span class="info-i" title="Device name can be set in Pictaria Frame settings.">i</span></th><th class="n">Photos shown</th><th class="n">Total displays</th><th>Last display</th></tr></thead>
+        <tbody id="deviceRows"></tbody>
+      </table>
+      <div id="ledgerEmpty" class="empty-note" hidden>Nothing recorded yet — the ledger fills in as frames display photos.</div>
+    </section>
+
+    <section class="p-panel section">
+      <h2>Most shown</h2>
+      <div id="topGrid" class="thumb-grid"></div>
+      <div id="topEmpty" class="empty-note" hidden>No displays recorded yet.</div>
+    </section>
+
+    <section class="p-panel section">
+      <div style="display: flex; align-items: center; justify-content: space-between; gap: 12px">
+        <h2>Voice commands</h2>
+        <select id="voiceDevice" class="p-input" style="width: auto; font-size: 12.5px" title="Show voice command counts for one device" hidden></select>
+      </div>
+      <div id="voiceTiles" class="tiles"></div>
+      <div id="voiceByDevice" style="font-size: 12px; color: var(--p-muted); margin: 6px 2px 0" hidden></div>
+      <table class="m" id="voiceTable" hidden>
+        <thead><tr><th>Command</th><th class="n">Uses</th><th>Last used</th></tr></thead>
+        <tbody id="voiceRows"></tbody>
+      </table>
+      <div id="voiceEmpty" class="empty-note" hidden>No voice commands recorded yet. Pictaria Frame reports each spoken command as it runs one — builds from before mid-July 2026 don't report yet.</div>
+      <p class="privacy-note">Counts only: the command label and a timestamp. Transcripts are never stored.</p>
+    </section>
+  </main>
+
+  <div id="phModal" class="lightbox" hidden>
+    <a id="phImmich" class="lb-immich" target="_blank" rel="noopener" hidden>Open in Immich &#8599;</a>
+    <button class="lb-close" id="phClose" aria-label="Close">&times;</button>
+    <img id="phImg" alt="">
+    <div class="cap" id="phMeta"></div>
+  </div>
+
+  <script>
+    const el = (id) => document.getElementById(id);
+    const fmt = (n) => Number(n ?? 0).toLocaleString();
+    const fmtWhen = (iso) => {
+      if (!iso) return '—';
+      const d = new Date(iso);
+      return Number.isNaN(d.getTime()) ? '—' : d.toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' });
+    };
+    function tile(num, lbl, title) {
+      const box = document.createElement('div');
+      box.className = 'tile';
+      if (title) box.title = title;
+      const n = document.createElement('div'); n.className = 'num'; n.textContent = num;
+      const l = document.createElement('div'); l.className = 'lbl'; l.textContent = lbl;
+      box.append(n, l);
+      return box;
+    }
+    // Compact form for tiles: "Today, 1:15 PM" or just the date. Full
+    // date+time goes in the tile's hover title.
+    function fmtWhenTile(iso) {
+      if (!iso) return '—';
+      const d = new Date(iso);
+      if (Number.isNaN(d.getTime())) return '—';
+      if (d.toDateString() === new Date().toDateString()) {
+        return d.toLocaleTimeString(undefined, { timeStyle: 'short' });
+      }
+      return d.toLocaleDateString(undefined, { dateStyle: 'medium' });
+    }
+    async function getJson(url) {
+      const res = await fetch(url, { headers: { Accept: 'application/json' }, cache: 'no-store' });
+      if (res.status === 401 || res.status === 403) { window.pictariaGate?.show(); throw new Error('unauthorized'); }
+      if (!res.ok) throw new Error(`${url} -> ${res.status}`);
+      return res.json();
+    }
+
+    async function loadLedger() {
+      const stats = await getJson('/api/frame/stats');
+      const ledger = stats.ledger ?? stats;
+      // Library size for the coverage tile; tolerate a missing snapshot.
+      let libraryPhotos = null;
+      try {
+        const insights = await getJson('/api/insights');
+        libraryPhotos = insights?.snapshot?.totals?.photos ?? null;
+        immichUrl = insights?.immichUrl ?? null;
+      } catch { /* coverage tile just goes without */ }
+
+      if (ledger.ledgerAvailable === false) {
+        el('ledgerUnavailable').hidden = false;
+        return;
+      }
+      const tiles = el('ledgerTiles');
+      tiles.append(
+        tile(fmt(ledger.distinctAssetsShown), 'Photos shown'),
+        tile(fmt(ledger.totalDisplays), 'Total displays'),
+      );
+      if (libraryPhotos) {
+        tiles.append(tile(`${Math.min(100, (100 * ledger.distinctAssetsShown / libraryPhotos)).toFixed(1)}%`, 'Of library'));
+      }
+      tiles.append(tile(fmtWhenTile(ledger.lastDisplayAt), 'Last display', fmtWhen(ledger.lastDisplayAt)));
+
+      const devices = ledger.devices ?? [];
+      if (devices.length === 0) {
+        el('ledgerEmpty').hidden = false;
+        return;
+      }
+      el('deviceTable').hidden = false;
+      for (const d of devices) {
+        const tr = document.createElement('tr');
+        for (const [txt, cls] of [[d.deviceId, ''], [fmt(d.distinctAssetsShown), 'n'], [fmt(d.totalDisplays), 'n'], [fmtWhen(d.lastDisplayAt), '']]) {
+          const td = document.createElement('td');
+          td.textContent = txt;
+          if (cls) td.className = cls;
+          tr.append(td);
+        }
+        el('deviceRows').append(tr);
+      }
+    }
+
+    let immichUrl = null;
+    const times = (n) => `${fmt(n)} ${Number(n) === 1 ? 'time' : 'times'}`;
+    function openPhoto(item) {
+      el('phImg').src = `/api/albums/assets/${encodeURIComponent(item.assetId)}/thumbnail?size=preview`;
+      el('phMeta').textContent = `Shown ${times(item.displayCount)} · last ${fmtWhen(item.lastShownAt)}`;
+      el('phImmich').hidden = !immichUrl;
+      if (immichUrl) el('phImmich').href = `${immichUrl}/photos/${encodeURIComponent(item.assetId)}`;
+      el('phModal').hidden = false;
+    }
+    function closePhoto() {
+      el('phModal').hidden = true;
+      el('phImg').src = '';
+    }
+    el('phClose').addEventListener('click', closePhoto);
+    el('phModal').addEventListener('click', (e) => { if (e.target === el('phModal')) closePhoto(); });
+    document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && !el('phModal').hidden) closePhoto(); });
+
+    async function loadTopShown() {
+      const { items = [] } = await getJson('/api/frame/ledger/top?limit=12');
+      if (items.length === 0) { el('topEmpty').hidden = false; return; }
+      for (const item of items) {
+        const a = document.createElement('a');
+        a.href = '#';
+        a.title = `Shown ${times(item.displayCount)} · last ${fmtWhen(item.lastShownAt)}`;
+        a.addEventListener('click', (e) => { e.preventDefault(); openPhoto(item); });
+        const img = document.createElement('img');
+        img.loading = 'lazy';
+        img.src = `/api/albums/assets/${encodeURIComponent(item.assetId)}/thumbnail?size=thumbnail`;
+        const ct = document.createElement('span');
+        ct.className = 'ct';
+        ct.textContent = `${fmt(item.displayCount)}×`;
+        a.append(img, ct);
+        el('topGrid').append(a);
+      }
+    }
+
+    // Voice device picker. null = all devices; '' = the unattributed bucket
+    // (counts from before devices were tracked, or app builds that don't
+    // send a device yet); anything else = one device. Option values carry a
+    // "d:" prefix so a device can never collide with the "all" sentinel.
+    let voiceDeviceFilter = null;
+    let voiceDeviceOptions = null; // fingerprint of the option set — rebuild only on change
+    const voiceDeviceLabel = (id) => (id === '' ? 'Earlier (unattributed)' : id);
+
+    // Returns true when the current filter had to be abandoned (its device
+    // vanished, e.g. deleted in Settings) — the caller must refetch rather
+    // than render the now-stale filtered data. Sorted fingerprint: the
+    // server orders devices by use count, and a rank swap alone must not
+    // rebuild the options out from under an open dropdown.
+    function syncVoiceDevicePicker(devices) {
+      const select = el('voiceDevice');
+      select.hidden = devices.length < 2; // one bucket = nothing to filter
+      const fingerprint = devices.map((d) => d.deviceId).sort().join('\n');
+      if (fingerprint === voiceDeviceOptions) return false;
+      voiceDeviceOptions = fingerprint;
+      select.replaceChildren(new Option('All devices', 'all'));
+      for (const d of devices) select.append(new Option(voiceDeviceLabel(d.deviceId), `d:${d.deviceId}`));
+      select.value = voiceDeviceFilter === null ? 'all' : `d:${voiceDeviceFilter}`;
+      if (select.selectedIndex < 0) {
+        select.value = 'all';
+        voiceDeviceFilter = null;
+        return true;
+      }
+      return false;
+    }
+
+    async function loadVoice() {
+      const query = voiceDeviceFilter === null ? '' : `?device=${encodeURIComponent(voiceDeviceFilter)}`;
+      const data = await getJson(`/api/voice/metrics${query}`);
+      const commands = data.commands ?? [];
+      const devices = data.devices ?? [];
+      if (syncVoiceDevicePicker(devices)) {
+        refreshVoice();
+        return;
+      }
+      const missed = commands.find((c) => c.label === 'unrecognized')?.uses ?? 0;
+      el('voiceTiles').append(
+        tile(fmt(data.totalUses), 'Heard'),
+        tile(fmt(commands.filter((c) => c.label !== 'unrecognized').length), 'Distinct'),
+        tile(fmt(missed), 'Not understood', 'Spoken commands that didn\'t match anything the frame knows. Counted from the label only — what was said is never stored.'),
+      );
+      if (voiceDeviceFilter === null && devices.length > 1) {
+        el('voiceByDevice').textContent = `By device: ${devices.map((d) => `${voiceDeviceLabel(d.deviceId)} ${fmt(d.uses)}`).join(' · ')}`;
+        el('voiceByDevice').hidden = false;
+      }
+      if (commands.length === 0) {
+        el('voiceEmpty').hidden = false;
+        return;
+      }
+      el('voiceTable').hidden = false;
+      for (const c of commands) {
+        const tr = document.createElement('tr');
+        for (const [txt, cls] of [[c.label, ''], [fmt(c.uses), 'n'], [fmtWhen(c.lastUsedAt), '']]) {
+          const td = document.createElement('td');
+          td.textContent = txt;
+          if (cls) td.className = cls;
+          tr.append(td);
+        }
+        el('voiceRows').append(tr);
+      }
+    }
+
+    function refreshVoice() {
+      for (const id of ['voiceTiles', 'voiceRows']) el(id).replaceChildren();
+      for (const id of ['voiceEmpty', 'voiceByDevice']) el(id).hidden = true;
+      el('voiceTable').hidden = true;
+      loadVoice().catch(() => { el('voiceEmpty').hidden = false; });
+    }
+
+    el('voiceDevice').addEventListener('change', () => {
+      const value = el('voiceDevice').value;
+      voiceDeviceFilter = value === 'all' ? null : value.slice(2);
+      refreshVoice();
+    });
+
+    async function checkConn() {
+      try {
+        const health = await getJson('/api/health');
+        el('connStatus').hidden = health?.immich !== 'connected';
+      } catch { /* chip stays hidden */ }
+    }
+
+    // Live page: reload everything every minute (and when the tab comes
+    // back into view) so the numbers advance while frames are displaying.
+    function refreshAll() {
+      for (const id of ['ledgerTiles', 'deviceRows', 'topGrid']) el(id).replaceChildren();
+      for (const id of ['ledgerUnavailable', 'ledgerEmpty', 'topEmpty']) el(id).hidden = true;
+      el('deviceTable').hidden = true;
+      loadLedger().catch((e) => { if (e.message !== 'unauthorized') el('ledgerUnavailable').hidden = false; });
+      loadTopShown().catch(() => { el('topEmpty').hidden = false; });
+      refreshVoice(); // keeps the device selection across the 60s auto-reload
+    }
+    refreshAll();
+    checkConn();
+    setInterval(() => { if (!document.hidden) refreshAll(); }, 60000);
+    document.addEventListener('visibilitychange', () => { if (!document.hidden) refreshAll(); });
+  </script>
+</body>
+</html>

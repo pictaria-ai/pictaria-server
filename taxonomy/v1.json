@@ -1,0 +1,377 @@
+{
+  "version": "v1.2",
+  "status": "frozen-for-initial-evaluation",
+  "notes": [
+    "JSON-compatible YAML keeps bootstrap validation runnable before PyYAML is installed.",
+    "Freeze this file before the first full AI run.",
+    "v1.1 adds ai/quality/eyes-closed (informational: not a hard exclusion, no bucket effect; feeds the group referee and future best-pick tiebreaks).",
+    "v1.2 (validated against 24k real decisions): low-resolution is no longer a hard exclusion (43% of tagged photos were approved — it was punishing era cameras, not bad photos); blurry description excludes artistic blur; duplicate-ish cut (fired once in 25k — burst grouping owns duplicates now); occasion tags added (wedding, birthday, holiday-celebration, concert, sports-event) to power albums and semantic search."
+  ],
+  "managed_prefixes": [
+    "ai/",
+    "frame/"
+  ],
+  "manual_tags": [
+    {
+      "tag": "frame/eligible",
+      "description": "Explicitly admitted into the display pool."
+    },
+    {
+      "tag": "frame/favorite",
+      "description": "Strong positive manual signal. Preferred by Pictaria Frame."
+    },
+    {
+      "tag": "frame/never-show",
+      "description": "Hard manual exclusion. Beats every other tag."
+    }
+  ],
+  "system_review_tags": [
+    {
+      "tag": "frame/review",
+      "description": "Needs human review before entering the display pool."
+    }
+  ],
+  "categories": {
+    "quality": [
+      {
+        "tag": "ai/quality/frame-worthy",
+        "description": "Visually suitable for passive display."
+      },
+      {
+        "tag": "ai/quality/good",
+        "description": "Usable image, but not necessarily excellent."
+      },
+      {
+        "tag": "ai/quality/low",
+        "description": "Low visual quality."
+      },
+      {
+        "tag": "ai/quality/blurry",
+        "description": "The subject is ruined by motion blur or missed focus. Not artistic depth-of-field or background blur."
+      },
+      {
+        "tag": "ai/quality/dark",
+        "description": "Too dark for pleasant display."
+      },
+      {
+        "tag": "ai/quality/eyes-closed",
+        "description": "A clearly visible person has closed eyes or is mid-blink. Only when the face is large enough to judge confidently."
+      },
+      {
+        "tag": "ai/quality/low-resolution",
+        "description": "Degraded, pixelated, or artifacted beyond pleasant display. Not merely a photo from an older, lower-megapixel camera."
+      }
+    ],
+    "exclude": [
+      {
+        "tag": "ai/exclude/screenshot",
+        "description": "Screenshot, app screen, webpage capture, or phone UI."
+      },
+      {
+        "tag": "ai/exclude/document",
+        "description": "Document, form, mail, ID, handwritten note, contract, paper, or similar."
+      },
+      {
+        "tag": "ai/exclude/receipt",
+        "description": "Receipt or invoice."
+      },
+      {
+        "tag": "ai/exclude/private",
+        "description": "Likely private or sensitive information."
+      },
+      {
+        "tag": "ai/exclude/text-heavy",
+        "description": "Image is mostly text."
+      },
+      {
+        "tag": "ai/exclude/financial",
+        "description": "Financial, account, banking, tax, or payment material."
+      },
+      {
+        "tag": "ai/exclude/whiteboard",
+        "description": "Whiteboard, presentation board, planning board, or notes."
+      },
+      {
+        "tag": "ai/exclude/low-quality",
+        "description": "General exclusion due to poor display suitability."
+      }
+    ],
+    "scene": [
+      {
+        "tag": "ai/scene/mountains",
+        "description": "Mountains are a meaningful part of the image."
+      },
+      {
+        "tag": "ai/scene/beach",
+        "description": "Beach, shoreline, sand, or coastal recreation."
+      },
+      {
+        "tag": "ai/scene/forest",
+        "description": "Forest or dense trees are prominent."
+      },
+      {
+        "tag": "ai/scene/desert",
+        "description": "Desert or arid landscape is prominent."
+      },
+      {
+        "tag": "ai/scene/snow",
+        "description": "Snow or icy winter setting is prominent."
+      },
+      {
+        "tag": "ai/scene/city",
+        "description": "Urban city scene or skyline."
+      },
+      {
+        "tag": "ai/scene/water",
+        "description": "Lake, river, ocean, pool, or other water scene."
+      },
+      {
+        "tag": "ai/scene/sunset",
+        "description": "Sunset or sunrise is visually important."
+      },
+      {
+        "tag": "ai/scene/indoors",
+        "description": "Primarily indoors."
+      },
+      {
+        "tag": "ai/scene/outdoors",
+        "description": "Primarily outdoors."
+      },
+      {
+        "tag": "ai/scene/restaurant",
+        "description": "Restaurant, cafe, bar, or dining venue."
+      },
+      {
+        "tag": "ai/scene/home",
+        "description": "Home interior or private residence setting."
+      },
+      {
+        "tag": "ai/scene/museum",
+        "description": "Museum or gallery setting."
+      },
+      {
+        "tag": "ai/scene/architecture",
+        "description": "Architecture is a major visual subject."
+      },
+      {
+        "tag": "ai/scene/landmark",
+        "description": "Well-known or famous landmark in the image."
+      },
+      {
+        "tag": "ai/scene/landscape",
+        "description": "Broad scenic landscape or vista."
+      }
+    ],
+    "subject": [
+      {
+        "tag": "ai/subject/food",
+        "description": "Food or prepared drinks are a major subject."
+      },
+      {
+        "tag": "ai/subject/art",
+        "description": "Artwork, sculpture, mural, or exhibit is a major subject."
+      },
+      {
+        "tag": "ai/subject/animal",
+        "description": "Animal is visible and meaningful."
+      },
+      {
+        "tag": "ai/subject/dog",
+        "description": "Dog is visible and meaningful."
+      },
+      {
+        "tag": "ai/subject/cat",
+        "description": "Cat is visible and meaningful."
+      },
+      {
+        "tag": "ai/subject/car",
+        "description": "Car or vehicle is a major subject."
+      },
+      {
+        "tag": "ai/subject/building",
+        "description": "Building is a major subject."
+      },
+      {
+        "tag": "ai/subject/flowers",
+        "description": "Flowers or decorative plants are a major subject."
+      },
+      {
+        "tag": "ai/subject/sign",
+        "description": "Signage is a meaningful subject."
+      },
+      {
+        "tag": "ai/subject/sports-equipment",
+        "description": "Sports equipment is visible and meaningful."
+      }
+    ],
+    "activity": [
+      {
+        "tag": "ai/activity/hiking",
+        "description": "Hiking, trail, or walking outdoors."
+      },
+      {
+        "tag": "ai/activity/skiing",
+        "description": "Skiing, snowboarding, or ski-area activity."
+      },
+      {
+        "tag": "ai/activity/swimming",
+        "description": "Swimming or pool/water recreation."
+      },
+      {
+        "tag": "ai/activity/dining",
+        "description": "Dining, meal, restaurant table, or shared food moment."
+      },
+      {
+        "tag": "ai/activity/travel",
+        "description": "Travel context such as airport, landmark, luggage, trip scene, or tourism."
+      },
+      {
+        "tag": "ai/activity/party",
+        "description": "Party, celebration, or social gathering."
+      },
+      {
+        "tag": "ai/activity/museum-visit",
+        "description": "Museum/gallery visit or viewing exhibits."
+      },
+      {
+        "tag": "ai/activity/road-trip",
+        "description": "Road trip, scenic drive, car travel, or roadside stop."
+      },
+      {
+        "tag": "ai/activity/wedding",
+        "description": "Wedding ceremony or reception."
+      },
+      {
+        "tag": "ai/activity/birthday",
+        "description": "Birthday celebration — cake, candles, gifts, party for someone."
+      },
+      {
+        "tag": "ai/activity/holiday-celebration",
+        "description": "Holiday celebration such as Christmas, Hanukkah, Thanksgiving, or New Year."
+      },
+      {
+        "tag": "ai/activity/concert",
+        "description": "Concert, live music, theater, or stage performance."
+      },
+      {
+        "tag": "ai/activity/sports-event",
+        "description": "Attending or playing an organized sports event or game."
+      }
+    ],
+    "people": [
+      {
+        "tag": "ai/people/none",
+        "description": "No people visible."
+      },
+      {
+        "tag": "ai/people/one",
+        "description": "One person visible."
+      },
+      {
+        "tag": "ai/people/couple",
+        "description": "Two people visible."
+      },
+      {
+        "tag": "ai/people/group",
+        "description": "Three or more people visible."
+      },
+      {
+        "tag": "ai/people/child-present",
+        "description": "At least one child appears present."
+      }
+    ],
+    "composition": [
+      {
+        "tag": "ai/composition/landscape",
+        "description": "Landscape orientation or landscape-style composition."
+      },
+      {
+        "tag": "ai/composition/portrait",
+        "description": "Portrait orientation or portrait-style composition."
+      },
+      {
+        "tag": "ai/composition/close-up",
+        "description": "Close-up view."
+      },
+      {
+        "tag": "ai/composition/wide-shot",
+        "description": "Wide establishing shot."
+      },
+      {
+        "tag": "ai/composition/selfie",
+        "description": "Selfie or selfie-like framing."
+      }
+    ]
+  },
+  "thresholds": {
+    "exclude": 0.7,
+    "semantic": 0.75,
+    "frame_worthy": 0.78,
+    "review_low": 0.65,
+    "privacy_review_low": 0.45
+  },
+  "hard_exclusion_tags": [
+    "frame/never-show",
+    "ai/quality/blurry",
+    "ai/quality/low",
+    "ai/exclude/screenshot",
+    "ai/exclude/document",
+    "ai/exclude/receipt",
+    "ai/exclude/private",
+    "ai/exclude/text-heavy",
+    "ai/exclude/financial",
+    "ai/exclude/whiteboard",
+    "ai/exclude/low-quality"
+  ],
+  "review": {
+    "notes": [
+      "Buckets classify the AI opinion for the review queue; human decisions are a separate axis.",
+      "Buckets are evaluated by ascending priority; the fallback bucket catches everything else.",
+      "This section is review policy only: changing it never invalidates prior enrichment runs."
+    ],
+    "buckets": [
+      {
+        "id": "candidates",
+        "label": "Candidates",
+        "description": "Frame-worthy with no exclusions. Most of these should be approved.",
+        "priority": 2,
+        "match": {
+          "any_tags": [
+            "ai/quality/frame-worthy"
+          ]
+        },
+        "sort": "frame_worthy_score desc"
+      },
+      {
+        "id": "should_review",
+        "label": "Should Review",
+        "description": "Neither clearly good nor excluded: borderline scores, privacy uncertainty, weak signal.",
+        "priority": 3,
+        "fallback": true,
+        "sort": "frame_worthy_score desc"
+      },
+      {
+        "id": "unlikely",
+        "label": "Unlikely",
+        "description": "Hard exclusions: screenshots, documents, blur, memes. Most of these should be rejected.",
+        "priority": 1,
+        "match": {
+          "any_tag_prefixes": [
+            "ai/exclude/"
+          ],
+          "any_hard_exclusions": true
+        },
+        "sort": "frame_worthy_score desc"
+      }
+    ],
+    "privacy_review_tags": [
+      "ai/exclude/private",
+      "ai/exclude/document",
+      "ai/exclude/receipt",
+      "ai/exclude/text-heavy",
+      "ai/exclude/financial",
+      "ai/exclude/whiteboard",
+      "ai/exclude/screenshot"
+    ]
+  }
+}

@@ -1,0 +1,1224 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Pictaria — Enrich</title>
+  <link rel="icon" type="image/png" sizes="32x32" href="/brand/favicon-32.png">
+  <link rel="apple-touch-icon" href="/brand/apple-touch-icon.png">
+  <script src="/theme.js"></script>
+  <script src="/auth-gate.js" defer></script>
+  <script src="/nav.js" defer></script>
+  <link rel="stylesheet" href="/pictaria.css">
+  <style>
+    main { max-width: var(--p-page-w-narrow); margin: 0 auto; padding: 26px 18px 60px; }
+    h1 { font-size: 20px; font-weight: 800; letter-spacing: 0.2px; margin: 8px 0 18px; }
+    .intro { color: var(--p-muted); font-size: 13px; margin: -8px 0 16px; line-height: 1.5; }
+    .off-banner {
+      display: flex; align-items: center; gap: 14px; flex-wrap: wrap;
+      border-color: var(--p-accent-deep); padding: 13px 16px; margin-bottom: 14px;
+    }
+    .off-banner .txt { flex: 1; min-width: 240px; }
+    .off-banner .txt strong { display: block; margin-bottom: 2px; }
+    .off-banner .txt span { color: var(--p-muted); font-size: 13px; }
+    .off-banner .p-btn { text-decoration: none; display: inline-flex; align-items: center; }
+    .panel { padding: 14px 16px; margin-bottom: 14px; display: grid; gap: 12px; }
+    .panel.dimmed { opacity: 0.55; }
+    .es-main { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; min-width: 0; }
+    .provider-note { color: var(--p-muted); font-size: 12px; line-height: 1.45; }
+    .provider-note.bad { color: var(--p-danger); }
+    /* The status detail sits on its own line under the title and wraps as
+       needed — run titles can be long; buttons keep the top-right corner. */
+    .es-line { min-width: 0; color: var(--p-muted); overflow-wrap: anywhere; line-height: 1.5; font-size: 13px; }
+    .es-line2 { margin-top: -7px; font-size: 12.5px; }
+    .es-progress { display: flex; align-items: center; gap: 8px; min-width: 140px; }
+    .es-progress .p-score-track { flex: 1; height: 6px; border-radius: 3px; }
+    .es-progress .p-muted { font-size: 12px; font-variant-numeric: tabular-nums; white-space: nowrap; }
+    .enrich-form { display: flex; gap: 9px; flex-wrap: wrap; align-items: center; }
+    .library-line { color: var(--p-muted); font-size: 12.5px; }
+    .library-line strong { color: var(--p-ink); }
+    .qlist { display: grid; gap: 2px; }
+    .qrow { display: flex; align-items: center; gap: 10px; padding: 7px 8px; border-radius: 7px; font-size: 13px; flex-wrap: wrap; }
+    .qrow:hover { background: var(--p-panel-2); }
+    .qrow .t { font-weight: 700; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .qrow .m { color: var(--p-muted); font-size: 12px; white-space: nowrap; }
+    .qrow .p-btn { height: 26px; font-size: 12px; }
+    .qempty { color: var(--p-muted); font-size: 12.5px; padding: 4px 8px; }
+    /* Queue items: boxed two-line cards — title/meta + right-aligned actions
+       on top, run options below. The box (not hover) separates items. */
+    .qlist.queue { gap: 8px; min-width: 0; }
+    .qitem {
+      background: var(--p-panel-2); border: 1px solid var(--p-line); border-radius: 8px;
+      padding: 9px 12px 8px; display: grid; gap: 5px; font-size: 13px; min-width: 0;
+    }
+    .qitem .qline { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; min-width: 0; }
+    /* Top line never wraps: the title yields first (ellipsis), then the
+       meta, so the action buttons stay right-aligned across all items and
+       the card never grows past its container. */
+    .qitem .qline.top { flex-wrap: nowrap; }
+    .qitem .t { flex: 1 1 auto; font-weight: 700; min-width: 40px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .qitem .m { flex: 0 1 auto; min-width: 0; color: var(--p-muted); font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .qitem .p-btn { height: 26px; font-size: 12px; flex-shrink: 0; }
+    .qitem .opts { gap: 16px; }
+    .qitem .opts label { color: var(--p-muted); font-size: 12px; display: inline-flex; align-items: center; gap: 5px; cursor: pointer; }
+    .qitem .detail { color: var(--p-muted); font-size: 12px; min-width: 0; overflow-wrap: anywhere; }
+    .qitem .detail.bad { color: var(--p-danger); }
+    /* Per-run log popup */
+    .log-backdrop {
+      position: fixed; inset: 0; background: rgba(0, 0, 0, 0.55); z-index: 60;
+      display: flex; align-items: center; justify-content: center; padding: 24px;
+    }
+    .log-box {
+      background: var(--p-bg); border: 1px solid var(--p-line); border-radius: var(--p-radius);
+      width: min(860px, 100%); max-height: 80vh; display: flex; flex-direction: column;
+    }
+    .log-box .head { display: flex; align-items: center; gap: 10px; padding: 12px 16px; border-bottom: 1px solid var(--p-line); }
+    .log-box .head strong { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .log-box pre { margin: 0; padding: 12px 16px; overflow: auto; font-size: 12px; line-height: 1.55; white-space: pre-wrap; overflow-wrap: anywhere; }
+    /* Stuck-photos details popup */
+    .stuck-list { overflow-y: auto; padding: 4px 16px 14px; }
+    .stuck-row { display: flex; gap: 12px; align-items: center; padding: 9px 0; border-bottom: 1px solid var(--p-line); }
+    .stuck-row:last-child { border-bottom: 0; }
+    .stuck-row img { width: 56px; height: 56px; object-fit: cover; border-radius: 6px; background: var(--p-panel-2); flex: none; }
+    .stuck-row .no-media {
+      width: 56px; height: 56px; border-radius: 6px; flex: none; display: flex; align-items: center;
+      justify-content: center; background: var(--p-panel-2); border: 1px dashed var(--p-danger);
+      color: var(--p-danger); font-size: 10px; text-align: center; line-height: 1.3;
+    }
+    .stuck-row .info { min-width: 0; flex: 1; }
+    .stuck-row .name { font-size: 13px; font-weight: 600; overflow-wrap: anywhere; }
+    .stuck-row .why { color: var(--p-muted); font-size: 12px; margin-top: 2px; overflow-wrap: anywhere; }
+    .stuck-row .acts { display: flex; gap: 6px; flex: none; }
+    /* The Immich link is an <a> wearing .p-btn — align its text like the
+       real buttons next to it, and drop the link underline. */
+    .stuck-row .acts a.p-btn { display: inline-flex; align-items: center; text-decoration: none; }
+    .stuck-note a { color: var(--p-accent); }
+    .stuck-head { margin: 16px 0 0; font-size: 12px; font-weight: 800; color: var(--p-muted); text-transform: uppercase; letter-spacing: 0.7px; }
+    .stuck-note { color: var(--p-muted); font-size: 12px; margin: 8px 0 0; line-height: 1.5; }
+    .qitem .opts .p-input { height: 26px; padding: 2px 8px; font-size: 12px; }
+    details.panel { display: block; }
+    details.panel summary {
+      cursor: pointer; list-style: none; display: flex; align-items: center; gap: 8px;
+      font-weight: 700; user-select: none;
+    }
+    details.panel summary::-webkit-details-marker { display: none; }
+    details.panel summary .chev { transition: transform 0.15s; color: var(--p-muted); font-size: 11px; }
+    details.panel[open] summary .chev { transform: rotate(90deg); }
+    details.panel summary .sub { color: var(--p-muted); font-size: 12.5px; font-weight: 400; }
+    .tp-body { display: grid; gap: 14px; margin-top: 12px; }
+    .tp-head { font-size: 12.5px; text-transform: uppercase; letter-spacing: 0.8px; font-weight: 800; color: var(--p-muted); }
+    .tp-cat { display: flex; gap: 8px; align-items: baseline; flex-wrap: wrap; margin: 3px 0; }
+    .tp-cat .c { font-size: 12px; font-weight: 700; min-width: 90px; color: var(--p-muted); }
+    .tag-chip {
+      display: inline-block; padding: 1px 8px; border-radius: 999px; font-size: 11.5px;
+      background: var(--p-panel-2); border: 1px solid var(--p-line); margin: 1px 0;
+    }
+    .tag-chip.hard { border-color: var(--p-danger); color: var(--p-danger); }
+    .tp-note { color: var(--p-muted); font-size: 12px; line-height: 1.5; }
+    .tp-cat .rf-use { color: var(--p-muted); font-size: 12px; }
+    pre.prompt {
+      background: var(--p-panel-2); border: 1px solid var(--p-line); border-radius: 8px;
+      padding: 10px 12px; font-size: 12px; line-height: 1.55; white-space: pre-wrap;
+      overflow-wrap: anywhere; margin: 4px 0 0; max-height: 40vh; overflow-y: auto;
+    }
+  </style>
+</head>
+<body>
+  <header class="p-topbar">
+    <a class="p-brand" href="/">
+      <img src="/brand/mark-128.png" alt="">
+      <img class="p-brand-word" src="/brand/wordmark.png" alt="Pictaria">
+      <span class="p-brand-service">Enrich</span>
+    </a>
+    <span class="p-supporter-slot" aria-live="polite"></span>
+    <nav class="p-nav">
+      <a href="/insights.html">Insights</a>
+      <a href="/enrich.html" class="active">Enrich</a>
+      <a href="/curate.html">Curate</a>
+      <a href="/albums.html">Albums</a>
+      <a href="/metrics.html">Frame</a>
+      <a href="/remote.html">Remote</a>
+    </nav>
+    <div class="p-grow"></div>
+    <span id="connStatus" class="p-chip p-conn" hidden><span class="p-dot ok"></span> Connected</span>
+    <a class="p-gear" href="/settings.html" title="Settings" aria-label="Settings">&#9881;</a>
+  </header>
+
+  <main>
+    <h1><span class="glyph">✦</span> Enrich</h1>
+    <p class="intro">AI models analyze your photos and propose tags from the taxonomy. Proposed tags land in
+      <a href="/curate.html" style="color: var(--p-accent)">Curate</a> for your review. If caption writeback is enabled,
+      successful captions are copied automatically into Immich descriptions. You add photo groups to the Enrich queue from
+      <a href="/insights.html" style="color: var(--p-accent)">Insights</a>.</p>
+
+    <div id="offBanner" class="p-panel off-banner" hidden>
+      <div class="txt">
+        <strong>AI enrichment is off</strong>
+        <span>Turning it on sends each selected photo rendition to the model you choose, either in infrastructure you operate or through your cloud-provider account.</span>
+      </div>
+      <a class="p-btn primary" href="/settings.html#sec-enrich">Enable in Settings</a>
+    </div>
+
+    <div class="p-panel panel">
+      <div id="libraryLine" class="library-line"></div>
+    </div>
+
+    <section id="modelPanel" class="p-panel panel">
+      <div class="es-main">
+        <strong>AI provider</strong>
+        <select id="enrichProvider" class="p-select"></select>
+        <span class="p-tab-divider"></span>
+        <a href="/settings.html#sec-providers" class="p-muted" style="font-size: 12px">provider &amp; model settings</a>
+      </div>
+      <div id="providerNote" class="provider-note">Used for new runs. Your selection is remembered.</div>
+    </section>
+
+    <details id="taxPanel" class="p-panel panel">
+      <summary><span class="chev">&#9654;</span> Taxonomy &amp; prompt <span class="sub">— exactly what the model is told, and the tags it may use</span></summary>
+      <div class="tp-note" style="margin-top: 10px">Editable in <a href="/settings.html#sec-enrich" style="color: var(--p-accent)">Settings &rarr; Enrich</a>. Learn more in the <a href="https://github.com/pictaria-ai/pictaria-server/blob/main/docs/ENRICH.md" target="_blank" rel="noopener" style="color: var(--p-accent)">enrichment guide</a>.</div>
+      <div id="taxBody" class="tp-body"><div class="tp-note">Loading…</div></div>
+    </details>
+
+    <section id="statusPanel" class="p-panel panel">
+      <div class="es-main">
+        <span id="enrichDot" class="p-dot"></span>
+        <strong>Status</strong>
+        <div class="p-grow"></div>
+        <button id="viewLogBtn" class="p-btn quiet">Log</button>
+        <button id="enrichCancel" class="p-btn danger" hidden title="Finishes the photo it's on, then stops. A queued job stays in the queue — run it again to continue where it left off.">Cancel</button>
+      </div>
+      <div id="enrichStatusLine" class="es-line"></div>
+      <div id="enrichStatusLine2" class="es-line es-line2" hidden></div>
+      <div id="enrichProgress" class="es-progress" hidden>
+        <span class="p-score-track"><span id="enrichBar" class="p-score-fill" style="width: 0%"></span></span>
+        <span id="enrichBarText" class="p-muted"></span>
+      </div>
+    </section>
+
+    <section id="runPanel" class="p-panel panel">
+      <div class="es-main">
+        <strong>Run queue</strong><span class="p-muted" style="font-size: 12.5px">— start a library sweep, or run a photo group sent from Insights</span>
+        <div class="p-grow"></div>
+        <button id="runAllBtn" class="p-btn accent" hidden title="Runs every queued job below, one after another, using each item's current checkboxes. A failure or cancel stops the chain — whatever remains stays queued.">Run all</button>
+      </div>
+      <div class="qitem">
+        <div class="qline top">
+          <span class="t">Library sweep</span>
+          <span class="m">newest unenriched photos first</span>
+          <button id="enrichStart" class="p-btn accent">Start</button>
+        </div>
+        <div class="qline opts">
+          <label>Photos <input id="enrichMax" class="p-input" type="number" min="1" value="100" style="width: 74px"></label>
+          <label title="Checked: skips photos any model has already enriched. Unchecked: re-enriches photos your current model + prompt + taxonomy hasn't processed yet — exact-duplicate re-runs are always skipped either way."><input id="enrichSkip" type="checkbox" checked> Only unenriched</label>
+          <label title="When the run finishes, the analyzed photos join the Curate review queue. Uncheck to enrich for tags/albums only."><input id="enrichCurate" type="checkbox" checked> Send to Curate</label>
+        </div>
+      </div>
+      <!-- Photos stuck at the content-failure limit under the selected
+           provider/model. Hidden unless there are any; Retry runs exactly
+           these photos with the failure cap off for that one run. -->
+      <div id="retryStrip" class="qitem" hidden>
+        <div class="qline top">
+          <span class="t">Stuck photos</span>
+          <span class="m" id="retryLine"></span>
+          <button id="retryFailedBtn" class="p-btn accent" title="Run just these photos with the failure cap off for one run. Their failure history is kept — a photo that fails again stays here; one that succeeds leaves.">Retry</button>
+          <button id="stuckDetailsBtn" class="p-btn" title="See each stuck photo — why it failed, open it in Immich, or discard it from enrichment.">Details</button>
+        </div>
+      </div>
+      <div id="queueList" class="qlist queue"></div>
+    </section>
+
+    <details id="runsPanel" class="p-panel panel">
+      <summary><span class="chev">&#9654;</span> Recent runs <span class="sub">— what ran, with which model and versions, and each run's log</span></summary>
+      <div id="runsList" class="qlist queue" style="margin-top: 12px"></div>
+    </details>
+  </main>
+
+  <div id="logPopup" class="log-backdrop" hidden>
+    <div class="log-box">
+      <div class="head">
+        <strong id="logPopupTitle"></strong>
+        <div class="p-grow"></div>
+        <button id="logPopupCopy" class="p-btn quiet" title="Copy the full log to the clipboard">Copy</button>
+        <button id="logPopupClose" class="p-btn quiet">Close</button>
+      </div>
+      <div id="logPopupMeta" class="p-muted" style="font-size: 12px; padding: 0 14px 8px"></div>
+      <pre id="logPopupBody"></pre>
+    </div>
+  </div>
+
+  <!-- Stuck-photos details popup: each stuck photo with its
+       failure message, an Immich deep link, and Discard/Restore. -->
+  <div id="stuckPopup" class="log-backdrop" hidden>
+    <div class="log-box">
+      <div class="head">
+        <strong>Stuck photos</strong>
+        <div class="p-grow"></div>
+        <button id="stuckDiscardAll" class="p-btn danger" hidden>Discard all</button>
+        <button id="stuckPopupClose" class="p-btn quiet">Close</button>
+      </div>
+      <div id="stuckPopupMeta" class="p-muted" style="font-size: 12px; padding: 10px 14px 8px">
+        Discarding stops enrichment attempts. Nothing changes in Immich — restore it any time,
+        here or in Settings&nbsp;&rarr;&nbsp;Discarded&nbsp;Photos.
+      </div>
+      <div id="stuckPopupBody" class="stuck-list"></div>
+    </div>
+  </div>
+
+  <div id="toast" class="p-toast"></div>
+
+  <script>
+    const state = {
+      polling: null,
+      providersLoaded: false,
+      providerConfigured: new Map(),
+      providerSavedValue: '',
+      providerSaving: false,
+      libraryPhotos: null,
+      lastStatus: null,
+      liveLog: false,
+      lastRunStartedAt: null,
+    };
+    const el = (id) => document.getElementById(id);
+
+    function headers(extra = {}) {
+      return { ...extra };
+    }
+
+    function toast(message, isError = false) {
+      const node = el('toast');
+      node.textContent = message;
+      node.className = `p-toast visible${isError ? ' error' : ''}`;
+      clearTimeout(toast.timer);
+      toast.timer = setTimeout(() => node.classList.remove('visible'), 3600);
+    }
+
+    async function api(path, options = {}) {
+      const response = await fetch(path, { ...options, headers: headers(options.headers) });
+      if (response.status === 401) {
+        el('connStatus').hidden = true;
+        window.pictariaGate.show();
+        throw new Error('App password required');
+      }
+      const body = await response.json().catch(() => null);
+      if (!response.ok) throw new Error(body?.error?.message ?? `Request failed: ${response.status}`);
+      return body;
+    }
+
+    function renderProviders(status) {
+      if (state.providersLoaded || !status.available) return;
+      state.providersLoaded = true;
+      state.providerConfigured = new Map(status.available.map((provider) => [provider.name, provider.configured]));
+      el('enrichProvider').replaceChildren(...status.available.map((provider) => {
+        const option = document.createElement('option');
+        option.value = provider.name;
+        option.textContent = provider.configured
+          ? `${provider.name.replace('cloud_', '').replace('local_', '')}${provider.model ? ` · ${provider.model}` : ''}`
+          : `${provider.name} (not configured)`;
+        option.disabled = !provider.configured;
+        return option;
+      }));
+      const savedProvider = status.defaults?.provider ?? '';
+      if (savedProvider) el('enrichProvider').value = savedProvider;
+      state.providerSavedValue = el('enrichProvider').value;
+      renderProviderNote();
+    }
+
+    function providerReady() {
+      return state.providerConfigured.get(el('enrichProvider').value) === true;
+    }
+
+    function renderProviderNote() {
+      const note = el('providerNote');
+      note.classList.toggle('bad', !providerReady());
+      note.textContent = providerReady()
+        ? 'Used for new runs. Your selection is remembered.'
+        : 'This provider is not configured. Choose a configured provider or add its connection details in AI Providers.';
+    }
+
+    async function saveSelectedProvider() {
+      const select = el('enrichProvider');
+      const nextProvider = select.value;
+      const previousProvider = state.providerSavedValue;
+      state.providerSaving = true;
+      select.disabled = true;
+      renderProviderNote();
+      syncRunButtons(state.lastStatus);
+      try {
+        const settings = await api('/api/settings', {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ enrich: { defaultProvider: nextProvider } }),
+        });
+        state.providerSavedValue = settings.enrich.defaultProvider.value;
+        if (state.lastStatus?.defaults) state.lastStatus.defaults.provider = state.providerSavedValue;
+        toast(`Enrichment provider set to ${select.selectedOptions[0]?.textContent ?? nextProvider}`);
+      } catch (error) {
+        select.value = previousProvider;
+        toast(`Could not remember the provider: ${error.message}`, true);
+      } finally {
+        state.providerSaving = false;
+        select.disabled = false;
+        renderProviderNote();
+        syncRunButtons(state.lastStatus);
+        void loadFailureLimited();
+      }
+    }
+
+    function applyEnabled(status) {
+      const off = status.enabled === false;
+      el('offBanner').hidden = !off;
+      for (const id of ['modelPanel', 'statusPanel', 'runPanel']) {
+        el(id).classList.toggle('dimmed', off);
+      }
+      syncRunButtons(status);
+    }
+
+    // Start/Run buttons: enrichment off means disabled; while a run is
+    // active — or a queued job's slice is still being resolved — they all
+    // grey out (the server 409s competing starts either way), and the
+    // running item's Remove locks so cancel-resume can't be broken by
+    // accident. Other items stay removable: pulling a job mid-resolution
+    // is safe — the server re-checks and won't start a removed item.
+    function syncRunButtons(status) {
+      if (!status) return;
+      const off = status.enabled === false;
+      const busy = status.running === true || status.resolvingSlice === true;
+      const providerUnavailable = state.providerSaving || !providerReady();
+      el('enrichStart').disabled = off || busy || providerUnavailable;
+      el('retryFailedBtn').disabled = off || busy || providerUnavailable;
+      for (const button of document.querySelectorAll('#queueList .p-btn.accent')) {
+        button.disabled = off || busy || providerUnavailable;
+      }
+      const activeId = busy ? status.options?.queueItemId : null;
+      for (const button of document.querySelectorAll('#queueList .p-btn.quiet[data-qid]')) {
+        const isActive = activeId != null && Number(button.dataset.qid) === activeId;
+        button.disabled = isActive;
+        button.title = isActive ? 'This item is running — cancel the run first.' : '';
+      }
+      el('runAllBtn').disabled = off || busy || providerUnavailable;
+    }
+
+    async function refresh() {
+      try {
+        const status = await api('/api/enrich/status');
+        el('connStatus').hidden = false;
+        renderProviders(status);
+        applyEnabled(status);
+        el('enrichDot').className = status.running ? 'p-dot ok' : status.error ? 'p-dot bad' : 'p-dot';
+        const analyzed = status.liveCounters.succeeded + status.liveCounters.failed;
+        const skippedNote = (counters) => counters?.skippedSuccessful > 0
+          ? `, skipped ${counters.skippedSuccessful.toLocaleString()} already enriched`
+          : '';
+        // Two lines: what's running (or ran) on top, its numbers below —
+        // long titles wrap without tangling with the counters.
+        let statusLine1;
+        let statusLine2 = '';
+        if (status.running) {
+          // 'Cancelling…' is deliberately ~as wide as 'Running' so the box
+          // never grows or wraps when Cancel is pressed; the detail rides
+          // in the hover title instead.
+          statusLine1 = [
+            status.cancelRequested ? 'Cancelling…' : 'Running',
+            status.title,
+            `${status.provider}${status.model ? ` · ${status.model}` : ''}`,
+          ].filter(Boolean).join(' · ');
+          statusLine2 = [
+            status.options?.targeted ? `${status.options.targeted.toLocaleString()} photos` : null,
+            `ok ${status.liveCounters.succeeded}`,
+            `failed ${status.liveCounters.failed}`,
+          ].filter(Boolean).join(' · ');
+        } else if (status.finishedAt) {
+          statusLine1 = 'Last run: ' + [
+            status.cancelled ? 'cancelled' : status.error ? `failed: ${status.error}` : 'finished',
+            status.title,
+          ].filter(Boolean).join(' · ');
+          statusLine2 = status.counters
+            ? `analyzed ${status.counters.analyzed}, ok ${status.counters.succeeded}${skippedNote(status.counters)}`
+            : '';
+        } else {
+          statusLine1 = 'Idle — ready to analyze photos';
+        }
+        el('enrichStatusLine').textContent = statusLine1;
+        el('enrichStatusLine').title = status.running && status.cancelRequested
+          ? 'Finishing the photo it’s on, then stopping. The queue item stays for the next run.'
+          : '';
+        el('enrichStatusLine2').textContent = statusLine2;
+        el('enrichStatusLine2').hidden = !statusLine2;
+        const goal = status.options?.maxAnalyzed || status.options?.targeted || status.progress?.total || 0;
+        const done = status.options?.maxAnalyzed ? analyzed : status.progress?.position || 0;
+        el('enrichProgress').hidden = !status.running || goal === 0;
+        if (status.running && goal > 0) {
+          el('enrichBar').style.width = `${Math.min(100, Math.round((done / goal) * 100))}%`;
+          el('enrichBarText').textContent = `${done.toLocaleString()} / ${goal.toLocaleString()}`;
+        }
+        el('enrichCancel').hidden = !status.running;
+        // Cancel is cooperative — the model finishes its current photo, which
+        // can take a minute locally. Acknowledge the press instantly and keep
+        // acknowledging until the run actually stops.
+        if (status.cancelRequested && status.running) {
+          el('enrichCancel').disabled = true;
+          el('enrichCancel').textContent = 'Cancelling…';
+        } else {
+          el('enrichCancel').disabled = false;
+          el('enrichCancel').textContent = 'Cancel';
+        }
+        const library = status.library || {};
+        const enriched = library.enrichedTotal ?? 0;
+        const remaining = state.libraryPhotos !== null ? Math.max(0, state.libraryPhotos - enriched) : null;
+        el('libraryLine').innerHTML = `Library: <strong>${enriched.toLocaleString()}</strong> enriched`
+          + (state.libraryPhotos !== null ? ` of <strong>${state.libraryPhotos.toLocaleString()}</strong> photos · <strong>${remaining.toLocaleString()}</strong> remaining` : '')
+          + ` · <strong>${(library.curatedTotal ?? 0).toLocaleString()}</strong> curated`;
+        state.lastStatus = status;
+        // A Run-all chain moves to the next item faster than the 2s poll
+        // can see idle — watch the run identity, not just running/idle,
+        // so the queue and history stay current mid-chain.
+        if (status.startedAt !== state.lastRunStartedAt) {
+          state.lastRunStartedAt = status.startedAt;
+          void loadQueue();
+          void loadRuns();
+        }
+        // The log popup tails live while it's open on the current run.
+        if (state.liveLog && !el('logPopup').hidden) renderLiveLog();
+        // resolvingSlice: a queued job's photos are being resolved (a
+        // single Run, or a Run-all chain deciding its next item). Keep
+        // polling through that gap — an item retired as fully covered
+        // would otherwise sit stale on screen, with its history row
+        // missing, until a manual reload.
+        const busy = status.running || status.resolvingSlice;
+        if (busy && !state.polling) state.polling = setInterval(refresh, 2000);
+        if (!busy && state.polling) {
+          clearInterval(state.polling);
+          state.polling = null;
+          void loadRuns(); // a run (or chain) just ended — history has new rows
+          void loadQueue(); // finished and retired queue items leave the queue
+          void loadFailureLimited(); // a retry may have unstuck (or added) photos
+          // A Run-all chain starts its next item moments after this one
+          // ends — check once more so polling resumes for the next run.
+          setTimeout(() => void refresh(), 4000);
+        }
+      } catch (error) {
+        el('enrichStatusLine').textContent = error.message;
+      }
+    }
+
+    el('enrichStart').addEventListener('click', async () => {
+      try {
+        await api('/api/enrich/run', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            provider: el('enrichProvider').value,
+            maxAnalyzed: Number(el('enrichMax').value) || 100,
+            limit: Math.max((Number(el('enrichMax').value) || 100) * 20, 1000),
+            skipAnySuccessful: el('enrichSkip').checked,
+            sendToCurate: el('enrichCurate').checked,
+          }),
+        });
+        toast('Enrichment run started');
+        await refresh();
+      } catch (error) {
+        toast(error.message, true);
+      }
+    });
+
+    // --- photos stuck at the content-failure limit ---
+
+    async function loadFailureLimited() {
+      // Cleared before the fetch, and stale responses discarded: a provider
+      // change mid-flight must never leave the old provider's ids on screen
+      // (Retry sends the ids to the provider that produced them, so a
+      // mismatch would retry the wrong set).
+      const seq = (state.failureLimitedSeq = (state.failureLimitedSeq || 0) + 1);
+      state.failureLimited = null;
+      el('retryStrip').hidden = true;
+      try {
+        const provider = el('enrichProvider').value;
+        const body = await api(`/api/enrich/failure-limited${provider ? `?provider=${encodeURIComponent(provider)}` : ''}`);
+        if (seq !== state.failureLimitedSeq) return; // superseded by a newer load
+        state.failureLimited = body;
+        const show = (body.count ?? 0) > 0;
+        el('retryStrip').hidden = !show;
+        if (show) {
+          el('retryLine').textContent =
+            `${body.count.toLocaleString()} photo${body.count === 1 ? '' : 's'} hit the `
+            + `${body.maxFailuresPerAsset}-failure limit for ${body.model || body.provider}`
+            + (body.truncated ? ` — Retry takes the first ${body.assetIds.length.toLocaleString()} at a time` : '');
+          el('retryLine').title = 'The model refused or errored on these photos every time it tried. '
+            + 'Retry runs just these photos with the failure cap off for one run.'
+            + (body.truncated ? ' Least-recently-attempted photos go first; run Retry again for the rest.' : '');
+        }
+      } catch { /* gate handles auth; the strip just stays hidden */ }
+    }
+
+    el('retryFailedBtn').addEventListener('click', async () => {
+      const stuck = state.failureLimited;
+      if (!stuck || !Array.isArray(stuck.assetIds) || stuck.assetIds.length === 0) return;
+      try {
+        await api('/api/enrich/run', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            // The provider that produced these ids — not the picker, which
+            // may have changed since the strip loaded.
+            provider: stuck.provider,
+            assetIds: stuck.assetIds,
+            retryFailureLimited: true,
+            sendToCurate: el('enrichCurate').checked,
+          }),
+        });
+        toast(`Retrying ${stuck.assetIds.length} stuck photo${stuck.assetIds.length === 1 ? '' : 's'}`);
+        await refresh();
+      } catch (error) {
+        toast(error.message, true);
+      }
+    });
+
+    // The picker is the one visible owner of the enrichment provider. Saving
+    // through the normal settings path makes the choice survive navigation
+    // and restart; stuck-photo state follows only after the save settles.
+    el('enrichProvider').addEventListener('change', () => void saveSelectedProvider());
+
+    // --- stuck-photos details popup ---
+
+    async function loadStuckDetails() {
+      const provider = el('enrichProvider').value;
+      return api(`/api/enrich/failure-limited/details${provider ? `?provider=${encodeURIComponent(provider)}` : ''}`);
+    }
+
+    function stuckThumb(assetId) {
+      const img = document.createElement('img');
+      img.alt = '';
+      img.loading = 'lazy';
+      img.src = `/api/review/thumbnail/${encodeURIComponent(assetId)}`;
+      // A photo whose media is gone from Immich can't render a thumbnail —
+      // and that broken state is itself the diagnosis.
+      img.addEventListener('error', () => {
+        const missing = document.createElement('div');
+        missing.className = 'no-media';
+        missing.textContent = 'no media';
+        img.replaceWith(missing);
+      });
+      return img;
+    }
+
+    function stuckRow(entry, { immichUrl, actionLabel, actionClass, onAction }) {
+      const row = document.createElement('div');
+      row.className = 'stuck-row';
+      row.append(stuckThumb(entry.assetId));
+
+      const info = document.createElement('div');
+      info.className = 'info';
+      const name = document.createElement('div');
+      name.className = 'name';
+      const file = entry.originalPath ? entry.originalPath.split('/').pop() : entry.assetId;
+      const date = (entry.fileCreatedAt || '').slice(0, 10);
+      name.textContent = date ? `${file} · ${date}` : file;
+      const why = document.createElement('div');
+      why.className = 'why';
+      why.textContent = entry.discardedAt
+        ? `Discarded ${entry.discardedAt.slice(0, 10)}${entry.lastError ? ` — Error: ${entry.lastError}` : ''}`
+        : (entry.lastError ? `Error: ${entry.lastError}` : 'No failure message recorded');
+      why.title = entry.lastError || '';
+      info.append(name, why);
+      row.append(info);
+
+      const acts = document.createElement('div');
+      acts.className = 'acts';
+      if (immichUrl) {
+        const link = document.createElement('a');
+        link.className = 'p-btn';
+        link.target = '_blank';
+        link.rel = 'noopener';
+        link.href = `${immichUrl}/photos/${encodeURIComponent(entry.assetId)}`;
+        link.textContent = 'Immich ↗';
+        acts.append(link);
+      }
+      const action = document.createElement('button');
+      action.className = actionClass;
+      action.textContent = actionLabel;
+      action.addEventListener('click', () => void onAction(entry, action));
+      acts.append(action);
+      row.append(acts);
+      return row;
+    }
+
+    function discardToast(body) {
+      const discarded = body.discarded ?? 0;
+      const skippedSuccessful = body.skippedSuccessful ?? 0;
+      const skippedNotStuck = body.skippedNotStuck ?? 0;
+      const parts = [];
+      if (discarded > 0) parts.push(`Discarded ${discarded.toLocaleString()} photo${discarded === 1 ? '' : 's'} from enrichment`);
+      if (skippedSuccessful > 0) parts.push(`${skippedSuccessful.toLocaleString()} enriched in the meantime — left untouched`);
+      if (skippedNotStuck > 0) parts.push(`${skippedNotStuck.toLocaleString()} no longer stuck — left untouched`);
+      toast(parts.length ? parts.join('; ') : 'Nothing left to discard');
+    }
+
+    async function discardStuck(assetIds) {
+      const body = await api('/api/enrich/discarded', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ assetIds }),
+      });
+      discardToast(body);
+      await renderStuckPopup();
+      void loadFailureLimited(); // the strip count just changed
+    }
+
+    // Discard all resolves the CURRENT stuck set on the server — never the
+    // popup's snapshot — so it can't act on stale rows and isn't limited
+    // by the popup's 500-row display cap.
+    async function discardAllStuck(provider) {
+      const body = await api('/api/enrich/discarded', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ all: true, provider }),
+      });
+      discardToast(body);
+      // The operation's own truncation flag — NOT `body.truncated`, which
+      // is the 500-row reference listing's display cap.
+      if (body.discardTruncated) toast(`Discarded the first ${(body.discarded ?? 0).toLocaleString()} — run Discard all again for the rest`);
+      await renderStuckPopup();
+      void loadFailureLimited();
+    }
+
+    async function restoreDiscarded(assetIds) {
+      await api('/api/enrich/discarded/restore', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ assetIds }),
+      });
+      toast(`Restored ${assetIds.length} photo${assetIds.length === 1 ? '' : 's'}`);
+      await renderStuckPopup();
+      void loadFailureLimited();
+    }
+
+    async function renderStuckPopup() {
+      let body;
+      try {
+        body = await loadStuckDetails();
+      } catch (error) {
+        toast(error.message, true);
+        return;
+      }
+      state.stuckDetails = body;
+      const box = el('stuckPopupBody');
+      box.textContent = '';
+
+      const rows = Array.isArray(body.rows) ? body.rows : [];
+      // The popup's Discarded section is an undo surface, not an archive:
+      // it shows only photos discarded during this popup session (ids that
+      // were on screen as stuck since the popup opened). The full list
+      // lives in Settings → Discarded Photos, linked below with its count.
+      const seen = state.stuckSeen ?? (state.stuckSeen = new Set());
+      for (const entry of rows) seen.add(entry.assetId);
+      const allDiscarded = Array.isArray(body.discarded?.assets) ? body.discarded.assets : [];
+      const discarded = allDiscarded.filter((entry) => seen.has(entry.assetId));
+      const discardedTotal = body.discarded?.total ?? allDiscarded.length;
+
+      // The full stuck count, not the row cap — Discard all runs server-side
+      // against the current stuck set, so the label can promise the lot.
+      el('stuckDiscardAll').hidden = rows.length === 0;
+      el('stuckDiscardAll').textContent = `Discard all ${(body.count ?? rows.length).toLocaleString()}`;
+
+      if (rows.length === 0) {
+        const empty = document.createElement('div');
+        empty.className = 'stuck-note';
+        empty.textContent = 'No stuck photos right now.';
+        box.append(empty);
+      }
+      for (const entry of rows) {
+        box.append(stuckRow(entry, {
+          immichUrl: body.immichUrl,
+          actionLabel: 'Discard',
+          actionClass: 'p-btn danger',
+          onAction: (item, button) => {
+            button.disabled = true;
+            return discardStuck([item.assetId]).catch((error) => {
+              button.disabled = false;
+              toast(error.message, true);
+            });
+          },
+        }));
+      }
+      if (body.truncated) {
+        const note = document.createElement('div');
+        note.className = 'stuck-note';
+        note.textContent = `Showing the first ${rows.length.toLocaleString()} of ${body.count.toLocaleString()} stuck photos.`;
+        box.append(note);
+      }
+
+      if (discarded.length > 0) {
+        const head = document.createElement('div');
+        head.className = 'stuck-head';
+        head.textContent = `Discarded just now (${discarded.length.toLocaleString()})`;
+        box.append(head);
+        for (const entry of discarded) {
+          box.append(stuckRow(entry, {
+            immichUrl: body.immichUrl,
+            actionLabel: 'Restore',
+            actionClass: 'p-btn',
+            onAction: (item, button) => {
+              button.disabled = true;
+              return restoreDiscarded([item.assetId]).catch((error) => {
+                button.disabled = false;
+                toast(error.message, true);
+              });
+            },
+          }));
+        }
+      }
+      if (discardedTotal > 0) {
+        const note = document.createElement('div');
+        note.className = 'stuck-note';
+        const link = document.createElement('a');
+        link.href = '/settings.html#sec-discarded';
+        link.textContent = `Settings → Discarded Photos`;
+        note.append(`All discarded photos (${discardedTotal.toLocaleString()}) live in `, link, '.');
+        box.append(note);
+      }
+    }
+
+    el('stuckDetailsBtn').addEventListener('click', async () => {
+      // A fresh popup session: the "Discarded just now" undo section
+      // starts empty and collects only what this session discards.
+      state.stuckSeen = new Set();
+      await renderStuckPopup();
+      el('stuckPopup').hidden = false;
+    });
+
+    el('stuckDiscardAll').addEventListener('click', async () => {
+      const details = state.stuckDetails;
+      const count = details?.count ?? 0;
+      if (count === 0) return;
+      const ok = window.confirm(
+        `Discard ${count} photo${count === 1 ? '' : 's'} from enrichment? `
+        + 'Nothing changes in Immich — you can restore them any time.',
+      );
+      if (!ok) return;
+      try {
+        // The provider that produced the popup's stuck set — not the
+        // picker, which may have changed since (same rule as Retry).
+        await discardAllStuck(details.provider);
+      } catch (error) {
+        toast(error.message, true);
+      }
+    });
+
+    function closeStuckPopup() {
+      el('stuckPopup').hidden = true;
+    }
+
+    el('stuckPopupClose').addEventListener('click', closeStuckPopup);
+    el('stuckPopup').addEventListener('click', (event) => {
+      if (event.target === el('stuckPopup')) closeStuckPopup();
+    });
+
+    el('enrichCancel').addEventListener('click', () => {
+      // Acknowledge before the round-trip — the poll keeps this state until
+      // the run actually stops.
+      el('enrichCancel').disabled = true;
+      el('enrichCancel').textContent = 'Cancelling…';
+      api('/api/enrich/cancel', { method: 'POST' }).then(refresh).catch((error) => {
+        el('enrichCancel').disabled = false;
+        el('enrichCancel').textContent = 'Cancel';
+        toast(error.message, true);
+      });
+    });
+
+    // --- queue (photo groups sent from Insights) ---
+
+    function fmtWhen(iso) {
+      if (!iso) return '';
+      const d = new Date(iso);
+      return d.toLocaleDateString(undefined, { month: 'short', day: 'numeric' })
+        + ' ' + d.toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' });
+    }
+
+    function renderQueue(items) {
+      const box = el('queueList');
+      box.replaceChildren();
+      if (!items.length) {
+        el('runAllBtn').hidden = true;
+        const none = document.createElement('div');
+        none.className = 'qempty';
+        none.textContent = 'Nothing queued. In Insights, open any photo group and hit "Send to Enrich".';
+        box.append(none);
+        return;
+      }
+      el('runAllBtn').hidden = items.length < 2;
+      for (const item of items) {
+        const card = document.createElement('div');
+        card.className = 'qitem';
+        card.dataset.qid = String(item.id);
+
+        // Line 1: title + meta on the left, actions right-aligned so every
+        // item's Run/Remove line up. Long titles ellipsize instead of
+        // pushing the buttons around.
+        const top = document.createElement('div');
+        top.className = 'qline top';
+        const title = document.createElement('span');
+        title.className = 't';
+        title.textContent = item.title;
+        title.title = item.title;
+        const meta = document.createElement('span');
+        meta.className = 'm';
+        meta.textContent = `${item.estimatedCount != null ? `~${Number(item.estimatedCount).toLocaleString()} photos · ` : ''}queued ${fmtWhen(item.requestedAt)}`;
+        const run = document.createElement('button');
+        run.className = 'p-btn accent';
+        run.textContent = 'Run';
+        const remove = document.createElement('button');
+        remove.className = 'p-btn quiet';
+        remove.textContent = 'Remove';
+        remove.dataset.qid = String(item.id);
+        remove.addEventListener('click', async () => {
+          const body = await api(`/api/enrich/queue/${item.id}`, { method: 'DELETE' }).catch(() => null);
+          if (body) await loadQueue();
+        });
+        top.append(title, meta, run, remove);
+
+        // Line 2: the run options.
+        const opts = document.createElement('div');
+        opts.className = 'qline opts';
+        const sendWrap = document.createElement('label');
+        sendWrap.title = 'When the run finishes, these photos join the Curate review queue (photos you already decided stay decided). Uncheck to enrich for tags/albums only.';
+        const send = document.createElement('input');
+        send.type = 'checkbox';
+        send.checked = true;
+        sendWrap.append(send, 'Send to Curate');
+        const reopenWrap = document.createElement('label');
+        reopenWrap.title = 'Also re-analyzes photos you already decided and clears those keep/hide decisions, so the whole slice comes back for a fresh review. Off: past decisions stand.';
+        const reopen = document.createElement('input');
+        reopen.type = 'checkbox';
+        reopenWrap.append(reopen, 'incl. previously curated');
+        send.addEventListener('change', () => {
+          reopen.disabled = !send.checked;
+          if (!send.checked) reopen.checked = false;
+          reopenWrap.style.opacity = send.checked ? '' : '0.45';
+        });
+        opts.append(sendWrap, reopenWrap);
+
+        run.addEventListener('click', () => void runQueued(item.id, run, send.checked, reopen.checked));
+        card.append(top, opts);
+        box.append(card);
+      }
+      // Fresh buttons need the current disabled rules (a run may be active).
+      syncRunButtons(state.lastStatus);
+    }
+
+    async function runQueued(id, button, sendToCurate = true, reopenDecided = false) {
+      button.disabled = true;
+      try {
+        const body = await api(`/api/enrich/queue/${id}/run`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            provider: el('enrichProvider').value,
+            sendToCurate,
+            reopenDecided,
+            // Re-opening implies a fresh look: re-analyze even the enriched.
+            skipAnySuccessful: !reopenDecided,
+          }),
+        });
+        await loadQueue();
+        if (body.fullyCovered) {
+          toast(body.message || 'Already fully covered — removed from the queue');
+          void loadRuns(); // the retirement is recorded as a history row
+        } else {
+          toast(body.queuedRemaining
+            ? 'Run started (capped at 1,000 photos needing work) — the job stays queued for the rest'
+            : 'Run started');
+        }
+        await refresh();
+      } catch (error) {
+        toast(error.message, true);
+      } finally {
+        button.disabled = false;
+      }
+    }
+
+    async function loadQueue() {
+      try {
+        const items = [];
+        let cursor = null;
+        do {
+          const params = new URLSearchParams({ limit: '50' });
+          if (cursor) params.set('cursor', cursor);
+          const page = await api(`/api/enrich/queue?${params}`);
+          items.push(...(page.items ?? []));
+          cursor = page.nextCursor ?? null;
+        } while (cursor);
+        renderQueue(items);
+      } catch { /* gate handles auth */ }
+    }
+
+    el('runAllBtn').addEventListener('click', async () => {
+      // The plan captures each item's checkboxes as currently set.
+      const plan = [...document.querySelectorAll('#queueList .qitem[data-qid]')].map((card) => {
+        const boxes = card.querySelectorAll('.opts input');
+        return { id: Number(card.dataset.qid), sendToCurate: boxes[0].checked, reopenDecided: boxes[1].checked };
+      });
+      if (plan.length === 0) return;
+      el('runAllBtn').disabled = true;
+      try {
+        const body = await api('/api/enrich/queue/run-all', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ provider: el('enrichProvider').value, plan }),
+        });
+        const jobs = (n) => `${n} job${n === 1 ? '' : 's'}`;
+        const leftBehind = [
+          body.failureLimited ? `${body.failureLimited} photo${body.failureLimited === 1 ? '' : 's'} stuck at the failure limit` : null,
+          body.discarded ? `${body.discarded} discarded` : null,
+        ].filter(Boolean).join(', ');
+        if (body.planned === 0 && body.coveredRemoved) {
+          toast(leftBehind
+            ? `Nothing left to analyze — removed ${jobs(body.coveredRemoved)}; ${leftBehind}`
+            : `Already fully covered — removed ${jobs(body.coveredRemoved)} from the queue`);
+          await loadQueue();
+          void loadRuns(); // each retirement is recorded as a history row
+        } else {
+          let note = `Running ${jobs(body.planned)} in order`;
+          if (body.coveredRemoved) {
+            note += ` — ${jobs(body.coveredRemoved)} already covered, removed`;
+            if (leftBehind) note += ` (${leftBehind})`;
+          }
+          toast(note);
+        }
+        await refresh();
+      } catch (error) {
+        toast(error.message, true);
+        el('runAllBtn').disabled = false;
+      }
+    });
+
+    // --- run history ---
+
+    async function loadRuns() {
+      let runs = [];
+      try { runs = (await api('/api/enrich/runs')).runs ?? []; } catch { return; }
+      const box = el('runsList');
+      box.replaceChildren();
+      if (!runs.length) {
+        const none = document.createElement('div');
+        none.className = 'qempty';
+        none.textContent = 'No runs yet.';
+        box.append(none);
+        return;
+      }
+      for (const run of runs) {
+        const card = document.createElement('div');
+        card.className = 'qitem';
+
+        const top = document.createElement('div');
+        top.className = 'qline top';
+        const title = document.createElement('span');
+        title.className = 't';
+        title.textContent = run.title;
+        title.title = run.title;
+        const when = document.createElement('span');
+        when.className = 'm';
+        const mins = run.startedAt && run.finishedAt ? Math.max(1, Math.round((new Date(run.finishedAt) - new Date(run.startedAt)) / 60000)) : null;
+        when.textContent = `${fmtWhen(run.startedAt)}${mins ? ` · ${mins}m` : ''}`;
+        top.append(title, when);
+        if (run.hasLog) {
+          const logBtn = document.createElement('button');
+          logBtn.className = 'p-btn quiet';
+          logBtn.textContent = 'Log';
+          logBtn.title = 'The full log of this run, as it appeared while running';
+          logBtn.addEventListener('click', () => void openRunLog(run.id));
+          top.append(logBtn);
+        }
+
+        // The row answers "how did it go" — counters for every outcome, just
+        // the provider for context. Full model/version detail lives in the
+        // log popup.
+        const c = run.counters;
+        const counts = c ? [
+          `${(c.succeeded ?? 0).toLocaleString()} ok`,
+          c.failed > 0 ? `${c.failed.toLocaleString()} failed` : null,
+          c.skippedSuccessful > 0 ? `${c.skippedSuccessful.toLocaleString()} already enriched` : null,
+          c.skippedFailureLimit > 0 ? `${c.skippedFailureLimit.toLocaleString()} at failure limit` : null,
+          c.skippedDiscarded > 0 ? `${c.skippedDiscarded.toLocaleString()} discarded` : null,
+        ].filter(Boolean).join(' · ') : null;
+        const detail = document.createElement('div');
+        detail.className = 'detail';
+        detail.textContent = [
+          run.provider,
+          run.status === 'finished' ? null : run.status + (run.error ? `: ${String(run.error).slice(0, 80)}` : ''),
+          counts,
+        ].filter(Boolean).join(' · ');
+        if (run.status === 'failed') detail.classList.add('bad');
+
+        card.append(top, detail);
+        box.append(card);
+      }
+    }
+
+    // --- log popup (past runs + live tail of the current run) ---
+
+    async function openRunLog(id) {
+      let entry;
+      try {
+        entry = await api(`/api/enrich/runs/${id}/log`);
+      } catch (error) {
+        toast(error.message, true);
+        return;
+      }
+      state.liveLog = false;
+      el('logPopupTitle').textContent = entry.title;
+      el('logPopupMeta').textContent = [
+        entry.provider,
+        entry.model,
+        entry.taxonomyVersion ? `tax ${entry.taxonomyVersion}` : null,
+        entry.promptVersion ? `prompt ${entry.promptVersion}` : null,
+        entry.status,
+      ].filter(Boolean).join(' · ');
+      el('logPopupBody').textContent = entry.log.length ? entry.log.join('\n') : 'No log was recorded for this run.';
+      el('logPopup').hidden = false;
+    }
+
+    function renderLiveLog() {
+      const body = el('logPopupBody');
+      const log = state.lastStatus?.log ?? [];
+      const atBottom = body.scrollHeight - body.scrollTop - body.clientHeight < 60;
+      body.textContent = log.length ? log.join('\n') : 'No log yet — start a run below.';
+      if (atBottom) body.scrollTop = body.scrollHeight;
+    }
+
+    el('viewLogBtn').addEventListener('click', () => {
+      state.liveLog = true;
+      const status = state.lastStatus;
+      el('logPopupTitle').textContent = status?.title
+        ? `${status.title}${status.running ? ' — running' : ''}`
+        : 'Current session log';
+      el('logPopupMeta').textContent = [status?.provider, status?.model].filter(Boolean).join(' · ');
+      renderLiveLog();
+      el('logPopup').hidden = false;
+      el('logPopupBody').scrollTop = el('logPopupBody').scrollHeight;
+    });
+
+    function closeLogPopup() {
+      el('logPopup').hidden = true;
+      state.liveLog = false;
+    }
+
+    el('logPopupClose').addEventListener('click', closeLogPopup);
+    el('logPopup').addEventListener('click', (event) => {
+      if (event.target === el('logPopup')) closeLogPopup();
+    });
+    document.addEventListener('keydown', (event) => {
+      if (event.key === 'Escape' && !el('logPopup').hidden) closeLogPopup();
+      if (event.key === 'Escape' && !el('stuckPopup').hidden) closeStuckPopup();
+    });
+
+    el('logPopupCopy').addEventListener('click', async () => {
+      const text = el('logPopupBody').textContent;
+      let copied = false;
+      try {
+        await navigator.clipboard.writeText(text);
+        copied = true;
+      } catch {
+        // Plain-HTTP LAN hosts have no clipboard API — legacy path.
+        const scratch = document.createElement('textarea');
+        scratch.value = text;
+        scratch.style.position = 'fixed';
+        scratch.style.opacity = '0';
+        document.body.append(scratch);
+        scratch.select();
+        try { copied = document.execCommand('copy'); } catch { /* stays false */ }
+        scratch.remove();
+      }
+      el('logPopupCopy').textContent = copied ? 'Copied ✓' : 'Copy failed';
+      setTimeout(() => { el('logPopupCopy').textContent = 'Copy'; }, 1600);
+    });
+
+    // --- taxonomy + prompt viewer (read-only; loaded on first open) ---
+
+    async function loadTaxonomyPanel() {
+      if (loadTaxonomyPanel.loaded) return;
+      loadTaxonomyPanel.loaded = true;
+      const body = el('taxBody');
+      try {
+        const [tax, prompts] = await Promise.all([api('/api/taxonomy'), api('/api/enrich/prompts')]);
+        body.replaceChildren();
+
+        const mk = (tag, cls, text) => {
+          const node = document.createElement(tag);
+          if (cls) node.className = cls;
+          if (text != null) node.textContent = text;
+          return node;
+        };
+
+        body.append(mk('div', 'tp-head', `Taxonomy ${tax.version ? `· version ${tax.version}` : ''}`));
+        const hard = new Set(tax.hardExclusionTags ?? []);
+        for (const [category, tags] of Object.entries(tax.tags ?? {})) {
+          const row = mk('div', 'tp-cat');
+          row.append(mk('span', 'c', category));
+          for (const t of tags) {
+            const chip = mk('span', `tag-chip${hard.has(t) ? ' hard' : ''}`, t);
+            if (hard.has(t)) chip.title = 'Hard exclusion — a photo with this tag is never shown on the frame';
+            row.append(chip);
+          }
+          body.append(row);
+        }
+        if (hard.size) {
+          body.append(mk('div', 'tp-note', 'Red tags are hard exclusions: any photo the model marks with one is kept off the frame.'));
+        }
+        const thresholds = Object.entries(tax.thresholds ?? {});
+        if (thresholds.length) {
+          body.append(mk('div', 'tp-note', `Confidence thresholds: ${thresholds.map(([k, v]) => `${k} ${v}`).join(' · ')}`));
+        }
+
+        if (Array.isArray(tax.responseFields) && tax.responseFields.length) {
+          body.append(mk('div', 'tp-head', 'Response fields'));
+          body.append(mk('div', 'tp-note',
+            'Every reply must be JSON with exactly these fields — enforced through structured output, not the prompt text. This is why captions and quality scores appear without ever being asked for in prose. The field list is fixed (Pictaria’s features depend on it); the tags the model may use inside it come from the taxonomy above.'));
+          for (const rf of tax.responseFields) {
+            const row = mk('div', 'tp-cat');
+            row.append(mk('span', 'c', rf.field));
+            row.append(mk('span', 'tag-chip', rf.type));
+            row.append(mk('span', 'rf-use', `→ ${rf.usedFor}`));
+            body.append(row);
+          }
+        }
+
+        body.append(mk('div', 'tp-head', `Prompt · version ${prompts.version}`));
+        body.append(mk('div', 'tp-note', `System prompt — the model’s standing instructions${prompts.customized?.systemPrompt ? ' (customized in Settings)' : ''}:`));
+        body.append(mk('pre', 'prompt', prompts.systemPrompt));
+        body.append(mk('div', 'tp-note', `Per-photo message — {approved_tags} is replaced with the taxonomy tags above${prompts.customized?.userTemplate ? ' (customized in Settings)' : ''}:`));
+        body.append(mk('pre', 'prompt', prompts.userTemplate));
+        const editNote = mk('div', 'tp-note');
+        editNote.append('Both the prompts and the taxonomy are editable in ');
+        const link = mk('a', null, 'Settings → Enrich');
+        link.href = '/settings.html#sec-enrich';
+        link.style.color = 'var(--p-accent)';
+        editNote.append(link, ' — changes apply immediately. How the pieces fit together is explained in ');
+        const docsLink = mk('a', null, 'the enrichment guide');
+        docsLink.href = 'https://github.com/pictaria-ai/pictaria-server/blob/main/docs/ENRICH.md';
+        docsLink.target = '_blank';
+        docsLink.rel = 'noopener';
+        docsLink.style.color = 'var(--p-accent)';
+        editNote.append(docsLink, '.');
+        body.append(editNote);
+      } catch (error) {
+        loadTaxonomyPanel.loaded = false;
+        body.replaceChildren();
+        body.append(Object.assign(document.createElement('div'), { className: 'tp-note', textContent: `Could not load: ${error.message}` }));
+      }
+    }
+
+    el('taxPanel').addEventListener('toggle', () => { if (el('taxPanel').open) void loadTaxonomyPanel(); });
+
+    // Library size for the "remaining" arithmetic (from the Insights snapshot).
+    fetch('/api/insights', { headers: headers() }).then((r) => r.ok ? r.json() : null).then((body) => {
+      const photos = body?.snapshot?.totals?.photos;
+      if (Number.isFinite(photos)) { state.libraryPhotos = photos; void refresh(); }
+    }).catch(() => {});
+
+    refresh();
+    loadQueue();
+    loadRuns();
+    loadFailureLimited();
+  </script>
+</body>
+</html>

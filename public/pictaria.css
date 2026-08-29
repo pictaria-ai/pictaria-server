@@ -1,0 +1,396 @@
+/* Pictaria design system — shared across all Pictaria Server pages.
+   Dark, photo-first: the UI recedes, photos and decisions pop. */
+
+:root {
+  color-scheme: dark;
+  --p-bg: #0e1116;
+  --p-panel: #151b23;
+  --p-panel-2: #1c242e;
+  --p-line: #29323d;
+  --p-ink: #e9eef4;
+  --p-muted: #8d99a7;
+  --p-accent: #2dd4bf;
+  --p-accent-deep: #0f766e;
+  --p-accent-ink: #06201d;
+  --p-danger: #f87171;
+  --p-gold: #fbbf24;
+  --p-ok: #4ade80;
+  --p-radius: 10px;
+  --p-radius-sm: 7px;
+  --p-font: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  /* Standard content widths: wide pages (home, Insights, Albums) and narrow
+     settings-style pages (Voice, Settings). Curate (full) and Remote (phone)
+     are deliberate exceptions. */
+  --p-page-w: 1140px;
+  --p-page-w-narrow: 720px;
+  --p-shadow: 0 10px 30px rgba(0, 0, 0, 0.45);
+  --p-topbar-bg: rgba(14, 17, 22, 0.92);
+}
+
+/* Light theme — set by theme.js from the saved preference. Photo overlays
+   (badges, lightbox scrim) deliberately stay dark in both themes. */
+:root[data-theme="light"] {
+  color-scheme: light;
+  --p-bg: #f4f6f9;
+  --p-panel: #ffffff;
+  --p-panel-2: #eaeef3;
+  --p-line: #d6dde5;
+  --p-ink: #17202b;
+  --p-muted: #5d6b7a;
+  --p-accent: #0d9488;
+  --p-accent-deep: #99e8df;
+  --p-accent-ink: #ffffff;
+  --p-danger: #dc2626;
+  --p-gold: #b45309;
+  --p-ok: #15803d;
+  --p-shadow: 0 10px 30px rgba(23, 32, 43, 0.18);
+  --p-topbar-bg: rgba(255, 255, 255, 0.92);
+}
+
+* { box-sizing: border-box; }
+
+/* Author display rules (grid/flex/inline-block) silently defeat the browser's
+   built-in [hidden] handling; this guard makes hidden always mean hidden. */
+[hidden] { display: none !important; }
+
+body {
+  margin: 0;
+  font-family: var(--p-font);
+  background: var(--p-bg);
+  color: var(--p-ink);
+  font-size: 14px;
+  line-height: 1.45;
+}
+
+/* ---- Brand header ---- */
+.p-topbar {
+  position: sticky;
+  top: 0;
+  z-index: 20;
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 10px 18px;
+  background: var(--p-topbar-bg);
+  backdrop-filter: blur(10px);
+  border-bottom: 1px solid var(--p-line);
+}
+.p-brand { display: flex; align-items: center; gap: 9px; text-decoration: none; color: var(--p-ink); }
+.p-brand svg { display: block; }
+.p-brand img { display: block; height: 22px; width: auto; }
+/* The butterfly mark reads as busy at topbar size — wordmark only up here.
+   (The hero keeps the full lockup.) Delete this rule to bring it back. */
+.p-brand img:not(.p-brand-word) { display: none; }
+.p-brand .p-brand-word { height: 18px; margin-top: 1px; }
+.p-brand-name { font-size: 17px; font-weight: 800; letter-spacing: 0.2px; }
+.p-supporter-slot {
+  display: flex;
+  align-items: center;
+  flex: 0 0 112px;
+  min-width: 0;
+}
+.p-supporter-chip {
+  font-size: 11px; font-weight: 800; letter-spacing: 0.4px; white-space: nowrap;
+  padding: 2px 9px; border-radius: 999px; margin-left: 2px;
+  color: var(--p-accent); border: 1px solid var(--p-accent); opacity: 0.9;
+  display: inline-flex; align-items: center; gap: 5px;
+}
+.p-supporter-chip img { height: 13px; width: auto; display: block; }
+/* var(--p-gold) flips for light mode — the hardcoded overlay gold
+   (.p-badge.gold) is illegible on the light topbar. */
+.p-supporter-chip.patron { color: var(--p-gold); border-color: var(--p-gold); }
+.p-brand-service {
+  font-size: 11px;
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: 0.8px;
+  color: var(--p-accent);
+  border: 1px solid var(--p-accent-deep);
+  border-radius: 999px;
+  padding: 2px 8px;
+  /* Fixed width (fits the widest page name) so the nav doesn't shift between pages. */
+  min-width: 84px;
+  text-align: center;
+}
+
+/* ---- Topbar nav ---- */
+.p-nav { display: flex; gap: 4px; margin-left: 4px; overflow-x: auto; }
+.p-nav a {
+  color: var(--p-muted);
+  text-decoration: none;
+  font-size: 13px;
+  font-weight: 700;
+  padding: 6px 10px;
+  border-radius: var(--p-radius-sm);
+  white-space: nowrap;
+}
+.p-nav a:hover { color: var(--p-ink); background: var(--p-panel-2); }
+.p-nav a.active { color: var(--p-accent); background: var(--p-panel-2); }
+
+/* ---- Mobile nav (hamburger, injected by nav.js) ---- */
+.p-nav-burger {
+  display: none;
+  background: none;
+  border: 1px solid var(--p-line);
+  border-radius: var(--p-radius-sm);
+  color: var(--p-ink);
+  font-size: 15px;
+  padding: 4px 10px;
+  cursor: pointer;
+}
+@media (max-width: 720px) {
+  .p-topbar { gap: 8px; padding: 10px 12px; }
+  .p-nav { display: none; }
+  .p-nav-burger { display: block; }
+  /* Compact badges: at full size the topbar (wordmark + service pill +
+     supporter chip + Connected chip + gear + burger) is wider than a
+     phone and shoves the burger off-screen. Supporter chip keeps only
+     the mark (the ring color still tells the tier), Connected keeps
+     only its status dot, and the service pill drops the fixed width
+     that exists to stop desktop nav-jiggle (nav is behind the burger
+     here). font-size: 0 hides the bare text nodes without any markup
+     changes across pages. */
+  .p-supporter-slot { flex-basis: 32px; }
+  .p-supporter-chip { font-size: 0; gap: 0; padding: 3px 7px; }
+  .p-supporter-chip img { height: 14px; }
+  /* .p-topbar prefix: the base .p-chip.p-conn rules (min-width 92px)
+     live LATER in this file and would win at equal specificity. */
+  .p-topbar .p-chip.p-conn { font-size: 0; gap: 0; min-width: 0; padding: 5px 6px; }
+  .p-brand-service { min-width: 0; }
+  .p-nav.open {
+    display: flex;
+    flex-direction: column;
+    position: absolute;
+    top: calc(100% + 6px);
+    right: 10px;
+    margin-left: 0;
+    background: var(--p-bg);
+    border: 1px solid var(--p-line);
+    border-radius: 10px;
+    padding: 6px;
+    box-shadow: 0 10px 30px rgba(0, 0, 0, 0.45);
+  }
+  .p-nav.open a { padding: 9px 16px; }
+}
+
+/* ---- Topbar settings gear ---- */
+.p-gear {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 30px;
+  height: 30px;
+  border-radius: var(--p-radius-sm);
+  color: var(--p-muted);
+  text-decoration: none;
+  font-size: 20px;
+  line-height: 1;
+}
+.p-gear:hover { color: var(--p-ink); background: var(--p-panel-2); }
+.p-gear.active { color: var(--p-accent); background: var(--p-panel-2); }
+
+/* ---- Switch (settings toggles) ---- */
+.p-switch { position: relative; display: inline-block; width: 42px; height: 24px; flex-shrink: 0; }
+.p-switch input { opacity: 0; width: 0; height: 0; }
+.p-switch .track {
+  position: absolute;
+  inset: 0;
+  border-radius: 999px;
+  background: var(--p-panel-2);
+  border: 1px solid var(--p-line);
+  transition: background 140ms, border-color 140ms;
+  cursor: pointer;
+}
+.p-switch .track::before {
+  content: "";
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  background: var(--p-muted);
+  transition: transform 140ms, background 140ms;
+}
+.p-switch input:checked + .track { background: var(--p-accent); border-color: var(--p-accent); }
+.p-switch input:checked + .track::before { transform: translateX(18px); background: var(--p-accent-ink); }
+.p-switch input:focus-visible + .track { outline: 2px solid var(--p-accent-deep); outline-offset: 1px; }
+
+/* ---- Buttons ---- */
+.p-btn {
+  height: 32px;
+  padding: 0 12px;
+  border-radius: var(--p-radius-sm);
+  border: 1px solid var(--p-line);
+  background: var(--p-panel-2);
+  color: var(--p-ink);
+  font-size: 13px;
+  font-weight: 700;
+  cursor: pointer;
+  transition: border-color 120ms, background 120ms;
+}
+.p-btn:hover { border-color: var(--p-muted); }
+.p-btn:disabled { opacity: 0.45; cursor: not-allowed; }
+.p-btn.primary { background: var(--p-accent); border-color: var(--p-accent); color: var(--p-accent-ink); }
+/* In-product actions (vs. grey external links like "Open in Immich"). */
+.p-btn.accent { color: var(--p-accent); border-color: var(--p-accent-deep); }
+.p-btn.accent:hover { border-color: var(--p-accent); }
+.p-btn.accent:disabled:hover { border-color: var(--p-accent-deep); }
+.p-btn.primary:hover { background: #46e0cd; }
+.p-btn.danger { color: var(--p-danger); }
+.p-btn.gold { color: var(--p-gold); }
+.p-btn.quiet { background: transparent; }
+
+/* ---- Inputs ---- */
+.p-input, .p-select {
+  height: 32px;
+  border-radius: var(--p-radius-sm);
+  border: 1px solid var(--p-line);
+  background: var(--p-bg);
+  color: var(--p-ink);
+  font-size: 13px;
+  padding: 0 10px;
+}
+.p-input:focus, .p-select:focus, .p-btn:focus-visible {
+  outline: 2px solid var(--p-accent-deep);
+  outline-offset: 1px;
+}
+.p-input:disabled, .p-select:disabled { opacity: 0.45; cursor: not-allowed; }
+
+/* ---- Tabs ---- */
+.p-tabs { display: flex; gap: 6px; overflow-x: auto; }
+.p-tab {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  padding: 7px 12px;
+  border-radius: var(--p-radius-sm);
+  border: 1px solid var(--p-line);
+  background: var(--p-panel);
+  color: var(--p-ink);
+  font-size: 13px;
+  font-weight: 700;
+  white-space: nowrap;
+  cursor: pointer;
+}
+.p-tab .count { color: var(--p-muted); font-weight: 600; }
+.p-tab.active { background: var(--p-accent); border-color: var(--p-accent); color: var(--p-accent-ink); }
+.p-tab.active .count { color: var(--p-accent-ink); opacity: 0.75; }
+
+.p-tab-divider { width: 1px; align-self: stretch; background: var(--p-line); margin: 2px 8px; }
+
+/* ---- Cards / panels ---- */
+.p-panel { background: var(--p-panel); border: 1px solid var(--p-line); border-radius: var(--p-radius); }
+.p-card {
+  background: var(--p-panel);
+  border: 1px solid var(--p-line);
+  border-radius: var(--p-radius);
+  overflow: hidden;
+}
+.p-card.selected { outline: 2px solid var(--p-accent); outline-offset: -1px; }
+
+/* ---- Chips & badges ---- */
+.p-chip {
+  display: inline-block;
+  font-size: 11px;
+  font-weight: 600;
+  border: 1px solid var(--p-line);
+  border-radius: 999px;
+  padding: 1px 7px;
+  color: var(--p-muted);
+  background: var(--p-panel-2);
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.p-chip.accent { color: var(--p-accent); border-color: var(--p-accent-deep); }
+.p-chip.warn { color: var(--p-gold); border-color: #6d5410; }
+.p-chip.danger { color: var(--p-danger); border-color: #6e2f2f; }
+/* Topbar connection chip — fixed width so the top-right reads identically on every page. */
+.p-chip.p-conn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  min-width: 92px;
+}
+.p-badge {
+  position: absolute;
+  top: 8px;
+  left: 8px;
+  font-size: 11px;
+  font-weight: 800;
+  background: rgba(10, 13, 17, 0.82);
+  /* Pinned literals, not theme vars: the pill stays dark on photos in both
+     themes, so its text must too (light mode's ink is near-black). */
+  border: 1px solid #3a4450;
+  color: #e9eef4;
+  border-radius: 999px;
+  padding: 2px 8px;
+}
+.p-badge.gold { color: #fbbf24; border-color: rgba(251, 191, 36, 0.55); }
+/* The star's confidence ladder: silver = per-photo scores suggested the
+   pick; gold = the AI referee compared the group side by side. */
+.p-badge.silver { color: #c9d2dd; border-color: rgba(201, 210, 221, 0.5); }
+
+/* ---- Score bar ---- */
+.p-score { display: flex; align-items: center; gap: 6px; font-size: 11px; color: var(--p-muted); }
+.p-score-track { flex: 1; height: 4px; border-radius: 2px; background: var(--p-panel-2); overflow: hidden; }
+.p-score-fill { display: block; height: 100%; border-radius: 2px; background: var(--p-accent); }
+
+/* ---- Toast ---- */
+.p-toast {
+  position: fixed;
+  left: 50%;
+  bottom: 22px;
+  transform: translate(-50%, 12px);
+  background: var(--p-panel-2);
+  border: 1px solid var(--p-line);
+  color: var(--p-ink);
+  border-radius: var(--p-radius);
+  padding: 10px 16px;
+  font-size: 13px;
+  box-shadow: var(--p-shadow);
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 160ms, transform 160ms;
+  z-index: 60;
+  max-width: min(640px, 90vw);
+}
+.p-toast.visible { opacity: 1; transform: translate(-50%, 0); }
+.p-toast.error { border-color: var(--p-danger); }
+
+/* ---- Product / license footer ---- */
+.p-legal-footer {
+  width: min(calc(100% - 28px), var(--p-page-w));
+  margin: 12px auto 20px;
+  color: var(--p-muted);
+  font-size: 12px;
+  line-height: 1.5;
+  text-align: center;
+}
+.p-legal-footer a {
+  color: inherit;
+  text-decoration-color: var(--p-line);
+  text-underline-offset: 2px;
+}
+.p-legal-footer a:hover { color: var(--p-accent); }
+
+/* ---- Status dot ---- */
+.p-dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: var(--p-muted); vertical-align: 1px; }
+.p-dot.ok { background: var(--p-ok); }
+.p-dot.warn { background: var(--p-gold); }
+.p-dot.bad { background: var(--p-danger); }
+
+/* ---- Utility ---- */
+.p-muted { color: var(--p-muted); }
+.p-error { color: var(--p-danger); }
+.p-row { display: flex; align-items: center; gap: 10px; }
+.p-grow { flex: 1; min-width: 0; }
+
+/* Page-title glyphs — same icons as the home cards, scaled to the h1.
+   The gear renders visually smaller than the geometric glyphs, so it gets
+   a compensating bump here and on the home card. */
+h1 .glyph { color: var(--p-accent); font-size: 0.8em; }
+h1 .glyph-gear { font-size: 1em; }

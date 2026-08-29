@@ -1,0 +1,127 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  # Superseded PR runs are noise; every merged main commit keeps its record.
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
+
+jobs:
+  dco:
+    name: DCO sign-off
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 22
+      - name: Verify commit sign-offs
+        env:
+          DCO_BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.before }}
+          DCO_HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: npm run check:dco
+
+  test:
+    name: Server tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 22
+      - run: npm run check:publication
+      - run: npm test
+
+  upgrade-compatibility:
+    name: Upgrade compatibility
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 22
+      - name: Verify settings, migrations, persistent state, and backups
+        run: node --test test/settings.test.mjs test/migrations.test.mjs test/persistentState.test.mjs test/backup.test.mjs test/upgrade/upgrade-safety.test.mjs test/upgrade/whole-install.test.mjs
+
+  docker-build:
+    name: Container build and boot smoke
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Verify Compose forwards backup configuration
+        env:
+          IMMICH_BASE_URL: http://immich.invalid:2283
+          IMMICH_API_KEY: synthetic-ci-key
+          APP_PASSWORD: synthetic-ci-password
+          BACKUP_DIR: /backups
+          BACKUP_ENABLED: "false"
+          BACKUP_INTERVAL_HOURS: "6"
+          BACKUP_KEEP: "30"
+        run: |
+          docker compose config --format json | jq -e '
+            .services.pictaria.environment.BACKUP_DIR == "/backups" and
+            .services.pictaria.environment.BACKUP_ENABLED == "false" and
+            .services.pictaria.environment.BACKUP_INTERVAL_HOURS == "6" and
+            .services.pictaria.environment.BACKUP_KEEP == "30"
+          '
+          env -u BACKUP_DIR -u BACKUP_ENABLED \
+            -u BACKUP_INTERVAL_HOURS -u BACKUP_KEEP \
+            docker compose config --format json | jq -e '
+              .services.pictaria.environment.BACKUP_DIR == "" and
+              .services.pictaria.environment.BACKUP_ENABLED == "true" and
+              .services.pictaria.environment.BACKUP_INTERVAL_HOURS == "24" and
+              .services.pictaria.environment.BACKUP_KEEP == "7"
+            '
+      - name: Add nested publication probes
+        run: |
+          touch src/publication-probe.key
+          touch prompts/publication-probe.sqlite
+      - name: Build image (no push)
+        run: docker build -t pictaria-server:ci .
+      - name: Verify nested local files stay out of the image
+        run: |
+          docker run --rm --entrypoint sh pictaria-server:ci -c '
+            test ! -e /app/src/publication-probe.key &&
+            test ! -e /app/prompts/publication-probe.sqlite
+          '
+      - name: Default image refuses unauthenticated startup
+        run: |
+          if docker run --name pictaria-refuses-open pictaria-server:ci; then
+            echo "Container unexpectedly started without APP_PASSWORD"
+            exit 1
+          fi
+          docker logs pictaria-refuses-open 2>&1 \
+            | grep -F "ALLOW_INSECURE_OPEN=true"
+          docker rm pictaria-refuses-open
+      - name: Boot smoke test
+        run: |
+          docker run -d --name pictaria -p 4080:4080 \
+            -e APP_PASSWORD=ci-secret pictaria-server:ci
+          for i in $(seq 1 15); do
+            if curl -fsS http://127.0.0.1:4080/api/health \
+              | jq -e '.ok == true and .service == "pictaria-server"' > /dev/null; then
+              exit 0
+            fi
+            sleep 2
+          done
+          docker logs pictaria
+          exit 1
+      - name: Show container logs on failure
+        if: failure()
+        run: docker logs pictaria || true
+      - name: Stop smoke-test container
+        if: always()
+        run: docker rm -f pictaria pictaria-refuses-open || true

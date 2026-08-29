@@ -1,0 +1,6 @@
+Classify this image for Immich AI enrichment.
+
+Approved tags:
+{approved_tags}
+
+Return only JSON matching the configured schema.

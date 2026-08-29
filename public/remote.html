@@ -1,0 +1,911 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Pictaria — Remote</title>
+  <link rel="icon" type="image/png" sizes="32x32" href="/brand/favicon-32.png">
+  <link rel="apple-touch-icon" href="/brand/apple-touch-icon.png">
+  <script src="/theme.js"></script>
+  <script src="/auth-gate.js" defer></script>
+  <script src="/nav.js" defer></script>
+  <link rel="stylesheet" href="/pictaria.css">
+  <style>
+    /* Phone-first remote: narrow column, big touch targets. */
+    main {
+      width: min(100%, 460px);
+      margin: 0 auto;
+      padding: 18px 14px 28px;
+    }
+
+    .page-head {
+      display: flex;
+      align-items: flex-start;
+      justify-content: space-between;
+      gap: 18px;
+      margin-bottom: 18px;
+    }
+
+    h1 {
+      margin: 0;
+      font-size: 20px;
+      font-weight: 800;
+      letter-spacing: 0.2px;
+    }
+
+    section { margin-top: 14px; }
+
+    /* Device picker — only rendered when more than one frame is known. */
+    .device-picker {
+      display: flex;
+      gap: 8px;
+      margin-bottom: 12px;
+      overflow-x: auto;
+    }
+
+    .watchdog-warning {
+      background: #7f1d1d;
+      border-radius: 8px;
+      color: #fecaca;
+      font-size: 12.5px;
+      font-weight: 600;
+      line-height: 1.45;
+      margin-bottom: 10px;
+      padding: 7px 12px;
+    }
+    .device-chip {
+      display: inline-flex;
+      align-items: center;
+      gap: 7px;
+      min-height: 38px;
+      padding: 0 14px;
+      border: 1px solid var(--p-line);
+      border-radius: 999px;
+      background: var(--p-panel-2);
+      color: var(--p-ink);
+      cursor: pointer;
+      font: inherit;
+      font-size: 14px;
+      font-weight: 700;
+      white-space: nowrap;
+      touch-action: manipulation;
+    }
+
+    .device-chip.selected {
+      background: rgba(45, 212, 191, 0.12);
+      border-color: var(--p-accent-deep);
+      color: var(--p-accent);
+    }
+    /* On a phone the topbar's Pictaria + Remote badge already title the page. */
+    @media (max-width: 720px) { .page-head { display: none; } }
+
+    .controls-section { margin-top: 55px; }
+    /* Keep the transport buttons close under the photo on a phone. */
+    @media (max-width: 720px) { .controls-section { margin-top: 16px; } }
+
+    .surface {
+      background: var(--p-panel);
+      border: 1px solid var(--p-line);
+      border-radius: var(--p-radius);
+      overflow: hidden;
+    }
+
+    .now-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 10px;
+      padding: 12px 12px 10px;
+      border-bottom: 1px solid var(--p-line);
+    }
+
+    .queue {
+      color: var(--p-muted);
+      font-size: 13px;
+    }
+
+    .session-pill { max-width: 58%; }
+
+    .photos {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 1px;
+      background: var(--p-line);
+    }
+
+    .photos.single {
+      grid-template-columns: minmax(0, calc(50% - 1px));
+      justify-content: center;
+    }
+
+    .photo {
+      min-width: 0;
+      background: var(--p-panel);
+    }
+
+    .thumb {
+      display: block;
+      width: 100%;
+      aspect-ratio: 1 / 1;
+      object-fit: contain;
+      background: #0a0d11;
+    }
+
+    .caption {
+      min-height: 70px;
+      padding: 10px;
+      line-height: 1.3;
+    }
+
+    .caption strong {
+      display: block;
+      overflow-wrap: anywhere;
+      font-size: 14px;
+    }
+
+    .caption span {
+      display: block;
+      margin-top: 3px;
+      color: var(--p-muted);
+      font-size: 13px;
+      overflow-wrap: anywhere;
+    }
+
+    .empty {
+      padding: 22px 14px;
+      color: var(--p-muted);
+      text-align: center;
+    }
+
+    .controls {
+      display: grid;
+      grid-template-columns: 1fr 1fr 1fr;
+      gap: 8px;
+    }
+
+    /* Big touch buttons — the shared .p-btn (32px) is too small for a remote. */
+    .big-btn {
+      min-height: 48px;
+      border: 1px solid var(--p-line);
+      border-radius: var(--p-radius);
+      background: var(--p-panel-2);
+      color: var(--p-ink);
+      cursor: pointer;
+      font: inherit;
+      font-size: 15px;
+      font-weight: 700;
+      touch-action: manipulation;
+      transition: border-color 120ms, background 120ms;
+    }
+
+    .big-btn:active { transform: translateY(1px); }
+
+    .big-btn:disabled {
+      cursor: not-allowed;
+      opacity: 0.45;
+      transform: none;
+    }
+
+    .big-btn:focus-visible {
+      outline: 2px solid var(--p-accent-deep);
+      outline-offset: 1px;
+    }
+
+    .big-btn.accent {
+      background: rgba(45, 212, 191, 0.12);
+      border-color: var(--p-accent-deep);
+      color: var(--p-accent);
+      font-size: 18px;
+      font-weight: 800;
+    }
+
+    .big-btn.solid {
+      background: var(--p-accent);
+      border-color: var(--p-accent);
+      color: var(--p-accent-ink);
+      font-size: 16px;
+      font-weight: 800;
+    }
+
+    .big-btn.solid:hover { background: #46e0cd; }
+
+    .actions {
+      display: grid;
+      grid-template-columns: repeat(3, 46px);
+      justify-content: center;
+      gap: 14px;
+      margin-top: 8px;
+      padding-bottom: 10px;
+    }
+
+    .icon-action {
+      min-height: 46px;
+      min-width: 46px;
+      padding: 0;
+      font-size: 21px;
+      font-weight: 400;
+      line-height: 1;
+      border-radius: var(--p-radius-sm);
+    }
+
+    .icon-action.danger {
+      border-color: rgba(248, 113, 113, 0.55);
+      color: var(--p-danger);
+    }
+
+    details.surface { overflow: hidden; }
+
+    summary {
+      min-height: 48px;
+      padding: 14px 12px;
+      cursor: pointer;
+      font-weight: 700;
+    }
+
+    .album-list {
+      border-top: 1px solid var(--p-line);
+      max-height: 320px;
+      overflow: auto;
+    }
+
+    .album {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      width: 100%;
+      gap: 10px;
+      min-height: 48px;
+      padding: 0 14px;
+      border: 0;
+      border-radius: 0;
+      border-bottom: 1px solid var(--p-line);
+      background: transparent;
+      color: var(--p-ink);
+      cursor: pointer;
+      font: inherit;
+      font-size: 14px;
+      text-align: left;
+      touch-action: manipulation;
+    }
+
+    .album:last-child { border-bottom: 0; }
+
+    .album span:first-child {
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .album span:last-child {
+      color: var(--p-muted);
+      flex: 0 0 auto;
+      font-size: 13px;
+    }
+
+    .footer-actions { margin-top: 26px; }
+
+    .full-width { width: 100%; }
+
+    .reload-header { align-items: center; }
+
+    .reload-subtitle {
+      margin-top: 5px;
+      color: var(--p-muted);
+      font-size: 13px;
+      line-height: 1.35;
+    }
+
+    .reload-album {
+      position: relative;
+      padding-left: 46px;
+    }
+
+    .reload-album::before {
+      content: "";
+      position: absolute;
+      left: 14px;
+      width: 18px;
+      height: 18px;
+      border: 1px solid var(--p-line);
+      border-radius: 5px;
+      background: var(--p-panel-2);
+    }
+
+    .reload-album.selected {
+      background: rgba(45, 212, 191, 0.10);
+    }
+
+    .reload-album.selected::before {
+      background: var(--p-accent);
+      border-color: var(--p-accent);
+      box-shadow: inset 0 0 0 4px var(--p-panel);
+    }
+
+    .save-row {
+      display: grid;
+      grid-template-columns: 1fr;
+      gap: 8px;
+      margin-top: 14px;
+    }
+
+    .selection-count {
+      color: var(--p-muted);
+      font-size: 13px;
+      text-align: center;
+    }
+  </style>
+</head>
+<body>
+  <header class="p-topbar">
+    <a class="p-brand" href="/">
+      <img src="/brand/mark-128.png" alt="">
+      <img class="p-brand-word" src="/brand/wordmark.png" alt="Pictaria">
+      <span class="p-brand-service">Remote</span>
+    </a>
+    <span class="p-supporter-slot" aria-live="polite"></span>
+    <nav class="p-nav">
+      <a href="/insights.html">Insights</a>
+      <a href="/enrich.html">Enrich</a>
+      <a href="/curate.html">Curate</a>
+      <a href="/albums.html">Albums</a>
+      <a href="/metrics.html">Frame</a>
+      <a href="/remote.html" class="active">Remote</a>
+    </nav>
+    <div class="p-grow"></div>
+    <span id="connChip" class="p-chip p-conn"><span class="p-dot" id="dot"></span> <span id="connection">Connecting</span></span>
+    <a class="p-gear" href="/settings.html" title="Settings" aria-label="Settings">&#9881;</a>
+  </header>
+
+  <main class="screen" id="remoteScreen">
+    <header class="page-head">
+      <h1><span class="glyph">▷</span> Remote</h1>
+    </header>
+
+    <div class="device-picker" id="devicePicker" hidden></div>
+
+    <section class="surface">
+      <div class="now-header">
+        <div class="queue" id="queue">No frame state yet</div>
+        <div class="p-chip accent session-pill" id="session" hidden></div>
+      </div>
+      <div class="watchdog-warning" id="watchdogWarning" hidden></div>
+      <div class="photos" id="photos">
+        <div class="empty">Waiting for the frame...</div>
+      </div>
+    </section>
+
+    <section class="controls-section">
+      <div class="controls">
+        <button class="big-btn accent" data-command="previous" aria-label="Previous photo" title="Previous photo">&lt;&lt;</button>
+        <button class="big-btn accent" id="pauseButton" data-command="pause" aria-label="Pause slideshow" title="Pause slideshow">Ⅱ</button>
+        <button class="big-btn accent" data-command="next" aria-label="Next photo" title="Next photo">&gt;&gt;</button>
+      </div>
+    </section>
+
+    <section>
+      <details class="surface" id="albumsDetails">
+        <summary>Show 20 from...</summary>
+        <div class="album-list" id="albums"><div class="empty">Loading albums...</div></div>
+      </details>
+    </section>
+
+    <section class="footer-actions">
+      <button class="big-btn solid full-width" id="reloadButton">Reload</button>
+    </section>
+  </main>
+
+  <main class="screen" id="reloadScreen" hidden>
+    <header class="page-head reload-header">
+      <div>
+        <h1>Reload Albums</h1>
+        <div class="reload-subtitle" id="reloadSubtitle"></div>
+      </div>
+      <button class="p-btn quiet" id="reloadCancelButton">Cancel</button>
+    </header>
+
+    <section class="surface">
+      <div class="album-list" id="reloadAlbums"><div class="empty">Loading albums...</div></div>
+    </section>
+
+    <section class="save-row">
+      <div class="selection-count" id="reloadSelectionCount">0 selected</div>
+      <button class="big-btn solid full-width" id="reloadSaveButton" disabled>Save and Start</button>
+    </section>
+  </main>
+  <div class="p-toast" id="toast"></div>
+
+  <script>
+    // Mirrors MAX_FRAME_ALBUMS in src/frame/remote.mjs (which matches
+    // Pictaria Frame's album-selection limit). Every
+    // limit check and piece of copy below derives from this one constant so
+    // they cannot drift from each other.
+    const MAX_FRAME_ALBUMS = 5;
+
+    const state = {
+      albums: [],
+      albumsLoaded: false,
+      authRequired: false,
+      deviceInfo: {},   // deviceId -> {connected, lastStateAt} from /api/frame/status
+      devices: {},      // deviceId -> latest frame state from the SSE stream
+      online: false,
+      reloadSelectedAlbumIds: [],
+      selectedDevice: localStorage.getItem('pictariaRemoteDevice') || '',
+      status: null,
+    };
+
+    const devicePicker = document.getElementById('devicePicker');
+    const remoteScreen = document.getElementById('remoteScreen');
+    const reloadScreen = document.getElementById('reloadScreen');
+    const connChip = document.getElementById('connChip');
+    const dot = document.getElementById('dot');
+    const connection = document.getElementById('connection');
+    const queue = document.getElementById('queue');
+    const session = document.getElementById('session');
+    const watchdogWarning = document.getElementById('watchdogWarning');
+    const photos = document.getElementById('photos');
+    const pauseButton = document.getElementById('pauseButton');
+    const albumsDetails = document.getElementById('albumsDetails');
+    const albums = document.getElementById('albums');
+    const reloadButton = document.getElementById('reloadButton');
+    const reloadCancelButton = document.getElementById('reloadCancelButton');
+    const reloadSubtitle = document.getElementById('reloadSubtitle');
+    reloadSubtitle.textContent = `Select up to ${MAX_FRAME_ALBUMS} albums for the frame slideshow.`;
+    const reloadAlbums = document.getElementById('reloadAlbums');
+    const reloadSelectionCount = document.getElementById('reloadSelectionCount');
+    const reloadSaveButton = document.getElementById('reloadSaveButton');
+    const toast = document.getElementById('toast');
+    let toastTimer = null;
+    let events = null;
+    let eventReconnectTimer = null;
+    let lastAuthProbe = 0;
+
+    boot();
+
+    document.addEventListener('visibilitychange', () => {
+      if (!document.hidden) {
+        refreshStatus();
+      }
+    });
+
+    document.querySelectorAll('[data-command]').forEach((button) => {
+      button.addEventListener('click', () => sendCommand({ command: button.dataset.command }));
+    });
+
+    albumsDetails.addEventListener('toggle', () => {
+      if (albumsDetails.open && !state.albumsLoaded) {
+        loadAlbums();
+      }
+    });
+
+    reloadButton.addEventListener('click', () => {
+      openReloadScreen();
+    });
+
+    reloadCancelButton.addEventListener('click', () => {
+      showRemoteScreen();
+    });
+
+    reloadSaveButton.addEventListener('click', async () => {
+      if (state.reloadSelectedAlbumIds.length === 0) {
+        return;
+      }
+
+      await sendCommand({
+        command: 'reload-albums',
+        albumIds: state.reloadSelectedAlbumIds,
+      });
+      showRemoteScreen();
+    });
+
+    function boot() {
+      // EventSource and <img> automatically send the HttpOnly session cookie
+      // established by the shared authentication gate.
+      connectEvents();
+      refreshStatus();
+    }
+
+    // ---------- Auth ----------
+    async function api(path, options = {}) {
+      const headers = { ...(options.headers || {}) };
+      if (options.body) headers['content-type'] = 'application/json';
+      const response = await fetch(path, { cache: 'no-store', ...options, headers });
+      if (response.status === 401) {
+        requirePassword();
+        throw new Error('App password required — enter it and press Connect');
+      }
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(payload?.error?.message || `Request failed (${response.status})`);
+      setConnected(true);
+      return payload;
+    }
+
+    function setConnected(connected) {
+      if (!connected) return;
+      state.authRequired = false;
+      connChip.hidden = false;
+    }
+
+    function requirePassword() {
+      state.authRequired = true;
+      connChip.hidden = true;
+      window.pictariaGate.show();
+    }
+
+    // ---------- Live frame events ----------
+    function connectEvents() {
+      clearTimeout(eventReconnectTimer);
+      eventReconnectTimer = null;
+      if (events) events.close();
+      events = new EventSource('/api/frame/events?role=remote');
+
+      events.addEventListener('open', () => {
+        state.online = true;
+        refreshStatus();
+        renderConnection();
+      });
+
+      events.addEventListener('error', () => {
+        state.online = false;
+        renderConnection();
+        // EventSource fails opaquely on 401 — probe the status endpoint so a
+        // missing/stale password surfaces the Connect prompt (throttled;
+        // EventSource retries on its own).
+        const now = Date.now();
+        if (!state.authRequired && now - lastAuthProbe > 5000) {
+          lastAuthProbe = now;
+          refreshStatus();
+        }
+        // Browsers retry an interrupted 200 SSE stream themselves, but an
+        // initial capacity 503 leaves EventSource permanently CLOSED. Recreate
+        // only that terminal case so a waiting Remote recovers when a slot is
+        // released; ordinary network reconnects keep native EventSource timing.
+        if (events.readyState === EventSource.CLOSED && !eventReconnectTimer) {
+          eventReconnectTimer = setTimeout(() => {
+            eventReconnectTimer = null;
+            if (!state.authRequired) connectEvents();
+          }, 5000);
+        }
+      });
+
+      events.addEventListener('state', (event) => {
+        const frame = JSON.parse(event.data);
+        const deviceId = frame.deviceId || 'frame';
+        state.devices[deviceId] = frame;
+        // A device that just reported is alive right now, whatever the last
+        // status poll said.
+        state.deviceInfo[deviceId] = { ...(state.deviceInfo[deviceId] || {}), connected: true, lastStateAt: frame.updatedAt };
+        state.online = true;
+        state.status = { ...(state.status || {}), frameConnected: true };
+        ensureDeviceSelection();
+        render();
+      });
+    }
+
+    async function refreshStatus() {
+      try {
+        state.status = await api('/api/frame/status');
+        state.deviceInfo = {};
+        for (const device of state.status.devices || []) {
+          state.deviceInfo[device.deviceId] = device;
+        }
+        // A device deleted in Settings vanishes from status — drop its
+        // remembered SSE state so the chip disappears here too.
+        for (const deviceId of Object.keys(state.devices)) {
+          if (!state.deviceInfo[deviceId]) {
+            delete state.devices[deviceId];
+          }
+        }
+        ensureDeviceSelection();
+        render();
+      } catch {
+        state.status = null;
+        renderConnection();
+      }
+    }
+
+    // ---------- Devices ----------
+    function knownDeviceIds() {
+      return [...new Set([...Object.keys(state.devices), ...Object.keys(state.deviceInfo)])].sort();
+    }
+
+    function currentFrame() {
+      return state.devices[state.selectedDevice] || null;
+    }
+
+    function deviceOnline(deviceId) {
+      // Named connections only. Unnamed legacy connections no longer count:
+      // targeted commands never reach them (the hub routes strictly by
+      // name), so calling this chip "online" would pair a green dot with
+      // guaranteed "not delivered" toasts. Legacy frames must update.
+      return Boolean(state.deviceInfo[deviceId] && state.deviceInfo[deviceId].connected);
+    }
+
+    function ensureDeviceSelection() {
+      const ids = knownDeviceIds();
+      if (!ids.length || ids.includes(state.selectedDevice)) {
+        return;
+      }
+      // Default to the device that reported most recently.
+      const lastStateAt = (id) => (state.devices[id] && state.devices[id].updatedAt)
+        || (state.deviceInfo[id] && state.deviceInfo[id].lastStateAt) || '';
+      state.selectedDevice = ids.slice().sort((a, b) => lastStateAt(b).localeCompare(lastStateAt(a)))[0];
+      localStorage.setItem('pictariaRemoteDevice', state.selectedDevice);
+    }
+
+    function selectDevice(deviceId) {
+      state.selectedDevice = deviceId;
+      localStorage.setItem('pictariaRemoteDevice', deviceId);
+      render();
+    }
+
+    async function loadAlbums() {
+      try {
+        state.albums = await api('/api/frame/albums');
+        state.albumsLoaded = true;
+
+        renderShowAlbumList();
+        renderReloadAlbumList();
+      } catch {
+        state.albums = [];
+        albums.innerHTML = '<div class="empty">Could not load albums.</div>';
+        reloadAlbums.innerHTML = '<div class="empty">Could not load albums.</div>';
+      }
+    }
+
+    function renderShowAlbumList() {
+      albums.innerHTML = '';
+
+      if (!state.albums.length) {
+        albums.innerHTML = '<div class="empty">No albums found.</div>';
+        return;
+      }
+
+      for (const album of state.albums) {
+        const button = document.createElement('button');
+        button.className = 'album';
+        button.innerHTML = `<span></span><span></span>`;
+        button.children[0].textContent = album.albumName;
+        button.children[1].textContent = typeof album.assetCount === 'number' ? album.assetCount.toLocaleString() : '';
+        button.addEventListener('click', () => sendCommand({
+          command: 'show-album',
+          albumId: album.id,
+          albumName: album.albumName,
+        }));
+        albums.appendChild(button);
+      }
+    }
+
+    function renderReloadAlbumList() {
+      reloadAlbums.innerHTML = '';
+
+      if (!state.albums.length) {
+        reloadAlbums.innerHTML = '<div class="empty">No albums found.</div>';
+        return;
+      }
+
+      for (const album of state.albums) {
+        const button = document.createElement('button');
+        const isSelected = state.reloadSelectedAlbumIds.includes(album.id);
+        button.className = `album reload-album${isSelected ? ' selected' : ''}`;
+        button.innerHTML = `<span></span><span></span>`;
+        button.children[0].textContent = album.albumName;
+        button.children[1].textContent = typeof album.assetCount === 'number' ? album.assetCount.toLocaleString() : '';
+        button.addEventListener('click', () => toggleReloadAlbum(album.id));
+        reloadAlbums.appendChild(button);
+      }
+
+      renderReloadSelectionCount();
+    }
+
+    function toggleReloadAlbum(albumId) {
+      if (state.reloadSelectedAlbumIds.includes(albumId)) {
+        state.reloadSelectedAlbumIds = state.reloadSelectedAlbumIds.filter((selectedAlbumId) => selectedAlbumId !== albumId);
+      } else if (state.reloadSelectedAlbumIds.length >= MAX_FRAME_ALBUMS) {
+        showToast(`Choose up to ${MAX_FRAME_ALBUMS} albums.`);
+        return;
+      } else {
+        state.reloadSelectedAlbumIds = [...state.reloadSelectedAlbumIds, albumId];
+      }
+
+      renderReloadAlbumList();
+    }
+
+    function renderReloadSelectionCount() {
+      const count = state.reloadSelectedAlbumIds.length;
+      reloadSelectionCount.textContent = count === 1 ? '1 selected' : `${count} selected`;
+      reloadSaveButton.disabled = count === 0;
+    }
+
+    async function openReloadScreen() {
+      remoteScreen.hidden = true;
+      reloadScreen.hidden = false;
+      state.reloadSelectedAlbumIds = Array.isArray(currentFrame()?.selectedAlbumIds)
+        ? currentFrame().selectedAlbumIds.slice(0, MAX_FRAME_ALBUMS)
+        : [];
+      renderReloadSelectionCount();
+
+      if (!state.albumsLoaded) {
+        await loadAlbums();
+      } else {
+        renderReloadAlbumList();
+      }
+    }
+
+    function showRemoteScreen() {
+      reloadScreen.hidden = true;
+      remoteScreen.hidden = false;
+    }
+
+    async function sendCommand(command) {
+      if (!confirmCommand(command)) {
+        return;
+      }
+
+      try {
+        const payload = state.selectedDevice ? { deviceId: state.selectedDevice, ...command } : command;
+        const result = await api('/api/frame/command', {
+          method: 'POST',
+          body: JSON.stringify(payload),
+        });
+        const sentLabel = knownDeviceIds().length > 1 ? `Sent to ${state.selectedDevice}.` : 'Sent to frame.';
+        // delivered: false is authoritative now — the server no longer
+        // broadcasts a targeted command to other frames and calls it a hit.
+        const offlineLabel = state.selectedDevice && knownDeviceIds().length > 1
+          ? `${state.selectedDevice} is offline — command not delivered.`
+          : 'Frame offline — command not delivered.';
+        showToast(result.delivered ? sentLabel : offlineLabel);
+      } catch (error) {
+        showToast(error && error.message ? error.message : 'Remote command failed.');
+      }
+    }
+
+    function confirmCommand(command) {
+      if (command.command === 'favorite') {
+        return window.confirm('Favorite this photo?');
+      }
+
+      if (command.command === 'never-show') {
+        return window.confirm('Hide this photo forever?');
+      }
+
+      return true;
+    }
+
+    function render() {
+      renderConnection();
+      renderDevicePicker();
+      renderState();
+    }
+
+    function renderConnection() {
+      if (state.authRequired) return;
+      const multiDevice = knownDeviceIds().length > 1;
+      const frameConnected = state.selectedDevice
+        ? deviceOnline(state.selectedDevice)
+        : Boolean(state.status && state.status.frameConnected);
+      dot.className = `p-dot ${frameConnected ? 'ok' : state.online ? 'warn' : 'bad'}`;
+      connection.textContent = frameConnected
+        ? (multiDevice ? `${state.selectedDevice} online` : 'Frame online')
+        : state.online ? 'Waiting' : 'Offline';
+    }
+
+    function renderDevicePicker() {
+      const ids = knownDeviceIds();
+      devicePicker.hidden = ids.length < 2;
+      if (devicePicker.hidden) {
+        devicePicker.innerHTML = '';
+        return;
+      }
+
+      devicePicker.innerHTML = '';
+      for (const deviceId of ids) {
+        const chip = document.createElement('button');
+        chip.className = `device-chip${deviceId === state.selectedDevice ? ' selected' : ''}`;
+        chip.innerHTML = '<span class="p-dot"></span><span></span>';
+        chip.children[0].classList.add(deviceOnline(deviceId) ? 'ok' : 'bad');
+        chip.children[1].textContent = deviceId;
+        chip.addEventListener('click', () => selectDevice(deviceId));
+        devicePicker.appendChild(chip);
+      }
+    }
+
+    function renderState() {
+      const frame = currentFrame();
+      if (!frame) {
+        queue.textContent = 'No frame state yet';
+        session.hidden = true;
+        watchdogWarning.hidden = true;
+        photos.innerHTML = '<div class="empty">Waiting for the frame...</div>';
+        photos.className = 'photos';
+        pauseButton.textContent = 'Ⅱ';
+        pauseButton.dataset.command = 'pause';
+        pauseButton.setAttribute('aria-label', 'Pause slideshow');
+        pauseButton.title = 'Pause slideshow';
+        return;
+      }
+
+      const length = Number(frame.queue && frame.queue.length) || 0;
+      const index = Number(frame.queue && frame.queue.index) || 0;
+      queue.textContent = length > 0 ? `${Math.min(index + 1, length).toLocaleString()} / ${length.toLocaleString()}` : 'Queue ready';
+
+      // White-screen watchdog: the frame reports an episode while it is
+      // active; the first healthy state report clears it.
+      if (frame.watchdog && frame.watchdog.whiteScreenSince) {
+        const since = new Date(frame.watchdog.whiteScreenSince);
+        const sinceLabel = Number.isNaN(since.getTime())
+          ? frame.watchdog.whiteScreenSince
+          : since.toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' });
+        const attempts = Number(frame.watchdog.recoveryAttempts) || 0;
+        // Layer forensics (v3 apps): where the wedge sits. "0 load starts"
+        // means image requests never reach the native pipeline.
+        const forensics = [];
+        if (typeof frame.watchdog.loadStartsSinceEpisode === 'number') {
+          forensics.push(`${frame.watchdog.loadStartsSinceEpisode} load starts`);
+        }
+        if (typeof frame.watchdog.imageErrorsSinceEpisode === 'number' && frame.watchdog.imageErrorsSinceEpisode > 0) {
+          forensics.push(`${frame.watchdog.imageErrorsSinceEpisode} image errors`);
+        }
+        if (frame.watchdog.imagesSummary) {
+          forensics.push(frame.watchdog.imagesSummary);
+        }
+        watchdogWarning.textContent = `⚠ Photos are not rendering on this frame (white-screen watchdog, since ${sinceLabel}`
+          + (attempts ? `, ${attempts} recovery ${attempts === 1 ? 'attempt' : 'attempts'}` : '')
+          + (forensics.length ? `; ${forensics.join(', ')}` : '') + ')';
+        watchdogWarning.hidden = false;
+      } else {
+        watchdogWarning.hidden = true;
+      }
+      pauseButton.textContent = frame.paused ? '▶' : 'Ⅱ';
+      pauseButton.dataset.command = frame.paused ? 'resume' : 'pause';
+      pauseButton.setAttribute('aria-label', frame.paused ? 'Resume slideshow' : 'Pause slideshow');
+      pauseButton.title = frame.paused ? 'Resume slideshow' : 'Pause slideshow';
+
+      if (frame.session && frame.session.type && frame.session.type !== 'normal') {
+        session.hidden = false;
+        session.textContent = frame.session.title || frame.session.type;
+      } else {
+        session.hidden = true;
+      }
+
+      photos.innerHTML = '';
+      photos.className = frame.assets.length === 1 ? 'photos single' : 'photos';
+      for (const [index, asset] of frame.assets.entries()) {
+        photos.appendChild(renderPhoto(asset, frame.assets.length === 2 ? (index === 0 ? 'left' : 'right') : ''));
+      }
+    }
+
+    function renderPhoto(asset, target) {
+      const root = document.createElement('div');
+      root.className = 'photo';
+
+      const image = document.createElement('img');
+      image.className = 'thumb';
+      image.alt = '';
+      image.src = `/api/frame/asset-thumbnail/${encodeURIComponent(asset.id)}`;
+
+      const caption = document.createElement('div');
+      caption.className = 'caption';
+      caption.innerHTML = '<strong></strong><span></span>';
+      caption.children[0].textContent = asset.locationLabel || 'Unknown location';
+      caption.children[1].textContent = asset.dateLabel || 'Unknown date';
+
+      const actions = document.createElement('div');
+      actions.className = 'actions';
+      actions.innerHTML = '<button class="big-btn icon-action" aria-label="Favorite photo" title="Favorite photo">♡</button><button class="big-btn icon-action" aria-label="More from this day" title="More from this day">▣</button><button class="big-btn icon-action danger" aria-label="Hide photo" title="Hide photo">⊘</button>';
+      actions.children[0].addEventListener('click', () => sendCommand({ command: 'favorite', ...(target ? { target } : {}) }));
+      actions.children[1].addEventListener('click', () => sendCommand({ command: 'more', ...(target ? { target } : {}) }));
+      actions.children[2].addEventListener('click', () => sendCommand({ command: 'never-show', ...(target ? { target } : {}) }));
+
+      root.append(image, caption, actions);
+      return root;
+    }
+
+    function showToast(message) {
+      toast.textContent = message;
+      toast.classList.add('visible');
+      clearTimeout(toastTimer);
+      toastTimer = setTimeout(() => toast.classList.remove('visible'), 2200);
+    }
+  </script>
+</body>
+</html>
