@@ -331,17 +331,36 @@ server.on('checkExpectation', (request, response) => {
   response.end();
 });
 
-server.listen(config.port, config.host, () => {
-  console.log(`Pictaria Server listening on http://${config.host}:${config.port}`);
-  activityLog.systemStarted({ serverVersion });
-  const missing = missingImmichSettings(config);
-  if (missing.length > 0) {
-    console.warn(`Missing configuration: ${missing.join(', ')}`);
-  }
-  if (!config.appPassword) {
-    console.warn('ALLOW_INSECURE_OPEN=true: APP_PASSWORD is not set; the API is open to your network.');
-  }
-});
+function startServer(hostToBind) {
+  // Catch binding errors (e.g., IPv6 disabled on system)
+  const onError = (err) => {
+    if (hostToBind === '::' && (err.code === 'EAFNOSUPPORT' || err.code === 'EADDRNOTAVAIL')) {
+      console.warn(`[Network] Binding to IPv6 (::) failed (${err.code}). Falling back to IPv4 (0.0.0.0)...`);
+      server.off('error', onError);
+      startServer('0.0.0.0');
+    } else {
+      console.error('Fatal server error:', err);
+      process.exit(1);
+    }
+  };
+
+  server.once('error', onError);
+
+  server.listen(config.port, hostToBind, () => {
+    server.off('error', onError); // Clear error listener on successful start
+    console.log(`Pictaria Server listening on http://${hostToBind}:${config.port}`);
+    activityLog.systemStarted({ serverVersion });
+    const missing = missingImmichSettings(config);
+    if (missing.length > 0) {
+      console.warn(`Missing configuration: ${missing.join(', ')}`);
+    }
+    if (!config.appPassword) {
+      console.warn('ALLOW_INSECURE_OPEN=true: APP_PASSWORD is not set; the API is open to your network.');
+    }
+  });
+}
+
+startServer(config.host);
 
 process.on('SIGINT', () => shutdown('SIGINT', 0));
 process.on('SIGTERM', () => shutdown('SIGTERM', 0));
