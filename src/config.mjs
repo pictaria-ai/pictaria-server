@@ -9,7 +9,7 @@ export function loadConfig(env = process.env) {
   const persistentStateInventoryPath = join(dirname(settingsPath), 'persistent-state.json');
   const config = {
     rootDir: ROOT_DIR,
-    host: env.HOST || '0.0.0.0',
+    host: env.HOST || '::',
     port: parseInteger(env.PORT, 4080),
     appPassword: env.APP_PASSWORD || '',
     // Open mode is retained for deliberate trusted-network deployments, but
