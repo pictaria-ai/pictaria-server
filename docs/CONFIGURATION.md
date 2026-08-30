@@ -92,7 +92,7 @@ normalizes that one trailing segment if supplied.
 
 | Variable | Default | Notes |
 | --- | --- | --- |
-| `HOST` | `0.0.0.0` | Listen address. Bind no wider than you need — e.g. a Tailscale address serves only your own devices; see [Exposing beyond your LAN](../README.md#exposing-beyond-your-lan). |
+| `HOST` | `0.0.0.0` | Listen address. Bind no wider than you need — e.g. a Tailscale address serves only your own devices; see [Exposing beyond your LAN](../README.md#exposing-beyond-your-lan). | Use `HOST=::` for dual stack support.
 | `PORT` | `4080` | Listen port. |
 | `SESSION_COOKIE_SECURE` | `false` | Adds the `Secure` attribute to the browser session cookie so it is never sent over plain HTTP. Set to `true` **only** when the server is reached exclusively through an HTTPS reverse proxy — with it on, login over plain `http://` stops working. The proxy must preserve the public `Host` header so cookie-authenticated mutations can pass Pictaria's same-origin check; TLS may still terminate at the proxy. See [Exposing beyond your LAN](../README.md#exposing-beyond-your-lan). |
 | `BROWSER_ALLOWED_HOSTS` | *(empty)* | Comma-separated browser-facing hosts or `host:port` authorities allowed to serve the UI, use cookie sessions, and reach the API in deliberate open mode. Add each public custom domain explicitly; IP addresses, single-label LAN names, `.local`, `.home.arpa`, and Tailscale `.ts.net` names work without an entry. Values are hosts, not URLs, and an entry with a port matches only that port. See [Exposing beyond your LAN](../README.md#exposing-beyond-your-lan). |
