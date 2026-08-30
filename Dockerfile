@@ -14,7 +14,7 @@ COPY bin/ bin/
 
 # All persistent state lives in one mountable volume.
 ENV NODE_ENV=production \
-    HOST=0.0.0.0 \
+    HOST=:: \
     PORT=4080 \
     DATABASE_PATH=/data/enrichment.sqlite \
     ALBUMS_DATA_FILE=/data/smart-albums.json \
@@ -31,6 +31,6 @@ USER node
 EXPOSE 4080
 
 HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
-  CMD wget -qO- "http://127.0.0.1:${PORT}/api/health" > /dev/null || exit 1
+  CMD wget -qO- "http://localhost:${PORT}/api/health" > /dev/null || exit 1
 
 CMD ["node", "src/server.mjs"]
