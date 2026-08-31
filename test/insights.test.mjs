@@ -11,7 +11,6 @@ import {
   MAX_INSIGHTS_DECODED_BYTES_PER_ASSET,
   MAX_INSIGHTS_IDENTIFIER_LENGTH,
   MAX_INSIGHTS_METADATA_FIELD_BYTES,
-  MAX_INSIGHTS_METADATA_ITEMS_PER_ASSET,
   MAX_INSIGHTS_NESTED_ITEMS_PER_ASSET,
   MAX_INSIGHTS_PEOPLE_PER_ASSET,
   MIN_INSIGHTS_SWEEP_FREE_BYTES,
@@ -366,19 +365,59 @@ test('asset metadata and relationships enforce exact per-asset boundaries before
     new RegExp(`${MAX_INSIGHTS_NESTED_ITEMS_PER_ASSET}-nested-item limit`),
   );
   assert.throws(
-    () => mapAsset(makeAsset('too-many-metadata', {
-      exifInfo: Object.fromEntries(
-        Array.from({ length: MAX_INSIGHTS_METADATA_ITEMS_PER_ASSET + 1 }, (_, index) => [`field${index}`, index]),
-      ),
+    () => mapAsset(makeAsset('decoded-person-row', {
+      people: [{
+        id: 'p1',
+        ...Object.fromEntries(
+          Array.from({ length: 33 }, (_, index) => [`field${index}`, 'x'.repeat(MAX_INSIGHTS_METADATA_FIELD_BYTES)]),
+        ),
+      }],
     })),
-    /128-metadata-item limit/,
+    new RegExp(`${MAX_INSIGHTS_DECODED_BYTES_PER_ASSET}-decoded-byte limit`),
+  );
+  const unusedExif = Object.fromEntries(
+    Array.from({ length: 256 }, (_, index) => [`unusedField${index}`, 'x'.repeat(8192)]),
+  );
+  const cleanBudget = createInsightsSweepBudget();
+  const unusedBudget = createInsightsSweepBudget();
+  mapAsset(makeAsset('same-size-id', { exifInfo: {} }), { budget: cleanBudget });
+  const ignored = mapAsset(makeAsset('same-size-id', {
+    exifInfo: {
+      ...unusedExif,
+      description: 'x'.repeat(MAX_INSIGHTS_METADATA_FIELD_BYTES + 1),
+      profileDescription: 'y'.repeat(MAX_INSIGHTS_METADATA_FIELD_BYTES + 1),
+    },
+  }), { budget: unusedBudget });
+  assert.equal(ignored.city, 'San Francisco');
+  assert.deepEqual(
+    unusedBudget.status(),
+    cleanBudget.status(),
+    'unused EXIF fields do not consume the retained-data sweep budget',
   );
 
   const exactUtf8 = '🙂'.repeat(MAX_INSIGHTS_METADATA_FIELD_BYTES / 4);
   assert.equal(mapAsset(makeAsset('utf8-exact', { exifInfo: { city: exactUtf8 } })).city, exactUtf8);
   assert.throws(
     () => mapAsset(makeAsset('utf8-over', { exifInfo: { city: `${exactUtf8}🙂` } })),
-    /oversized EXIF metadata/,
+    /oversized or empty city/,
+  );
+  assert.throws(
+    () => mapAsset(makeAsset('malformed-city', { exifInfo: { city: { nested: true } } })),
+    /invalid city on asset malformed-city/,
+  );
+  const malformedNumbers = mapAsset(makeAsset('malformed-numbers', {
+    exifInfo: {
+      latitude: 'north',
+      longitude: 181,
+      fileSizeInByte: 'unknown',
+    },
+  }));
+  assert.equal(malformedNumbers.lat, null);
+  assert.equal(malformedNumbers.lon, null);
+  assert.equal(malformedNumbers.fileSize, null);
+  assert.deepEqual(
+    malformedNumbers.omittedMetadataFields,
+    ['fileSizeInByte', 'latitude', 'longitude'],
   );
 
   for (const asset of [
@@ -390,17 +429,76 @@ test('asset metadata and relationships enforce exact per-asset boundaries before
     assert.throws(() => mapAsset(asset), /invalid .* identifier/);
   }
 
-  const metadataFieldsToExceedAssetBytes = Math.floor(
-    MAX_INSIGHTS_DECODED_BYTES_PER_ASSET / MAX_INSIGHTS_METADATA_FIELD_BYTES,
-  ) + 1;
-  const manyFields = Object.fromEntries(Array.from({ length: metadataFieldsToExceedAssetBytes }, (_, index) => [
-    `field${index}`,
-    'x'.repeat(MAX_INSIGHTS_METADATA_FIELD_BYTES),
-  ]));
-  assert.throws(
-    () => mapAsset({ id: 'asset-bytes', type: 'IMAGE', exifInfo: manyFields }),
-    new RegExp(`${MAX_INSIGHTS_DECODED_BYTES_PER_ASSET}-decoded-byte limit`),
-  );
+});
+
+test('collector publishes assets with oversized unused EXIF fields', async () => {
+  await withRepoAsync(async (repo) => {
+    const asset = makeAsset('long-unused-exif', {
+      exifInfo: {
+        description: 'x'.repeat(MAX_INSIGHTS_METADATA_FIELD_BYTES * 4),
+        profileDescription: 'y'.repeat(MAX_INSIGHTS_METADATA_FIELD_BYTES * 4),
+      },
+    });
+    const collector = new InsightsCollector({ repo, immich: new FakeImmich([asset], []), config: CONFIG });
+    collector.start();
+    await waitForIdle(collector);
+
+    assert.equal(collector.status().phase, 'done');
+    assert.equal(repo.sweepTotals().assetsSwept, 1);
+    assert.deepEqual(collector.snapshot().metadataOmissions, { total: 0, fields: {} });
+  });
+});
+
+test('collector omits malformed numeric EXIF, counts it, and still publishes every asset', async () => {
+  await withRepoAsync(async (repo) => {
+    const assets = [
+      makeAsset('invalid-numbers', {
+        exifInfo: { latitude: 'north', longitude: 181, fileSizeInByte: 'unknown' },
+      }),
+      makeAsset('valid-neighbor'),
+    ];
+    const messages = [];
+    const collector = new InsightsCollector({
+      repo,
+      immich: new FakeImmich(assets, []),
+      config: CONFIG,
+      log: (message) => messages.push(message),
+    });
+    collector.start();
+    await waitForIdle(collector);
+
+    assert.equal(collector.status().phase, 'done');
+    assert.equal(collector.status().progress.metadataOmissions, 3);
+    assert.equal(repo.sweepTotals().assetsSwept, 2);
+    assert.deepEqual(collector.snapshot().metadataOmissions, {
+      total: 3,
+      fields: { fileSizeInByte: 1, latitude: 1, longitude: 1 },
+    });
+    assert.ok(messages.some((message) => /omitted 3 invalid metadata values/.test(message)));
+  });
+});
+
+test('collector names malformed used EXIF fields and removes staging without replacing a snapshot', async () => {
+  await withRepoAsync(async (repo) => {
+    const seed = new InsightsCollector({ repo, immich: new FakeImmich([makeAsset('old')], []), config: CONFIG });
+    seed.start();
+    await waitForIdle(seed);
+    const baseline = repo.getMeta('snapshot');
+
+    const malformed = makeAsset('bad-city', {
+      exifInfo: { city: 'x'.repeat(MAX_INSIGHTS_METADATA_FIELD_BYTES + 1) },
+    });
+    const collector = new InsightsCollector({ repo, immich: new FakeImmich([malformed], []), config: CONFIG });
+    collector.start();
+    await waitForIdle(collector);
+
+    assert.equal(collector.status().phase, 'error');
+    assert.match(collector.status().error, /oversized or empty city on asset bad-city/);
+    assert.deepEqual(repo.getMeta('snapshot'), baseline);
+    assert.equal(repo.sweepTotals().assetsSwept, 1);
+    const staging = repo.db.prepare("SELECT COUNT(*) AS n FROM sqlite_master WHERE name LIKE '%_staging'").get().n;
+    assert.equal(staging, 0);
+  });
 });
 
 test('aggregate Insights sweep budgets reject before the failing page write and clean staging', async () => {

@@ -16,6 +16,15 @@
     .intro { color: var(--p-muted); font-size: 13px; margin: -10px 0 18px; line-height: 1.5; }
     .page-head h1 { font-size: 20px; font-weight: 800; letter-spacing: 0.2px; margin: 0; }
     .freshness { color: var(--p-muted); font-size: 13px; }
+    .refresh-error {
+      margin: 0 0 16px;
+      padding: 10px 12px;
+      border: 1px solid color-mix(in srgb, var(--p-danger) 55%, transparent);
+      border-radius: 8px;
+      color: var(--p-danger);
+      background: color-mix(in srgb, var(--p-danger) 8%, transparent);
+      font-size: 13px;
+    }
     .hero-tiles { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 12px; margin-bottom: 22px; }
     .tile { padding: 14px 16px; }
     .tile .num { font-size: 24px; font-weight: 800; letter-spacing: 0.2px; }
@@ -377,6 +386,7 @@
       or location to see details and send groups to
       <a href="/enrich.html" style="color: var(--p-accent)">Enrich</a> or
       <a href="/curate.html" style="color: var(--p-accent)">Curate</a>.</p>
+    <p id="refreshError" class="refresh-error" role="alert" hidden></p>
 
     <div id="empty" class="p-panel empty" hidden>
       <h2>No snapshot yet</h2>

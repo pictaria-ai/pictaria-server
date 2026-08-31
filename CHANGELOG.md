@@ -5,6 +5,14 @@ All notable changes to Pictaria Server are documented here. This project follows
 
 ## Unreleased
 
+### Fixed
+
+- Insights ignores oversized Immich EXIF fields it does not store, while
+  retaining strict bounds for metadata it uses. Malformed numeric metadata is
+  left blank, counted, and reported without dropping the asset or the sweep.
+  Refresh failures remain visible even when a run ends before the first status
+  poll observes it.
+
 ## 1.0.0 - 2026-08-28
 
 The first public release of Pictaria Server: a self-hosted companion for
