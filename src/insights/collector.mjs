@@ -18,7 +18,6 @@ const PEOPLE_TRAVERSAL_TIMEOUT_MS = 60_000;
 
 export const MAX_INSIGHTS_IDENTIFIER_LENGTH = 128;
 export const MAX_INSIGHTS_PEOPLE_PER_ASSET = 100;
-export const MAX_INSIGHTS_METADATA_ITEMS_PER_ASSET = 128;
 export const MAX_INSIGHTS_METADATA_FIELD_BYTES = 4 * 1024;
 // Immich's PersonWithFaces response carries roughly twenty structural items
 // per recognized face. These per-record ceilings leave useful margin above
@@ -195,7 +194,7 @@ export class InsightsCollector {
     const startedMs = Date.now();
     const sweepBudget = createInsightsSweepBudget(this.sweepBudgetLimits);
     try {
-      const { truncated } = await this.#sweepAssets(sweepBudget);
+      const { truncated, metadataOmissions } = await this.#sweepAssets(sweepBudget);
       this.#checkCancelled();
       const people = await this.#collectPeople(sweepBudget);
       this.#checkCancelled();
@@ -208,7 +207,7 @@ export class InsightsCollector {
       const favoritesTag = await this.#refreshFavoritesTag();
       this.#checkCancelled();
       this.#requireSweepDiskHeadroom(sweepBudget);
-      const snapshot = this.#publish({ startedMs, truncated, people, tags, favoritesTag });
+      const snapshot = this.#publish({ startedMs, truncated, metadataOmissions, people, tags, favoritesTag });
       if (await this.#labelHomeArea(snapshot)) {
         // Best-effort decoration of the generation just published — a crash
         // between commit and here leaves a complete snapshot, just unlabeled.
@@ -264,6 +263,7 @@ export class InsightsCollector {
     let page = 1;
     let swept = 0;
     let truncated = false;
+    const metadataOmissions = { total: 0, fields: {} };
     const budget = createTraversalBudget({
       label: 'Immich asset sweep',
       maxPages: this.config.maxSweepPages,
@@ -297,10 +297,16 @@ export class InsightsCollector {
       // therefore cannot leave a partial page, and the outer run catch drops
       // every earlier staging page while preserving the live generation.
       const rows = items.map((asset) => mapAsset(asset, { budget: sweepBudget }));
+      for (const row of rows) {
+        for (const field of row.omittedMetadataFields) {
+          metadataOmissions.total += 1;
+          metadataOmissions.fields[field] = (metadataOmissions.fields[field] ?? 0) + 1;
+        }
+      }
       this.#requireSweepDiskHeadroom(sweepBudget);
       this.repo.insertAssets(rows, { staging: true });
       swept += items.length;
-      this.#setPhase('assets', { assetsSwept: swept });
+      this.#setPhase('assets', { assetsSwept: swept, metadataOmissions: metadataOmissions.total });
       const nextPage = response?.assets?.nextPage;
       page = parseProgressingPage(nextPage, page, { label: 'Immich asset sweep' });
       if (items.length === 0) {
@@ -310,7 +316,13 @@ export class InsightsCollector {
     this.log(
       `insights sweep cached ${swept} assets${truncated ? ` (TRUNCATED at ${this.config.maxSweepPages} pages — raise INSIGHTS_MAX_SWEEP_PAGES to cover the whole library)` : ''}`,
     );
-    return { swept, truncated };
+    if (metadataOmissions.total > 0) {
+      const fields = Object.entries(metadataOmissions.fields)
+        .map(([field, count]) => `${field}: ${count}`)
+        .join(', ');
+      this.log(`insights sweep omitted ${metadataOmissions.total} invalid metadata values (${fields})`);
+    }
+    return { swept, truncated, metadataOmissions };
   }
 
   // Names come from /people (a handful of paged calls); the counts come from
@@ -493,7 +505,7 @@ export class InsightsCollector {
   // and everything #computeSnapshot aggregates — see the new generation:
   // one process, one connection, so this connection reads its own
   // uncommitted writes. Rollback on any failure leaves generation N live.
-  #publish({ startedMs, truncated, people, tags, favoritesTag }) {
+  #publish({ startedMs, truncated, metadataOmissions, people, tags, favoritesTag }) {
     return this.repo.transaction(() => {
       this.repo.commitSweepStaging();
       this.repo.replacePeople(people.counted);
@@ -504,13 +516,13 @@ export class InsightsCollector {
       if (favoritesTag) {
         this.repo.setMeta('favoritesTag', favoritesTag);
       }
-      const snapshot = this.#computeSnapshot(Date.now() - startedMs, truncated);
+      const snapshot = this.#computeSnapshot(Date.now() - startedMs, truncated, metadataOmissions);
       this.repo.setMeta('snapshot', snapshot);
       return snapshot;
     });
   }
 
-  #computeSnapshot(sweepDurationMs, sweepTruncated = false) {
+  #computeSnapshot(sweepDurationMs, sweepTruncated = false, metadataOmissions = { total: 0, fields: {} }) {
     const totals = this.repo.sweepTotals();
     const peopleTotals = this.repo.getMeta('peopleTotals') ?? { named: 0, total: 0 };
     const enrichedTotal = this.enrichRepo ? this.enrichRepo.libraryStats().enrichedTotal : null;
@@ -527,6 +539,7 @@ export class InsightsCollector {
       // True when the page cap ended the sweep early: the numbers below
       // describe a bounded slice of the library, not all of it.
       sweepTruncated,
+      metadataOmissions,
       totals: {
         ...totals,
         peopleNamed: peopleTotals.named,
@@ -784,11 +797,6 @@ export function mapAsset(asset, { budget = null } = {}) {
   if (!exif || typeof exif !== 'object' || Array.isArray(exif)) {
     throw new UpstreamPaginationError(`Immich asset ${id} returned invalid EXIF metadata.`);
   }
-  const exifMeasure = measureJsonMetadata(exif, `EXIF metadata on asset ${id}`, {
-    maxItems: MAX_INSIGHTS_METADATA_ITEMS_PER_ASSET,
-    maxBytes: MAX_INSIGHTS_DECODED_BYTES_PER_ASSET,
-    itemLimitLabel: 'metadata-item',
-  });
   const rawPeople = asset.people ?? [];
   if (!Array.isArray(rawPeople)) {
     throw new UpstreamPaginationError(`Immich asset ${id} returned invalid people metadata.`);
@@ -799,8 +807,8 @@ export function mapAsset(asset, { budget = null } = {}) {
     );
   }
 
-  let decodedBytes = utf8Bytes(id) + exifMeasure.bytes;
-  let nestedItems = exifMeasure.items;
+  let decodedBytes = utf8Bytes(id);
+  let nestedItems = 0;
 
   const type = boundedMetadataString(asset.type ?? 'IMAGE', `type on asset ${id}`, { required: true });
   const rawTakenAt = exif.dateTimeOriginal ?? asset.localDateTime ?? asset.fileCreatedAt ?? null;
@@ -823,10 +831,47 @@ export function mapAsset(asset, { budget = null } = {}) {
   const make = boundedMetadataString(exif.make, `camera make on asset ${id}`);
   const model = boundedMetadataString(exif.model, `camera model on asset ${id}`);
   const lens = boundedMetadataString(exif.lensModel, `camera lens on asset ${id}`);
-  // Charge the original bounded timestamp even when it normalizes to null so
-  // invalid strings cannot evade the decoded-byte sweep budget.
-  for (const value of [type, boundedTakenAt, city, state, country, make, model, lens]) {
-    if (value !== null) decodedBytes += utf8Bytes(value);
+  const omittedMetadataFields = [];
+  const fileSize = boundedMetadataNumber(exif.fileSizeInByte, `file size on asset ${id}`, {
+    field: 'fileSizeInByte',
+    min: 0,
+    onOmitted: (field) => omittedMetadataFields.push(field),
+  });
+  let lat = boundedMetadataNumber(exif.latitude, `latitude on asset ${id}`, {
+    field: 'latitude',
+    min: -90,
+    max: 90,
+    onOmitted: (field) => omittedMetadataFields.push(field),
+  });
+  let lon = boundedMetadataNumber(exif.longitude, `longitude on asset ${id}`, {
+    field: 'longitude',
+    min: -180,
+    max: 180,
+    onOmitted: (field) => omittedMetadataFields.push(field),
+  });
+
+  decodedBytes += utf8Bytes(type);
+  // Only the fixed EXIF projection Insights stores or expands is admitted to
+  // the per-asset and aggregate sweep budgets. Immich can legitimately carry
+  // large descriptions, profile metadata, and future fields that Insights
+  // never reads; measuring those values made an unused field able to abort the
+  // entire staged sweep. The field name is charged as well as the bounded
+  // value so retained metadata remains fully accounted for.
+  for (const [field, value] of [
+    ['dateTimeOriginal', boundedTakenAt],
+    ['city', city],
+    ['state', state],
+    ['country', country],
+    ['make', make],
+    ['model', model],
+    ['lensModel', lens],
+    ['fileSizeInByte', fileSize],
+    ['latitude', lat],
+    ['longitude', lon],
+  ]) {
+    if (value === null) continue;
+    nestedItems += 1;
+    decodedBytes += utf8Bytes(field) + utf8Bytes(String(value));
   }
   const personIds = [];
   const seenPeople = new Set();
@@ -868,13 +913,11 @@ export function mapAsset(asset, { budget = null } = {}) {
 
   const year = takenAt ? Number(takenAt.slice(0, 4)) : null;
   const day = takenAt ? takenAt.slice(0, 10) : null;
-  // Number(null) is 0, and cameras without a GPS fix also write 0,0 — either
-  // way (0,0) is "no location", not a photo in the Gulf of Guinea.
-  let lat = exif.latitude === null || exif.latitude === undefined ? NaN : Number(exif.latitude);
-  let lon = exif.longitude === null || exif.longitude === undefined ? NaN : Number(exif.longitude);
+  // Cameras without a GPS fix can write 0,0. That pair means "no location",
+  // not a photo in the Gulf of Guinea.
   if (lat === 0 && lon === 0) {
-    lat = NaN;
-    lon = NaN;
+    lat = null;
+    lon = null;
   }
   return {
     id,
@@ -890,10 +933,11 @@ export function mapAsset(asset, { budget = null } = {}) {
     lens,
     isFavorite: Boolean(asset.isFavorite),
     isArchived: Boolean(asset.isArchived),
-    fileSize: Number.isFinite(Number(exif.fileSizeInByte)) ? Number(exif.fileSizeInByte) : null,
-    lat: Number.isFinite(lat) ? lat : null,
-    lon: Number.isFinite(lon) ? lon : null,
+    fileSize,
+    lat,
+    lon,
     personIds,
+    omittedMetadataFields,
   };
 }
 
@@ -929,6 +973,30 @@ function boundedMetadataString(value, label, { required = false, trim = false } 
     throw new UpstreamPaginationError(`Immich returned an oversized or empty ${label}.`);
   }
   return text;
+}
+
+function boundedMetadataNumber(value, label, {
+  field,
+  min = -Infinity,
+  max = Infinity,
+  onOmitted = () => {},
+} = {}) {
+  if (value === null || value === undefined) return null;
+  if (!['string', 'number'].includes(typeof value)) {
+    onOmitted(field);
+    return null;
+  }
+  // Oversized retained input is still a resource-limit violation. Ordinary
+  // malformed or out-of-range numeric metadata is instead omitted: Immich has
+  // historically emitted values Number() could not use, and one such field
+  // must not discard the entire staged library sweep.
+  const text = boundedMetadataString(value, label, { trim: true });
+  const number = Number(text);
+  if (text === '' || !Number.isFinite(number) || number < min || number > max) {
+    onOmitted(field);
+    return null;
+  }
+  return number;
 }
 
 function boundedMetadataBytes(value, label) {

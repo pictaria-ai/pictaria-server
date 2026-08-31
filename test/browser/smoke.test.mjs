@@ -43,7 +43,7 @@ const INSIGHTS_CONFIG = {
   favoritesTagValue: '',
 };
 
-function makeAsset(id, city, country, takenAt) {
+function makeAsset(id, city, country, takenAt, exifOverrides = {}) {
   return {
     id,
     type: 'IMAGE',
@@ -59,6 +59,7 @@ function makeAsset(id, city, country, takenAt) {
       model: 'iPhone 12',
       lensModel: 'wide',
       fileSizeInByte: 1000,
+      ...exifOverrides,
     },
   };
 }
@@ -110,7 +111,7 @@ const FILLER_PLACES = [
 ];
 
 const LIBRARY_ASSETS = [
-  makeAsset('vienna-1', 'Vienna', 'Austria', '2019-05-02T10:00:00.000Z'),
+  makeAsset('vienna-1', 'Vienna', 'Austria', '2019-05-02T10:00:00.000Z', { fileSizeInByte: 'unknown' }),
   ...FILLER_PLACES.flatMap(([city, country], index) => [
     makeAsset(`${city.toLowerCase()}-1`, city, country, `202${index % 5}-03-0${(index % 8) + 1}T10:00:00.000Z`),
     makeAsset(`${city.toLowerCase()}-2`, city, country, `202${index % 5}-06-0${(index % 8) + 1}T10:00:00.000Z`),
@@ -515,6 +516,10 @@ test('admin UI smoke: gate, Insights lens, Curate, Smart Albums', { timeout: 120
       'document.getElementById("lensBtn") && !document.querySelector(".gate-backdrop")',
       { label: 'insights page ready' },
     );
+    assert.equal(
+      await page.evaluate('document.getElementById("metadataOmissionBanner")?.textContent'),
+      'Insights left 1 invalid metadata value blank while scanning (file size: 1). All photos were still counted.',
+    );
 
     await page.evaluate('document.getElementById("lensBtn").click()');
     await page.waitFor(
@@ -540,6 +545,70 @@ test('admin UI smoke: gate, Insights lens, Curate, Smart Albums', { timeout: 120
       '[...document.querySelectorAll("#lensResults button")].some((b) => b.textContent.includes("Austria"))',
       { label: 'Austria appears in lens results' },
     );
+  });
+
+  await t.test('Insights keeps a first-poll refresh failure visible', async () => {
+    await page.navigate(`${server.base}/insights.html`);
+    await page.waitFor(
+      'document.getElementById("refreshBtn") && !document.querySelector(".gate-backdrop")',
+      { label: 'insights refresh controls ready' },
+    );
+
+    const result = await page.evaluate(`(async () => {
+      const realFetch = window.fetch;
+      const terminal = {
+        running: false,
+        phase: 'error',
+        error: 'Immich returned an oversized city on asset test-asset.',
+        progress: { assetsSwept: 0 },
+      };
+      window.fetch = (input, init) => {
+        const url = new URL(typeof input === 'string' ? input : input.url, location.href);
+        if (url.pathname === '/api/insights/refresh') {
+          return Promise.resolve(new Response(JSON.stringify({ running: true, phase: 'assets' }), {
+            status: 200,
+            headers: { 'Content-Type': 'application/json' },
+          }));
+        }
+        if (url.pathname === '/api/insights/status') {
+          return Promise.resolve(new Response(JSON.stringify(terminal), {
+            status: 200,
+            headers: { 'Content-Type': 'application/json' },
+          }));
+        }
+        if (url.pathname === '/api/insights') {
+          return Promise.resolve(new Response(JSON.stringify({
+            snapshot: null,
+            status: terminal,
+            immichUrl: null,
+            favoritesTag: null,
+            locationGroups: [],
+          }), {
+            status: 200,
+            headers: { 'Content-Type': 'application/json' },
+          }));
+        }
+        return realFetch(input, init);
+      };
+      await refresh();
+      const error = document.getElementById('refreshError');
+      const observed = {
+        hidden: error.hidden,
+        text: error.textContent,
+        refreshDisabled: document.getElementById('refreshBtn').disabled,
+        polling: state.polling !== null,
+      };
+      window.fetch = realFetch;
+      await load();
+      return observed;
+    })()`);
+
+    assert.deepEqual(result, {
+      hidden: false,
+      text: 'Refresh failed: Immich returned an oversized city on asset test-asset.',
+      refreshDisabled: false,
+      polling: false,
+    });
   });
 
   await t.test('Insights month drill scopes People/Places; a failed month never wears another scope\'s data', async () => {

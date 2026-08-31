@@ -1,5 +1,7 @@
 const state = {
   polling: null,
+  refreshPending: false,
+  lastRefreshError: null,
   immichUrl: null,
   snapshot: null,
   browser: null, // { slice, items, nextPage, loading }
@@ -2552,11 +2554,43 @@ function renderSweepBanner(snapshot) {
     + 'Raise INSIGHTS_MAX_SWEEP_PAGES in the server environment and refresh to cover everything.';
 }
 
+function renderMetadataOmissionBanner(snapshot) {
+  let banner = el('metadataOmissionBanner');
+  const omission = snapshot.metadataOmissions;
+  const total = Number(omission?.total ?? 0);
+  if (!Number.isSafeInteger(total) || total < 1) {
+    if (banner) banner.hidden = true;
+    return;
+  }
+  if (!banner) {
+    banner = document.createElement('div');
+    banner.id = 'metadataOmissionBanner';
+    banner.className = 'p-panel';
+    banner.setAttribute('role', 'status');
+    banner.style.cssText = 'padding: 10px 16px; margin-bottom: 14px; font-size: 13px; '
+      + 'line-height: 1.5; color: var(--p-gold); border-color: #6d5410;';
+    el('content').prepend(banner);
+  }
+  const labels = {
+    fileSizeInByte: 'file size',
+    latitude: 'latitude',
+    longitude: 'longitude',
+  };
+  const detail = Object.entries(omission.fields ?? {})
+    .filter(([field, count]) => labels[field] && Number.isSafeInteger(count) && count > 0)
+    .map(([field, count]) => `${labels[field]}: ${fmt(count)}`)
+    .join(', ');
+  banner.hidden = false;
+  banner.textContent = `Insights left ${fmt(total)} invalid metadata ${total === 1 ? 'value' : 'values'} blank while scanning`
+    + `${detail ? ` (${detail})` : ''}. All photos were still counted.`;
+}
+
 function render(snapshot) {
   state.snapshot = snapshot;
   el('content').hidden = false;
   el('empty').hidden = true;
   renderSweepBanner(snapshot);
+  renderMetadataOmissionBanner(snapshot);
 
   const t = snapshot.totals;
   const spanYears = t.firstTakenAt && t.lastTakenAt
@@ -2664,27 +2698,41 @@ function describePhase(status) {
   }
 }
 
+function renderRefreshStatus(status, { notifyError = false } = {}) {
+  const chip = el('runChip');
+  chip.hidden = !status.running;
+  chip.textContent = status.running ? describePhase(status) : '';
+  el('refreshBtn').disabled = Boolean(status.running);
+
+  const message = status.phase === 'error' && status.error
+    ? `Refresh failed: ${status.error}`
+    : null;
+  const errorNode = el('refreshError');
+  errorNode.hidden = !message;
+  errorNode.textContent = message ?? '';
+  if (notifyError && message && message !== state.lastRefreshError) {
+    toast(message);
+  }
+  state.lastRefreshError = message;
+}
+
 async function poll() {
   try {
     const status = await api('/api/insights/status');
-    const chip = el('runChip');
+    renderRefreshStatus(status, { notifyError: true });
     if (status.running) {
-      chip.hidden = false;
-      chip.textContent = describePhase(status);
-      el('refreshBtn').disabled = true;
       if (!state.polling) {
         state.polling = setInterval(poll, 2500);
       }
       return;
     }
-    chip.hidden = true;
-    el('refreshBtn').disabled = false;
+    const shouldReload = Boolean(state.polling) || state.refreshPending;
     if (state.polling) {
       clearInterval(state.polling);
       state.polling = null;
-      if (status.phase === 'error' && status.error) {
-        toast(`Refresh failed: ${status.error}`);
-      }
+    }
+    state.refreshPending = false;
+    if (shouldReload) {
       await load();
     }
   } catch {
@@ -2693,11 +2741,15 @@ async function poll() {
 }
 
 async function refresh() {
+  state.refreshPending = true;
+  renderRefreshStatus({ running: true, phase: 'starting', progress: {} });
   try {
     await api('/api/insights/refresh', { method: 'POST' });
     toast('Refresh started');
     await poll();
   } catch (error) {
+    state.refreshPending = false;
+    renderRefreshStatus({ running: false, phase: 'error', error: 'Could not start refresh.' });
     if (error.unauthorized) { showLogin(); return; }
     toast('Could not start refresh');
   }
@@ -2716,6 +2768,7 @@ async function load() {
       el('empty').hidden = false;
       el('content').hidden = true;
     }
+    renderRefreshStatus(status);
     if (status.running) {
       await poll();
     }
