@@ -111,7 +111,7 @@ jobs:
           docker run -d --name pictaria -p 4080:4080 \
             -e APP_PASSWORD=ci-secret pictaria-server:ci
           for i in $(seq 1 15); do
-            if curl -fsS http://127.0.0.1:4080/api/health \
+            if curl -fsS http://localhost:4080/api/health \
               | jq -e '.ok == true and .service == "pictaria-server"' > /dev/null; then
               exit 0
             fi
