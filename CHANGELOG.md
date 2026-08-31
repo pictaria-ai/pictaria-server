@@ -12,6 +12,9 @@ All notable changes to Pictaria Server are documented here. This project follows
   left blank, counted, and reported without dropping the asset or the sweep.
   Refresh failures remain visible even when a run ends before the first status
   poll observes it.
+- LM Studio Enrich and Curate requests accept validated schema JSON when a
+  thinking-capable model returns it in `reasoning_content` with empty ordinary
+  content. Voice and other prose never expose that reasoning channel.
 
 ## 1.0.0 - 2026-08-28
 

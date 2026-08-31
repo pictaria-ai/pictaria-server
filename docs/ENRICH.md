@@ -46,6 +46,12 @@ dropping tags under rapid mutation).
 | `cloud_ollama` | Cloud | API key + model under Settings → AI Providers |
 | `venice` | Cloud | API key + a vision-capable model under Settings → AI Providers (no default) |
 
+Thinking-capable LM Studio models can place a strict-schema Enrich or Curate
+answer in their `reasoning_content` response field while leaving ordinary
+`content` empty. Pictaria accepts and validates that channel only for requests
+whose entire output is constrained to the Pictaria JSON schema. Voice and other
+prose requests always ignore reasoning content.
+
 Connections and model identifiers live under **Settings → AI Providers**.
 Choose the active provider on the **Enrich** page: it is used for every new
 run and remembered across page visits and server restarts. `DEFAULT_PROVIDER`
