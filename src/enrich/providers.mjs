@@ -217,11 +217,22 @@ export class LmStudioProvider {
     }
     const headers = this.apiKey ? { Authorization: `Bearer ${this.apiKey}` } : {};
     const rawOutput = await postJson(this, appendHttpUrlPath(this.baseUrl, '/chat/completions'), body, headers);
-    const outputText = extractChoiceMessageContent(rawOutput);
+    const outputText = extractSchemaConstrainedChoiceContent(rawOutput);
     if (!outputText) {
       throw new Error('LM Studio response did not include message content');
     }
-    return { rawOutput, normalizedOutput: parseJsonContent(outputText) };
+    try {
+      return { rawOutput, normalizedOutput: parseJsonContent(outputText) };
+    } catch (error) {
+      // The fallback channel can contain private chain-of-thought rather than
+      // the requested schema JSON. JSON.parse errors quote the rejected input,
+      // so replace them with a fixed diagnostic when that channel was used.
+      const ordinaryContent = extractChoiceMessageContent(rawOutput);
+      if (!(typeof ordinaryContent === 'string' && ordinaryContent.trim())) {
+        throw new Error('LM Studio returned schema output that was not valid JSON');
+      }
+      throw error;
+    }
   }
 
   async generateProse({ systemPrompt, userPrompt, images = [], maxOutputTokens }) {
@@ -822,6 +833,23 @@ export function extractOpenAiProseText(response) {
 export function extractChoiceMessageContent(response) {
   const message = response?.choices?.[0]?.message;
   return typeof message?.content === 'string' ? message.content : null;
+}
+
+export function extractSchemaConstrainedChoiceContent(response) {
+  const content = extractChoiceMessageContent(response);
+  if (typeof content === 'string' && content.trim()) {
+    return content;
+  }
+  // Some thinking-capable models in LM Studio route the entire
+  // grammar-constrained JSON answer into reasoning_content while leaving
+  // content empty. This extractor is used only for strict-schema requests;
+  // prose continues to read content alone so genuine reasoning is never
+  // displayed or spoken.
+  const reasoningContent = response?.choices?.[0]?.message?.reasoning_content;
+  if (typeof reasoningContent === 'string' && reasoningContent.trim()) {
+    return reasoningContent;
+  }
+  return content;
 }
 
 export function extractOllamaMessageContent(response) {

@@ -13,6 +13,7 @@ import {
   createProvider,
   extractChoiceMessageContent,
   extractOpenAiOutputText,
+  extractSchemaConstrainedChoiceContent,
   lmStudioSupportedImage,
 } from '../../src/enrich/providers.mjs';
 
@@ -47,6 +48,21 @@ test('choice message extraction reads openai-compatible responses', () => {
   assert.equal(extractChoiceMessageContent({ choices: [] }), null);
 });
 
+test('schema-constrained choice extraction uses reasoning_content only when content is empty', () => {
+  assert.equal(
+    extractSchemaConstrainedChoiceContent({
+      choices: [{ message: { content: '{"caption":"Content"}', reasoning_content: '{"caption":"Reasoning"}' } }],
+    }),
+    '{"caption":"Content"}',
+  );
+  assert.equal(
+    extractSchemaConstrainedChoiceContent({
+      choices: [{ message: { content: '  ', reasoning_content: '{"caption":"Reasoning"}' } }],
+    }),
+    '{"caption":"Reasoning"}',
+  );
+});
+
 test('openai output text extraction supports output_text and output list fallback', () => {
   assert.equal(extractOpenAiOutputText({ output_text: '{"a":1}' }), '{"a":1}');
   assert.equal(
@@ -69,7 +85,12 @@ test('lm studio posts an openai-compatible vision schema request', async () => {
     apiKey: '',
     maxTokens: 1234,
     temperature: 0.2,
-    fetchImpl: fakeFetch({ choices: [{ message: { content: '{"caption": "Lake"}' } }] }, { capture }),
+    fetchImpl: fakeFetch({
+      choices: [{ message: {
+        content: '{"caption": "Lake"}',
+        reasoning_content: '{"caption": "Wrong channel"}',
+      } }],
+    }, { capture }),
   });
 
   const result = await provider.analyzeImage(image, prompts);
@@ -86,6 +107,60 @@ test('lm studio posts an openai-compatible vision schema request', async () => {
   assert.ok(imagePart.image_url.url.startsWith('data:image/jpeg;base64,'));
   assert.equal(capture.options.headers.Authorization, undefined);
   assert.equal(capture.options.redirect, 'error');
+});
+
+test('lm studio reads strict-schema JSON from reasoning_content when content is empty', async () => {
+  const provider = new LmStudioProvider({
+    modelName: 'qwen3.5-4b-mlx',
+    fetchImpl: fakeFetch({
+      choices: [{
+        message: { content: '', reasoning_content: '{"caption": "Lake"}' },
+        finish_reason: 'stop',
+      }],
+    }),
+  });
+
+  const result = await provider.analyzeImage(image, prompts);
+
+  assert.deepEqual(result.normalizedOutput, { caption: 'Lake' });
+});
+
+test('lm studio rejects malformed schema output from reasoning_content', async () => {
+  const provider = new LmStudioProvider({
+    modelName: 'qwen3.5-4b-mlx',
+    fetchImpl: fakeFetch({
+      choices: [{
+        message: { content: '', reasoning_content: 'I think the answer is not JSON' },
+        finish_reason: 'stop',
+      }],
+    }),
+  });
+
+  await assert.rejects(
+    () => provider.analyzeImage(image, prompts),
+    (error) => {
+      assert.equal(error.message, 'LM Studio returned schema output that was not valid JSON');
+      assert.doesNotMatch(error.message, /I think/i);
+      return true;
+    },
+  );
+});
+
+test('lm studio prose never returns reasoning_content', async () => {
+  const provider = new LmStudioProvider({
+    modelName: 'qwen3.5-4b-mlx',
+    fetchImpl: fakeFetch({
+      choices: [{ message: { content: '', reasoning_content: 'private model reasoning' } }],
+    }),
+  });
+
+  const result = await provider.generateProse({
+    systemPrompt: 'system',
+    userPrompt: 'user',
+    maxOutputTokens: 100,
+  });
+
+  assert.equal(result.text, '');
 });
 
 test('lm studio keeps non-webp image payloads', () => {
