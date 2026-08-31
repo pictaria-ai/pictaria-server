@@ -2585,12 +2585,42 @@ function renderMetadataOmissionBanner(snapshot) {
     + `${detail ? ` (${detail})` : ''}. All photos were still counted.`;
 }
 
+function renderPeopleTruncationBanner(snapshot) {
+  let banner = el('peopleTruncationBanner');
+  const truncation = snapshot.peopleTruncation;
+  const assets = Number(truncation?.assets ?? 0);
+  const omitted = Number(truncation?.relationshipsOmitted ?? 0);
+  const limit = Number(truncation?.perAssetLimit ?? 0);
+  if (
+    !Number.isSafeInteger(assets) || assets < 1
+    || !Number.isSafeInteger(omitted) || omitted < 1
+    || !Number.isSafeInteger(limit) || limit < 1
+  ) {
+    if (banner) banner.hidden = true;
+    return;
+  }
+  if (!banner) {
+    banner = document.createElement('div');
+    banner.id = 'peopleTruncationBanner';
+    banner.className = 'p-panel';
+    banner.setAttribute('role', 'status');
+    banner.style.cssText = 'padding: 10px 16px; margin-bottom: 14px; font-size: 13px; '
+      + 'line-height: 1.5; color: var(--p-gold); border-color: #6d5410;';
+    el('content').prepend(banner);
+  }
+  banner.hidden = false;
+  banner.textContent = `Insights limited people relationships to ${fmt(limit)} on `
+    + `${fmt(assets)} ${assets === 1 ? 'photo' : 'photos'} and left ${fmt(omitted)} additional `
+    + `${omitted === 1 ? 'entry' : 'entries'} out. Every photo and all non-people statistics were still counted.`;
+}
+
 function render(snapshot) {
   state.snapshot = snapshot;
   el('content').hidden = false;
   el('empty').hidden = true;
   renderSweepBanner(snapshot);
   renderMetadataOmissionBanner(snapshot);
+  renderPeopleTruncationBanner(snapshot);
 
   const t = snapshot.totals;
   const spanYears = t.firstTakenAt && t.lastTakenAt

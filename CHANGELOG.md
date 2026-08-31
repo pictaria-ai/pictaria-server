@@ -7,6 +7,9 @@ All notable changes to Pictaria Server are documented here. This project follows
 
 ### Fixed
 
+- Insights keeps legitimate crowd photos in the library sweep when Immich
+  reports more than 100 people. People relationships remain capped and excess
+  entries are counted and surfaced instead of aborting the complete snapshot.
 - Insights ignores oversized Immich EXIF fields it does not store, while
   retaining strict bounds for metadata it uses. Malformed numeric metadata is
   left blank, counted, and reported without dropping the asset or the sweep.

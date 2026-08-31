@@ -194,7 +194,7 @@ export class InsightsCollector {
     const startedMs = Date.now();
     const sweepBudget = createInsightsSweepBudget(this.sweepBudgetLimits);
     try {
-      const { truncated, metadataOmissions } = await this.#sweepAssets(sweepBudget);
+      const { truncated, metadataOmissions, peopleTruncation } = await this.#sweepAssets(sweepBudget);
       this.#checkCancelled();
       const people = await this.#collectPeople(sweepBudget);
       this.#checkCancelled();
@@ -207,7 +207,15 @@ export class InsightsCollector {
       const favoritesTag = await this.#refreshFavoritesTag();
       this.#checkCancelled();
       this.#requireSweepDiskHeadroom(sweepBudget);
-      const snapshot = this.#publish({ startedMs, truncated, metadataOmissions, people, tags, favoritesTag });
+      const snapshot = this.#publish({
+        startedMs,
+        truncated,
+        metadataOmissions,
+        peopleTruncation,
+        people,
+        tags,
+        favoritesTag,
+      });
       if (await this.#labelHomeArea(snapshot)) {
         // Best-effort decoration of the generation just published — a crash
         // between commit and here leaves a complete snapshot, just unlabeled.
@@ -264,6 +272,11 @@ export class InsightsCollector {
     let swept = 0;
     let truncated = false;
     const metadataOmissions = { total: 0, fields: {} };
+    const peopleTruncation = {
+      assets: 0,
+      relationshipsOmitted: 0,
+      perAssetLimit: MAX_INSIGHTS_PEOPLE_PER_ASSET,
+    };
     const budget = createTraversalBudget({
       label: 'Immich asset sweep',
       maxPages: this.config.maxSweepPages,
@@ -302,11 +315,19 @@ export class InsightsCollector {
           metadataOmissions.total += 1;
           metadataOmissions.fields[field] = (metadataOmissions.fields[field] ?? 0) + 1;
         }
+        if (row.omittedPeopleRelationships > 0) {
+          peopleTruncation.assets += 1;
+          peopleTruncation.relationshipsOmitted += row.omittedPeopleRelationships;
+        }
       }
       this.#requireSweepDiskHeadroom(sweepBudget);
       this.repo.insertAssets(rows, { staging: true });
       swept += items.length;
-      this.#setPhase('assets', { assetsSwept: swept, metadataOmissions: metadataOmissions.total });
+      this.#setPhase('assets', {
+        assetsSwept: swept,
+        metadataOmissions: metadataOmissions.total,
+        peopleRelationshipsOmitted: peopleTruncation.relationshipsOmitted,
+      });
       const nextPage = response?.assets?.nextPage;
       page = parseProgressingPage(nextPage, page, { label: 'Immich asset sweep' });
       if (items.length === 0) {
@@ -322,7 +343,13 @@ export class InsightsCollector {
         .join(', ');
       this.log(`insights sweep omitted ${metadataOmissions.total} invalid metadata values (${fields})`);
     }
-    return { swept, truncated, metadataOmissions };
+    if (peopleTruncation.assets > 0) {
+      this.log(
+        `insights sweep limited people relationships on ${peopleTruncation.assets} asset(s); `
+        + `${peopleTruncation.relationshipsOmitted} relationship entries were omitted`,
+      );
+    }
+    return { swept, truncated, metadataOmissions, peopleTruncation };
   }
 
   // Names come from /people (a handful of paged calls); the counts come from
@@ -505,7 +532,7 @@ export class InsightsCollector {
   // and everything #computeSnapshot aggregates — see the new generation:
   // one process, one connection, so this connection reads its own
   // uncommitted writes. Rollback on any failure leaves generation N live.
-  #publish({ startedMs, truncated, metadataOmissions, people, tags, favoritesTag }) {
+  #publish({ startedMs, truncated, metadataOmissions, peopleTruncation, people, tags, favoritesTag }) {
     return this.repo.transaction(() => {
       this.repo.commitSweepStaging();
       this.repo.replacePeople(people.counted);
@@ -516,13 +543,27 @@ export class InsightsCollector {
       if (favoritesTag) {
         this.repo.setMeta('favoritesTag', favoritesTag);
       }
-      const snapshot = this.#computeSnapshot(Date.now() - startedMs, truncated, metadataOmissions);
+      const snapshot = this.#computeSnapshot(
+        Date.now() - startedMs,
+        truncated,
+        metadataOmissions,
+        peopleTruncation,
+      );
       this.repo.setMeta('snapshot', snapshot);
       return snapshot;
     });
   }
 
-  #computeSnapshot(sweepDurationMs, sweepTruncated = false, metadataOmissions = { total: 0, fields: {} }) {
+  #computeSnapshot(
+    sweepDurationMs,
+    sweepTruncated = false,
+    metadataOmissions = { total: 0, fields: {} },
+    peopleTruncation = {
+      assets: 0,
+      relationshipsOmitted: 0,
+      perAssetLimit: MAX_INSIGHTS_PEOPLE_PER_ASSET,
+    },
+  ) {
     const totals = this.repo.sweepTotals();
     const peopleTotals = this.repo.getMeta('peopleTotals') ?? { named: 0, total: 0 };
     const enrichedTotal = this.enrichRepo ? this.enrichRepo.libraryStats().enrichedTotal : null;
@@ -540,6 +581,7 @@ export class InsightsCollector {
       // describe a bounded slice of the library, not all of it.
       sweepTruncated,
       metadataOmissions,
+      peopleTruncation,
       totals: {
         ...totals,
         peopleNamed: peopleTotals.named,
@@ -801,12 +843,6 @@ export function mapAsset(asset, { budget = null } = {}) {
   if (!Array.isArray(rawPeople)) {
     throw new UpstreamPaginationError(`Immich asset ${id} returned invalid people metadata.`);
   }
-  if (rawPeople.length > MAX_INSIGHTS_PEOPLE_PER_ASSET) {
-    throw new UpstreamPaginationError(
-      `Immich asset ${id} exceeded its ${MAX_INSIGHTS_PEOPLE_PER_ASSET}-person limit.`,
-    );
-  }
-
   let decodedBytes = utf8Bytes(id);
   let nestedItems = 0;
 
@@ -875,30 +911,25 @@ export function mapAsset(asset, { budget = null } = {}) {
   }
   const personIds = [];
   const seenPeople = new Set();
-  for (const person of rawPeople) {
-    const measured = measureJsonMetadata(person, `person relationship on asset ${id}`, {
-      maxItems: MAX_INSIGHTS_NESTED_ITEMS_PER_ASSET,
-      maxBytes: MAX_INSIGHTS_DECODED_BYTES_PER_ASSET,
-    });
-    nestedItems += 1 + measured.items;
-    decodedBytes += measured.bytes;
-    if (nestedItems > MAX_INSIGHTS_NESTED_ITEMS_PER_ASSET) {
-      throw new UpstreamPaginationError(
-        `Immich asset ${id} exceeded its ${MAX_INSIGHTS_NESTED_ITEMS_PER_ASSET}-nested-item limit.`,
-      );
-    }
-    if (decodedBytes > MAX_INSIGHTS_DECODED_BYTES_PER_ASSET) {
-      throw new UpstreamPaginationError(
-        `Immich asset ${id} exceeded its ${MAX_INSIGHTS_DECODED_BYTES_PER_ASSET}-decoded-byte limit.`,
-      );
-    }
+  let omittedPeopleRelationships = 0;
+  for (let index = 0; index < rawPeople.length; index += 1) {
+    const person = rawPeople[index];
     const candidate = person?.id ?? person?.personId ?? person?.person?.id ?? null;
     if (candidate === null || candidate === undefined || candidate === '') continue;
     const personId = requireImmichId(candidate, `person relationship on asset ${id}`);
-    if (!seenPeople.has(personId)) {
-      seenPeople.add(personId);
-      personIds.push(personId);
+    if (seenPeople.has(personId)) continue;
+    if (personIds.length >= MAX_INSIGHTS_PEOPLE_PER_ASSET) {
+      // The cap bounds relationship rows and pair expansion. Stop inspecting
+      // the remainder as soon as the first additional unique relationship is
+      // found: unused PersonWithFaces fields must not consume sweep resources
+      // or turn a legitimate crowd photo into a whole-library failure.
+      omittedPeopleRelationships = rawPeople.length - index;
+      break;
     }
+    seenPeople.add(personId);
+    personIds.push(personId);
+    nestedItems += 1;
+    decodedBytes += utf8Bytes('personId') + utf8Bytes(personId);
   }
   if (decodedBytes > MAX_INSIGHTS_DECODED_BYTES_PER_ASSET) {
     throw new UpstreamPaginationError(
@@ -937,6 +968,7 @@ export function mapAsset(asset, { budget = null } = {}) {
     lat,
     lon,
     personIds,
+    omittedPeopleRelationships,
     omittedMetadataFields,
   };
 }

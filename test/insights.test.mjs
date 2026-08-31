@@ -323,38 +323,52 @@ test('asset metadata and relationships enforce exact per-asset boundaries before
   const budget = createInsightsSweepBudget();
   const mapped = mapAsset(makeAsset('bounded-asset', { people: exactlyMaxPeople }), { budget });
   assert.equal(mapped.personIds.length, MAX_INSIGHTS_PEOPLE_PER_ASSET);
-  assert.equal(budget.status().nestedItems, 2008);
+  assert.equal(mapped.omittedPeopleRelationships, 0);
+  assert.equal(budget.status().nestedItems, 108);
   assert.equal(budget.status().generatedRows, 1 + MAX_INSIGHTS_PEOPLE_PER_ASSET);
 
-  const expandedPerson = mapAsset(makeAsset('expanded-person-row', {
+  const barePersonBudget = createInsightsSweepBudget();
+  const expandedPersonBudget = createInsightsSweepBudget();
+  mapAsset(makeAsset('same-person-id', { people: [{ id: 'p1' }] }), { budget: barePersonBudget });
+  const expandedPerson = mapAsset(makeAsset('same-person-id', {
     people: [{
       id: 'p1',
       detail: Object.fromEntries(Array.from({ length: 2500 }, (_, index) => [`field${index}`, index])),
     }],
-  }));
+  }), { budget: expandedPersonBudget });
   assert.deepEqual(expandedPerson.personIds, ['p1']);
+  assert.deepEqual(
+    expandedPersonBudget.status(),
+    barePersonBudget.status(),
+    'unused PersonWithFaces fields do not consume the retained-data sweep budget',
+  );
 
   const duplicateBudget = createInsightsSweepBudget();
   const duplicateMapped = mapAsset(makeAsset('duplicate-people', {
     people: Array.from({ length: MAX_INSIGHTS_PEOPLE_PER_ASSET }, () => ({ id: 'p1' })),
   }), { budget: duplicateBudget });
   assert.deepEqual(duplicateMapped.personIds, ['p1']);
-  assert.equal(duplicateBudget.status().generatedRows, 2, 'raw duplicates consume work but generate one relationship row');
+  assert.equal(duplicateMapped.omittedPeopleRelationships, 0);
+  assert.equal(duplicateBudget.status().generatedRows, 2, 'raw duplicates generate one relationship row');
 
-  assert.throws(
-    () => mapAsset(makeAsset('too-many-people', {
-      people: Array.from({ length: MAX_INSIGHTS_PEOPLE_PER_ASSET + 1 }, () => ({ id: 'p1' })),
-    })),
-    /100-person limit/,
-  );
-  assert.throws(
-    () => mapAsset(makeAsset('oversized-person-row', {
+  const crowd = mapAsset(makeAsset('crowd-photo', {
+    people: Array.from(
+      { length: MAX_INSIGHTS_PEOPLE_PER_ASSET + 250 },
+      (_, index) => ({ id: `crowd-${index}` }),
+    ),
+  }));
+  assert.equal(crowd.personIds.length, MAX_INSIGHTS_PEOPLE_PER_ASSET);
+  assert.deepEqual(crowd.personIds, Array.from(
+    { length: MAX_INSIGHTS_PEOPLE_PER_ASSET },
+    (_, index) => `crowd-${index}`,
+  ));
+  assert.equal(crowd.omittedPeopleRelationships, 250);
+
+  for (const row of [
+    mapAsset(makeAsset('oversized-person-row', {
       people: [{ id: 'p1', name: 'x'.repeat(MAX_INSIGHTS_METADATA_FIELD_BYTES + 1) }],
     })),
-    /oversized person relationship/,
-  );
-  assert.throws(
-    () => mapAsset(makeAsset('nested-person-row', {
+    mapAsset(makeAsset('nested-person-row', {
       people: [{
         id: 'p1',
         detail: Object.fromEntries(
@@ -362,10 +376,7 @@ test('asset metadata and relationships enforce exact per-asset boundaries before
         ),
       }],
     })),
-    new RegExp(`${MAX_INSIGHTS_NESTED_ITEMS_PER_ASSET}-nested-item limit`),
-  );
-  assert.throws(
-    () => mapAsset(makeAsset('decoded-person-row', {
+    mapAsset(makeAsset('decoded-person-row', {
       people: [{
         id: 'p1',
         ...Object.fromEntries(
@@ -373,7 +384,13 @@ test('asset metadata and relationships enforce exact per-asset boundaries before
         ),
       }],
     })),
-    new RegExp(`${MAX_INSIGHTS_DECODED_BYTES_PER_ASSET}-decoded-byte limit`),
+  ]) {
+    assert.deepEqual(row.personIds, ['p1']);
+    assert.equal(row.omittedPeopleRelationships, 0);
+  }
+  assert.throws(
+    () => mapAsset(makeAsset('invalid-person-id', { people: [{ id: 'not valid!' }] })),
+    /invalid person relationship on asset invalid-person-id identifier/,
   );
   const unusedExif = Object.fromEntries(
     Array.from({ length: 256 }, (_, index) => [`unusedField${index}`, 'x'.repeat(8192)]),
@@ -446,6 +463,34 @@ test('collector publishes assets with oversized unused EXIF fields', async () =>
     assert.equal(collector.status().phase, 'done');
     assert.equal(repo.sweepTotals().assetsSwept, 1);
     assert.deepEqual(collector.snapshot().metadataOmissions, { total: 0, fields: {} });
+  });
+});
+
+test('collector keeps crowd photos, caps people relationships, and publishes a durable notice', async () => {
+  await withRepoAsync(async (repo) => {
+    const people = Array.from(
+      { length: MAX_INSIGHTS_PEOPLE_PER_ASSET + 250 },
+      (_, index) => ({ id: `crowd-${index}`, name: `Person ${index}` }),
+    );
+    const messages = [];
+    const collector = new InsightsCollector({
+      repo,
+      immich: new FakeImmich([makeAsset('crowd', { people }), makeAsset('neighbor')], []),
+      config: CONFIG,
+      log: (message) => messages.push(message),
+    });
+    collector.start();
+    await waitForIdle(collector);
+
+    assert.equal(collector.status().phase, 'done');
+    assert.equal(collector.status().progress.peopleRelationshipsOmitted, 250);
+    assert.equal(repo.sweepTotals().assetsSwept, 2);
+    assert.deepEqual(collector.snapshot().peopleTruncation, {
+      assets: 1,
+      relationshipsOmitted: 250,
+      perAssetLimit: MAX_INSIGHTS_PEOPLE_PER_ASSET,
+    });
+    assert.ok(messages.some((message) => /limited people relationships on 1 asset.*250 relationship entries/.test(message)));
   });
 });
 

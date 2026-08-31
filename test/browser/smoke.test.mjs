@@ -43,7 +43,7 @@ const INSIGHTS_CONFIG = {
   favoritesTagValue: '',
 };
 
-function makeAsset(id, city, country, takenAt, exifOverrides = {}) {
+function makeAsset(id, city, country, takenAt, exifOverrides = {}, assetOverrides = {}) {
   return {
     id,
     type: 'IMAGE',
@@ -61,6 +61,7 @@ function makeAsset(id, city, country, takenAt, exifOverrides = {}) {
       fileSizeInByte: 1000,
       ...exifOverrides,
     },
+    ...assetOverrides,
   };
 }
 
@@ -111,7 +112,14 @@ const FILLER_PLACES = [
 ];
 
 const LIBRARY_ASSETS = [
-  makeAsset('vienna-1', 'Vienna', 'Austria', '2019-05-02T10:00:00.000Z', { fileSizeInByte: 'unknown' }),
+  makeAsset(
+    'vienna-1',
+    'Vienna',
+    'Austria',
+    '2019-05-02T10:00:00.000Z',
+    { fileSizeInByte: 'unknown' },
+    { people: Array.from({ length: 102 }, (_, index) => ({ id: `crowd-${index}` })) },
+  ),
   ...FILLER_PLACES.flatMap(([city, country], index) => [
     makeAsset(`${city.toLowerCase()}-1`, city, country, `202${index % 5}-03-0${(index % 8) + 1}T10:00:00.000Z`),
     makeAsset(`${city.toLowerCase()}-2`, city, country, `202${index % 5}-06-0${(index % 8) + 1}T10:00:00.000Z`),
@@ -519,6 +527,10 @@ test('admin UI smoke: gate, Insights lens, Curate, Smart Albums', { timeout: 120
     assert.equal(
       await page.evaluate('document.getElementById("metadataOmissionBanner")?.textContent'),
       'Insights left 1 invalid metadata value blank while scanning (file size: 1). All photos were still counted.',
+    );
+    assert.equal(
+      await page.evaluate('document.getElementById("peopleTruncationBanner")?.textContent'),
+      'Insights limited people relationships to 100 on 1 photo and left 2 additional entries out. Every photo and all non-people statistics were still counted.',
     );
 
     await page.evaluate('document.getElementById("lensBtn").click()');
