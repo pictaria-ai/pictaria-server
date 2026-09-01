@@ -62,6 +62,14 @@ key, model, or reachable URL, Enrich keeps that selection visible, explains
 that it is not configured, and will not start a run until you configure it or
 choose another provider.
 
+An OpenRouter model must have both **image input** and **structured outputs**
+on at least one currently available endpoint. Pictaria keeps strict structured
+output enabled. For `google/gemini-*` models it automatically projects the
+generation schema to Gemini's documented JSON Schema subset; Pictaria still
+applies the complete taxonomy, string-length, item-count, and numeric checks
+locally before accepting an answer. This provider-specific adaptation does not
+weaken the validation used for OpenAI or other OpenRouter models.
+
 For a dated, role-by-role starting point drawn from the Pictaria reference
 installation, see [Recommended AI models](RECOMMENDED-MODELS.md). It includes
 local and cloud choices and the extra multi-image requirement for the Curate
@@ -304,6 +312,19 @@ your approved tags on every request.
   converter, so set **Image source** to `original` in Settings → Enrich
   (`IMAGE_SOURCE=original`). Originals are typically JPEG; HEIC originals
   may still be rejected by LM Studio.
+- **OpenRouter says `404 No endpoints found`**: confirm that the exact current
+  model identifier accepts images and advertises structured outputs on an
+  available endpoint. OpenRouter model availability and endpoint capabilities
+  change independently; an old model slug or a model with no endpoint that
+  supports both requirements cannot run Enrich. Pictaria does not silently
+  fall back to unconstrained text output. OpenRouter failure messages include
+  a bounded provider name plus structured upstream code, status, and message;
+  unstructured raw metadata and dedicated request, prompt, image, header, and
+  debug fields are ignored, and configured credentials are redacted. If a
+  successful envelope has no answer, the diagnostic instead includes bounded
+  request and finish metadata. The remaining message text is controlled by the
+  upstream provider, so review it before posting it publicly in case that
+  provider echoed request content in its message.
 - **Rate limits, outages, and timeouts never cost a photo anything.**
   Failures are classified by *whose fault they are*. A provider error that
   is clearly environmental — a timeout or dropped connection, an auth

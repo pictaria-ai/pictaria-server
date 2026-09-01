@@ -33,6 +33,7 @@ function fakeFetch(responseBody, { status = 200, capture = {} } = {}) {
 
 const image = { data: Buffer.from('image-bytes'), mimeType: 'image/jpeg', assetId: 'asset-1' };
 const prompts = { systemPrompt: 'system', userPrompt: 'user', jsonSchema: { type: 'object' } };
+const OPENROUTER_OVERSIZED_TEST_BYTES = 17 * 1024;
 
 test('json parser accepts plain json, fences, and surrounding prose', () => {
   assert.deepEqual(parseJsonContent('{"caption": "Lake"}'), { caption: 'Lake' });
@@ -203,6 +204,101 @@ test('openrouter posts identity headers and parses strict json content', async (
   assert.equal(capture.body.response_format.json_schema.strict, true);
 });
 
+test('openrouter projects Gemini schemas to its supported JSON Schema subset', async () => {
+  const capture = {};
+  const jsonSchema = {
+    type: 'object',
+    additionalProperties: false,
+    required: ['caption', 'tags'],
+    properties: {
+      caption: { type: 'string', description: 'What is shown.', maxLength: 4096 },
+      tags: {
+        type: 'array',
+        maxItems: 50,
+        items: {
+          type: 'object',
+          additionalProperties: false,
+          required: ['confidence'],
+          properties: {
+            confidence: { type: 'number', minimum: 0, maximum: 1 },
+          },
+        },
+      },
+      maxLength: { type: 'string', maxLength: 12 },
+    },
+  };
+  const originalSchema = structuredClone(jsonSchema);
+  const provider = new OpenRouterProvider({
+    apiKey: 'key',
+    modelName: 'google/gemini-2.5-flash',
+    fetchImpl: fakeFetch({ choices: [{ message: { content: '{"caption":"Lake","tags":[]}' } }] }, { capture }),
+  });
+
+  await provider.analyzeImage(image, { ...prompts, jsonSchema });
+
+  const sent = capture.body.response_format.json_schema.schema;
+  assert.equal(capture.body.response_format.json_schema.strict, true);
+  assert.equal(sent.properties.caption.maxLength, undefined);
+  assert.equal(sent.properties.caption.description, 'What is shown.');
+  assert.equal(sent.properties.tags.maxItems, 50);
+  assert.equal(sent.properties.tags.items.additionalProperties, false);
+  assert.equal(sent.properties.tags.items.properties.confidence.minimum, 0);
+  assert.equal(sent.properties.tags.items.properties.confidence.maximum, 1);
+  assert.deepEqual(sent.properties.maxLength, { type: 'string' });
+  assert.deepEqual(jsonSchema, originalSchema, 'provider projection must not mutate the validation schema');
+});
+
+test('openrouter leaves non-Gemini strict schemas unchanged', async () => {
+  const capture = {};
+  const jsonSchema = {
+    type: 'object',
+    properties: { caption: { type: 'string', maxLength: 4096 } },
+  };
+  const provider = new OpenRouterProvider({
+    apiKey: 'key',
+    modelName: 'qwen/qwen3-vl-32b-instruct',
+    fetchImpl: fakeFetch({ choices: [{ message: { content: '{"caption":"Lake"}' } }] }, { capture }),
+  });
+
+  await provider.analyzeImage(image, { ...prompts, jsonSchema });
+
+  assert.deepEqual(capture.body.response_format.json_schema.schema, jsonSchema);
+});
+
+test('openrouter empty content reports only bounded safe provider metadata', async () => {
+  const secret = 'provider:test/+ key';
+  const provider = new OpenRouterProvider({
+    apiKey: secret,
+    modelName: 'google/gemini-2.5-flash',
+    fetchImpl: fakeFetch({
+      id: 'gen-safe-id',
+      provider: 'Google AI Studio',
+      choices: [{
+        finish_reason: 'error',
+        native_finish_reason: 'INVALID_ARGUMENT',
+        message: { content: '', reasoning: 'private chain of thought' },
+        error: {
+          code: 400,
+          message: `Unable to process input; Authorization: Bearer ${secret}`,
+          debug: 'private provider payload',
+        },
+      }],
+      debug: 'private top-level payload',
+    }),
+  });
+
+  await assert.rejects(provider.analyzeImage(image, prompts), (error) => {
+    assert.match(error.message, /request id: gen-safe-id/);
+    assert.match(error.message, /provider: Google AI Studio/);
+    assert.match(error.message, /finish reason: error/);
+    assert.match(error.message, /native finish reason: INVALID_ARGUMENT/);
+    assert.match(error.message, /code: 400; Unable to process input/);
+    assert.doesNotMatch(error.message, /provider:test|private chain|private provider|private top-level/i);
+    assert.ok(Buffer.byteLength(error.message, 'utf8') <= 600);
+    return true;
+  });
+});
+
 test('ollama embeds the schema in the prompt and tolerates fenced output', async () => {
   const capture = {};
   const provider = new OllamaCloudProvider({
@@ -340,6 +436,94 @@ test('http errors surface provider name, status, and response detail', async () 
     () => provider.analyzeImage(image, prompts),
     /openrouter request failed with status 429.*rate limited/,
   );
+});
+
+test('openrouter HTTP errors safely expose structured native-provider metadata', async () => {
+  const secret = 'provider:test/+ key';
+  const provider = new OpenRouterProvider({
+    apiKey: secret,
+    modelName: 'google/gemini-2.5-flash',
+    fetchImpl: fakeFetch({
+      error: {
+        code: 400,
+        message: 'Provider returned error',
+        metadata: {
+          provider_name: 'Google AI Studio',
+          raw: JSON.stringify({
+            error: {
+              code: 400,
+              status: 'INVALID_ARGUMENT',
+              message: `Unable to process input image; Authorization: Bearer ${secret}`,
+              debug: 'private native debug data',
+            },
+            request: { prompt: 'private prompt', image: 'private image bytes' },
+          }),
+          debug: 'private router metadata',
+        },
+      },
+      debug: 'private router response',
+    }, { status: 400 }),
+  });
+
+  await assert.rejects(provider.analyzeImage(image, prompts), (error) => {
+    assert.equal(error.status, 400);
+    assert.match(error.message, /code: 400; Provider returned error/);
+    assert.match(error.message, /provider: Google AI Studio/);
+    assert.match(error.message, /upstream status: INVALID_ARGUMENT/);
+    assert.match(error.message, /upstream: code: 400; Unable to process input image/);
+    assert.doesNotMatch(error.message, /provider:test|private/i);
+    assert.match(error.message, /Authorization: \[redacted\]/);
+    assert.ok(Buffer.byteLength(error.message, 'utf8') <= 600);
+    return true;
+  });
+});
+
+test('openrouter HTTP errors ignore unstructured or oversized raw metadata', async () => {
+  for (const raw of [
+    'private prompt and image bytes',
+    JSON.stringify({ error: { message: 'private ' + 'x'.repeat(OPENROUTER_OVERSIZED_TEST_BYTES) } }),
+  ]) {
+    const provider = new OpenRouterProvider({
+      apiKey: 'key',
+      modelName: 'google/gemini-2.5-flash',
+      fetchImpl: fakeFetch({
+        error: {
+          code: 400,
+          message: 'Provider returned error',
+          metadata: { provider_name: 'Google AI Studio', raw },
+        },
+      }, { status: 400 }),
+    });
+
+    await assert.rejects(provider.analyzeImage(image, prompts), (error) => {
+      assert.match(error.message, /provider: Google AI Studio/);
+      assert.doesNotMatch(error.message, /private prompt|private x/i);
+      return true;
+    });
+  }
+});
+
+test('non-OpenRouter providers do not expose OpenRouter metadata envelopes', async () => {
+  const provider = new VeniceProvider({
+    apiKey: 'key',
+    modelName: 'qwen3-vl-235b-a22b',
+    fetchImpl: fakeFetch({
+      error: {
+        code: 400,
+        message: 'Provider returned error',
+        metadata: {
+          provider_name: 'must-not-survive',
+          raw: JSON.stringify({ error: { message: 'must-not-survive' } }),
+        },
+      },
+    }, { status: 400 }),
+  });
+
+  await assert.rejects(provider.analyzeImage(image, prompts), (error) => {
+    assert.match(error.message, /code: 400; Provider returned error/);
+    assert.doesNotMatch(error.message, /must-not-survive/);
+    return true;
+  });
 });
 
 test('provider errors redact exact, encoded, and echoed-header API credentials', async () => {
