@@ -33,18 +33,22 @@ limit; people collection stops at 100 pages, 50,000 entries, or 60 seconds;
 and slice resolution stops at 1,000 upstream calls, 250,000 scanned entries,
 or two minutes. Invalid, repeated, and non-progressing Immich page metadata
 fails the operation without publishing a partial Insights generation.
-The asset sweep additionally accepts at most 100 face relationships and 128
-EXIF fields per asset, 4 KiB per metadata field, 4,096 nested metadata items,
-and 128 KiB of decoded metadata per asset. The same structural and byte limits
-bound each people-directory record. That envelope leaves margin above the full
-`PersonWithFaces` records returned by supported Immich versions. Asset and
-person identifiers are restricted to 128 safe opaque characters. One
+The asset sweep retains at most 100 unique people relationships per photo,
+along with its fixed EXIF projection, 4 KiB per retained metadata field, 4,096
+nested metadata items, and 128 KiB of decoded metadata per asset. A crowd photo
+with more than 100 relationships remains in every ordinary photo, date, place,
+camera, and storage statistic; Insights keeps the first 100 relationships and
+shows a persistent notice that people and pair statistics were truncated for
+that photo. Only the bounded person ID Pictaria stores is admitted—not names,
+face boxes, or other fields on Immich's `PersonWithFaces` relationship object.
+The same structural and byte limits still bound each people-directory record.
+Asset and person identifiers are restricted to 128 safe opaque characters. One
 refresh may admit at most 20 million nested items, 512 MiB of decoded metadata,
 and 5 million generated asset/relationship/people rows. Complete people
-relationship and directory records count before filtering or deduplication,
-including hidden and unnamed entries. Every page is fully admitted before its
-first staging write; a limit failure drops staging and keeps the previous
-snapshot intact.
+retained relationship and complete directory records count toward those
+budgets, including hidden and unnamed entries. Every page is fully admitted
+before its first staging write; a limit failure drops staging and keeps the
+previous snapshot intact.
 
 Insights also reserves filesystem headroom for the overlap between the live
 generation, staging tables, the indexed publish copy, and SQLite's WAL. A
@@ -106,6 +110,9 @@ camera slices.
 ```json
 {
   "generatedAt": "…",
+  "peopleTruncation": {
+    "assets": 0, "relationshipsOmitted": 0, "perAssetLimit": 100
+  },
   "totals": { "photos": 0, "videos": 0, "favorites": 0, "storageBytes": 0,
               "firstTakenAt": "…", "lastTakenAt": "…",
               "peopleNamed": 0, "peopleTotal": 0 },
