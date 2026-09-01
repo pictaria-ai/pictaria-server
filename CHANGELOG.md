@@ -21,6 +21,10 @@ All notable changes to Pictaria Server are documented here. This project follows
 - LM Studio Enrich and Curate requests accept validated schema JSON when a
   thinking-capable model returns it in `reasoning_content` with empty ordinary
   content. Voice and other prose never expose that reasoning channel.
+- OpenRouter Enrich and Curate requests adapt strict schemas to Google
+  Gemini's documented JSON Schema subset while retaining Pictaria's complete
+  local validation. Empty OpenRouter responses now expose bounded, sanitized
+  request and finish metadata instead of a context-free error.
 
 ## 1.0.0 - 2026-08-28
 

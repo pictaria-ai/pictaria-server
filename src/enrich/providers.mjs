@@ -35,6 +35,34 @@ const OPENAI_MAX_OUTPUT_TOKENS = 8192;
 // can become a large transient allocation.
 const MAX_PROVIDER_RESPONSE_BYTES = 2 * 1024 * 1024;
 
+// Gemini accepts JSON Schema through OpenRouter, but its native structured-
+// output API supports only a documented subset of JSON Schema. Keep strict
+// generation while projecting out unsupported generation hints; the complete
+// Pictaria schema is still enforced by validateAiOutput after the response.
+const GEMINI_JSON_SCHEMA_KEYWORDS = new Set([
+  '$id',
+  '$defs',
+  '$ref',
+  '$anchor',
+  'type',
+  'format',
+  'title',
+  'description',
+  'enum',
+  'items',
+  'prefixItems',
+  'minItems',
+  'maxItems',
+  'minimum',
+  'maximum',
+  'anyOf',
+  'oneOf',
+  'properties',
+  'additionalProperties',
+  'required',
+  'propertyOrdering',
+]);
+
 // Transport-level provider failure. `infrastructure` separates "the provider
 // or network is unhealthy" (timeouts, refused connections, auth, rate limits,
 // 5xx) from "the provider judged this request's content" — the runner only
@@ -289,6 +317,7 @@ export class OpenRouterProvider {
   }
 
   async analyzeImages(images, { systemPrompt, userPrompt, jsonSchema, schemaName = 'pictaria_photo_enrichment' }) {
+    const providerJsonSchema = openRouterJsonSchema(this.modelName, jsonSchema);
     const body = {
       model: this.modelName,
       messages: [
@@ -306,7 +335,7 @@ export class OpenRouterProvider {
         json_schema: {
           name: schemaName,
           strict: true,
-          schema: jsonSchema,
+          schema: providerJsonSchema,
         },
       },
       temperature: 0,
@@ -319,7 +348,8 @@ export class OpenRouterProvider {
     });
     const outputText = extractChoiceMessageContent(rawOutput);
     if (!outputText) {
-      throw new Error('OpenRouter response did not include message content');
+      const detail = openRouterEmptyContentDiagnostic(rawOutput, this.apiKey);
+      throw new Error(`OpenRouter response did not include message content${detail ? `: ${detail}` : ''}`);
     }
     return { rawOutput, normalizedOutput: JSON.parse(outputText) };
   }
@@ -339,6 +369,53 @@ export class OpenRouterProvider {
     });
     return { rawOutput, text: extractChoiceMessageContent(rawOutput) };
   }
+}
+
+function openRouterJsonSchema(modelName, jsonSchema) {
+  if (!String(modelName ?? '').toLowerCase().startsWith('google/gemini-')) {
+    return jsonSchema;
+  }
+  return projectGeminiJsonSchema(jsonSchema);
+}
+
+function projectGeminiJsonSchema(value, context = 'schema') {
+  if (Array.isArray(value)) {
+    return value.map((item) => projectGeminiJsonSchema(item, context));
+  }
+  if (!value || typeof value !== 'object') {
+    return value;
+  }
+  if (context === 'properties' || context === '$defs') {
+    return Object.fromEntries(
+      Object.entries(value).map(([key, schema]) => [key, projectGeminiJsonSchema(schema)]),
+    );
+  }
+  return Object.fromEntries(
+    Object.entries(value)
+      .filter(([key]) => GEMINI_JSON_SCHEMA_KEYWORDS.has(key))
+      .map(([key, child]) => [key, projectGeminiJsonSchema(child, key)]),
+  );
+}
+
+function openRouterEmptyContentDiagnostic(response, apiKey) {
+  const choice = response?.choices?.[0];
+  const fields = [];
+  for (const [label, value] of [
+    ['request id', response?.id],
+    ['provider', response?.provider],
+    ['finish reason', choice?.finish_reason],
+    ['native finish reason', choice?.native_finish_reason],
+  ]) {
+    if (typeof value === 'string' || typeof value === 'number') {
+      const text = String(value).trim();
+      if (text) fields.push(`${label}: ${text}`);
+    }
+  }
+  for (const error of [response?.error, choice?.error]) {
+    const detail = structuredUpstreamDiagnostic(error, { secrets: [apiKey], maxBytes: 256 });
+    if (detail) fields.push(`error: ${detail}`);
+  }
+  return sanitizeDiagnostic(fields.join('; '), { secrets: [apiKey], maxBytes: 512 });
 }
 
 export class VeniceProvider {
