@@ -7,6 +7,9 @@ All notable changes to Pictaria Server are documented here. This project follows
 
 ### Fixed
 
+- Curate now offers the same synchronized **Load more** control below the
+  photo grid, so long review sessions do not require scrolling back to the
+  toolbar for another page.
 - Docker Compose now forwards every documented non-path enrichment, AI,
   Curate-referee, voice, and geocoding variable, including LM Studio's token
   cap and temperature. Empty Compose values preserve the same runtime defaults

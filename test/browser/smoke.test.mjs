@@ -856,6 +856,39 @@ test('admin UI smoke: gate, Insights lens, Curate, Smart Albums', { timeout: 120
     );
   });
 
+  await t.test('Curate keeps top and bottom Load more controls synchronized', async () => {
+    await page.navigate(`${server.base}/curate.html?limit=3`);
+    await page.waitFor(
+      'document.querySelectorAll("#grid img").length === 3 && !document.querySelector(".gate-backdrop")',
+      { label: 'first Curate page renders' },
+    );
+
+    const firstPage = await page.evaluate(`(() => ({
+      topDisabled: document.getElementById('loadMore').disabled,
+      bottomDisabled: document.getElementById('loadMoreBottom').disabled,
+      bottomHidden: document.getElementById('loadMoreBottomRow').hidden,
+    }))()`);
+    assert.deepEqual(firstPage, { topDisabled: false, bottomDisabled: false, bottomHidden: false });
+
+    await page.evaluate('document.getElementById("loadMoreBottom").click()');
+    await page.waitFor(
+      'document.querySelectorAll("#grid img").length === 6 && !document.getElementById("loadMore").disabled',
+      { label: 'bottom control appends the second page' },
+    );
+    await page.evaluate('document.getElementById("loadMore").click()');
+    await page.waitFor(
+      'document.querySelectorAll("#grid img").length === 9 && document.getElementById("loadMore").disabled',
+      { label: 'top control appends the final page' },
+    );
+
+    const finalPage = await page.evaluate(`(() => ({
+      topDisabled: document.getElementById('loadMore').disabled,
+      bottomDisabled: document.getElementById('loadMoreBottom').disabled,
+      bottomHidden: document.getElementById('loadMoreBottomRow').hidden,
+    }))()`);
+    assert.deepEqual(finalPage, { topDisabled: true, bottomDisabled: true, bottomHidden: true });
+  });
+
   await t.test('Curate flows across page boundaries: auto-append + lightbox continuity', async () => {
     // A 3-photo page against the 9-photo queue: deciding must auto-append the
     // next page and keep the lightbox open across the boundary. A false "all
@@ -900,6 +933,8 @@ test('admin UI smoke: gate, Insights lens, Curate, Smart Albums', { timeout: 120
       { label: 'empty state renders' },
     );
     assert.match(emptyText, /Queue is empty/);
+    assert.equal(await page.evaluate('document.getElementById("loadMore").disabled'), true);
+    assert.equal(await page.evaluate('document.getElementById("loadMoreBottomRow").hidden'), true);
   });
 
   await t.test('Smart Albums: multi-country album round-trips through the form', async () => {
