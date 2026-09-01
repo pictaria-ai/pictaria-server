@@ -483,6 +483,7 @@ function removeDecided(assetIds) {
   // Keep the queue flowing: when decisions run the loaded list low and the
   // server has more, append the next page before the user reaches the end.
   if (state.assets.length < LOAD_AHEAD && state.offset < state.total) loadAssets(true);
+  updateLoadMoreControls();
 }
 
 function updateBulkbar() {

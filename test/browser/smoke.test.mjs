@@ -933,6 +933,8 @@ test('admin UI smoke: gate, Insights lens, Curate, Smart Albums', { timeout: 120
       { label: 'empty state renders' },
     );
     assert.match(emptyText, /Queue is empty/);
+    assert.equal(await page.evaluate('document.getElementById("loadMore").disabled'), true);
+    assert.equal(await page.evaluate('document.getElementById("loadMoreBottomRow").hidden'), true);
   });
 
   await t.test('Smart Albums: multi-country album round-trips through the form', async () => {
