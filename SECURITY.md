@@ -2,10 +2,11 @@
 
 ## Reporting a vulnerability
 
-Please report suspected vulnerabilities privately to
-[security@pictaria.ai](mailto:security@pictaria.ai). When GitHub private
-vulnerability reporting is available for this repository, the private
-reporting form under the Security tab is also a preferred channel.
+Please use this repository's
+[private vulnerability reporting form](https://github.com/pictaria-ai/pictaria-server/security/advisories/new)
+for suspected vulnerabilities. It keeps the report private and gives the
+project an auditable place to investigate and coordinate a fix. You may also
+email [security@pictaria.ai](mailto:security@pictaria.ai).
 
 We aim to acknowledge reports within three business days. Please allow us a
 reasonable opportunity to investigate, coordinate a fix, and agree on a
