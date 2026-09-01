@@ -44,10 +44,11 @@ else waits on them.
 
   Also enable **Tags** in Immich under **Account Settings → Features** for
   the same Immich account that owns this API key. This account-level switch
-  and the API-key permissions are separate: turning Tags on does not require
-  a new key when the existing key already has `tag.read`, `tag.create`, and
-  `tag.asset`. If Pictaria reports one of those permissions missing, update or
-  replace the key and save the replacement in Settings → Server.
+  and the API-key permissions are separate. Turning Tags on normally does not
+  require a new key when the existing key already has `tag.read`,
+  `tag.create`, and `tag.asset`. If Pictaria still reports a missing permission
+  or synchronization continues to fail, recreate the key and save the
+  replacement in Settings → Server.
 
   Roughly: the reads power search, Insights, and image fetches; `album.*`
   is Smart Albums doing its job — `albumAsset.create`/`albumAsset.delete`
