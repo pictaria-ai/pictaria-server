@@ -58,12 +58,12 @@ async function api(path, options = {}) {
 function loadAssets(append = false) {
   if (state.loading) return state.loadingPromise ?? Promise.resolve();
   state.loading = true;
+  updateLoadMoreControls();
   state.loadingPromise = doLoadAssets(append);
   return state.loadingPromise;
 }
 
 async function doLoadAssets(append) {
-  el('loadMore').disabled = true;
   try {
     const params = new URLSearchParams({ view: state.view, q: state.q, offset: String(state.offset), limit: String(state.limit) });
     if (state.group !== 'all' && state.view !== 'decided') params.set('group', state.group);
@@ -106,8 +106,16 @@ async function doLoadAssets(append) {
     toast(error.message, true);
   } finally {
     state.loading = false;
-    el('loadMore').disabled = state.offset >= state.total;
+    updateLoadMoreControls();
   }
+}
+
+function updateLoadMoreControls() {
+  const hasMore = state.offset < state.total;
+  document.querySelectorAll('[data-load-more]').forEach((button) => {
+    button.disabled = state.loading || !hasMore;
+  });
+  el('loadMoreBottomRow').hidden = state.assets.length === 0 || !hasMore;
 }
 
 function renderTabs(payload) {
@@ -1015,7 +1023,9 @@ el('search').addEventListener('input', () => {
   clearTimeout(el('search')._timer);
   el('search')._timer = setTimeout(loadAssetsFresh, 200);
 });
-el('loadMore').addEventListener('click', () => loadAssets(true));
+document.querySelectorAll('[data-load-more]').forEach((button) => {
+  button.addEventListener('click', () => loadAssets(true));
+});
 document.querySelectorAll('#groupFilter .p-tab').forEach((button) => {
   button.addEventListener('click', () => {
     if (state.group === button.dataset.group) return;
