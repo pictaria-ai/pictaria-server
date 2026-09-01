@@ -28,21 +28,47 @@ services:
       BACKUP_ENABLED: ${BACKUP_ENABLED-true}
       BACKUP_INTERVAL_HOURS: ${BACKUP_INTERVAL_HOURS:-24}
       BACKUP_KEEP: ${BACKUP_KEEP:-7}
-      # Optional providers (see .env.example for the full list). Connections
-      # and models can also be set under Settings → AI Providers; the active
-      # enrichment provider is selected and remembered on the Enrich page.
+      # Enrichment and optional providers (see .env.example for the full
+      # list). Connections and models can also be set under Settings → AI
+      # Providers; the active provider is remembered on the Enrich page.
+      ENRICH_ENABLED: ${ENRICH_ENABLED:-false}
+      CAPTION_WRITEBACK: ${CAPTION_WRITEBACK:-false}
+      IMAGE_SOURCE: ${IMAGE_SOURCE:-preview}
+      MAX_FAILURES_PER_ASSET: ${MAX_FAILURES_PER_ASSET:-2}
+      PROMPT_VERSION: ${PROMPT_VERSION:-v2}
+      # Unlike ${VAR:-default}, ${VAR-default} preserves an explicitly blank
+      # value. Blank means false here, matching the native configuration path.
+      CURATE_BURST_GROUPING: ${CURATE_BURST_GROUPING-true}
+      REFEREE_GROUP_BUDGET_MB: ${REFEREE_GROUP_BUDGET_MB:-96}
       OPENAI_API_KEY: ${OPENAI_API_KEY:-}
       DEFAULT_PROVIDER: ${DEFAULT_PROVIDER:-cloud_openai}
+      CURATE_REFEREE_ENABLED: ${CURATE_REFEREE_ENABLED:-}
+      CURATE_REFEREE_PROVIDER: ${CURATE_REFEREE_PROVIDER:-}
+      CURATE_REFEREE_MODEL: ${CURATE_REFEREE_MODEL:-}
       TTS_PROVIDER: ${TTS_PROVIDER:-}
       STT_PROVIDER: ${STT_PROVIDER:-}
+      OPENAI_TTS_MODEL: ${OPENAI_TTS_MODEL:-}
+      OPENAI_TTS_VOICE: ${OPENAI_TTS_VOICE:-}
+      OPENAI_TTS_SPEED: ${OPENAI_TTS_SPEED:-}
+      OPENAI_TTS_FORMAT: ${OPENAI_TTS_FORMAT:-}
+      OPENAI_TTS_INSTRUCTIONS: ${OPENAI_TTS_INSTRUCTIONS:-}
       ELEVENLABS_API_KEY: ${ELEVENLABS_API_KEY:-}
       ELEVENLABS_VOICE_ID: ${ELEVENLABS_VOICE_ID:-}
+      ELEVENLABS_TTS_MODEL: ${ELEVENLABS_TTS_MODEL:-}
+      ELEVENLABS_OUTPUT_FORMAT: ${ELEVENLABS_OUTPUT_FORMAT:-}
+      ELEVENLABS_REQUEST_TIMEOUT_MS: ${ELEVENLABS_REQUEST_TIMEOUT_MS:-}
       # Spoken voice answers: provider, per-command models, and the interactive
       # deadline. Settings → Voice can set these too.
       VOICE_PROSE_PROVIDER: ${VOICE_PROSE_PROVIDER:-}
       VOICE_INTERESTING_MODEL: ${VOICE_INTERESTING_MODEL:-}
       VOICE_ASK_MODEL: ${VOICE_ASK_MODEL:-}
       VOICE_PROSE_TIMEOUT_MS: ${VOICE_PROSE_TIMEOUT_MS:-}
+      OPENAI_INTERESTING_MODEL: ${OPENAI_INTERESTING_MODEL:-}
+      OPENAI_INTERESTING_IMAGE_DETAIL: ${OPENAI_INTERESTING_IMAGE_DETAIL:-}
+      OPENAI_INTERESTING_MAX_OUTPUT_TOKENS: ${OPENAI_INTERESTING_MAX_OUTPUT_TOKENS:-}
+      OPENAI_ASK_MODEL: ${OPENAI_ASK_MODEL:-}
+      OPENAI_ASK_MAX_OUTPUT_TOKENS: ${OPENAI_ASK_MAX_OUTPUT_TOKENS:-}
+      OPENAI_REQUEST_TIMEOUT_MS: ${OPENAI_REQUEST_TIMEOUT_MS:-}
       # AI provider connections, used by Enrich, the Curate referee and the
       # spoken voice answers alike. Without these a .env-only install can
       # select a provider it then has no way to reach.
@@ -64,8 +90,12 @@ services:
       LMSTUDIO_MODEL: ${LMSTUDIO_MODEL:-}
       LMSTUDIO_BASE_URL: ${LMSTUDIO_BASE_URL:-}
       LMSTUDIO_API_KEY: ${LMSTUDIO_API_KEY:-}
+      LMSTUDIO_MAX_TOKENS: ${LMSTUDIO_MAX_TOKENS:-}
+      LMSTUDIO_TEMPERATURE: ${LMSTUDIO_TEMPERATURE:-}
       GEOCODING_PROVIDER: ${GEOCODING_PROVIDER:-}
       GEOAPIFY_API_KEY: ${GEOAPIFY_API_KEY:-}
+      GEOCODING_TIMEOUT_MS: ${GEOCODING_TIMEOUT_MS:-}
+      GEOCODING_COORDINATE_PRECISION: ${GEOCODING_COORDINATE_PRECISION:-}
     # Using LM Studio on the Docker host for local enrichment? Inside the
     # container 127.0.0.1 is the container itself — set the LM Studio base
     # URL (Settings → AI Providers) to http://host.docker.internal:1234/v1.

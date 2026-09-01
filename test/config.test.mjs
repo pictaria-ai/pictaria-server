@@ -52,6 +52,29 @@ test('every environment-configurable service base URL rejects query components',
   }
 });
 
+test('empty Compose values preserve native LM Studio defaults', () => {
+  const native = loadConfig({}).providers.local_lmstudio;
+  const composeEmpty = loadConfig({
+    LMSTUDIO_API_KEY: '',
+    LMSTUDIO_MAX_TOKENS: '',
+    LMSTUDIO_TEMPERATURE: '',
+  }).providers.local_lmstudio;
+
+  assert.equal(native.apiKey, 'lm-studio');
+  assert.equal(composeEmpty.apiKey, native.apiKey);
+  assert.equal(composeEmpty.maxTokens, native.maxTokens);
+  assert.equal(composeEmpty.temperature, native.temperature);
+
+  const configured = loadConfig({
+    LMSTUDIO_API_KEY: 'proxy-token',
+    LMSTUDIO_MAX_TOKENS: '4096',
+    LMSTUDIO_TEMPERATURE: '0.7',
+  }).providers.local_lmstudio;
+  assert.equal(configured.apiKey, 'proxy-token');
+  assert.equal(configured.maxTokens, 4096);
+  assert.equal(configured.temperature, 0.7);
+});
+
 test('server auth configuration fails closed unless open mode is explicit', () => {
   for (const env of [{}, { APP_PASSWORD: '' }, { APP_PASSWORD: '', ALLOW_INSECURE_OPEN: 'false' }]) {
     assert.throws(

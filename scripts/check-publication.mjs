@@ -243,6 +243,49 @@ const composeDefault = compose.match(/PICTARIA_IMAGE_TAG:-([^}\s]+)/)?.[1];
 if (!composeDefault || !/^\d+\.\d+\.\d+(?:[-+][0-9A-Za-z.-]+)?$/.test(composeDefault)) {
   throw new Error('docker-compose.yml must default PICTARIA_IMAGE_TAG to an explicit release version.');
 }
+const composeEnvironmentKeys = new Set(
+  [...compose.matchAll(/^\s{6}([A-Z][A-Z0-9_]+):/gm)].map((match) => match[1]),
+);
+const serverConfigSource = readFileSync(resolve(root, 'src/config.mjs'), 'utf8');
+const serverEnvironmentKeys = new Set(
+  [...serverConfigSource.matchAll(/\benv\.([A-Z][A-Z0-9_]*)\b/g)].map((match) => match[1]),
+);
+const providerEnvironmentPrefixes = [
+  // Add a provider's prefix here when its first env-backed configuration is
+  // introduced; prefix-based discovery keeps later knobs self-maintaining.
+  'CURATE_',
+  'ELEVENLABS_',
+  'ENRICH_',
+  'GEOCODING_',
+  'LMSTUDIO_',
+  'OLLAMA_',
+  'OPENAI_',
+  'OPENROUTER_',
+  'VENICE_',
+  'VOICE_',
+];
+const providerEnvironmentNames = new Set([
+  'CAPTION_WRITEBACK',
+  'DEFAULT_PROVIDER',
+  'GEOAPIFY_API_KEY',
+  'IMAGE_SOURCE',
+  'MAX_FAILURES_PER_ASSET',
+  'PROMPT_VERSION',
+  'REFEREE_GROUP_BUDGET_MB',
+  'STT_PROVIDER',
+  'TTS_PROVIDER',
+]);
+const providerEnvironmentKeys = [...serverEnvironmentKeys]
+  .filter((key) => providerEnvironmentNames.has(key)
+    || providerEnvironmentPrefixes.some((prefix) => key.startsWith(prefix)))
+  .sort();
+const missingProviderEnvironmentKeys = providerEnvironmentKeys
+  .filter((key) => !composeEnvironmentKeys.has(key));
+if (missingProviderEnvironmentKeys.length > 0) {
+  throw new Error(
+    `docker-compose.yml must forward every supported AI and enrichment environment variable; missing: ${missingProviderEnvironmentKeys.join(', ')}.`,
+  );
+}
 const configuration = publicGuidance.get('docs/CONFIGURATION.md');
 if (!configuration.includes(`| \`PICTARIA_IMAGE_TAG\` | \`${composeDefault}\` |`)) {
   throw new Error(

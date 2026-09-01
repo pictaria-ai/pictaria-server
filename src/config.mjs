@@ -192,7 +192,7 @@ export function loadConfig(env = process.env) {
         modelName: env.OPENAI_MODEL || 'gpt-5.5',
       },
       local_lmstudio: {
-        apiKey: env.LMSTUDIO_API_KEY ?? 'lm-studio',
+        apiKey: env.LMSTUDIO_API_KEY || 'lm-studio',
         modelName: env.LMSTUDIO_MODEL || '',
         baseUrl: normalizeHttpUrl(env.LMSTUDIO_BASE_URL || 'http://127.0.0.1:1234/v1'),
         // 2400 gives long tag-lists + captions headroom: the 1600 cap was
