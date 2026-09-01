@@ -50,7 +50,7 @@ Production installs should select an explicit reviewed release. The source
 tag and matching versioned GHCR image keep the deployment inputs aligned.
 
 ```sh
-PICTARIA_RELEASE=v1.0.0 # replace with the release you are installing
+PICTARIA_RELEASE=v1.0.1 # replace with the release you are installing
 mkdir pictaria-server && cd pictaria-server
 curl -fsSLO \
   "https://raw.githubusercontent.com/pictaria-ai/pictaria-server/${PICTARIA_RELEASE}/docker-compose.yml"
@@ -80,7 +80,7 @@ and its online-backup API; earlier builds fail at boot — `engines` says
 newer supported versions work as well.
 
 ```sh
-PICTARIA_RELEASE=v1.0.0 # replace with the release you are installing
+PICTARIA_RELEASE=v1.0.1 # replace with the release you are installing
 git clone --branch "$PICTARIA_RELEASE" --depth 1 \
   https://github.com/pictaria-ai/pictaria-server.git
 cd pictaria-server

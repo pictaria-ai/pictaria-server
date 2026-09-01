@@ -5,6 +5,8 @@ All notable changes to Pictaria Server are documented here. This project follows
 
 ## Unreleased
 
+## 1.0.1 - 2026-09-01
+
 ### Fixed
 
 - Curate now offers the same synchronized **Load more** control below the
@@ -44,6 +46,12 @@ All notable changes to Pictaria Server are documented here. This project follows
 - LM Studio-compatible local requests use a fresh HTTP connection for each
   generation, avoiding `socket hang up` failures when llama.cpp closes a
   completed connection before Pictaria's stricter validation retry.
+
+### Compatibility
+
+- Persisted-state contracts, the Frame protocol, Node requirements, and the
+  Immich 2.0+ compatibility floor are unchanged from 1.0.0. This is a
+  code-only update with no startup migration.
 
 ## 1.0.0 - 2026-08-28
 
