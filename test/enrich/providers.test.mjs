@@ -33,6 +33,7 @@ function fakeFetch(responseBody, { status = 200, capture = {} } = {}) {
 
 const image = { data: Buffer.from('image-bytes'), mimeType: 'image/jpeg', assetId: 'asset-1' };
 const prompts = { systemPrompt: 'system', userPrompt: 'user', jsonSchema: { type: 'object' } };
+const OPENROUTER_OVERSIZED_TEST_BYTES = 17 * 1024;
 
 test('json parser accepts plain json, fences, and surrounding prose', () => {
   assert.deepEqual(parseJsonContent('{"caption": "Lake"}'), { caption: 'Lake' });
@@ -435,6 +436,94 @@ test('http errors surface provider name, status, and response detail', async () 
     () => provider.analyzeImage(image, prompts),
     /openrouter request failed with status 429.*rate limited/,
   );
+});
+
+test('openrouter HTTP errors safely expose structured native-provider metadata', async () => {
+  const secret = 'provider:test/+ key';
+  const provider = new OpenRouterProvider({
+    apiKey: secret,
+    modelName: 'google/gemini-2.5-flash',
+    fetchImpl: fakeFetch({
+      error: {
+        code: 400,
+        message: 'Provider returned error',
+        metadata: {
+          provider_name: 'Google AI Studio',
+          raw: JSON.stringify({
+            error: {
+              code: 400,
+              status: 'INVALID_ARGUMENT',
+              message: `Unable to process input image; Authorization: Bearer ${secret}`,
+              debug: 'private native debug data',
+            },
+            request: { prompt: 'private prompt', image: 'private image bytes' },
+          }),
+          debug: 'private router metadata',
+        },
+      },
+      debug: 'private router response',
+    }, { status: 400 }),
+  });
+
+  await assert.rejects(provider.analyzeImage(image, prompts), (error) => {
+    assert.equal(error.status, 400);
+    assert.match(error.message, /code: 400; Provider returned error/);
+    assert.match(error.message, /provider: Google AI Studio/);
+    assert.match(error.message, /upstream status: INVALID_ARGUMENT/);
+    assert.match(error.message, /upstream: code: 400; Unable to process input image/);
+    assert.doesNotMatch(error.message, /provider:test|private/i);
+    assert.match(error.message, /Authorization: \[redacted\]/);
+    assert.ok(Buffer.byteLength(error.message, 'utf8') <= 600);
+    return true;
+  });
+});
+
+test('openrouter HTTP errors ignore unstructured or oversized raw metadata', async () => {
+  for (const raw of [
+    'private prompt and image bytes',
+    JSON.stringify({ error: { message: 'private ' + 'x'.repeat(OPENROUTER_OVERSIZED_TEST_BYTES) } }),
+  ]) {
+    const provider = new OpenRouterProvider({
+      apiKey: 'key',
+      modelName: 'google/gemini-2.5-flash',
+      fetchImpl: fakeFetch({
+        error: {
+          code: 400,
+          message: 'Provider returned error',
+          metadata: { provider_name: 'Google AI Studio', raw },
+        },
+      }, { status: 400 }),
+    });
+
+    await assert.rejects(provider.analyzeImage(image, prompts), (error) => {
+      assert.match(error.message, /provider: Google AI Studio/);
+      assert.doesNotMatch(error.message, /private prompt|private x/i);
+      return true;
+    });
+  }
+});
+
+test('non-OpenRouter providers do not expose OpenRouter metadata envelopes', async () => {
+  const provider = new VeniceProvider({
+    apiKey: 'key',
+    modelName: 'qwen3-vl-235b-a22b',
+    fetchImpl: fakeFetch({
+      error: {
+        code: 400,
+        message: 'Provider returned error',
+        metadata: {
+          provider_name: 'must-not-survive',
+          raw: JSON.stringify({ error: { message: 'must-not-survive' } }),
+        },
+      },
+    }, { status: 400 }),
+  });
+
+  await assert.rejects(provider.analyzeImage(image, prompts), (error) => {
+    assert.match(error.message, /code: 400; Provider returned error/);
+    assert.doesNotMatch(error.message, /must-not-survive/);
+    return true;
+  });
 });
 
 test('provider errors redact exact, encoded, and echoed-header API credentials', async () => {

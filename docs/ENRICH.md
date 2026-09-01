@@ -317,10 +317,12 @@ your approved tags on every request.
   available endpoint. OpenRouter model availability and endpoint capabilities
   change independently; an old model slug or a model with no endpoint that
   supports both requirements cannot run Enrich. Pictaria does not silently
-  fall back to unconstrained text output. If OpenRouter returns a successful
-  envelope with no answer, the failure message includes only bounded request,
-  provider, and finish metadata that can be shared for troubleshooting — never
-  prompts, images, reasoning text, or credentials.
+  fall back to unconstrained text output. OpenRouter failure messages include
+  only bounded provider and structured upstream error fields that can be
+  shared for troubleshooting; unstructured raw metadata is ignored. If a
+  successful envelope has no answer, the message instead includes bounded
+  request and finish metadata. Neither path exposes prompts, images, reasoning
+  text, header values, debug objects, or credentials.
 - **Rate limits, outages, and timeouts never cost a photo anything.**
   Failures are classified by *whose fault they are*. A provider error that
   is clearly environmental — a timeout or dropped connection, an auth

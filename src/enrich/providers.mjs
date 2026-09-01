@@ -726,7 +726,7 @@ async function postJson(provider, url, body, extraHeaders) {
   }
 
   if (!response.ok) {
-    const detail = await readErrorDetail(response, provider.apiKey);
+    const detail = await readErrorDetail(response, provider);
     throw new ProviderRequestError(providerStatusMessage(provider.providerName, response.status, detail), {
       status: response.status,
     });
@@ -761,16 +761,17 @@ async function postJson(provider, url, body, extraHeaders) {
 // bounded, and degrade to no detail rather than throw — the status-coded
 // error we are building is the failure that matters.
 const ERROR_DETAIL_MAX_BYTES = 64 * 1024;
-async function readErrorDetail(response, apiKey) {
+async function readErrorDetail(response, provider) {
   try {
     // Injected doubles without a body stream (tests) read whole.
     if (typeof response.body?.getReader === 'function') {
       return providerErrorDetail(
         (await readBodyBounded(response, ERROR_DETAIL_MAX_BYTES, 'Provider')).toString('utf8'),
-        apiKey,
+        provider.providerName,
+        provider.apiKey,
       );
     }
-    return providerErrorDetail(await response.text(), apiKey);
+    return providerErrorDetail(await response.text(), provider.providerName, provider.apiKey);
   } catch {
     return '';
   }
@@ -810,7 +811,7 @@ function nodePostJson(provider, url, headers, payload) {
         clearTimeout(deadline);
         const text = Buffer.concat(chunks).toString('utf8');
         if (response.statusCode < 200 || response.statusCode >= 300) {
-          const detail = providerErrorDetail(text, provider.apiKey);
+          const detail = providerErrorDetail(text, provider.providerName, provider.apiKey);
           reject(new ProviderRequestError(providerStatusMessage(provider.providerName, response.statusCode, detail), {
             status: response.statusCode,
           }));
@@ -836,9 +837,21 @@ function nodePostJson(provider, url, headers, payload) {
   });
 }
 
-function providerErrorDetail(text, apiKey) {
+const OPENROUTER_RAW_ERROR_MAX_BYTES = 16 * 1024;
+
+function providerErrorDetail(text, providerName, apiKey) {
   try {
-    return structuredUpstreamDiagnostic(JSON.parse(text), { secrets: [apiKey] });
+    const body = JSON.parse(text);
+    const options = { secrets: [apiKey] };
+    if (providerName !== 'openrouter') {
+      return structuredUpstreamDiagnostic(body, options);
+    }
+    const primary = structuredUpstreamDiagnostic(body, { ...options, maxBytes: 256 });
+    const metadata = openRouterErrorMetadataDiagnostic(body, options);
+    return sanitizeDiagnostic([primary, metadata].filter(Boolean).join('; '), {
+      ...options,
+      maxBytes: 512,
+    });
   } catch {
     // Arbitrary HTML/plaintext bodies are not diagnostics. The status and
     // provider identity still explain the failure without retaining a dump.
@@ -846,8 +859,48 @@ function providerErrorDetail(text, apiKey) {
   }
 }
 
+// OpenRouter wraps the useful native-provider failure inside
+// error.metadata.raw. Never surface that field directly: it is untrusted and
+// could contain request data. Accept only a small JSON object, run it through
+// the same field allowlist as every other upstream diagnostic, and ignore
+// plaintext, arrays, debug objects, headers, prompts, and image data.
+function openRouterErrorMetadataDiagnostic(body, options) {
+  const metadata = body?.error?.metadata;
+  if (!isPlainObject(metadata)) return '';
+
+  const fields = [];
+  if (typeof metadata.provider_name === 'string' || typeof metadata.provider_name === 'number') {
+    const providerName = sanitizeDiagnostic(metadata.provider_name, { ...options, maxBytes: 96 });
+    if (providerName) fields.push(`provider: ${providerName}`);
+  }
+
+  if (typeof metadata.raw === 'string'
+    && Buffer.byteLength(metadata.raw, 'utf8') <= OPENROUTER_RAW_ERROR_MAX_BYTES) {
+    try {
+      const nativeError = JSON.parse(metadata.raw);
+      if (isPlainObject(nativeError)) {
+        const status = nativeError.status ?? nativeError.error?.status ?? nativeError.detail?.status;
+        if (typeof status === 'string' || typeof status === 'number') {
+          const safeStatus = sanitizeDiagnostic(status, { ...options, maxBytes: 96 });
+          if (safeStatus) fields.push(`upstream status: ${safeStatus}`);
+        }
+        const detail = structuredUpstreamDiagnostic(nativeError, { ...options, maxBytes: 256 });
+        if (detail) fields.push(`upstream: ${detail}`);
+      }
+    } catch {
+      // Raw plaintext or malformed JSON is intentionally not diagnostic data.
+    }
+  }
+
+  return sanitizeDiagnostic(fields.join('; '), { ...options, maxBytes: 384 });
+}
+
 function providerStatusMessage(providerName, status, detail) {
   return `${providerName} request failed with status ${status}${detail ? `: ${detail}` : ''}`;
+}
+
+function isPlainObject(value) {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
 
 function toDataUrl(image) {
