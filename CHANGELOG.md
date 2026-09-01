@@ -23,9 +23,9 @@ All notable changes to Pictaria Server are documented here. This project follows
   content. Voice and other prose never expose that reasoning channel.
 - OpenRouter Enrich and Curate requests adapt strict schemas to Google
   Gemini's documented JSON Schema subset while retaining Pictaria's complete
-  local validation. OpenRouter failures now expose bounded, sanitized provider
-  and structured upstream error details; empty responses expose request and
-  finish metadata instead of a context-free error.
+  local validation. OpenRouter failures now expose bounded, credential-redacted
+  provider and structured upstream error details; empty responses expose
+  request and finish metadata instead of a context-free error.
 
 ## 1.0.0 - 2026-08-28
 

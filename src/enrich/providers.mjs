@@ -861,9 +861,11 @@ function providerErrorDetail(text, providerName, apiKey) {
 
 // OpenRouter wraps the useful native-provider failure inside
 // error.metadata.raw. Never surface that field directly: it is untrusted and
-// could contain request data. Accept only a small JSON object, run it through
-// the same field allowlist as every other upstream diagnostic, and ignore
-// plaintext, arrays, debug objects, headers, prompts, and image data.
+// could contain request data. Accept only a small JSON object and read the
+// same fields allowed in every other upstream diagnostic; dedicated request,
+// prompt, image, header, and debug fields remain ignored. The allowed message
+// is still provider-controlled: bound it and redact credentials, but do not
+// describe it as automatically safe to publish.
 function openRouterErrorMetadataDiagnostic(body, options) {
   const metadata = body?.error?.metadata;
   if (!isPlainObject(metadata)) return '';
