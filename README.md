@@ -202,6 +202,7 @@ say" }`. A successful response is the provider's audio payload; the
 - [docs/RUNNING.md](docs/RUNNING.md) — running as a service (launchd, systemd) and uptime monitoring.
 - [docs/UPGRADING.md](docs/UPGRADING.md) — moving an existing install to a newer release, and rolling back.
 - [SECURITY.md](SECURITY.md) — supported versions, security boundaries, and private vulnerability reporting.
+- [SUPPORT.md](SUPPORT.md) — where to ask for help and what diagnostic context is safe to share.
 - [CHANGELOG.md](CHANGELOG.md) — release history.
 
 ## Development

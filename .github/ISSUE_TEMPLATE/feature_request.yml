@@ -1,0 +1,37 @@
+name: Feature request
+description: Suggest a focused improvement to Pictaria Server
+title: "[Feature]: "
+body:
+  - type: markdown
+    attributes:
+      value: |
+        A concrete problem and desired outcome are more useful than a proposed
+        implementation. Please do not include private photo-library details.
+  - type: textarea
+    id: problem
+    attributes:
+      label: What problem would this solve?
+      description: Explain the workflow or limitation you encounter today.
+    validations:
+      required: true
+  - type: textarea
+    id: outcome
+    attributes:
+      label: What outcome would you like?
+      description: Describe what success looks like without prescribing internal design.
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Current workaround or alternatives
+      description: Optional; tell us how you handle this today.
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Before submitting
+      options:
+        - label: I searched existing issues and did not find this request.
+          required: true
+        - label: I removed personal photo-library details and credentials.
+          required: true

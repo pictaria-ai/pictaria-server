@@ -1,0 +1,84 @@
+name: Bug report
+description: Report a reproducible problem with Pictaria Server
+title: "[Bug]: "
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for helping improve Pictaria Server. Please remove API keys,
+        passwords, private URLs, photo contents, and other personal data from
+        logs before posting them publicly.
+  - type: input
+    id: pictaria-version
+    attributes:
+      label: Pictaria Server version
+      description: Find this in Settings or the authenticated health response.
+      placeholder: "1.0.0"
+    validations:
+      required: true
+  - type: input
+    id: immich-version
+    attributes:
+      label: Immich version
+      placeholder: "3.1.0"
+    validations:
+      required: true
+  - type: dropdown
+    id: installation
+    attributes:
+      label: Installation method
+      options:
+        - Docker Compose
+        - Docker without the supplied Compose file
+        - Bare Node.js
+        - Other
+    validations:
+      required: true
+  - type: input
+    id: platform
+    attributes:
+      label: Host platform
+      description: Operating system, CPU architecture, and relevant NAS or container platform.
+      placeholder: "Ubuntu 24.04, x86_64, Docker 27"
+    validations:
+      required: true
+  - type: textarea
+    id: problem
+    attributes:
+      label: What happened?
+      description: Describe the behavior and its impact.
+    validations:
+      required: true
+  - type: textarea
+    id: reproduce
+    attributes:
+      label: Steps to reproduce
+      placeholder: |
+        1. Open ...
+        2. Choose ...
+        3. See ...
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+    validations:
+      required: true
+  - type: textarea
+    id: diagnostics
+    attributes:
+      label: Relevant sanitized logs or diagnostics
+      description: Include only the smallest useful excerpt. Remove secrets, private URLs, filenames, names, locations, and photo-derived content.
+      render: shell
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Before submitting
+      options:
+        - label: I searched existing issues for the same problem.
+          required: true
+        - label: I removed credentials and personal data from everything above.
+          required: true
+        - label: This is not a security vulnerability; security reports follow SECURITY.md instead.
+          required: true
