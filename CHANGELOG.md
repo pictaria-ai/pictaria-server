@@ -7,6 +7,11 @@ All notable changes to Pictaria Server are documented here. This project follows
 
 ### Fixed
 
+- Docker Compose now forwards every documented non-path enrichment, AI,
+  Curate-referee, voice, and geocoding variable, including LM Studio's token
+  cap and temperature. Empty Compose values preserve the same runtime defaults
+  as a native installation; custom taxonomy and prompt paths still require a
+  matching container mount.
 - Insights keeps legitimate crowd photos in the library sweep when Immich
   reports more than 100 people. People relationships remain capped and excess
   entries are counted and surfaced instead of aborting the complete snapshot.

@@ -130,6 +130,12 @@ Enrich page; that choice is saved immediately and applies to new runs across
 future visits and server restarts. `DEFAULT_PROVIDER` only seeds the choice
 when no saved UI selection exists, which makes it useful for initial setup and
 infrastructure-as-code deployments rather than as a second day-to-day control.
+The stock Docker Compose file forwards every non-path environment variable in
+this section; values saved in Settings continue to override their environment
+defaults. `TAXONOMY_PATH` and `PROMPTS_DIR` are intentional exceptions: a
+custom container path is meaningless without a matching bind mount, so add
+both the mount and the environment override to Compose when using custom
+files.
 
 | Variable | Default | Notes |
 | --- | --- | --- |
@@ -150,8 +156,8 @@ infrastructure-as-code deployments rather than as a second day-to-day control.
 | `VENICE_API_KEY` / `VENICE_MODEL` / `VENICE_BASE_URL` | — / *(empty — no default)* / `https://api.venice.ai/api/v1` | Key and model live under Settings → AI Providers. **UI**. The model must support vision and structured output; the AI referee additionally needs multi-image input (e.g. `qwen3-vl-235b-a22b`). |
 | `IMAGE_SOURCE` | `preview` | Which Immich rendition is sent to the model (`preview`, `thumbnail`, or `original`). Immich previews are WebP, which LM Studio cannot ingest — on macOS Pictaria converts them automatically; in Docker set this to `original`. **UI** |
 | `MAX_FAILURES_PER_ASSET` | `2` | Give up on an asset after this many failed attempts (per provider + model + prompt + taxonomy setup). `0` disables the limit; raising it above an asset's recorded failures re-attempts it on the next run. Stuck photos can also be retried one run at a time from the Enrich page's **Stuck photos** strip. |
-| `TAXONOMY_PATH` | `taxonomy/v1.json` | The shipped tag taxonomy and review-bucket policy. Editable at runtime in Settings → Enrich (the override lives in the settings store and must bump the taxonomy version). |
-| `PROMPTS_DIR` / `PROMPT_VERSION` | `prompts` / `v2` | Prompt templates for enrichment. The prompt text itself can be overridden in Settings → Enrich (no env var); runs with an override record prompt version `v2-custom`. |
+| `TAXONOMY_PATH` | `taxonomy/v1.json` | The shipped tag taxonomy and review-bucket policy. Editable at runtime in Settings → Enrich (the override lives in the settings store and must bump the taxonomy version). A custom container path requires a matching bind mount and Compose override. |
+| `PROMPTS_DIR` / `PROMPT_VERSION` | `prompts` / `v2` | Prompt templates for enrichment. `PROMPT_VERSION` is forwarded by stock Compose; a custom `PROMPTS_DIR` requires a matching bind mount and Compose override. The prompt text itself can be overridden in Settings → Enrich (no env var); runs with an override record prompt version `v2-custom`. |
 | `CURATE_BURST_GROUPING` | `true` | Collapse same-moment photos (bursts, re-shoots, duplicates) into stacked cards in the Curate queue. Off = flat photo-by-photo queue. **UI** |
 | `CURATE_REFEREE_ENABLED` | `false` | The gold star: an AI model compares each same-moment group side by side and picks the keeper, with a why-line per photo. Runs whenever enrichment is idle; needs `ENRICH_ENABLED`. **UI** |
 | `CURATE_REFEREE_PROVIDER` | *(empty)* | Referee provider; empty = follow the provider currently selected on Enrich. Lives under Settings → Curate. **UI** |
