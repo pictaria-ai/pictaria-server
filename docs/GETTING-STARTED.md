@@ -42,6 +42,14 @@ else waits on them.
   > `album.create` · `album.delete` · `albumAsset.create` ·
   > `albumAsset.delete` · `tag.read` · `tag.create` · `tag.asset`
 
+  Also enable **Tags** in Immich under **Account Settings → Features** for
+  the same Immich account that owns this API key. This account-level switch
+  and the API-key permissions are separate. Turning Tags on normally does not
+  require a new key when the existing key already has `tag.read`,
+  `tag.create`, and `tag.asset`. If Pictaria still reports a missing permission
+  or synchronization continues to fail, recreate the key and save the
+  replacement in Settings → Server.
+
   Roughly: the reads power search, Insights, and image fetches; `album.*`
   is Smart Albums doing its job — `albumAsset.create`/`albumAsset.delete`
   re-sync each album to its rule on every run (photos that stop matching,
@@ -81,6 +89,10 @@ else waits on them.
   the provider for new runs. That choice is remembered across visits and
   server restarts. Ollama and LM Studio keep everything on your own hardware;
   OpenAI, OpenRouter, Venice, and Ollama's cloud models are the cloud routes.
+  Captions are stored in Pictaria by default; Immich descriptions remain
+  unchanged unless you separately turn on **Write captions to Immich
+  descriptions**. Use **Write existing captions now** to copy captions made
+  before enabling that option.
   ([Pipeline, providers, taxonomy.](ENRICH.md))
 
 - [ ] *Optional* — **Get a free Geoapify key** for place names. Weather

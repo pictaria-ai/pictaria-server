@@ -454,7 +454,7 @@ test('ai tag additions batch into one bulk call per shared tag set', async () =>
   });
 });
 
-test('a dropped tag is detected by verification and repaired', async () => {
+test('a temporarily missing tag is detected by verification and repaired', async () => {
   await withService(async ({ repo, immich, service }) => {
     seedAsset(repo, 'droppy', { decisions: TWO_AI_TAGS });
     // Simulate Immich dropping one tag on the first bulk write only.
@@ -477,6 +477,50 @@ test('a dropped tag is detected by verification and repaired', async () => {
     for (const tag of repo.loadAssetTagsFor(['droppy'], { prefix: 'ai/' }).droppy ?? []) {
       assert.ok(finalTags.has(tag), `expected repaired tag ${tag}`);
     }
+  });
+});
+
+test('missing Immich tag data reports the feature and API-key checks', async () => {
+  await withService(async ({ repo, immich, service }) => {
+    seedAsset(repo, 'no-tag-data', { decisions: TWO_AI_TAGS });
+    immich.getAsset = async (assetId) => ({ id: assetId });
+
+    const job = {
+      id: 1,
+      action: 'approve',
+      assetIds: ['no-tag-data'],
+      add: ['frame/eligible'],
+      remove: [],
+      attempts: 0,
+    };
+    await assert.rejects(
+      service.pushDecisionToImmich(job),
+      /Enable Tags under Account Settings → Features.*tag\.read, tag\.create, and tag\.asset/,
+    );
+  });
+});
+
+test('persistent missing tags report asset writability as a possible cause', async () => {
+  await withService(async ({ repo, immich, service }) => {
+    seedAsset(repo, 'read-only-photo', { decisions: TWO_AI_TAGS });
+    const originalGetAsset = immich.getAsset.bind(immich);
+    immich.getAsset = async (assetId) => {
+      const asset = await originalGetAsset(assetId);
+      return { ...asset, tags: asset.tags.filter(({ value }) => value !== 'frame/eligible') };
+    };
+
+    const job = {
+      id: 1,
+      action: 'approve',
+      assetIds: ['read-only-photo'],
+      add: ['frame/eligible'],
+      remove: [],
+      attempts: 0,
+    };
+    await assert.rejects(
+      service.pushDecisionToImmich(job),
+      /did not retain all requested tags.*owned by or writable to that account.*Missing: read-only-photo: frame\/eligible/,
+    );
   });
 });
 

@@ -32,8 +32,9 @@ For each photo, one *processing run*:
 
 Enrichment runs are always dry runs against Immich. Tags reach Immich only
 through Curate decisions, via a durable background sync worker that verifies
-and repairs Immich's tag state after writing (Immich has been observed
-dropping tags under rapid mutation).
+and repairs Immich's tag state after writing. For that sync, enable **Tags**
+under **Immich Account Settings → Features** for the account whose API key
+Pictaria uses, and grant that key `tag.read`, `tag.create`, and `tag.asset`.
 
 ## Providers
 
@@ -288,6 +289,15 @@ your approved tags on every request.
 
 ## When things go wrong
 
+- **Curate says Immich is still missing tags**: first confirm **Tags** is
+  enabled under **Immich Account Settings → Features** for the same account
+  whose API key Pictaria uses, and confirm the key has `tag.read`,
+  `tag.create`, and `tag.asset`. Retry the parked sync entry after correcting
+  either setting. If only some photos keep failing, test one owned by the
+  API-key account: a shared or otherwise read-only photo can be visible to the
+  account without being writable. If an owned photo still fails, confirm only
+  one Pictaria Server instance is using the data volume and check the Immich
+  and Pictaria logs for the affected request.
 - **LM Studio in Docker fails every photo with a WebP message**: Immich
   previews are WebP, which LM Studio cannot ingest. On macOS Pictaria
   converts them automatically (`sips`); inside the Docker image there is no
@@ -378,6 +388,9 @@ Enrich → Write captions to Immich descriptions** turned on (off by
 default), Pictaria copies each caption into the photo's description field in
 Immich — so your photos become searchable *in Immich itself* by what's
 actually in them, and the description shows up anywhere Immich shows one.
+Until that option is enabled, captions remain searchable inside Pictaria but
+Immich descriptions intentionally stay blank. After enabling it, use **Write
+existing captions now** to backfill captions produced earlier.
 
 The rule is **never knowingly overwrite a human**:
 

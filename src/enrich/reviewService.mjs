@@ -439,10 +439,10 @@ export class ReviewService {
     await this.verifyAndRepairTags(job);
   }
 
-  // Immich has been observed dropping tags even from successful calls when
-  // mutations land close together. Verify the final state after a short settle
-  // and re-push once; if tags are still missing, throw so the durable queue
-  // retries the whole (idempotent) job.
+  // Immich can report a successful mutation before every requested tag is
+  // visible on the asset. Verify the final state after a short settle and
+  // re-push once; if tags are still missing, throw so the durable queue retries
+  // the whole (idempotent) job.
   async verifyAndRepairTags(job) {
     const localTagsByAsset = this.repo.loadAssetTagsFor(job.assetIds, { prefix: 'ai/' });
     const expectedByAsset = new Map(
@@ -454,9 +454,12 @@ export class ReviewService {
       const missingByAsset = new Map();
       for (const assetId of job.assetIds) {
         const remoteAsset = await this.immich.getAsset(assetId);
-        const remoteTags = new Set(
-          (Array.isArray(remoteAsset?.tags) ? remoteAsset.tags : []).map((tag) => tagValue(tag)).filter(Boolean),
-        );
+        if (!Array.isArray(remoteAsset?.tags)) {
+          throw new Error(
+            'Immich did not expose asset tags. Enable Tags under Account Settings → Features for the API-key account, confirm the key includes tag.read, tag.create, and tag.asset, then retry.',
+          );
+        }
+        const remoteTags = new Set(remoteAsset.tags.map((tag) => tagValue(tag)).filter(Boolean));
         const missing = (expectedByAsset.get(assetId) ?? []).filter((tag) => !remoteTags.has(tag));
         if (missing.length > 0) {
           missingByAsset.set(assetId, missing);
@@ -469,9 +472,11 @@ export class ReviewService {
         const summary = [...missingByAsset.entries()]
           .map(([assetId, tags]) => `${assetId}: ${tags.join(', ')}`)
           .join(' | ');
-        throw new Error(`Immich dropped tags after repair attempt: ${summary}`);
+        throw new Error(
+          `Immich did not retain all requested tags after a repair attempt. Confirm Tags is enabled for the API-key account and that the affected photos are owned by or writable to that account, then retry. Missing: ${summary}`,
+        );
       }
-      this.log(`immich dropped ${missingByAsset.size} asset(s) worth of tags; repairing`);
+      this.log(`immich is still missing tags on ${missingByAsset.size} asset(s); repairing`);
       const allMissing = [...new Set([...missingByAsset.values()].flat())].sort();
       const resolved = await ensureImmichTagIds(this.immich, allMissing);
       for (const [assetId, missing] of missingByAsset) {
