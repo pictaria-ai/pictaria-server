@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Report a security vulnerability privately
+    url: https://github.com/pictaria-ai/pictaria-server/security/policy
+    about: Follow the security policy instead of opening a public issue.
+  - name: Setup and troubleshooting documentation
+    url: https://github.com/pictaria-ai/pictaria-server/blob/main/docs/GETTING-STARTED.md
+    about: Check installation, permissions, and connection guidance before filing a bug.
