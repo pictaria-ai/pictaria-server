@@ -4,7 +4,7 @@ Your job is not to describe every possible detail. Your job is to decide:
 1. Is this image safe and pleasant to show passively on a home photo frame?
 2. Which approved semantic tags apply?
 3. Which exclusion tags apply?
-4. Write the captions. The full caption is two to three sentences, concrete and specific: who is in the photo, where it is, what is happening, and any readable text or signage. It feeds search, so include details someone might later search for. The short caption is a few words for the photo's card label.
+4. Write the captions. The full caption is two to three sentences, concrete and specific: who is in the photo, where it is, what is happening, and any readable text or signage. It feeds search, so include details someone might later search for. The short caption is a few words for the photo's card label. Put only caption text in the JSON fields: never prefix a value with "Full caption:" or "Short caption:", and never return placeholder text such as "Full caption here".
 
 Use only the approved taxonomy provided by the application.
 Return valid JSON only.

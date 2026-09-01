@@ -13,6 +13,7 @@ const MAX_SHORT_CAPTION_BYTES = 512;
 const MAX_TEXT_BYTES = 512;
 const MAX_REASON_BYTES = 1024;
 const MAX_LIST_ITEMS = 50;
+const CAPTION_TEMPLATE_LEAK = /^\s*(?:full|short)[ _-]+caption(?:[ _-]+here)?(?:\s*:|\s*[.!]?\s*$)/i;
 
 const REQUIRED_TOP_LEVEL_FIELDS = [
   'caption',
@@ -59,6 +60,8 @@ export function validateAiOutput(output, taxonomy) {
 
   validateString(normalized.caption, 'caption', MAX_CAPTION_BYTES);
   validateString(normalized.short_caption, 'short_caption', MAX_SHORT_CAPTION_BYTES);
+  validateCaptionText(normalized.caption, 'caption');
+  validateCaptionText(normalized.short_caption, 'short_caption');
   validateString(normalized.people_count, 'people_count', MAX_TEXT_BYTES);
 
   for (const field of [
@@ -149,12 +152,13 @@ export function enrichmentJsonSchema(taxonomy) {
         description:
           'Two to three sentences, concrete and specific: who is in the photo, where it is, ' +
           'what is happening, and any readable text or signage. Feeds caption search and photo ' +
-          'descriptions, so include details someone might later search for.',
+          'descriptions, so include details someone might later search for. Return caption text ' +
+          'only, without a Full caption or Short caption label.',
       },
       short_caption: {
         type: 'string',
         maxLength: MAX_SHORT_CAPTION_BYTES,
-        description: 'A few words used as the photo card label.',
+        description: 'A few words used as the photo card label. Return only the label text, without a caption-field prefix.',
       },
       is_photo: { type: 'boolean' },
       is_screenshot: { type: 'boolean' },
@@ -311,6 +315,12 @@ function validateString(value, field, maxBytes) {
   }
   if (Buffer.byteLength(value, 'utf8') > maxBytes) {
     throw new OutputValidationError(`${field} exceeds the ${maxBytes}-byte limit`);
+  }
+}
+
+function validateCaptionText(value, field) {
+  if (CAPTION_TEMPLATE_LEAK.test(value)) {
+    throw new OutputValidationError(`${field} repeats a caption prompt label or placeholder`);
   }
 }
 

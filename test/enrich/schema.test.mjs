@@ -12,6 +12,26 @@ test('valid output passes', () => {
   assert.deepEqual(validateAiOutput(output, taxonomy), output);
 });
 
+test('caption prompt labels and placeholders are rejected without blocking ordinary prose', () => {
+  for (const [field, value] of [
+    ['caption', 'Full caption: A mountain lake under a bright sky.'],
+    ['caption', 'Full caption here'],
+    ['short_caption', 'Short caption: Mountain lake'],
+    ['short_caption', 'short_caption_here.'],
+  ]) {
+    const output = sampleOutput();
+    output[field] = value;
+    assert.throws(
+      () => validateAiOutput(output, taxonomy),
+      new RegExp(`${field} repeats a caption prompt label or placeholder`),
+    );
+  }
+
+  const ordinary = sampleOutput();
+  ordinary.caption = 'A printed sign explains where the full caption belongs in the exhibit.';
+  assert.deepEqual(validateAiOutput(ordinary, taxonomy), ordinary);
+});
+
 test('unknown tag fails', () => {
   const output = sampleOutput();
   output.candidate_tags.push({ tag: 'mountains', confidence: 0.9, reason: 'Bad free-form tag.' });
