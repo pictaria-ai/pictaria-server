@@ -137,6 +137,7 @@ test('lm studio validation failures retry once with the stricter prompt', async 
   assert.equal(retryCount, 1);
   assert.equal(provider.calls.length, 2);
   assert.ok(provider.calls[1].userPrompt.includes('Local retry instructions'));
+  assert.ok(provider.calls[1].userPrompt.includes('do not prefix either value with "Full caption:" or "Short caption:"'));
   assert.equal(normalized.caption, sampleOutput().caption);
 });
 

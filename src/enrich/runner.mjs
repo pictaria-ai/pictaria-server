@@ -66,7 +66,8 @@ const LOCAL_RETRY_SUFFIX =
   '\n\nLocal retry instructions: return only the strongest, clearly visible tags. ' +
   'Use no more than 20 candidate_tags and no more than 6 exclusion_reasons. ' +
   'Do not include weak, speculative, duplicate, or near-duplicate tags. ' +
-  'Keep each reason short.';
+  'Keep each reason short. Return only caption text in caption and short_caption: ' +
+  'do not prefix either value with "Full caption:" or "Short caption:", and do not use caption placeholder text.';
 
 export async function analyzeWithValidationRetry(provider, image, { systemPrompt, userPrompt, jsonSchema, taxonomy, log = () => {} }) {
   const prompts = [userPrompt];

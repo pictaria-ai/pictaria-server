@@ -267,6 +267,12 @@ The schema's fields (also listed with their uses on the Enrich page):
 | `exclusion_reasons` (tag + confidence + reason) | exclusions that keep a photo off the frame |
 | `needs_review` | flags the photo for human review |
 
+Caption values must contain the caption itself, without prompt labels such as
+`Full caption:` or `Short caption:` and without placeholder text such as
+`Full caption here`. Pictaria rejects those small-model template leaks as an
+invalid response, so the normal retry and per-photo failure handling apply
+instead of storing the label as photo metadata.
+
 **What is editable and what is not.** The taxonomy (which tags the model may
 use, thresholds, exclusions) and both prompts are editable in Settings →
 Enrich. The schema's *field list* is fixed: Curate's buckets, the star
