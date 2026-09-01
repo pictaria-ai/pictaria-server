@@ -7,11 +7,14 @@ All notable changes to Pictaria Server are documented here. This project follows
 
 ## 1.0.1 - 2026-09-01
 
-### Fixed
+### Changed
 
 - Curate now offers the same synchronized **Load more** control below the
   photo grid, so long review sessions do not require scrolling back to the
   toolbar for another page.
+
+### Fixed
+
 - Enrich rejects caption prompt labels and placeholder text from small vision
   models instead of storing them as captions, and explicitly tells models to
   return caption text only.
@@ -52,6 +55,10 @@ All notable changes to Pictaria Server are documented here. This project follows
 - Persisted-state contracts, the Frame protocol, Node requirements, and the
   Immich 2.0+ compatibility floor are unchanged from 1.0.0. This is a
   code-only update with no startup migration.
+- Docker Compose installations should review their `.env` before upgrading.
+  Documented non-path settings that earlier Compose files did not forward now
+  take effect when configured, including enrichment limits, AI model and
+  timeout overrides, and geocoding timeouts.
 
 ## 1.0.0 - 2026-08-28
 
