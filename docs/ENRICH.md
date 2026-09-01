@@ -32,9 +32,10 @@ For each photo, one *processing run*:
 
 Enrichment runs are always dry runs against Immich. Tags reach Immich only
 through Curate decisions, via a durable background sync worker that verifies
-and repairs Immich's tag state after writing. For that sync, enable **Tags**
-under **Immich Account Settings → Features** for the account whose API key
-Pictaria uses, and grant that key `tag.read`, `tag.create`, and `tag.asset`.
+and repairs both required additions and required removals after writing. For
+that sync, enable **Tags** under **Immich Account Settings → Features** for the
+account whose API key Pictaria uses, and grant that key `tag.read`,
+`tag.create`, and `tag.asset`.
 
 ## Providers
 
