@@ -12,6 +12,10 @@ All notable changes to Pictaria Server are documented here. This project follows
   cap and temperature. Empty Compose values preserve the same runtime defaults
   as a native installation; custom taxonomy and prompt paths still require a
   matching container mount.
+- Curate verifies and repairs both sides of every Immich tag decision, so a
+  rejected or reviewed photo cannot finish synchronization while retaining
+  `frame/eligible` or `frame/favorite`, and approving a photo likewise removes
+  contradictory rejection tags.
 - Insights keeps legitimate crowd photos in the library sweep when Immich
   reports more than 100 people. People relationships remain capped and excess
   entries are counted and surfaced instead of aborting the complete snapshot.

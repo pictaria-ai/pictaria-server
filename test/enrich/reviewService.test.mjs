@@ -480,6 +480,70 @@ test('a temporarily missing tag is detected by verification and repaired', async
   });
 });
 
+test('a temporarily retained incompatible tag is detected and removed on repair', async () => {
+  await withService(async ({ repo, immich, service }) => {
+    seedAsset(repo, 'dropped-removal', { decisions: TWO_AI_TAGS });
+    immich.assetTags.set('dropped-removal', new Set(['frame/eligible', 'frame/favorite']));
+
+    // Simulate Immich acknowledging the first eligible removal without
+    // applying it. The verification repair must issue the removal again.
+    const originalUntag = immich.untagAssets.bind(immich);
+    let dropped = false;
+    immich.untagAssets = async (request) => {
+      if (!dropped && request.tagId === 'tag-frame/eligible') {
+        dropped = true;
+        immich.calls.push(['untag', request.tagId, request.assetIds]);
+        return [];
+      }
+      return originalUntag(request);
+    };
+
+    const job = {
+      id: 1,
+      action: 'reject',
+      assetIds: ['dropped-removal'],
+      add: ['frame/never-show', 'frame/reviewed'],
+      remove: ['frame/eligible', 'frame/favorite'],
+      attempts: 0,
+    };
+    await service.pushDecisionToImmich(job);
+
+    const finalTags = immich.assetTags.get('dropped-removal');
+    assert.ok(finalTags.has('frame/never-show'));
+    assert.ok(finalTags.has('frame/reviewed'));
+    assert.equal(finalTags.has('frame/eligible'), false);
+    assert.equal(finalTags.has('frame/favorite'), false);
+    assert.equal(
+      immich.calls.filter(([kind, tagId]) => kind === 'untag' && tagId === 'tag-frame/eligible').length,
+      2,
+    );
+  });
+});
+
+test('a persistent contradictory tag keeps the durable sync visible as failed', async () => {
+  await withService(async ({ repo, immich, service }) => {
+    seedAsset(repo, 'contradictory-photo', { decisions: TWO_AI_TAGS });
+    immich.assetTags.set('contradictory-photo', new Set(['frame/never-show', 'frame/reviewed']));
+    immich.untagAssets = async ({ tagId, assetIds }) => {
+      immich.calls.push(['untag', tagId, assetIds]);
+      return []; // acknowledge while retaining the tag
+    };
+
+    const job = {
+      id: 1,
+      action: 'approve',
+      assetIds: ['contradictory-photo'],
+      add: ['frame/eligible'],
+      remove: ['frame/never-show', 'frame/reviewed'],
+      attempts: 0,
+    };
+    await assert.rejects(
+      service.pushDecisionToImmich(job),
+      /did not retain all requested tags.*Still present: contradictory-photo: frame\/never-show, frame\/reviewed/,
+    );
+  });
+});
+
 test('missing Immich tag data reports the feature and API-key checks', async () => {
   await withService(async ({ repo, immich, service }) => {
     seedAsset(repo, 'no-tag-data', { decisions: TWO_AI_TAGS });
