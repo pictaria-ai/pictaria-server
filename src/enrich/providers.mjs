@@ -784,6 +784,15 @@ function nodePostJson(provider, url, headers, payload) {
   return new Promise((resolve, reject) => {
     const target = new URL(url);
     const makeRequest = target.protocol === 'https:' ? httpsRequest : httpRequest;
+    // LM Studio's OpenAI-compatible surface can also reach lightweight local
+    // servers such as llama.cpp, some of which close a completed keep-alive
+    // connection just as the stricter validation retry
+    // begins, so Node's global Agent can reuse a socket that is already being
+    // torn down and report ECONNRESET / "socket hang up". A model generation
+    // takes orders of magnitude longer than a TCP handshake; isolate these
+    // requests instead of retrying a POST that may already have consumed
+    // inference work upstream.
+    const isolateConnection = provider.providerName === 'local_lmstudio';
     const chunks = [];
     const fail = (reason, { timeout = false } = {}) => reject(
       new ProviderRequestError(
@@ -795,7 +804,11 @@ function nodePostJson(provider, url, headers, payload) {
     // 'error' event is reported as a timeout rather than a generic
     // transport failure.
     let timedOut = false;
-    const request = makeRequest(target, { method: 'POST', headers }, (response) => {
+    const request = makeRequest(target, {
+      method: 'POST',
+      headers,
+      ...(isolateConnection ? { agent: false } : {}),
+    }, (response) => {
       let received = 0;
       response.on('data', (chunk) => {
         received += chunk.length;

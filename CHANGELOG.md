@@ -41,6 +41,9 @@ All notable changes to Pictaria Server are documented here. This project follows
   local validation. OpenRouter failures now expose bounded, credential-redacted
   provider and structured upstream error details; empty responses expose
   request and finish metadata instead of a context-free error.
+- LM Studio-compatible local requests use a fresh HTTP connection for each
+  generation, avoiding `socket hang up` failures when llama.cpp closes a
+  completed connection before Pictaria's stricter validation retry.
 
 ## 1.0.0 - 2026-08-28
 
