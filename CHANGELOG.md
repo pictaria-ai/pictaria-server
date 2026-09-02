@@ -5,7 +5,7 @@ All notable changes to Pictaria Server are documented here. This project follows
 
 ## Unreleased
 
-## 1.0.1 - 2026-09-01
+## 1.0.1 - 2026-09-02
 
 ### Changed
 
