@@ -590,6 +590,37 @@ test('missing message content raises a clear error', async () => {
   await assert.rejects(() => provider.analyzeImage(image, prompts), /did not include message content/);
 });
 
+test('lm studio node transport isolates consecutive requests from stale keep-alive sockets', async () => {
+  let connectionCount = 0;
+  const connectionHeaders = [];
+  const server = createServer((request, response) => {
+    request.resume();
+    connectionHeaders.push(request.headers.connection);
+    response.writeHead(200, { 'content-type': 'application/json' });
+    response.end(JSON.stringify({ choices: [{ message: { content: '{"caption":"Lake"}' } }] }));
+  });
+  server.on('connection', () => {
+    connectionCount += 1;
+  });
+  await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
+
+  const provider = new LmStudioProvider({
+    modelName: 'm',
+    baseUrl: `http://127.0.0.1:${server.address().port}/v1`,
+  });
+
+  try {
+    await provider.analyzeImage(image, prompts);
+    await provider.analyzeImage(image, prompts);
+
+    assert.equal(connectionCount, 2);
+    assert.deepEqual(connectionHeaders, ['close', 'close']);
+  } finally {
+    server.closeAllConnections?.();
+    await new Promise((resolve) => server.close(resolve));
+  }
+});
+
 test('node transport caps a runaway provider response body', async () => {
   // Streams far past the 2MB cap; the client must abort mid-body instead of
   // accumulating chunks without bound.
