@@ -439,14 +439,16 @@ your approved tags on every request.
   the job again.
 - **Cancel or restart mid-run**: results already produced are saved
   per-photo the moment they finish. A cancelled run leaves its queue item
-  in place; a server restart records the run as *interrupted*. Either way,
-  running the item again continues where it left off.
+  in place; a server restart records exactly one *interrupted* run and leaves
+  its queue item in place even if abandoned provider work later settles.
+  Either way, running the item again continues where it left off.
 
 ## Run history
 
 The Enrich page lists recent runs: what ran (slice title or library sweep),
 when, provider + model, taxonomy + prompt versions, counters
-(analyzed / ok / failed), and outcome (finished / cancelled / failed). Model
+(analyzed / ok / failed), and outcome (finished / cancelled / interrupted /
+failed). Model
 comparisons stay honest — you can always see which model and prompt produced
 a batch of tags. Runs with at least one successful photo also show two
 end-to-end rates: successful photos per minute and average wall-clock seconds

@@ -291,7 +291,7 @@ test('jobRunner stop() cancels and drains the run — one cancelled record, no i
   assert.equal(runs[0].status, 'cancelled');
 });
 
-test('jobRunner stop() past its budget records the run as interrupted', async () => {
+test('jobRunner stop() past its budget records exactly one interrupted row and never completes its queue', async () => {
   const { opened, release } = gate();
   const { runner, runs } = runnerFixture({
     getAsset: async (id) => {
@@ -299,14 +299,23 @@ test('jobRunner stop() past its budget records the run as interrupted', async ()
       return { id, originalPath: `${id}.jpg` };
     },
   });
-  runner.start({ assetIds: ['a1'], title: 'Stuck run' });
+  let completed = 0;
+  runner.start({
+    assetIds: ['a1'],
+    title: 'Stuck run',
+    onFinished: () => { completed += 1; },
+  });
 
   assert.equal(await runner.stop(50), false);
-  assert.ok(runs.some((run) => run.status === 'interrupted'), 'a stuck run must not vanish from history');
+  assert.equal(runs.length, 1);
+  assert.equal(runs[0].status, 'interrupted', 'a stuck run must not vanish from history');
 
   release(); // let the dangling run settle before the test ends
   await runner.runPromise;
   assert.equal(runner.isRunning(), false);
+  assert.equal(runs.length, 1, 'late settlement must not append a contradictory terminal row');
+  assert.equal(runs[0].status, 'interrupted');
+  assert.equal(completed, 0, 'late settlement must not invoke queue completion');
 });
 
 test('jobRunner stop() while idle is an immediate true', async () => {

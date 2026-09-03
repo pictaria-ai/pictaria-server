@@ -40,6 +40,12 @@ All notable changes to Pictaria Server are documented here. This project follows
   Curate AI referee also uses bounded provider retry guidance before its
   existing five-minute fallback.
 
+### Fixed
+
+- A server shutdown that outlasts an Enrich run's drain now records exactly
+  one interrupted Recent Runs entry. If abandoned work later settles, it
+  cannot append a contradictory outcome or advance the queued job.
+
 ## 1.0.1 - 2026-09-02
 
 ### Changed

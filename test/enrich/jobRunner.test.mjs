@@ -243,6 +243,8 @@ test('recordInterrupted writes an interrupted run to history while running', asy
   assert.equal(repo.runs[0].status, 'interrupted');
   assert.equal(repo.runs[0].title, 'Interrupted slice');
   assert.ok(runner.status().log.some((line) => line.includes('run interrupted')));
+  assert.equal(runner.recordInterrupted(), false, 'the terminal row is idempotent');
+  assert.equal(repo.runs.length, 1);
 });
 
 test('needsWorkFilter resolves the run key start() would use and delegates to the repo in batch', () => {
