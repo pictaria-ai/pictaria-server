@@ -71,6 +71,44 @@ const ENRICH_FIELDS = {
       config.enrichEnabled = Boolean(value);
     },
   },
+  scheduledEnabled: {
+    env: 'ENRICH_SCHEDULE_ENABLED',
+    label: 'Run Enrich every day',
+    boolean: true,
+    read: (config) => config.enrichSchedule.enabled,
+    apply: (config, value) => {
+      config.enrichSchedule.enabled = Boolean(value);
+    },
+  },
+  scheduledTime: {
+    env: 'ENRICH_SCHEDULE_TIME',
+    label: 'Daily time',
+    maxLength: 5,
+    validate: validateDailyTime,
+    read: (config) => config.enrichSchedule.time,
+    apply: (config, value) => {
+      config.enrichSchedule.time = value;
+    },
+  },
+  scheduledTimeZone: {
+    env: 'ENRICH_SCHEDULE_TIME_ZONE',
+    label: 'Daily schedule time zone',
+    maxLength: 100,
+    validate: validateTimeZone,
+    read: (config) => config.enrichSchedule.timeZone,
+    apply: (config, value) => {
+      config.enrichSchedule.timeZone = value;
+    },
+  },
+  scheduledPhotoBudget: {
+    env: 'ENRICH_SCHEDULE_PHOTO_BUDGET',
+    label: 'Photos per day',
+    number: { min: 1, max: 10000 },
+    read: (config) => config.enrichSchedule.photoBudget,
+    apply: (config, value) => {
+      config.enrichSchedule.photoBudget = value;
+    },
+  },
   captionWriteback: {
     env: 'CAPTION_WRITEBACK',
     label: 'Write captions to Immich descriptions',
@@ -544,7 +582,7 @@ const SECTIONS = {
 
 const PROTOTYPE_SPECIAL_KEYS = new Set(['__proto__', 'prototype', 'constructor']);
 
-export const SETTINGS_VERSION = 5;
+export const SETTINGS_VERSION = 6;
 
 // Only credentials whose destination authority can vary belong here. Fixed
 // public APIs (OpenAI, ElevenLabs, Geoapify) do not need a stored binding.
@@ -654,6 +692,11 @@ const SETTINGS_MIGRATIONS = new Map([
   [4, (state) => {
     const migrated = structuredClone(state);
     migrated.version = 5;
+    return migrated;
+  }],
+  [5, (state) => {
+    const migrated = structuredClone(state);
+    migrated.version = 6;
     return migrated;
   }],
 ]);
@@ -1261,6 +1304,21 @@ function coerce(field, key, raw, store = null) {
   // echoes the corrected value back to the UI — a scheme-less Immich URL
   // must round-trip as http://…, not look accepted as typed.
   return field.normalize ? field.normalize(value) : value;
+}
+
+function validateDailyTime(value) {
+  const match = /^(\d{2}):(\d{2})$/.exec(value);
+  if (!match || Number(match[1]) > 23 || Number(match[2]) > 59) {
+    throw new SettingsError('scheduledTime must be a 24-hour time such as 03:00.');
+  }
+}
+
+function validateTimeZone(value) {
+  try {
+    new Intl.DateTimeFormat('en', { timeZone: value }).format();
+  } catch {
+    throw new SettingsError('scheduledTimeZone must be a valid IANA time zone such as America/Los_Angeles.');
+  }
 }
 
 export function defaultSettingsPath(rootDir) {

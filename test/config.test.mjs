@@ -99,6 +99,29 @@ test('inference host context is operator-authored, trimmed, and bounded', () => 
   assert.equal(loadConfig({}).inferenceHostLabel, '');
 });
 
+test('daily Enrich schedule has safe defaults and normalizes environment values', () => {
+  assert.deepEqual(loadConfig({ ENRICH_SCHEDULE_TIME_ZONE: 'UTC' }).enrichSchedule, {
+    enabled: false,
+    time: '03:00',
+    timeZone: 'UTC',
+    photoBudget: 100,
+  });
+  assert.deepEqual(loadConfig({
+    ENRICH_SCHEDULE_ENABLED: 'true',
+    ENRICH_SCHEDULE_TIME: '21:45',
+    ENRICH_SCHEDULE_TIME_ZONE: 'America/Los_Angeles',
+    ENRICH_SCHEDULE_PHOTO_BUDGET: '250',
+  }).enrichSchedule, {
+    enabled: true,
+    time: '21:45',
+    timeZone: 'America/Los_Angeles',
+    photoBudget: 250,
+  });
+  assert.equal(loadConfig({ ENRICH_SCHEDULE_TIME: '25:90' }).enrichSchedule.time, '03:00');
+  assert.equal(loadConfig({ ENRICH_SCHEDULE_TIME_ZONE: 'not-a-zone' }).enrichSchedule.timeZone, 'UTC');
+  assert.equal(loadConfig({ ENRICH_SCHEDULE_PHOTO_BUDGET: '99999' }).enrichSchedule.photoBudget, 10000);
+});
+
 test('server auth configuration fails closed unless open mode is explicit', () => {
   for (const env of [{}, { APP_PASSWORD: '' }, { APP_PASSWORD: '', ALLOW_INSECURE_OPEN: 'false' }]) {
     assert.throws(

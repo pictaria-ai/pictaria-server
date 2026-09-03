@@ -32,6 +32,10 @@ services:
       # list). Connections and models can also be set under Settings → AI
       # Providers; the active provider is remembered on the Enrich page.
       ENRICH_ENABLED: ${ENRICH_ENABLED:-false}
+      ENRICH_SCHEDULE_ENABLED: ${ENRICH_SCHEDULE_ENABLED:-false}
+      ENRICH_SCHEDULE_TIME: ${ENRICH_SCHEDULE_TIME:-03:00}
+      ENRICH_SCHEDULE_TIME_ZONE: ${ENRICH_SCHEDULE_TIME_ZONE:-UTC}
+      ENRICH_SCHEDULE_PHOTO_BUDGET: ${ENRICH_SCHEDULE_PHOTO_BUDGET:-100}
       CAPTION_WRITEBACK: ${CAPTION_WRITEBACK:-false}
       IMAGE_SOURCE: ${IMAGE_SOURCE:-preview}
       INFERENCE_HOST_LABEL: ${INFERENCE_HOST_LABEL:-}

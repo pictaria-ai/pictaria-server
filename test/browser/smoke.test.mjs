@@ -1581,6 +1581,39 @@ test('admin UI smoke: gate, Insights lens, Curate, Smart Albums', { timeout: 120
     assert.equal(persisted.elevenLabs.configured, true);
     assert.equal(persisted.elevenLabs.value, '', 'the ElevenLabs key remains redacted');
     assert.equal(await page.evaluate('document.getElementById("sub-providers").textContent'), '3 configured');
+
+    // Daily Enrich stays a three-control setup. The browser contributes its
+    // IANA zone invisibly so a UTC Docker container still honors local time.
+    assert.equal(
+      await page.evaluate('document.getElementById("f2-enrich-scheduledTime").type'),
+      'time',
+    );
+    const browserTimeZone = await page.evaluate('Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC"');
+    await page.evaluate(`
+      const enabled = document.getElementById("f2-enrich-scheduledEnabled");
+      enabled.checked = true;
+      enabled.dispatchEvent(new Event("change"));
+      const time = document.getElementById("f2-enrich-scheduledTime");
+      time.value = "04:30";
+      time.dispatchEvent(new Event("input"));
+      const budget = document.getElementById("f2-enrich-scheduledPhotoBudget");
+      budget.value = "25";
+      budget.dispatchEvent(new Event("input"));
+    `);
+    await page.evaluate('document.getElementById("save-enrich").click()');
+    await page.waitFor(
+      'document.getElementById("note-enrich").textContent.startsWith("Saved")',
+      { label: 'Daily Enrich settings saved' },
+    );
+    assert.deepEqual(await page.evaluate('window.__settingsPatch'), {
+      enrich: {
+        scheduledEnabled: true,
+        scheduledTime: '04:30',
+        scheduledPhotoBudget: '25',
+        scheduledTimeZone: browserTimeZone,
+      },
+    });
+    assert.match(await page.evaluate('document.getElementById("sub-enrich").textContent'), /daily/);
   });
 
   await t.test('Enrich remembers its provider selection through server settings', async () => {
