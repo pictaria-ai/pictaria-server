@@ -240,6 +240,38 @@ test('cancel aborts an in-flight provider request and leaves the photo retryable
   }
 });
 
+test('cancel during an Immich download stops before provider work without a phantom failure', async () => {
+  let markDownloadStarted;
+  let finishDownload;
+  const downloadStarted = new Promise((resolve) => { markDownloadStarted = resolve; });
+  const repo = makeRepo({ alreadyEnriched: false });
+  const runner = new EnrichJobRunner({
+    repo,
+    immich: {
+      getAsset: async (id) => ({ id, originalPath: `${id}.jpg` }),
+      getAssetThumbnail: () => new Promise((resolve) => {
+        finishDownload = () => resolve({ data: Buffer.from('image'), contentType: 'image/jpeg' });
+        markDownloadStarted();
+      }),
+    },
+    taxonomy,
+    config: makeConfig(),
+  });
+
+  runner.start({ assetIds: ['a1'], sendToCurate: false });
+  await downloadStarted;
+  assert.equal(runner.cancel(), true);
+  finishDownload();
+  await finished(runner);
+
+  assert.equal(repo.processingRuns.length, 0);
+  assert.equal(repo.runs.length, 1);
+  assert.equal(repo.runs[0].status, 'cancelled');
+  assert.equal(repo.runs[0].counters.failed, 0);
+  assert.ok(runner.status().log.some((line) => line.includes('after image download')));
+  assert.equal(runner.status().log.some((line) => line.includes('cancelled mid-request')), false);
+});
+
 test('onFinished is skipped when the run fails', async () => {
   const repo = makeRepo();
   const runner = new EnrichJobRunner({

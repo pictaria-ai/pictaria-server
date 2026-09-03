@@ -383,6 +383,14 @@ export async function runBatch({
             throw fetchError;
           }
         }
+        // Immich calls do not yet take the run's abort signal. If Cancel
+        // arrived while the image was downloading, stop here rather than
+        // manufacturing a provider cancellation for a request never sent.
+        if (shouldStop()) {
+          log('stopping early: cancellation requested after image download');
+          stopped = true;
+          break;
+        }
         const { normalized, decisions, retryCount } = await analyzeWithValidationRetry(
           provider,
           { data: image.data, mimeType: image.contentType, assetId },

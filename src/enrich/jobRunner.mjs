@@ -4,7 +4,8 @@ import { createProvider } from './providers.mjs';
 import { configuredSecrets, sanitizeDiagnostic } from '../diagnostics.mjs';
 
 // Single-flight enrichment job runner for the server: one run at a time,
-// live progress counters, a bounded log tail, and cooperative cancellation.
+// live progress counters, a bounded log tail, and cancellation that aborts
+// provider requests while remaining cooperative at Immich boundaries.
 
 const LOG_TAIL_LIMIT = 500;
 
