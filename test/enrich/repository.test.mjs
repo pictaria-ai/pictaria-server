@@ -868,6 +868,7 @@ test('job run retries reconstruct content and infrastructure failures that still
     assert.deepEqual(repo.jobRunRetryFailures(run.id, { limit: 1 }).assetIds, ['content-failure']);
     assert.equal(repo.jobRunRetryFailures(run.id, { limit: 1 }).count, 2);
     assert.equal(repo.jobRunRetryFailures(run.id, { limit: 1 }).truncated, true);
+    assert.equal(repo.jobRunRetryFailures(run.id, { limit: 0 }).truncated, false);
 
     // A success after the history card was rendered removes the photo from
     // the live retry set and therefore updates the card count too.
@@ -875,6 +876,22 @@ test('job run retries reconstruct content and infrastructure failures that still
     assert.deepEqual(repo.jobRunRetryFailures(run.id).assetIds, ['infra-failure']);
     assert.equal(repo.listJobRuns(1)[0].retryableFailures, 1);
     assert.equal(repo.jobRunRetryFailures(9999), null);
+
+    repo.recordJobRun({
+      title: 'Clean sweep', ...key, targeted: 1, status: 'finished', error: null,
+      counters: { analyzed: 1, succeeded: 1, failed: 0 }, log: [],
+      startedAt: '2026-07-09T13:00:00.000Z', finishedAt: '2026-07-09T13:01:00.000Z',
+    });
+    const originalRetryFailures = repo.jobRunRetryFailures.bind(repo);
+    const queriedRunIds = [];
+    repo.jobRunRetryFailures = (id, options) => {
+      queriedRunIds.push(id);
+      return originalRetryFailures(id, options);
+    };
+    const listed = repo.listJobRuns(2);
+    assert.equal(listed[0].retryableFailures, 0);
+    assert.equal(listed[1].retryableFailures, 1);
+    assert.deepEqual(queriedRunIds, [run.id]);
   });
 });
 

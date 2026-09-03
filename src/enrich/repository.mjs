@@ -1940,7 +1940,9 @@ export class Repository {
       taxonomyVersion: run.taxonomy_version,
       count,
       assetIds,
-      truncated: count > assetIds.length,
+      // A zero-id query is the cheap count-only mode used by history cards,
+      // not a page callers can meaningfully describe as truncated.
+      truncated: boundedLimit === 0 ? false : count > assetIds.length,
     };
   }
 
@@ -1953,6 +1955,13 @@ export class Repository {
       FROM job_runs ORDER BY id DESC LIMIT ?
     `).all(limit).map((row) => {
       const id = Number(row.id);
+      const counters = row.counters_json ? JSON.parse(row.counters_json) : null;
+      // Modern completed runs record failed=0 authoritatively. Avoid a
+      // historical-window query for those overwhelmingly common clean cards;
+      // legacy/interrupted rows with absent counters still get reconstructed.
+      const retryableFailures = Number.isFinite(counters?.failed) && counters.failed === 0
+        ? 0
+        : this.jobRunRetryFailures(id, { limit: 0 })?.count ?? 0;
       return {
         id,
         title: row.title,
@@ -1963,11 +1972,11 @@ export class Repository {
         targeted: row.targeted === null ? null : Number(row.targeted),
         status: row.status,
         error: row.error,
-        counters: row.counters_json ? JSON.parse(row.counters_json) : null,
+        counters,
         hasLog: Boolean(row.has_log),
         startedAt: row.started_at,
         finishedAt: row.finished_at,
-        retryableFailures: this.jobRunRetryFailures(id, { limit: 0 })?.count ?? 0,
+        retryableFailures,
       };
     });
   }
