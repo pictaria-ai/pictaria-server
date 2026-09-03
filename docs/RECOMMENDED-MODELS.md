@@ -57,7 +57,10 @@ servers: use the exact identifier that endpoint accepts, verify that the model
 supports images (and multiple images for the Curate referee), and run a small
 Enrich test before a library sweep. Current llama.cpp accepts JPEG/PNG-style
 stb_image inputs rather than WebP, so set Pictaria's Image source to
-**original** for that setup.
+**original** for that setup. Also leave context headroom for Pictaria's output
+contract: with the shipped taxonomy, the schema embedded in each Enrich prompt
+is roughly 1,100 text tokens before the image and the rest of the prompt; a
+larger custom taxonomy increases that cost.
 
 The upstream references are LM Studio's
 [identifier guidance](https://lmstudio.ai/docs/cli/local-models/load), Ollama's
