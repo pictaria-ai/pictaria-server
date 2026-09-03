@@ -16,6 +16,7 @@ export class EnrichJobRunner {
     this.config = config;
     this.state = idleState();
     this.runPromise = null;
+    this.runLifecycle = null;
     // One-way shutdown latch: a request landing during the drain window
     // must not start a run nobody will drain or record.
     this.stopped = false;
@@ -73,10 +74,26 @@ export class EnrichJobRunner {
   // record the run synchronously here or it vanishes from history. Per-photo
   // results are already committed; a queued item stays queued and resumes.
   recordInterrupted() {
-    if (!this.state.running) {
+    const lifecycle = this.runLifecycle;
+    if (!this.state.running || !lifecycle || lifecycle.terminalRecorded) {
       return false;
     }
-    this.#log('server shutting down — run interrupted; results so far are saved and the job stays queued');
+    if (!lifecycle.interrupted) {
+      lifecycle.interrupted = true;
+      lifecycle.terminalStatus = 'interrupted';
+      lifecycle.interruptedAt = new Date().toISOString();
+      this.#log('server shutting down — run interrupted; results so far are saved and the job stays queued');
+    }
+    this.#recordTerminal(lifecycle, {
+      status: 'interrupted',
+      error: null,
+      finishedAt: lifecycle.interruptedAt,
+    });
+    return true;
+  }
+
+  #recordTerminal(lifecycle, { status, error, finishedAt }) {
+    if (lifecycle.terminalRecorded) return false;
     this.repo.recordJobRun({
       title: this.state.title,
       provider: this.state.provider,
@@ -85,13 +102,15 @@ export class EnrichJobRunner {
       taxonomyVersion: this.taxonomy.version,
       inferenceHostLabel: this.state.inferenceHostLabel,
       targeted: this.state.options.targeted,
-      status: 'interrupted',
-      error: null,
+      status,
+      error,
       counters: this.state.counters,
       log: this.state.log,
       startedAt: this.state.startedAt,
-      finishedAt: new Date().toISOString(),
+      finishedAt,
     });
+    lifecycle.terminalRecorded = true;
+    lifecycle.terminalStatus = status;
     return true;
   }
 
@@ -328,12 +347,23 @@ export class EnrichJobRunner {
       this.#log('when this run finishes, earlier Curate decisions for these photos will be cleared for re-review');
     }
 
+    // Per-run latch: an interruption record written after a timed-out drain
+    // remains the sole terminal history row even if abandoned async work
+    // later settles. Kept separate from UI state so queue completion cannot
+    // accidentally reset it while the old promise unwinds.
+    const lifecycle = {
+      interrupted: false,
+      interruptedAt: null,
+      terminalRecorded: false,
+      terminalStatus: null,
+    };
+    this.runLifecycle = lifecycle;
     // Stored so stop() can drain the in-flight run; #run never rejects.
-    this.runPromise = this.#run(provider, prompts, assetIds);
+    this.runPromise = this.#run(provider, prompts, assetIds, lifecycle);
     return this.status();
   }
 
-  async #run(provider, prompts, assetIds = null) {
+  async #run(provider, prompts, assetIds, lifecycle) {
     let listed = 0;
     try {
       const { counters, listedForReview } = await runBatch({
@@ -374,23 +404,27 @@ export class EnrichJobRunner {
       this.state.running = false;
       this.state.cancelRequested = false;
       try {
-        this.repo.recordJobRun({
-          title: this.state.title,
-          provider: this.state.provider,
-          model: this.state.model,
-          promptVersion: this.state.promptVersion,
-          taxonomyVersion: this.taxonomy.version,
-          inferenceHostLabel: this.state.inferenceHostLabel,
-          targeted: this.state.options.targeted,
-          status: this.state.error ? 'failed' : this.state.cancelled ? 'cancelled' : 'finished',
-          error: this.state.error,
-          counters: this.state.counters,
-          log: this.state.log,
-          startedAt: this.state.startedAt,
-          finishedAt: this.state.finishedAt,
+        this.#recordTerminal(lifecycle, {
+          status: lifecycle.interrupted
+            ? 'interrupted'
+            : this.state.error
+              ? 'failed'
+              : this.state.cancelled
+                ? 'cancelled'
+                : 'finished',
+          error: lifecycle.interrupted ? null : this.state.error,
+          finishedAt: lifecycle.interrupted ? lifecycle.interruptedAt : this.state.finishedAt,
         });
       } catch (error) {
         this.#log(`could not record run history: ${error instanceof Error ? error.message : error}`);
+      }
+      // Once interruption has been published, the abandoned promise may
+      // only settle and clear in-memory state. It must never remove/advance
+      // its queue item or invoke a clean-finish callback after shutdown gave
+      // up waiting for it.
+      if (lifecycle.interrupted) {
+        this.onRunFinished = null;
+        return;
       }
       // "Send results to Curate": photos join the review list as they are
       // enriched (or were already enriched) during the run — never on
