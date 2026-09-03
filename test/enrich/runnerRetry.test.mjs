@@ -111,6 +111,18 @@ test('retry mode still aborts when the failures are infrastructure — the provi
   );
 });
 
+test('infrastructure failures increment the folded failed counter used by run history', async () => {
+  const repo = makeRepo();
+  const { counters } = await runBatch(batchOptions({
+    repo,
+    provider: infraFailingProvider(),
+    assetIds: IDS_9.slice(0, 2),
+    retryFailureLimited: true,
+  }));
+  assert.equal(counters.failed, 2);
+  assert.equal(repo.processing.filter((row) => row.status === 'failed_infra').length, 2);
+});
+
 test('run persistence and logs redact reflected active integration secrets', async () => {
   const secret = 'runner:test/+ key';
   const repo = makeRepo();
