@@ -238,10 +238,13 @@ latest successful run per photo is what Curate and the caption data use.
   chain advances only on clean finishes: a failure or cancel stops it (the
   stop is recorded in run history) and whatever remains stays queued, ready
   for the next Run all.
-- **Cancellation** is cooperative: the in-flight photo finishes first
-  (30–60 s on large local models). Cancel doubles as pause — a queued job
-  stays in the queue unless its run finishes cleanly, and running it again
-  continues where it left off (already-enriched photos are skipped).
+- **Cancellation** aborts an active AI-provider request immediately. That
+  photo is recorded as an infrastructure failure, so it does not consume a
+  failure strike and retries automatically the next time the job runs. If
+  Pictaria is waiting on an Immich request instead, it stops as soon as that
+  request returns. Cancel doubles as pause — a queued job stays in the queue
+  unless its run finishes cleanly, and running it again continues where it
+  left off (already-enriched photos are skipped).
 - **Recent runs** starts with the newest 20 summaries. **Load more** walks
   through all 100 retained summaries without loading their potentially large
   logs; each log is fetched only when you open it. Retry actions remain
@@ -804,7 +807,7 @@ and expect the queue to breathe a little while enrichment is running.
 - `POST /api/enrich/discarded/restore` — `{ assetIds }` → unflag; returns
   `{ restored, assets, total, truncated }`. The same 1,000-ID canonical batch
   boundary applies atomically.
-- `POST /api/enrich/cancel` — cooperative cancel.
+- `POST /api/enrich/cancel` — cancel the run and abort its active provider request.
 - `GET|POST /api/enrich/queue`, `POST /api/enrich/queue/:id/run`
   (`{ provider, sendToCurate, reopenDecided, skipAnySuccessful }`),
   `DELETE /api/enrich/queue/:id` — the Send-to-Enrich queue (deleting the

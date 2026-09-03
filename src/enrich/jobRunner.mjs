@@ -4,7 +4,8 @@ import { createProvider } from './providers.mjs';
 import { configuredSecrets, sanitizeDiagnostic } from '../diagnostics.mjs';
 
 // Single-flight enrichment job runner for the server: one run at a time,
-// live progress counters, a bounded log tail, and cooperative cancellation.
+// live progress counters, a bounded log tail, and cancellation that aborts
+// provider requests while remaining cooperative at Immich boundaries.
 
 const LOG_TAIL_LIMIT = 500;
 
@@ -39,14 +40,19 @@ export class EnrichJobRunner {
     if (!this.state.running) {
       return false;
     }
+    const firstCancellation = !this.state.cancelRequested;
     this.state.cancelRequested = true;
-    this.#log('cancel requested; finishing current photo');
+    this.runLifecycle?.providerAbortController.abort();
+    if (firstCancellation) {
+      this.#log('cancel requested; stopping current photo');
+    }
     return true;
   }
 
   // Shutdown drain: request cancellation (the run checks between photos) and
-  // wait for the run promise — bounded, because a photo mid-provider-call
-  // can't be aborted. A run that drains in time records itself as
+  // wait for the run promise — bounded, because Immich work does not yet
+  // take the run's abort signal. Provider work is aborted immediately. A run
+  // that drains in time records itself as
   // 'cancelled' through its own finally; one we give up on is recorded as
   // 'interrupted' here, or it would vanish from run history when the
   // process exits before its finally reaches the database. Per-photo
@@ -356,6 +362,7 @@ export class EnrichJobRunner {
       interruptedAt: null,
       terminalRecorded: false,
       terminalStatus: null,
+      providerAbortController: new AbortController(),
     };
     this.runLifecycle = lifecycle;
     // Stored so stop() can drain the in-flight run; #run never rejects.
@@ -389,6 +396,7 @@ export class EnrichJobRunner {
         // setting, so a mid-run toggle just pauses the queue, not the run.
         captionWriteback: Boolean(this.config.captionWriteback),
         shouldStop: () => this.state.cancelRequested,
+        signal: lifecycle.providerAbortController.signal,
         log: (message) => this.#onProgress(message),
       });
       this.state.counters = counters;

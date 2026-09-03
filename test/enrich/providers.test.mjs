@@ -518,6 +518,38 @@ test('http errors surface provider name, status, response detail, and Retry-Afte
   );
 });
 
+test('an injected provider transport distinguishes user cancellation from timeout', async () => {
+  let markStarted;
+  const started = new Promise((resolve) => { markStarted = resolve; });
+  const provider = new OpenRouterProvider({
+    apiKey: 'key',
+    modelName: 'm',
+    timeoutMs: 60000,
+    fetchImpl: async (_url, options) => new Promise((_resolve, reject) => {
+      markStarted();
+      options.signal.addEventListener('abort', () => {
+        const error = new Error('aborted');
+        error.name = 'AbortError';
+        reject(error);
+      }, { once: true });
+    }),
+  });
+  const controller = new AbortController();
+
+  const pending = provider.analyzeImage(image, { ...prompts, signal: controller.signal });
+  await started;
+  controller.abort();
+
+  await assert.rejects(pending, (error) => {
+    assert.equal(error.name, 'ProviderRequestError');
+    assert.equal(error.cancelled, true);
+    assert.equal(error.timeout, false);
+    assert.equal(error.infrastructure, true);
+    assert.match(error.message, /request failed: cancelled$/);
+    return true;
+  });
+});
+
 test('Retry-After parsing accepts seconds and future HTTP dates, but rejects stale values', () => {
   const now = Date.parse('2026-09-03T12:00:00.000Z');
   assert.equal(parseRetryAfterMs('1.5', now), 1500);

@@ -11,7 +11,7 @@ import { appendHttpUrlPath, normalizeHttpUrl } from '../config.mjs';
 import { sanitizeDiagnostic, structuredUpstreamDiagnostic } from '../diagnostics.mjs';
 
 // Vision providers. Each analyzeImage(image, { systemPrompt, userPrompt,
-// jsonSchema }) returns { rawOutput, normalizedOutput }. An image is
+// jsonSchema, signal? }) returns { rawOutput, normalizedOutput }. An image is
 // { data: Buffer|Uint8Array, mimeType, assetId? }.
 // analyzeImages(images, options) sends several images in ONE request (the
 // group referee: "here are 5 frames of the same moment, rank them");
@@ -68,7 +68,7 @@ const GEMINI_JSON_SCHEMA_KEYWORDS = new Set([
 // 5xx) from "the provider judged this request's content" — the runner only
 // charges an asset's permanent failure allowance for the latter.
 export class ProviderRequestError extends Error {
-  constructor(message, { status = null, timeout = false, retryAfterMs = null } = {}) {
+  constructor(message, { status = null, timeout = false, cancelled = false, retryAfterMs = null } = {}) {
     super(message);
     this.name = 'ProviderRequestError';
     this.status = status;
@@ -81,8 +81,12 @@ export class ProviderRequestError extends Error {
     // an HTTP status. Carried explicitly rather than sniffed from the
     // message text.
     this.timeout = timeout;
+    // User-requested cancellation shares the transport teardown used by a
+    // timeout, but is kept distinct so Enrich can stop immediately without
+    // presenting the request as a provider failure.
+    this.cancelled = cancelled;
     this.infrastructure =
-      status === null || status === 401 || status === 403 || status === 429 || status >= 500;
+      cancelled || status === null || status === 401 || status === 403 || status === 429 || status >= 500;
   }
 }
 
@@ -142,7 +146,13 @@ export class OpenAiProvider {
     return this.analyzeImages([image], options);
   }
 
-  async analyzeImages(images, { systemPrompt, userPrompt, jsonSchema, schemaName = 'pictaria_photo_enrichment' }) {
+  async analyzeImages(images, {
+    systemPrompt,
+    userPrompt,
+    jsonSchema,
+    schemaName = 'pictaria_photo_enrichment',
+    signal = null,
+  }) {
     const body = {
       model: this.modelName,
       input: [
@@ -167,7 +177,7 @@ export class OpenAiProvider {
     };
     const rawOutput = await postJson(this, 'https://api.openai.com/v1/responses', body, {
       Authorization: `Bearer ${this.apiKey}`,
-    });
+    }, { signal });
     const outputText = extractOpenAiOutputText(rawOutput);
     if (!outputText) {
       throw new Error('OpenAI response did not include output_text');
@@ -234,7 +244,13 @@ export class LmStudioProvider {
     return this.analyzeImages([image], options);
   }
 
-  async analyzeImages(images, { systemPrompt, userPrompt, jsonSchema, schemaName = 'pictaria_photo_enrichment' }) {
+  async analyzeImages(images, {
+    systemPrompt,
+    userPrompt,
+    jsonSchema,
+    schemaName = 'pictaria_photo_enrichment',
+    signal = null,
+  }) {
     const body = {
       model: this.modelName,
       messages: [
@@ -265,7 +281,13 @@ export class LmStudioProvider {
       body.max_tokens = this.maxTokens;
     }
     const headers = this.apiKey ? { Authorization: `Bearer ${this.apiKey}` } : {};
-    const rawOutput = await postJson(this, appendHttpUrlPath(this.baseUrl, '/chat/completions'), body, headers);
+    const rawOutput = await postJson(
+      this,
+      appendHttpUrlPath(this.baseUrl, '/chat/completions'),
+      body,
+      headers,
+      { signal },
+    );
     const outputText = extractSchemaConstrainedChoiceContent(rawOutput);
     if (!outputText) {
       throw new Error('LM Studio response did not include message content');
@@ -329,7 +351,7 @@ export class OpenAiCompatibleProvider {
     return this.analyzeImages([image], options);
   }
 
-  async analyzeImages(images, { systemPrompt, userPrompt, jsonSchema }) {
+  async analyzeImages(images, { systemPrompt, userPrompt, jsonSchema, signal = null }) {
     // JSON-object mode constrains only the outer syntax. Unlike a strict
     // json_schema request, it does not tell the model which fields Pictaria
     // requires, so include the deterministic schema text in the prompt and
@@ -365,7 +387,13 @@ export class OpenAiCompatibleProvider {
       max_tokens: this.maxTokens,
     };
     const headers = this.apiKey ? { Authorization: `Bearer ${this.apiKey}` } : {};
-    const rawOutput = await postJson(this, appendHttpUrlPath(this.baseUrl, '/chat/completions'), body, headers);
+    const rawOutput = await postJson(
+      this,
+      appendHttpUrlPath(this.baseUrl, '/chat/completions'),
+      body,
+      headers,
+      { signal },
+    );
     const outputText = extractSchemaConstrainedChoiceContent(rawOutput);
     if (!outputText) {
       throw new Error('OpenAI-compatible response did not include message content');
@@ -434,7 +462,13 @@ export class OpenRouterProvider {
     return this.analyzeImages([image], options);
   }
 
-  async analyzeImages(images, { systemPrompt, userPrompt, jsonSchema, schemaName = 'pictaria_photo_enrichment' }) {
+  async analyzeImages(images, {
+    systemPrompt,
+    userPrompt,
+    jsonSchema,
+    schemaName = 'pictaria_photo_enrichment',
+    signal = null,
+  }) {
     const providerJsonSchema = openRouterJsonSchema(this.modelName, jsonSchema);
     const body = {
       model: this.modelName,
@@ -463,7 +497,7 @@ export class OpenRouterProvider {
       Authorization: `Bearer ${this.apiKey}`,
       'HTTP-Referer': 'https://github.com/pictaria-ai/pictaria-server',
       'X-Title': 'Pictaria',
-    });
+    }, { signal });
     const outputText = extractChoiceMessageContent(rawOutput);
     if (!outputText) {
       const detail = openRouterEmptyContentDiagnostic(rawOutput, this.apiKey);
@@ -559,7 +593,13 @@ export class VeniceProvider {
     return this.analyzeImages([image], options);
   }
 
-  async analyzeImages(images, { systemPrompt, userPrompt, jsonSchema, schemaName = 'pictaria_photo_enrichment' }) {
+  async analyzeImages(images, {
+    systemPrompt,
+    userPrompt,
+    jsonSchema,
+    schemaName = 'pictaria_photo_enrichment',
+    signal = null,
+  }) {
     // Venice's response_format constrains the output grammar but — unlike
     // OpenAI's structured outputs — does not show the model the schema, so
     // free-text fields came back as type-satisfying empty strings (caption:
@@ -611,7 +651,7 @@ export class VeniceProvider {
     };
     const rawOutput = await postJson(this, appendHttpUrlPath(this.baseUrl, '/chat/completions'), body, {
       Authorization: `Bearer ${this.apiKey}`,
-    });
+    }, { signal });
     const outputText = extractChoiceMessageContent(rawOutput);
     if (!outputText) {
       throw new Error('Venice response did not include message content');
@@ -665,7 +705,7 @@ export class OllamaCloudProvider {
     return this.analyzeImages([image], options);
   }
 
-  async analyzeImages(images, { systemPrompt, userPrompt, jsonSchema }) {
+  async analyzeImages(images, { systemPrompt, userPrompt, jsonSchema, signal = null }) {
     const schemaText = JSON.stringify(sortKeysDeep(jsonSchema));
     const strictUserPrompt =
       `${userPrompt}\n\n` +
@@ -688,7 +728,7 @@ export class OllamaCloudProvider {
     };
     const rawOutput = await postJson(this, appendHttpUrlPath(this.baseUrl, '/api/chat'), body, {
       Authorization: `Bearer ${this.apiKey}`,
-    });
+    }, { signal });
     const content = extractOllamaMessageContent(rawOutput);
     if (!content) {
       throw new Error('Ollama response did not include message content');
@@ -761,7 +801,7 @@ export class OllamaLocalProvider {
     return this.analyzeImages([image], options);
   }
 
-  async analyzeImages(images, { systemPrompt, userPrompt, jsonSchema }) {
+  async analyzeImages(images, { systemPrompt, userPrompt, jsonSchema, signal = null }) {
     const body = {
       model: this.modelName,
       messages: [
@@ -788,6 +828,7 @@ export class OllamaLocalProvider {
       appendHttpUrlPath(this.baseUrl, '/api/chat'),
       body,
       this.apiKey ? { Authorization: `Bearer ${this.apiKey}` } : {},
+      { signal },
     );
     const content = extractOllamaMessageContent(rawOutput);
     if (!content) {
@@ -808,7 +849,7 @@ export class OllamaLocalProvider {
   }
 }
 
-async function postJson(provider, url, body, extraHeaders) {
+async function postJson(provider, url, body, extraHeaders, { signal = null } = {}) {
   const headers = {
     'Content-Type': 'application/json',
     Accept: 'application/json',
@@ -819,10 +860,27 @@ async function postJson(provider, url, body, extraHeaders) {
   // group can run 10+ minutes). Default transport is node:http(s) with a
   // single wall-clock deadline; injected fetchImpl (tests, custom) is kept.
   if (provider.fetchImpl === fetch) {
-    return nodePostJson(provider, url, headers, JSON.stringify(body));
+    return nodePostJson(provider, url, headers, JSON.stringify(body), { signal });
   }
   const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), provider.timeoutMs);
+  let timedOut = false;
+  let cancelled = false;
+  const onCancel = () => {
+    if (timedOut || cancelled) return;
+    cancelled = true;
+    controller.abort();
+  };
+  if (signal?.aborted) {
+    onCancel();
+  } else {
+    signal?.addEventListener('abort', onCancel, { once: true });
+  }
+  const timeout = setTimeout(() => {
+    if (cancelled) return;
+    timedOut = true;
+    controller.abort();
+  }, provider.timeoutMs);
+  timeout.unref?.();
   let response;
   try {
     response = await provider.fetchImpl(url, {
@@ -833,14 +891,18 @@ async function postJson(provider, url, body, extraHeaders) {
       body: JSON.stringify(body),
     });
   } catch (error) {
-    const timedOut = error?.name === 'AbortError';
-    const reason = timedOut ? `timed out after ${provider.timeoutMs}ms` : error?.message ?? error;
+    const reason = cancelled
+      ? 'cancelled'
+      : timedOut
+        ? `timed out after ${provider.timeoutMs}ms`
+        : error?.message ?? error;
     throw new ProviderRequestError(
       `${provider.providerName} request failed: ${sanitizeDiagnostic(reason, { secrets: [provider.apiKey] })}`,
-      { timeout: timedOut },
+      { timeout: timedOut, cancelled },
     );
   } finally {
     clearTimeout(timeout);
+    signal?.removeEventListener('abort', onCancel);
   }
 
   if (!response.ok) {
@@ -899,8 +961,12 @@ async function readErrorDetail(response, provider) {
 // POST JSON over node:http(s): same semantics as the fetch path (throws the
 // provider-labelled error on failure, resolves with parsed JSON), but the
 // only timeout is our own absolute deadline.
-function nodePostJson(provider, url, headers, payload) {
+function nodePostJson(provider, url, headers, payload, { signal = null } = {}) {
   return new Promise((resolve, reject) => {
+    if (signal?.aborted) {
+      reject(new ProviderRequestError(`${provider.providerName} request failed: cancelled`, { cancelled: true }));
+      return;
+    }
     const target = new URL(url);
     const makeRequest = target.protocol === 'https:' ? httpsRequest : httpRequest;
     // Lightweight OpenAI-compatible servers can close a completed keep-alive
@@ -912,16 +978,22 @@ function nodePostJson(provider, url, headers, payload) {
     // inference work upstream.
     const isolateConnection = provider.isolateConnection === true;
     const chunks = [];
-    const fail = (reason, { timeout = false } = {}) => reject(
-      new ProviderRequestError(
+    const cleanup = () => {
+      clearTimeout(deadline);
+      signal?.removeEventListener('abort', onCancel);
+    };
+    const fail = (reason, { timeout = false, cancelled = false } = {}) => {
+      cleanup();
+      reject(new ProviderRequestError(
         `${provider.providerName} request failed: ${sanitizeDiagnostic(reason, { secrets: [provider.apiKey] })}`,
-        { timeout },
-      ),
-    );
+        { timeout, cancelled },
+      ));
+    };
     // Set when our own deadline destroys the socket, so the resulting
     // 'error' event is reported as a timeout rather than a generic
     // transport failure.
     let timedOut = false;
+    let cancelled = false;
     const request = makeRequest(target, {
       method: 'POST',
       headers,
@@ -937,9 +1009,9 @@ function nodePostJson(provider, url, headers, payload) {
         }
         chunks.push(chunk);
       });
-      response.on('error', (error) => fail(error?.message ?? error));
+      response.on('error', (error) => fail(error?.message ?? error, { timeout: timedOut, cancelled }));
       response.on('end', () => {
-        clearTimeout(deadline);
+        cleanup();
         const text = Buffer.concat(chunks).toString('utf8');
         if (response.statusCode < 200 || response.statusCode >= 300) {
           const detail = providerErrorDetail(text, provider.providerName, provider.apiKey);
@@ -957,13 +1029,19 @@ function nodePostJson(provider, url, headers, payload) {
       });
     });
     const deadline = setTimeout(() => {
+      if (cancelled) return;
       timedOut = true;
       request.destroy(new Error(`timed out after ${provider.timeoutMs}ms`));
     }, provider.timeoutMs);
     if (typeof deadline.unref === 'function') deadline.unref();
+    const onCancel = () => {
+      if (timedOut || cancelled) return;
+      cancelled = true;
+      request.destroy(new Error('cancelled'));
+    };
+    signal?.addEventListener('abort', onCancel, { once: true });
     request.on('error', (error) => {
-      clearTimeout(deadline);
-      fail(error?.message ?? error, { timeout: timedOut });
+      fail(error?.message ?? error, { timeout: timedOut, cancelled });
     });
     request.end(payload);
   });
