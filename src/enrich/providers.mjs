@@ -312,7 +312,17 @@ export class OpenAiCompatibleProvider {
     return this.analyzeImages([image], options);
   }
 
-  async analyzeImages(images, { systemPrompt, userPrompt }) {
+  async analyzeImages(images, { systemPrompt, userPrompt, jsonSchema }) {
+    // JSON-object mode constrains only the outer syntax. Unlike a strict
+    // json_schema request, it does not tell the model which fields Pictaria
+    // requires, so include the deterministic schema text in the prompt and
+    // keep the existing full local validation as the acceptance boundary.
+    const schemaText = JSON.stringify(sortKeysDeep(jsonSchema));
+    const schemaAwareUserPrompt =
+      `${userPrompt}\n\n` +
+      'Return only one valid JSON object. Do not include markdown fences, commentary, or extra text.\n' +
+      'The JSON object must conform to this schema:\n' +
+      schemaText;
     const body = {
       model: this.modelName,
       messages: [
@@ -320,7 +330,7 @@ export class OpenAiCompatibleProvider {
         {
           role: 'user',
           content: [
-            { type: 'text', text: userPrompt },
+            { type: 'text', text: schemaAwareUserPrompt },
             ...images.map((image) => ({
               type: 'image_url',
               image_url: { url: toDataUrl(image) },
@@ -329,9 +339,9 @@ export class OpenAiCompatibleProvider {
         },
       ],
       // JSON-object mode is the common denominator across OpenAI-compatible
-      // servers. Pictaria still applies its complete schema locally before a
-      // result is accepted; do not assume OpenAI's nested strict-schema
-      // dialect is portable to llama.cpp and other implementations.
+      // servers. The prompt above communicates the fields, and Pictaria still
+      // applies its complete schema locally before accepting a result; do not
+      // assume OpenAI's nested strict-schema dialect is portable everywhere.
       response_format: { type: 'json_object' },
       temperature: 0,
       stream: false,

@@ -60,11 +60,12 @@ AI Providers**. The server appends `/chat/completions`; do not put that final
 route in the base URL.
 
 For Enrich and the Curate referee, Pictaria asks for the broadly supported
-`json_object` response mode and then applies its complete taxonomy-derived
-schema locally before accepting anything. This avoids pretending that every
-"OpenAI-compatible" server implements OpenAI or LM Studio's nested strict
-schema request in the same way. A server still needs multimodal image input,
-JSON-object output, and—when used for Curate—multiple images per request.
+`json_object` response mode, describes every expected field with the complete
+schema in the prompt, and then applies that same schema locally before
+accepting anything. This avoids pretending that every "OpenAI-compatible"
+server implements OpenAI or LM Studio's nested strict-schema request in the
+same way. A server still needs multimodal image input, JSON-object output,
+and—when used for Curate—multiple images per request.
 
 For current llama.cpp, run `llama-server` with a multimodal model and its
 projector, use a base such as `http://llama-host:8080/v1`, and leave the key
@@ -277,12 +278,12 @@ Every enrichment request has **two parts**, and only one of them is prose:
 2. **The response schema** is a JSON contract used as the final acceptance
    rule and, where the provider supports the same dialect, sent as a
    structured-output constraint (OpenAI structured outputs, LM Studio's
-   `json_schema` mode). The generic compatible provider asks only for a JSON
-   object and enforces the complete schema after receipt. The contract
-   declares the exact fields every accepted reply must contain. This is why
-   captions, quality scores, and screenshot flags appear in results without
-   ever being requested in the prompt text: the schema demands them, and the
-   field names themselves act as the instruction.
+   `json_schema` mode). The generic compatible provider asks for a JSON object,
+   embeds the schema in the prompt, and enforces it again after receipt. The
+   contract declares the exact fields every accepted reply must contain. This
+   is why captions, quality scores, and screenshot flags appear in results:
+   the schema demands them, and its field names and descriptions act as the
+   instruction.
 
 The schema's fields (also listed with their uses on the Enrich page):
 

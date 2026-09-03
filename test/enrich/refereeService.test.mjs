@@ -15,7 +15,7 @@ import {
 } from '../../src/enrich/refereeService.mjs';
 import { annotateBursts } from '../../src/enrich/reviewService.mjs';
 import { Repository } from '../../src/enrich/repository.mjs';
-import { LmStudioProvider } from '../../src/enrich/providers.mjs';
+import { LmStudioProvider, OpenAiCompatibleProvider } from '../../src/enrich/providers.mjs';
 import { ResponseTooLargeError } from '../../src/fetchWithTimeout.mjs';
 
 test('refereeGroupKey is order-insensitive and membership-sensitive', () => {
@@ -82,6 +82,40 @@ test('LM Studio analyzeImages sends every image in one request with the custom s
   const content = captured.messages[1].content;
   assert.equal(content.filter((part) => part.type === 'image_url').length, 3);
   assert.equal(captured.response_format.json_schema.name, 'pictaria_group_referee');
+});
+
+test('OpenAI-compatible Curate requests describe the dynamic referee schema', async () => {
+  let captured = null;
+  const provider = new OpenAiCompatibleProvider({
+    modelName: 'm',
+    baseUrl: 'http://llama.local:8080/v1',
+    fetchImpl: async (url, options) => {
+      captured = JSON.parse(options.body);
+      return {
+        ok: true,
+        json: async () => ({ choices: [{ message: { content: '{"same_subject":true,"photos":[]}' } }] }),
+      };
+    },
+  });
+  const images = [
+    { data: Buffer.from('a'), mimeType: 'image/jpeg' },
+    { data: Buffer.from('b'), mimeType: 'image/jpeg' },
+    { data: Buffer.from('c'), mimeType: 'image/jpeg' },
+  ];
+
+  await provider.analyzeImages(images, {
+    systemPrompt: 's',
+    userPrompt: 'Rank these photos.',
+    jsonSchema: refereeJsonSchema(images.length),
+    schemaName: 'pictaria_group_referee',
+  });
+
+  const promptText = captured.messages[1].content[0].text;
+  assert.ok(promptText.includes('"minItems":3'));
+  assert.ok(promptText.includes('"maxItems":3'));
+  assert.ok(promptText.includes('"subject_group"'));
+  assert.equal(captured.messages[1].content.filter((part) => part.type === 'image_url').length, 3);
+  assert.equal(captured.response_format.type, 'json_object');
 });
 
 function withRepo(work) {

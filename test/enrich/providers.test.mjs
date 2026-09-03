@@ -129,6 +129,14 @@ test('lm studio reads strict-schema JSON from reasoning_content when content is 
 
 test('OpenAI-compatible provider posts a portable multimodal JSON-object request without auth', async () => {
   const capture = {};
+  const jsonSchema = {
+    type: 'object',
+    additionalProperties: false,
+    required: ['caption'],
+    properties: {
+      caption: { type: 'string', description: 'A one-sentence description of the photo.' },
+    },
+  };
   const provider = new OpenAiCompatibleProvider({
     modelName: 'qwen-vision',
     baseUrl: 'http://llama-host:8080/v1/',
@@ -137,7 +145,7 @@ test('OpenAI-compatible provider posts a portable multimodal JSON-object request
     }, { capture }),
   });
 
-  const result = await provider.analyzeImage(image, prompts);
+  const result = await provider.analyzeImage(image, { ...prompts, jsonSchema });
 
   assert.deepEqual(result.normalizedOutput, { caption: 'Lake' });
   assert.equal(capture.url, 'http://llama-host:8080/v1/chat/completions');
@@ -146,6 +154,10 @@ test('OpenAI-compatible provider posts a portable multimodal JSON-object request
   assert.equal(capture.body.max_tokens, 2400);
   assert.equal(capture.body.temperature, 0);
   assert.equal(capture.body.stream, false);
+  const promptText = capture.body.messages[1].content[0].text;
+  assert.match(promptText, /^user\n\nReturn only one valid JSON object\./);
+  assert.ok(promptText.includes('"required":["caption"]'));
+  assert.ok(promptText.includes('"description":"A one-sentence description of the photo."'));
   assert.equal(capture.body.messages[1].content[1].type, 'image_url');
   assert.ok(capture.body.messages[1].content[1].image_url.url.startsWith('data:image/jpeg;base64,'));
   assert.equal(capture.options.headers.Authorization, undefined);
