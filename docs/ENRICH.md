@@ -8,9 +8,10 @@ descriptions under the rules documented below.
 
 Enrichment is **off by default** (`ENRICH_ENABLED` / Settings → Enrich).
 Each run sends the selected rendition to its chosen model, so it takes an
-explicit opt-in. LM Studio and local Ollama keep model requests within
-infrastructure you operate; cloud providers receive them through your own
-provider account. The user-invoked Voice **Interesting** command is separate
+explicit opt-in. LM Studio, local Ollama, and an OpenAI-compatible endpoint
+you host keep model requests within infrastructure you operate; cloud
+providers receive them through your own provider account. The user-invoked
+Voice **Interesting** command is separate
 from Enrich and can send a preview plus photo metadata to its selected model
 even while enrichment is off.
 
@@ -24,8 +25,8 @@ For each photo, one *processing run*:
    per-photo prompt (the `{approved_tags}` placeholder is replaced with the
    taxonomy's tag list).
 3. Validate the model's JSON against a strict schema derived from the
-   taxonomy — unknown tags are rejected, and local models get one automatic
-   retry with stricter instructions.
+   taxonomy — unknown tags are rejected, and operator-hosted models get one
+   automatic retry with stricter instructions.
 4. Map the validated output to `ai/*` tag decisions and store the run
    (raw + normalized output, provider, model, prompt and taxonomy versions)
    locally.
@@ -44,15 +45,42 @@ account whose API key Pictaria uses, and grant that key `tag.read`,
 | `cloud_openai` | Cloud | OpenAI API key + model under Settings → AI Providers |
 | `local_lmstudio` | Local | Base URL + the model identifier LM Studio lists under Settings → AI Providers |
 | `local_ollama` | Local | Base URL + a vision model as `ollama list` shows it under Settings → AI Providers (no key needed) |
+| `openai_compatible` | Operator-chosen | Base URL + model + optional bearer key for llama.cpp and similar servers under Settings → AI Providers |
 | `openrouter` | Cloud | API key + model under Settings → AI Providers |
 | `cloud_ollama` | Cloud | API key + model under Settings → AI Providers |
 | `venice` | Cloud | API key + a vision-capable model under Settings → AI Providers (no default) |
 
-Thinking-capable LM Studio models can place a strict-schema Enrich or Curate
-answer in their `reasoning_content` response field while leaving ordinary
-`content` empty. Pictaria accepts and validates that channel only for requests
-whose entire output is constrained to the Pictaria JSON schema. Voice and other
-prose requests always ignore reasoning content.
+### OpenAI-compatible endpoints and llama.cpp
+
+The generic provider targets servers that accept OpenAI-style
+`POST /v1/chat/completions` requests, including multimodal `image_url` data
+URLs. Configure the full base URL (normally ending in `/v1`), the exact model
+identifier the server accepts, and an optional bearer key under **Settings →
+AI Providers**. The server appends `/chat/completions`; do not put that final
+route in the base URL.
+
+For Enrich and the Curate referee, Pictaria asks for the broadly supported
+`json_object` response mode and then applies its complete taxonomy-derived
+schema locally before accepting anything. This avoids pretending that every
+"OpenAI-compatible" server implements OpenAI or LM Studio's nested strict
+schema request in the same way. A server still needs multimodal image input,
+JSON-object output, and—when used for Curate—multiple images per request.
+
+For current llama.cpp, run `llama-server` with a multimodal model and its
+projector, use a base such as `http://llama-host:8080/v1`, and leave the key
+blank unless the server was started with API-key authentication. llama.cpp's
+documented image decoder accepts stb_image formats such as JPEG and PNG, not
+Immich's WebP previews, so set **Image source** to `original`. HEIC/RAW
+originals may still be unsupported. The voice **Interesting** command always
+uses an Immich preview, so choose another voice-answer provider when the
+compatible endpoint cannot ingest WebP; text-only **Tell Me** does not have
+that image-format constraint.
+
+Thinking-capable models behind compatible endpoints can place a requested
+Enrich or Curate JSON answer in their `reasoning_content` response field while
+leaving ordinary `content` empty. Pictaria accepts and validates that channel
+only for machine-readable requests; Voice and other prose requests always
+ignore reasoning content.
 
 Connections and model identifiers live under **Settings → AI Providers**.
 Choose the active provider on the **Enrich** page: it is used for every new
@@ -147,18 +175,19 @@ into the thinking channel, the server reads it from there).
   timeouts are classified as infrastructure and retried on the next run
   (see "When things go wrong" below).
 
-**Ollama or LM Studio on another machine (LAN or Tailscale).** Pointing the
-base URL at a different machine works — a beefy desktop can serve models to
-a small Pictaria host — but two defaults get in the way:
+**Ollama, LM Studio, or another compatible server on another machine (LAN or
+Tailscale).** Pointing the base URL at a different machine works — a beefy
+desktop can serve models to a small Pictaria host — but two defaults get in
+the way:
 
-1. **Both servers listen on localhost only** out of the box. On the serving
-   machine, tell Ollama to listen wider (`OLLAMA_HOST`, per Ollama's FAQ
-   for your install method) or flip LM Studio's "serve on local network"
+1. **Model servers often listen on localhost only** out of the box. On the
+   serving machine, tell Ollama to listen wider (`OLLAMA_HOST`, per Ollama's
+   FAQ for your install method) or flip LM Studio's "serve on local network"
    toggle. Then use that machine's address in the base URL, e.g.
    `http://192.168.1.20:11434`.
-2. **Neither has authentication**, and every request carries your photos in
-   plain HTTP. Anyone who can reach the port can run the models and see
-   what you send — so bind no wider than you must, and don't expose these
+2. **Many have no authentication by default**, and every request carries your
+   photos in plain HTTP. Anyone who can reach the port can run the models and
+   see what you send — so bind no wider than you must, and don't expose these
    ports beyond networks you trust.
 
 Those two points are why **Tailscale is the nicest remote setup**: traffic
@@ -245,13 +274,15 @@ Every enrichment request has **two parts**, and only one of them is prose:
 1. **The prompt** (system instructions + per-photo message) carries the
    judgment: what makes a photo frame-worthy, how to use the tag list, when
    to prefer one tag over another.
-2. **The response schema** is a JSON contract sent as a structured-output
-   constraint (OpenAI structured outputs, LM Studio's `json_schema` mode).
-   It declares the exact fields every reply must contain — the model cannot
-   return anything else. This is why captions, quality scores, and
-   screenshot flags appear in results without ever being requested in the
-   prompt text: the schema demands them, and the field names themselves act
-   as the instruction.
+2. **The response schema** is a JSON contract used as the final acceptance
+   rule and, where the provider supports the same dialect, sent as a
+   structured-output constraint (OpenAI structured outputs, LM Studio's
+   `json_schema` mode). The generic compatible provider asks only for a JSON
+   object and enforces the complete schema after receipt. The contract
+   declares the exact fields every accepted reply must contain. This is why
+   captions, quality scores, and screenshot flags appear in results without
+   ever being requested in the prompt text: the schema demands them, and the
+   field names themselves act as the instruction.
 
 The schema's fields (also listed with their uses on the Enrich page):
 
@@ -319,6 +350,10 @@ your approved tags on every request.
   converter, so set **Image source** to `original` in Settings → Enrich
   (`IMAGE_SOURCE=original`). Originals are typically JPEG; HEIC originals
   may still be rejected by LM Studio.
+- **llama.cpp rejects a preview image**: current llama.cpp multimodal support
+  accepts JPEG, PNG, and other stb_image formats, but not WebP. Set **Image
+  source** to `original`; if the original is HEIC/RAW, try a compatible JPEG
+  source or model server. Pictaria does not transcode generic-provider images.
 - **OpenRouter says `404 No endpoints found`**: confirm that the exact current
   model identifier accepts images and advertises structured outputs on an
   available endpoint. OpenRouter model availability and endpoint capabilities

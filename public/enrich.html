@@ -308,12 +308,15 @@
       if (state.providersLoaded || !status.available) return;
       state.providersLoaded = true;
       state.providerConfigured = new Map(status.available.map((provider) => [provider.name, provider.configured]));
+      const providerNames = { openai_compatible: 'OpenAI-compatible' };
       el('enrichProvider').replaceChildren(...status.available.map((provider) => {
         const option = document.createElement('option');
         option.value = provider.name;
+        const providerName = providerNames[provider.name]
+          ?? provider.name.replace('cloud_', '').replace('local_', '');
         option.textContent = provider.configured
-          ? `${provider.name.replace('cloud_', '').replace('local_', '')}${provider.model ? ` · ${provider.model}` : ''}`
-          : `${provider.name} (not configured)`;
+          ? `${providerName}${provider.model ? ` · ${provider.model}` : ''}`
+          : `${providerName} (not configured)`;
         option.disabled = !provider.configured;
         return option;
       }));

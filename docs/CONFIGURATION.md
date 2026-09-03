@@ -141,7 +141,7 @@ files.
 | --- | --- | --- |
 | `ENRICH_ENABLED` | `false` | Master switch for AI enrichment — off by default because a run sends the selected image rendition to its chosen model. Voice Interesting is a separate, user-invoked model path and does not depend on this switch. Flip Enrich in Settings → Enrich (or here). **UI** |
 | `CAPTION_WRITEBACK` | `false` | Copy enrichment captions into Immich's description field, making photos searchable in Immich by their content. Pictaria checks at the final safe point before writing and only fills an empty description or updates its own earlier text; Immich offers no atomic conditional update, so see the precisely documented residual race in [ENRICH.md](ENRICH.md). **UI** |
-| `DEFAULT_PROVIDER` | `cloud_openai` | Initial/infrastructure fallback when the Enrich page has no remembered provider. `cloud_openai` \| `local_lmstudio` \| `local_ollama` \| `openrouter` \| `cloud_ollama` \| `venice`. Choosing a provider on Enrich saves a UI override. **UI (Enrich page)** |
+| `DEFAULT_PROVIDER` | `cloud_openai` | Initial/infrastructure fallback when the Enrich page has no remembered provider. `cloud_openai` \| `local_lmstudio` \| `local_ollama` \| `openai_compatible` \| `openrouter` \| `cloud_ollama` \| `venice`. Choosing a provider on Enrich saves a UI override. **UI (Enrich page)** |
 | `OPENAI_API_KEY` | *(empty)* | Used by the `cloud_openai` provider, voice photo-Q&A, and TTS. Lives under Settings → AI Providers. **UI** |
 | `OPENAI_MODEL` | `gpt-5.5` | Vision model for enrichment. Lives under Settings → AI Providers. **UI** |
 | `LMSTUDIO_BASE_URL` | `http://127.0.0.1:1234/v1` | Model inference within infrastructure you operate via LM Studio. **Docker:** inside the container `127.0.0.1` is the container itself — when LM Studio runs on the Docker host, use `http://host.docker.internal:1234/v1` (on Linux, add `extra_hosts: ["host.docker.internal:host-gateway"]` to the service in `docker-compose.yml`). Lives under Settings → AI Providers. **UI** |
@@ -149,12 +149,14 @@ files.
 | `LMSTUDIO_API_KEY` | `lm-studio` | Rarely needs changing. |
 | `LMSTUDIO_MAX_TOKENS` | `2400` | `none` disables the cap. Too low a cap truncates long responses mid-JSON, which shows up as "bad JSON from model" failures. |
 | `LMSTUDIO_TEMPERATURE` | `0` | |
+| `OPENAI_COMPATIBLE_BASE_URL` / `OPENAI_COMPATIBLE_MODEL` | *(empty)* | Generic OpenAI-style `/chat/completions` provider for llama.cpp and similar servers. Include the API prefix in the base URL (normally `/v1`) and choose a vision-capable model. Lives under Settings → AI Providers. **UI** |
+| `OPENAI_COMPATIBLE_API_KEY` | *(empty)* | Optional bearer key for the generic endpoint. Leave blank for a keyless trusted-network service. A saved key is bound to the endpoint authority and is quarantined if a restore or setting change points it elsewhere. **UI** |
 | `OLLAMA_LOCAL_BASE_URL` / `OLLAMA_LOCAL_MODEL` | `http://127.0.0.1:11434` / *(empty)* | Model inference within infrastructure you operate via Ollama — no third-party cloud model or API key. Model must be a vision model, named as `ollama list` shows it. Same Docker note as LM Studio: use `http://host.docker.internal:11434` when Ollama runs on the Docker host — and Ollama itself must listen beyond localhost (`OLLAMA_HOST=0.0.0.0:11434`, see [Ollama's FAQ](https://docs.ollama.com/faq)) or the container cannot reach it; that exposes an unauthenticated service to your network, so bind only as wide as needed (a Tailscale-only bind avoids that entirely — see [ENRICH.md](ENRICH.md), "on another machine"). Base URL and model live under Settings → AI Providers. **UI** |
 | `OLLAMA_LOCAL_API_KEY` | — | Only for local Ollama behind an authenticating proxy; adds a Bearer header. |
 | `OPENROUTER_API_KEY` / `OPENROUTER_MODEL` / `OPENROUTER_BASE_URL` | — / `qwen/qwen3-vl-32b-instruct` / `https://openrouter.ai/api/v1` | Key and model live under Settings → AI Providers. **UI** |
 | `OLLAMA_API_KEY` / `OLLAMA_MODEL` / `OLLAMA_BASE_URL` | — / `qwen3.5:cloud` / `https://ollama.com` | Key and model live under Settings → AI Providers. **UI** |
 | `VENICE_API_KEY` / `VENICE_MODEL` / `VENICE_BASE_URL` | — / *(empty — no default)* / `https://api.venice.ai/api/v1` | Key and model live under Settings → AI Providers. **UI**. The model must support vision and structured output; the AI referee additionally needs multi-image input (e.g. `qwen3-vl-235b-a22b`). |
-| `IMAGE_SOURCE` | `preview` | Which Immich rendition is sent to the model (`preview`, `thumbnail`, or `original`). Immich previews are WebP, which LM Studio cannot ingest — on macOS Pictaria converts them automatically; in Docker set this to `original`. **UI** |
+| `IMAGE_SOURCE` | `preview` | Which Immich rendition is sent to the model (`preview`, `thumbnail`, or `original`). Immich previews are WebP. LM Studio cannot ingest them (Pictaria converts on macOS; use `original` in Docker), and current llama.cpp accepts stb_image formats rather than WebP, so use `original` with that endpoint too. **UI** |
 | `MAX_FAILURES_PER_ASSET` | `2` | Give up on an asset after this many failed attempts (per provider + model + prompt + taxonomy setup). `0` disables the limit; raising it above an asset's recorded failures re-attempts it on the next run. Stuck photos can also be retried one run at a time from the Enrich page's **Stuck photos** strip. |
 | `TAXONOMY_PATH` | `taxonomy/v1.json` | The shipped tag taxonomy and review-bucket policy. Editable at runtime in Settings → Enrich (the override lives in the settings store and must bump the taxonomy version). A custom container path requires a matching bind mount and Compose override. |
 | `PROMPTS_DIR` / `PROMPT_VERSION` | `prompts` / `v2` | Prompt templates for enrichment. `PROMPT_VERSION` is forwarded by stock Compose; a custom `PROMPTS_DIR` requires a matching bind mount and Compose override. The prompt text itself can be overridden in Settings → Enrich (no env var); runs with an override record prompt version `v2-custom`. |
@@ -219,7 +221,10 @@ the `/models` response and in
 you pick, the "interesting" model must be vision-capable — and note that
 **LM Studio cannot serve that command outside macOS**: it rejects the WebP
 preview the command sends, and converting needs macOS's `sips`, so a Docker
-or Linux install should choose a different provider for spoken answers.
+or Linux install should choose a different provider for spoken answers. A
+generic OpenAI-compatible endpoint must likewise accept that WebP preview;
+current llama.cpp does not, so it can serve text-only **Tell Me** but should
+not be selected for **Interesting**.
 
 The prompts behind the "interesting" and "tell me …" voice answers are
 editable in **Settings → Prompts** (settings-only, no environment variables):

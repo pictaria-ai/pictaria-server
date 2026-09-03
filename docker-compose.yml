@@ -92,13 +92,16 @@ services:
       LMSTUDIO_API_KEY: ${LMSTUDIO_API_KEY:-}
       LMSTUDIO_MAX_TOKENS: ${LMSTUDIO_MAX_TOKENS:-}
       LMSTUDIO_TEMPERATURE: ${LMSTUDIO_TEMPERATURE:-}
+      OPENAI_COMPATIBLE_BASE_URL: ${OPENAI_COMPATIBLE_BASE_URL:-}
+      OPENAI_COMPATIBLE_MODEL: ${OPENAI_COMPATIBLE_MODEL:-}
+      OPENAI_COMPATIBLE_API_KEY: ${OPENAI_COMPATIBLE_API_KEY:-}
       GEOCODING_PROVIDER: ${GEOCODING_PROVIDER:-}
       GEOAPIFY_API_KEY: ${GEOAPIFY_API_KEY:-}
       GEOCODING_TIMEOUT_MS: ${GEOCODING_TIMEOUT_MS:-}
       GEOCODING_COORDINATE_PRECISION: ${GEOCODING_COORDINATE_PRECISION:-}
-    # Using LM Studio on the Docker host for local enrichment? Inside the
-    # container 127.0.0.1 is the container itself — set the LM Studio base
-    # URL (Settings → AI Providers) to http://host.docker.internal:1234/v1.
+    # Using a model server such as LM Studio or llama.cpp on the Docker host?
+    # Inside the container 127.0.0.1 is the container itself — set its base
+    # URL (Settings → AI Providers) to host.docker.internal with its port.
     # On Linux, also uncomment these two lines so that hostname resolves:
     # extra_hosts:
     #   - "host.docker.internal:host-gateway"

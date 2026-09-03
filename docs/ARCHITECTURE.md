@@ -174,7 +174,9 @@ data/               all persistent state (gitignored): enrichment.sqlite,
   authorities. Version-2 state recorded no credential provenance: its
   version-3 migration trusts only a saved Immich URL; legacy provider keys
   always require one-time re-entry because their former environment URLs
-  were not persisted. Sanitized version-pinned inputs and the storage
+  were not persisted. Version 4 adds the generic OpenAI-compatible endpoint
+  fields and destination binding for its optional saved key. Sanitized
+  version-pinned inputs and the storage
   contract live under `test/fixtures/upgrades/`. The version-pinned
   whole-install fixture is
   materialized into temporary SQLite/JSON/directory state and opened through

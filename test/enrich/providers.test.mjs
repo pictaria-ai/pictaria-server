@@ -5,6 +5,7 @@ import { createServer } from 'node:http';
 import { parseJsonContent } from '../../src/enrich/jsonUtils.mjs';
 import {
   LmStudioProvider,
+  OpenAiCompatibleProvider,
   OllamaCloudProvider,
   OllamaLocalProvider,
   OpenAiProvider,
@@ -124,6 +125,52 @@ test('lm studio reads strict-schema JSON from reasoning_content when content is 
   const result = await provider.analyzeImage(image, prompts);
 
   assert.deepEqual(result.normalizedOutput, { caption: 'Lake' });
+});
+
+test('OpenAI-compatible provider posts a portable multimodal JSON-object request without auth', async () => {
+  const capture = {};
+  const provider = new OpenAiCompatibleProvider({
+    modelName: 'qwen-vision',
+    baseUrl: 'http://llama-host:8080/v1/',
+    fetchImpl: fakeFetch({
+      choices: [{ message: { content: '```json\n{"caption":"Lake"}\n```' } }],
+    }, { capture }),
+  });
+
+  const result = await provider.analyzeImage(image, prompts);
+
+  assert.deepEqual(result.normalizedOutput, { caption: 'Lake' });
+  assert.equal(capture.url, 'http://llama-host:8080/v1/chat/completions');
+  assert.equal(capture.body.model, 'qwen-vision');
+  assert.equal(capture.body.response_format.type, 'json_object');
+  assert.equal(capture.body.max_tokens, 2400);
+  assert.equal(capture.body.temperature, 0);
+  assert.equal(capture.body.stream, false);
+  assert.equal(capture.body.messages[1].content[1].type, 'image_url');
+  assert.ok(capture.body.messages[1].content[1].image_url.url.startsWith('data:image/jpeg;base64,'));
+  assert.equal(capture.options.headers.Authorization, undefined);
+});
+
+test('OpenAI-compatible provider sends optional bearer auth and prose without response format', async () => {
+  const capture = {};
+  const provider = new OpenAiCompatibleProvider({
+    modelName: 'local-text',
+    baseUrl: 'https://models.example/custom/v1',
+    apiKey: 'private-key',
+    fetchImpl: fakeFetch({ choices: [{ message: { content: 'A concise answer.' } }] }, { capture }),
+  });
+
+  const result = await provider.generateProse({
+    systemPrompt: 'system',
+    userPrompt: 'question',
+    maxOutputTokens: 321,
+  });
+
+  assert.equal(result.text, 'A concise answer.');
+  assert.equal(capture.url, 'https://models.example/custom/v1/chat/completions');
+  assert.equal(capture.options.headers.Authorization, 'Bearer private-key');
+  assert.equal(capture.body.max_tokens, 321);
+  assert.equal(Object.hasOwn(capture.body, 'response_format'), false);
 });
 
 test('lm studio rejects malformed schema output from reasoning_content', async () => {
@@ -370,8 +417,23 @@ test('local provider constructors reject query and fragment delimiters before an
       () => new OllamaLocalProvider({ modelName: 'm', baseUrl, fetchImpl }),
       /without credentials, a query, or a fragment/,
     );
+    assert.throws(
+      () => new OpenAiCompatibleProvider({ modelName: 'm', baseUrl, fetchImpl }),
+      /without credentials, a query, or a fragment/,
+    );
   }
   assert.equal(called, false);
+});
+
+test('OpenAI-compatible provider requires both a destination and model', () => {
+  assert.throws(
+    () => new OpenAiCompatibleProvider({ modelName: 'm' }),
+    /OPENAI_COMPATIBLE_BASE_URL is required/,
+  );
+  assert.throws(
+    () => new OpenAiCompatibleProvider({ baseUrl: 'http://llama:8080/v1' }),
+    /OPENAI_COMPATIBLE_MODEL is required/,
+  );
 });
 
 test('local ollama omits think and reads schema JSON from the thinking channel', async () => {
@@ -621,6 +683,37 @@ test('lm studio node transport isolates consecutive requests from stale keep-ali
   }
 });
 
+test('OpenAI-compatible node transport also isolates consecutive requests', async () => {
+  let connectionCount = 0;
+  const connectionHeaders = [];
+  const server = createServer((request, response) => {
+    request.resume();
+    connectionHeaders.push(request.headers.connection);
+    response.writeHead(200, { 'content-type': 'application/json' });
+    response.end(JSON.stringify({ choices: [{ message: { content: '{"caption":"Lake"}' } }] }));
+  });
+  server.on('connection', () => {
+    connectionCount += 1;
+  });
+  await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
+
+  const provider = new OpenAiCompatibleProvider({
+    modelName: 'm',
+    baseUrl: `http://127.0.0.1:${server.address().port}/v1`,
+  });
+
+  try {
+    await provider.analyzeImage(image, prompts);
+    await provider.analyzeImage(image, prompts);
+
+    assert.equal(connectionCount, 2);
+    assert.deepEqual(connectionHeaders, ['close', 'close']);
+  } finally {
+    server.closeAllConnections?.();
+    await new Promise((resolve) => server.close(resolve));
+  }
+});
+
 test('node transport caps a runaway provider response body', async () => {
   // Streams far past the 2MB cap; the client must abort mid-body instead of
   // accumulating chunks without bound.
@@ -680,6 +773,10 @@ test('an injected transport also caps a successful provider response', async () 
 test('createProvider maps names to implementations and rejects unknowns', () => {
   assert.equal(createProvider('cloud_openai', { apiKey: 'k', modelName: 'm' }).providerName, 'cloud_openai');
   assert.equal(createProvider('local_lmstudio', { modelName: 'm' }).providerName, 'local_lmstudio');
+  assert.equal(
+    createProvider('openai_compatible', { baseUrl: 'http://llama:8080/v1', modelName: 'm' }).providerName,
+    'openai_compatible',
+  );
   assert.equal(createProvider('openrouter', { apiKey: 'k', modelName: 'm' }).providerName, 'openrouter');
   assert.equal(createProvider('cloud_ollama', { apiKey: 'k', modelName: 'm' }).providerName, 'cloud_ollama');
   assert.equal(createProvider('local_ollama', { modelName: 'm' }).providerName, 'local_ollama');

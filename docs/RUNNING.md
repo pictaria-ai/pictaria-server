@@ -184,14 +184,16 @@ sudo systemctl enable --now pictaria-server
 journalctl -u pictaria-server -f   # logs
 ```
 
-## LM Studio from Docker
+## Host model servers from Docker
 
-If Pictaria runs in Docker and LM Studio runs on the Docker host, the
-default LM Studio base URL (`http://127.0.0.1:1234/v1`) won't work —
+If Pictaria runs in Docker and LM Studio, llama.cpp, or another model server
+runs on the Docker host, a loopback base URL (`http://127.0.0.1:…`) won't work —
 inside the container, `127.0.0.1` is the container itself. Set the base
-URL (Settings → AI Providers, or `LMSTUDIO_BASE_URL`) to
-`http://host.docker.internal:1234/v1`. On Linux, also give the container
-that hostname:
+URL under Settings → AI Providers (or its environment variable) to
+`http://host.docker.internal:<port>` with the service's API prefix, for
+example LM Studio at `http://host.docker.internal:1234/v1` or llama.cpp at
+`http://host.docker.internal:8080/v1`. On Linux, also give the container that
+hostname:
 
 ```yaml
 # docker-compose.yml, under the pictaria service
@@ -199,8 +201,9 @@ extra_hosts:
   - "host.docker.internal:host-gateway"
 ```
 
-And in LM Studio, enable **Serve on local network** so its server listens
-beyond the host's loopback interface.
+The model server must listen beyond its own loopback interface. In LM Studio,
+enable **Serve on local network**; for other servers, follow their bind/host
+setting and expose the port only to networks you trust.
 
 ## Monitoring
 

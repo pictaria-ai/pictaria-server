@@ -201,6 +201,14 @@ export function loadConfig(env = process.env) {
         maxTokens: parseOptionalInteger(env.LMSTUDIO_MAX_TOKENS, 2400),
         temperature: parseFloatEnv(env.LMSTUDIO_TEMPERATURE, 0),
       },
+      openai_compatible: {
+        // Generic OpenAI-style chat endpoint (for example llama.cpp). Both
+        // URL and model are deliberately empty until the operator selects a
+        // service; authentication is optional for trusted-network servers.
+        apiKey: env.OPENAI_COMPATIBLE_API_KEY || '',
+        modelName: env.OPENAI_COMPATIBLE_MODEL || '',
+        baseUrl: normalizeHttpUrl(env.OPENAI_COMPATIBLE_BASE_URL || ''),
+      },
       local_ollama: {
         // Optional: local Ollama needs no auth; set only behind a proxy.
         apiKey: env.OLLAMA_LOCAL_API_KEY || '',
