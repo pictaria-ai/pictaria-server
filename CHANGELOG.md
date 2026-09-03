@@ -19,13 +19,17 @@ All notable changes to Pictaria Server are documented here. This project follows
   and infrastructure failures that still need work. The server recalculates
   the set at click time, so later successes, deleted photos, and deliberately
   discarded photos are never reprocessed from a stale card.
+- Enrich Recent Runs now show privacy-safe end-to-end throughput for successful
+  photos, with the provider, model, and an optional operator-authored inference
+  host label for comparing setups without adding prompts or provider responses
+  to run history.
 
 ### Changed
 
-- The persisted Settings contract advances to version 4 and the installation
-  state contract to version 6. Existing installations take the standard
+- The persisted Settings contract advances to version 5 and the installation
+  state contract to version 7. Existing installations take the standard
   automatic pre-migration recovery snapshot before adopting the additive
-  provider settings.
+  provider and per-run benchmark-context settings.
 
 ## 1.0.1 - 2026-09-02
 

@@ -92,6 +92,13 @@ test('OpenAI-compatible configuration is explicit and keeps authentication optio
   });
 });
 
+test('inference host context is operator-authored, trimmed, and bounded', () => {
+  assert.equal(loadConfig({ INFERENCE_HOST_LABEL: '  M4\n Mac\tmini · LM Studio  ' }).inferenceHostLabel,
+    'M4 Mac mini · LM Studio');
+  assert.equal(loadConfig({ INFERENCE_HOST_LABEL: 'x'.repeat(121) }).inferenceHostLabel, 'x'.repeat(120));
+  assert.equal(loadConfig({}).inferenceHostLabel, '');
+});
+
 test('server auth configuration fails closed unless open mode is explicit', () => {
   for (const env of [{}, { APP_PASSWORD: '' }, { APP_PASSWORD: '', ALLOW_INSECURE_OPEN: 'false' }]) {
     assert.throws(

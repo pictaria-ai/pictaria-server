@@ -272,6 +272,27 @@ function enrichQueueError(message, code, status) {
   return error;
 }
 
+function jobRunThroughput(counters, startedAt, finishedAt) {
+  const successfulPhotos = counters?.succeeded;
+  const startMs = Date.parse(startedAt);
+  const finishMs = Date.parse(finishedAt);
+  const durationMs = finishMs - startMs;
+  if (!Number.isSafeInteger(successfulPhotos) || successfulPhotos <= 0
+    || !Number.isFinite(startMs) || !Number.isFinite(finishMs) || durationMs <= 0) {
+    return null;
+  }
+  return {
+    basis: 'end_to_end',
+    successfulPhotos,
+    photosPerMinute: successfulPhotos * 60_000 / durationMs,
+    secondsPerPhoto: durationMs / 1000 / successfulPhotos,
+  };
+}
+
+function jobRunHostLabel(value) {
+  return typeof value === 'string' ? value.trim().replace(/\s+/g, ' ').slice(0, 120) || null : null;
+}
+
 // Migration 1 is the pre-user_version era: every probe-based fixup this
 // repository ever applied, verbatim. All idempotent — a database already in
 // the current shape passes through unchanged and just gains the stamp.
@@ -411,6 +432,14 @@ const ENRICH_MIGRATIONS = [
         DELETE FROM job_runs
         WHERE id NOT IN (SELECT id FROM job_runs ORDER BY id DESC LIMIT ${MAX_JOB_RUNS});
       `);
+    },
+  },
+  {
+    version: 7,
+    up(db) {
+      // User-authored benchmark context is snapshotted per run so changing a
+      // Settings label never rewrites the meaning of historical comparisons.
+      addColumnIfMissing(db, 'job_runs', 'inference_host_label', 'TEXT');
     },
   },
 ];
@@ -1863,13 +1892,14 @@ export class Repository {
     return this.db.prepare('DELETE FROM enrich_queue WHERE id = ?').run(id).changes > 0;
   }
 
-  recordJobRun({ title, provider, model, promptVersion, taxonomyVersion, targeted, status, error, counters, log, startedAt, finishedAt }) {
+  recordJobRun({ title, provider, model, promptVersion, taxonomyVersion, inferenceHostLabel, targeted, status, error, counters, log, startedAt, finishedAt }) {
     const safeError = error === null || error === undefined ? null : sanitizeDiagnostic(error);
     const safeLog = boundedJobLog(log);
+    const safeHostLabel = jobRunHostLabel(inferenceHostLabel);
     this.db.prepare(`
-      INSERT INTO job_runs (title, provider, model, prompt_version, taxonomy_version, targeted, status, error, counters_json, log_json, started_at, finished_at)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-    `).run(title, provider, model ?? null, promptVersion ?? null, taxonomyVersion ?? null, targeted ?? null,
+      INSERT INTO job_runs (title, provider, model, prompt_version, taxonomy_version, inference_host_label, targeted, status, error, counters_json, log_json, started_at, finished_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `).run(title, provider, model ?? null, promptVersion ?? null, taxonomyVersion ?? null, safeHostLabel, targeted ?? null,
       status, safeError, counters ? JSON.stringify(counters) : null,
       safeLog?.length > 0 ? JSON.stringify(safeLog) : null, startedAt, finishedAt);
     this.db.prepare(`
@@ -1950,7 +1980,7 @@ export class Repository {
     // The log stays out of the list payload (it can be hundreds of KB);
     // fetch it per run via getJobRunLog.
     return this.db.prepare(`
-      SELECT id, title, provider, model, prompt_version, taxonomy_version, targeted,
+      SELECT id, title, provider, model, prompt_version, taxonomy_version, inference_host_label, targeted,
              status, error, counters_json, log_json IS NOT NULL AS has_log, started_at, finished_at
       FROM job_runs ORDER BY id DESC LIMIT ?
     `).all(limit).map((row) => {
@@ -1969,6 +1999,7 @@ export class Repository {
         model: row.model,
         promptVersion: row.prompt_version,
         taxonomyVersion: row.taxonomy_version,
+        inferenceHostLabel: jobRunHostLabel(row.inference_host_label),
         targeted: row.targeted === null ? null : Number(row.targeted),
         status: row.status,
         error: row.error,
@@ -1976,6 +2007,7 @@ export class Repository {
         hasLog: Boolean(row.has_log),
         startedAt: row.started_at,
         finishedAt: row.finished_at,
+        throughput: jobRunThroughput(counters, row.started_at, row.finished_at),
         retryableFailures,
       };
     });
@@ -1983,7 +2015,7 @@ export class Repository {
 
   getJobRunLog(id) {
     const row = this.db.prepare(`
-      SELECT title, provider, model, prompt_version, taxonomy_version, status, log_json
+      SELECT title, provider, model, prompt_version, taxonomy_version, inference_host_label, status, log_json
       FROM job_runs WHERE id = ?
     `).get(id);
     if (!row) {
@@ -1995,6 +2027,7 @@ export class Repository {
       model: row.model,
       promptVersion: row.prompt_version,
       taxonomyVersion: row.taxonomy_version,
+      inferenceHostLabel: jobRunHostLabel(row.inference_host_label),
       status: row.status,
       log: row.log_json ? JSON.parse(row.log_json) : [],
     };

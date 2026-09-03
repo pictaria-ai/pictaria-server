@@ -819,6 +819,51 @@ test('job run logs round-trip and stay out of the list payload', () => {
   });
 });
 
+test('job run history derives honest end-to-end throughput and snapshots bounded host context', () => {
+  withRepo((repo) => {
+    repo.recordJobRun({
+      title: 'Comparable run', provider: 'local_lmstudio', model: 'vision-model',
+      promptVersion: 'v2', taxonomyVersion: 'v1', inferenceHostLabel: 'Original host',
+      targeted: 30, status: 'cancelled', error: null,
+      counters: { analyzed: 15, succeeded: 12, failed: 3, skippedSuccessful: 10 }, log: [],
+      startedAt: '2026-07-09T12:00:00.000Z', finishedAt: '2026-07-09T12:02:00.000Z',
+    });
+    repo.recordJobRun({
+      title: 'Nothing succeeded', provider: 'local_lmstudio', model: 'vision-model',
+      promptVersion: 'v2', taxonomyVersion: 'v1', inferenceHostLabel: '',
+      targeted: 1, status: 'failed', error: 'offline',
+      counters: { analyzed: 1, succeeded: 0, failed: 1 }, log: [],
+      startedAt: '2026-07-09T12:03:00.000Z', finishedAt: '2026-07-09T12:04:00.000Z',
+    });
+    repo.recordJobRun({
+      title: 'Invalid duration', provider: 'local_lmstudio', model: 'vision-model',
+      promptVersion: 'v2', taxonomyVersion: 'v1', targeted: 1,
+      status: 'finished', error: null, counters: { succeeded: 1 }, log: [],
+      startedAt: '2026-07-09T12:05:00.000Z', finishedAt: '2026-07-09T12:05:00.000Z',
+    });
+
+    const comparableId = repo.db.prepare("SELECT id FROM job_runs WHERE title = 'Comparable run'").get().id;
+    // A restored/tampered database cannot turn the bounded API field into an
+    // arbitrarily large response even though normal writes already clamp it.
+    repo.db.prepare('UPDATE job_runs SET inference_host_label = ? WHERE id = ?')
+      .run(`  ${'M'.repeat(60)}\n\t${'M'.repeat(80)}  `, comparableId);
+
+    const [invalid, empty, comparable] = repo.listJobRuns(3);
+    assert.equal(invalid.throughput, null);
+    assert.equal(empty.throughput, null);
+    assert.equal(empty.inferenceHostLabel, null);
+    assert.deepEqual(comparable.throughput, {
+      basis: 'end_to_end',
+      successfulPhotos: 12,
+      photosPerMinute: 6,
+      secondsPerPhoto: 10,
+    });
+    const boundedLabel = `${'M'.repeat(60)} ${'M'.repeat(59)}`;
+    assert.equal(comparable.inferenceHostLabel, boundedLabel);
+    assert.equal(repo.getJobRunLog(comparable.id).inferenceHostLabel, boundedLabel);
+  });
+});
+
 test('job run retries reconstruct content and infrastructure failures that still need work', () => {
   withRepo((repo) => {
     const key = { provider: 'openrouter', model: 'vision-model', promptVersion: 'v2', taxonomyVersion: 'v1' };
@@ -934,6 +979,8 @@ test('job_runs without log_json gains the column on init (migration)', () => {
     const runs = repo.listJobRuns();
     assert.equal(runs[0].title, 'old run');
     assert.equal(runs[0].hasLog, false);
+    assert.equal(runs[0].inferenceHostLabel, null);
+    assert.equal(runs[0].throughput, null);
   });
 });
 

@@ -122,6 +122,7 @@ See [docs/CONFIGURATION.md](docs/CONFIGURATION.md) for the complete reference an
 | `ALLOW_INSECURE_OPEN` | no | Dangerous explicit opt-in to run without authentication. Anyone who can reach the server can browse photos and perform Immich-backed mutations. |
 | `OPENAI_API_KEY` / `OPENAI_COMPATIBLE_*` / `LMSTUDIO_*` / `OPENROUTER_*` / `OLLAMA_*` / `VENICE_*` | for Enrich | Provider connections and vision-model identifiers; configure the same values under Settings → AI Providers |
 | `DEFAULT_PROVIDER` | no | Initial/infrastructure fallback for Enrich; choosing a provider on the Enrich page saves the active choice for future runs |
+| `INFERENCE_HOST_LABEL` | no | Optional operator-authored label saved with new Enrich run summaries for comparing inference machines; editable under Settings → Enrich |
 | `TTS_PROVIDER` + keys | for Voice | `openai` or `elevenlabs` text-to-speech |
 | `WEATHER_DEFAULT_LOCATION` | for Ambient | Default weather place (any city name or US zip) |
 | `GEOCODING_PROVIDER` + `GEOAPIFY_API_KEY` | optional | Reverse geocoding for nicer location labels |
