@@ -41,6 +41,12 @@ export async function fetchImage(immich, assetId, imageSource, { maxBytes = null
 // pattern means the provider is down (e.g. LM Studio's server not started),
 // not that the photos are hard.
 const PROVIDER_DOWN_FAILURE_LIMIT = 8;
+export const PROVIDER_OVERLOAD_RETRY_LIMIT = 2;
+export const PROVIDER_RETRY_AFTER_CAP_MS = 5 * 60000;
+const PROVIDER_RETRY_AFTER_MIN_MS = 1000;
+const PROVIDER_OVERLOAD_EXHAUSTION_LIMIT = 2;
+const PROVIDER_OVERLOAD_FALLBACK_MS = [15000, 30000];
+const RETRY_CANCEL_POLL_MS = 250;
 const MAX_ENRICH_TRAVERSAL_WINDOWS = 1_000;
 const MAX_ENRICH_TRAVERSAL_ITEMS = 100_000;
 const ENRICH_TRAVERSAL_TIMEOUT_MS = 10 * 60 * 1000;
@@ -69,7 +75,51 @@ const LOCAL_RETRY_SUFFIX =
   'Keep each reason short. Return only caption text in caption and short_caption: ' +
   'do not prefix either value with "Full caption:" or "Short caption:", and do not use caption placeholder text.';
 
-export async function analyzeWithValidationRetry(provider, image, { systemPrompt, userPrompt, jsonSchema, taxonomy, log = () => {} }) {
+class RetryWaitCancelledError extends Error {
+  constructor() {
+    super('cancellation requested during provider retry wait');
+    this.name = 'RetryWaitCancelledError';
+  }
+}
+
+function isRetryableProviderOverload(error) {
+  return error?.name === 'ProviderRequestError' && (error.status === 429 || error.status === 503);
+}
+
+function overloadRetryDelay(error, retryIndex) {
+  if (Number.isFinite(error?.retryAfterMs) && error.retryAfterMs >= 0) {
+    return Math.max(PROVIDER_RETRY_AFTER_MIN_MS, Math.min(error.retryAfterMs, PROVIDER_RETRY_AFTER_CAP_MS));
+  }
+  return PROVIDER_OVERLOAD_FALLBACK_MS[Math.min(retryIndex, PROVIDER_OVERLOAD_FALLBACK_MS.length - 1)];
+}
+
+function formatRetryDelay(ms) {
+  if (ms >= 60000 && ms % 60000 === 0) return `${ms / 60000}m`;
+  return `${Math.max(0, Math.round(ms / 1000))}s`;
+}
+
+async function waitForRetry(ms, { shouldStop, sleep }) {
+  let remaining = ms;
+  while (remaining > 0) {
+    if (shouldStop()) return false;
+    const chunk = Math.min(remaining, RETRY_CANCEL_POLL_MS);
+    await sleep(chunk);
+    remaining -= chunk;
+  }
+  return !shouldStop();
+}
+
+export async function analyzeWithValidationRetry(provider, image, {
+  systemPrompt,
+  userPrompt,
+  jsonSchema,
+  taxonomy,
+  log = () => {},
+  shouldStop = () => false,
+  retrySleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms)),
+  overloadRetryLimit = PROVIDER_OVERLOAD_RETRY_LIMIT,
+  onProviderResponse = () => {},
+}) {
   const prompts = [userPrompt];
   // Every local provider (local_*), plus generic endpoints that explicitly
   // opt in, earns one retry with stricter instructions before a validation
@@ -80,23 +130,40 @@ export async function analyzeWithValidationRetry(provider, image, { systemPrompt
   }
 
   let lastError = null;
+  let overloadRetryCount = 0;
   for (let attemptIndex = 0; attemptIndex < prompts.length; attemptIndex += 1) {
-    try {
-      const result = await provider.analyzeImage(image, {
-        systemPrompt,
-        userPrompt: prompts[attemptIndex],
-        jsonSchema,
-      });
-      const normalized = validateAiOutput(result.normalizedOutput, taxonomy);
-      const decisions = mapOutputToTags(normalized, taxonomy);
-      return { result, normalized, decisions, retryCount: attemptIndex };
-    } catch (error) {
-      if (!(error instanceof OutputValidationError)) {
-        throw error;
-      }
-      lastError = error;
-      if (attemptIndex + 1 < prompts.length) {
-        log(`retrying with stricter local prompt after validation failure: ${error.message}`);
+    while (true) {
+      try {
+        const result = await provider.analyzeImage(image, {
+          systemPrompt,
+          userPrompt: prompts[attemptIndex],
+          jsonSchema,
+        });
+        // A completed provider response proves a persistent 429/503 wave has
+        // ended even if local schema validation later rejects its content.
+        onProviderResponse();
+        const normalized = validateAiOutput(result.normalizedOutput, taxonomy);
+        const decisions = mapOutputToTags(normalized, taxonomy);
+        return { result, normalized, decisions, retryCount: attemptIndex + overloadRetryCount };
+      } catch (error) {
+        if (isRetryableProviderOverload(error) && overloadRetryCount < overloadRetryLimit) {
+          const retryIndex = overloadRetryCount;
+          overloadRetryCount += 1;
+          const delay = overloadRetryDelay(error, retryIndex);
+          log(`${error.status} — retrying in ${formatRetryDelay(delay)} (${overloadRetryCount}/${overloadRetryLimit})`);
+          if (!await waitForRetry(delay, { shouldStop, sleep: retrySleep })) {
+            throw new RetryWaitCancelledError();
+          }
+          continue;
+        }
+        if (!(error instanceof OutputValidationError)) {
+          throw error;
+        }
+        lastError = error;
+        if (attemptIndex + 1 < prompts.length) {
+          log(`retrying with stricter local prompt after validation failure: ${error.message}`);
+        }
+        break;
       }
     }
   }
@@ -128,6 +195,7 @@ export async function runBatch({
   shouldStop = () => false,
   log = () => {},
   now = Date.now,
+  retrySleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms)),
 }) {
   const diagnosticSecrets = configuredSecrets(immich, provider);
   if (maxAnalyzed !== null && maxAnalyzed < 1) {
@@ -232,6 +300,20 @@ export async function runBatch({
   let stopped = false;
   let listedForReview = 0;
   let infraFailed = 0;
+  // A persistent quota/outage must not multiply the per-photo wait across
+  // the provider-down circuit breaker's first eight failures. After two
+  // photos exhaust both overload retries without any provider success, keep
+  // making one ordinary attempt per photo but skip further waits. The first
+  // success proves recovery and re-enables the polite retry policy.
+  let exhaustedOverloadPhotos = 0;
+  let overloadRetriesSuppressed = false;
+  const noteProviderResponse = () => {
+    if (overloadRetriesSuppressed) {
+      log('provider responded — overload retries re-enabled');
+    }
+    exhaustedOverloadPhotos = 0;
+    overloadRetriesSuppressed = false;
+  };
 
   while (true) {
     const scanTotal = scanned + assets.length;
@@ -282,6 +364,7 @@ export async function runBatch({
       analyzed += 1;
       counters.analyzed += 1;
       log(`${position} analyzing ${assetId}`);
+      const overloadRetryLimit = overloadRetriesSuppressed ? 0 : PROVIDER_OVERLOAD_RETRY_LIMIT;
       try {
         let image;
         try {
@@ -300,7 +383,17 @@ export async function runBatch({
         const { normalized, decisions, retryCount } = await analyzeWithValidationRetry(
           provider,
           { data: image.data, mimeType: image.contentType, assetId },
-          { systemPrompt, userPrompt, jsonSchema, taxonomy, log },
+          {
+            systemPrompt,
+            userPrompt,
+            jsonSchema,
+            taxonomy,
+            log,
+            shouldStop,
+            retrySleep,
+            overloadRetryLimit,
+            onProviderResponse: noteProviderResponse,
+          },
         );
         // One transaction: a run may never read as 'succeeded' without its
         // tags, caption index, review listing, and caption-writeback marker.
@@ -337,6 +430,21 @@ export async function runBatch({
         log(`  tags: ${decisions.map((decision) => decision.tag).join(', ') || '(none)'}`);
         log(`  caption: ${typeof normalized.caption === 'string' && normalized.caption ? normalized.caption : '(none)'}`);
       } catch (error) {
+        if (error instanceof RetryWaitCancelledError) {
+          log('stopping early: cancellation requested during provider retry wait');
+          stopped = true;
+          break;
+        }
+        if (overloadRetryLimit > 0 && isRetryableProviderOverload(error)) {
+          exhaustedOverloadPhotos += 1;
+          if (exhaustedOverloadPhotos >= PROVIDER_OVERLOAD_EXHAUSTION_LIMIT) {
+            overloadRetriesSuppressed = true;
+            log(
+              `provider remained overloaded after retries on ${exhaustedOverloadPhotos} photos — `
+              + 'skipping further overload waits until a request succeeds',
+            );
+          }
+        }
         const infrastructure = isInfrastructureFailure(error);
         const diagnostic = sanitizeDiagnostic(error instanceof Error ? error.message : error, {
           secrets: diagnosticSecrets,

@@ -15,7 +15,7 @@ import {
 } from '../../src/enrich/refereeService.mjs';
 import { annotateBursts } from '../../src/enrich/reviewService.mjs';
 import { Repository } from '../../src/enrich/repository.mjs';
-import { LmStudioProvider, OpenAiCompatibleProvider } from '../../src/enrich/providers.mjs';
+import { LmStudioProvider, OpenAiCompatibleProvider, ProviderRequestError } from '../../src/enrich/providers.mjs';
 import { ResponseTooLargeError } from '../../src/fetchWithTimeout.mjs';
 
 test('refereeGroupKey is order-insensitive and membership-sensitive', () => {
@@ -325,6 +325,46 @@ test('batchDone counts judged stacks this run and resets when the queue drains',
     st = service.status();
     assert.equal(st.remaining, 0);
     assert.equal(st.batchDone, 0);
+  });
+});
+
+test('referee backoff honors a bounded Retry-After hint and otherwise keeps the five-minute fallback', async () => {
+  await withRepo(async (repo) => {
+    const scenarios = [
+      { retryAfterMs: 120000, expectedMs: 120000, expectedLog: 'backing off for 2m' },
+      { retryAfterMs: 60 * 60000, expectedMs: 5 * 60000, expectedLog: 'backing off for 5m' },
+      { retryAfterMs: null, expectedMs: 5 * 60000, expectedLog: 'backing off for 5m' },
+    ];
+
+    for (const scenario of scenarios) {
+      const log = [];
+      let calls = 0;
+      const service = new RefereeService({
+        repo,
+        immich: { getAssetThumbnail: async (assetId) => ({ data: Buffer.from(assetId), contentType: 'image/jpeg' }) },
+        review: fakeReview(makeRows()),
+        enrichRunner: { isRunning: () => false },
+        config: { enrichEnabled: true, curateRefereeEnabled: true, defaultProvider: 'x', providers: {} },
+        log: (message) => log.push(message),
+      });
+      service.makeProvider = () => ({
+        providerName: 'fake',
+        modelName: 'fake-vl',
+        analyzeImages: async () => {
+          calls += 1;
+          throw new ProviderRequestError('fake request failed with status 429', {
+            status: 429,
+            retryAfterMs: scenario.retryAfterMs,
+          });
+        },
+      });
+
+      await service.tick();
+      assert.equal(service._errorBackoffMs, scenario.expectedMs);
+      assert.ok(log.some((line) => line.includes(scenario.expectedLog)));
+      await service.tick();
+      assert.equal(calls, 1, 'an immediate poll must respect the active backoff');
+    }
   });
 });
 

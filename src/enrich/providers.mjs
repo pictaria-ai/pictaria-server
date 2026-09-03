@@ -68,10 +68,13 @@ const GEMINI_JSON_SCHEMA_KEYWORDS = new Set([
 // 5xx) from "the provider judged this request's content" — the runner only
 // charges an asset's permanent failure allowance for the latter.
 export class ProviderRequestError extends Error {
-  constructor(message, { status = null, timeout = false } = {}) {
+  constructor(message, { status = null, timeout = false, retryAfterMs = null } = {}) {
     super(message);
     this.name = 'ProviderRequestError';
     this.status = status;
+    // Keep the provider's retry hint as bounded numeric metadata, never as
+    // raw header text. Callers decide their own cap and fallback policy.
+    this.retryAfterMs = Number.isFinite(retryAfterMs) && retryAfterMs >= 0 ? retryAfterMs : null;
     // Callers that answer a person in real time (the voice commands) need
     // to tell a genuine deadline apart from a refused connection, a DNS
     // failure, or an unparseable body — all of which also arrive without
@@ -81,6 +84,20 @@ export class ProviderRequestError extends Error {
     this.infrastructure =
       status === null || status === 401 || status === 403 || status === 429 || status >= 500;
   }
+}
+
+// Retry-After permits either seconds or an HTTP date. A malformed or past
+// value is no hint; callers retain their normal fallback behavior.
+export function parseRetryAfterMs(value, now = Date.now()) {
+  const raw = Array.isArray(value) ? value[0] : value;
+  if (typeof raw !== 'string' || !raw.trim()) return null;
+  const seconds = Number(raw.trim());
+  if (Number.isFinite(seconds) && seconds >= 0) {
+    return Math.round(seconds * 1000);
+  }
+  const at = Date.parse(raw);
+  if (!Number.isFinite(at) || at <= now) return null;
+  return at - now;
 }
 
 export function createProvider(name, options) {
@@ -830,6 +847,7 @@ async function postJson(provider, url, body, extraHeaders) {
     const detail = await readErrorDetail(response, provider);
     throw new ProviderRequestError(providerStatusMessage(provider.providerName, response.status, detail), {
       status: response.status,
+      retryAfterMs: parseRetryAfterMs(response.headers?.get?.('retry-after')),
     });
   }
   try {
@@ -927,6 +945,7 @@ function nodePostJson(provider, url, headers, payload) {
           const detail = providerErrorDetail(text, provider.providerName, provider.apiKey);
           reject(new ProviderRequestError(providerStatusMessage(provider.providerName, response.statusCode, detail), {
             status: response.statusCode,
+            retryAfterMs: parseRetryAfterMs(response.headers['retry-after']),
           }));
           return;
         }
