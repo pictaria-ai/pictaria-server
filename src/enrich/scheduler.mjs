@@ -108,6 +108,13 @@ export class EnrichScheduler {
     if (dueMinute === null || current.minuteOfDay < dueMinute) return false;
     if (this.startedDate === current.date || this.failedDate === current.date) return false;
 
+    // A manual/queued run or a queued slice resolution keeps priority. Check
+    // before caching today's history lookup: a Settings save during an active
+    // run clears the in-memory latch, and the run has no history row until it
+    // finishes. Consuming the lookup while busy could otherwise start a
+    // second Daily Enrich later that day.
+    if (this.runner.isBusy()) return false;
+
     // Run history is the durable once-per-day latch. A graceful restart writes
     // an interrupted row too, so it will not start the same daily job twice.
     // Abrupt power loss can repeat the catch-up scan, but only-unenriched makes
@@ -123,10 +130,6 @@ export class EnrichScheduler {
         }
       }
     }
-
-    // A manual or queued enrichment run keeps priority.
-    // Leave today unlatched and the next minute quietly tries again.
-    if (this.runner.isRunning()) return false;
 
     try {
       this.runner.start({

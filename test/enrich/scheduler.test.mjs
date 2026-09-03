@@ -11,6 +11,7 @@ import {
 function fixture(overrides = {}) {
   const starts = [];
   let running = false;
+  let reserved = false;
   let latest = null;
   const warnings = [];
   const config = {
@@ -26,6 +27,7 @@ function fixture(overrides = {}) {
   };
   const runner = {
     isRunning: () => running,
+    isBusy: () => running || reserved,
     start: (options) => starts.push(options),
     ...overrides.runner,
   };
@@ -47,6 +49,7 @@ function fixture(overrides = {}) {
     starts,
     warnings,
     setRunning: (value) => { running = value; },
+    setReserved: (value) => { reserved = value; },
     setLatest: (value) => { latest = value; },
   };
 }
@@ -94,6 +97,30 @@ test('an active manual run delays the daily run without consuming the day', () =
   assert.equal(starts.length, 1);
 });
 
+test('a queued slice reservation delays the daily run without consuming the day', () => {
+  const { scheduler, setReserved, starts } = fixture();
+  setReserved(true);
+  assert.equal(scheduler.tick(new Date('2026-09-03T10:00:00Z')), false);
+  setReserved(false);
+  assert.equal(scheduler.tick(new Date('2026-09-03T10:01:00Z')), true);
+  assert.equal(starts.length, 1);
+});
+
+test('a Settings save during Daily Enrich cannot start a second same-day run', () => {
+  const { scheduler, setRunning, setLatest, starts } = fixture();
+  assert.equal(scheduler.tick(new Date('2026-09-03T10:00:00Z')), true);
+  setRunning(true);
+  scheduler.settingsChanged();
+  assert.equal(scheduler.tick(new Date('2026-09-03T10:01:00Z')), false);
+
+  // The first run finishes after the Settings save and writes its history row.
+  setLatest('2026-09-03T10:00:00.000Z');
+  setRunning(false);
+  assert.equal(scheduler.tick(new Date('2026-09-03T10:02:00Z')), false);
+  assert.equal(starts.length, 1);
+  scheduler.stop();
+});
+
 test('Enrich and its daily switch must both be enabled', () => {
   const offMaster = fixture({ config: { enrichEnabled: false } });
   assert.equal(offMaster.scheduler.tick(new Date('2026-09-03T18:00:00Z')), false);
@@ -110,6 +137,7 @@ test('a provider configuration error logs once until Settings changes', () => {
   const { scheduler, warnings } = fixture({
     runner: {
       isRunning: () => false,
+      isBusy: () => false,
       start: () => { throw new Error('model missing'); },
     },
   });

@@ -212,8 +212,12 @@ light even on remote links.
   Curate. The browser's current time zone is remembered when the schedule is
   saved, even when Pictaria itself runs in a UTC Docker container. A manual or
   queued run already in progress keeps priority and the daily sweep waits
-  quietly. Each attempt appears in **Recent runs** as `Daily Enrich`, including
-  a zero-photo run when the library was already caught up.
+  quietly. Enabling the schedule after today's chosen time starts that day's
+  catch-up promptly. Each attempt appears in **Recent runs** as `Daily Enrich`,
+  including a zero-photo run when the library was already caught up. A run
+  that starts but fails is recorded there and waits until the next day rather
+  than retrying automatically; after correcting the problem, start a manual
+  run if you do not want to wait.
 
 **"Enriched" is per setup**: a photo counts as enriched for a specific
 combination of provider + model + prompt version + taxonomy version.

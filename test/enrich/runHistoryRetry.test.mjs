@@ -39,6 +39,7 @@ function makeHarness({ failures, running = false, startError = null } = {}) {
     },
     enrichRunner: {
       isRunning: () => running,
+      isBusy: () => running,
       start(options) {
         if (startError) throw startError;
         state.starts.push(options);
