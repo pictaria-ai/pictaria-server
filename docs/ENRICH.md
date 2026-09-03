@@ -380,9 +380,9 @@ your approved tags on every request.
   `Retry-After` request between one second and five minutes; without one it
   waits 15 seconds, then 30 seconds. The live run log shows each retry, and
   Cancel interrupts those waits promptly. If two photos exhaust both retries
-  without a successful provider response in between, Enrich stops adding
-  overload waits for the rest of that provider-down probe; one successful
-  response turns them back on.
+  without a successful provider response in between, Enrich skips further
+  overload waits until the provider responds successfully again. It still
+  makes one ordinary attempt per photo so it can detect that recovery.
   That keeps an exhausted quota from stretching the existing fast-failure
   check across more than 20 minutes of requested wait. If both attempts still
   fail — or for another clearly environmental error such as a timeout, dropped
