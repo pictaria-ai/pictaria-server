@@ -818,6 +818,116 @@ test('admin UI smoke: gate, Insights lens, Curate, Smart Albums', { timeout: 120
     assert.equal(Number(await page.evaluate('document.querySelector(".p-tab.active .count").textContent')), baseline);
   });
 
+  await t.test('Curate Undo preserves bucket counts under search and restores lightbox identity', async () => {
+    await page.navigate(`${server.base}/curate.html`);
+    await page.waitFor(
+      `document.querySelector('[data-asset-id="${REVIEW_ASSET_IDS[2]}"]') && !document.querySelector(".gate-backdrop")`,
+      { label: 'curate ready for filtered undo' },
+    );
+    const baseline = Number(await page.evaluate('document.querySelector(".p-tab.active .count").textContent'));
+
+    // The tab is the complete bucket count even while the grid total follows
+    // a search. Undo must adjust that tab relatively, not replace it with 1.
+    await page.evaluate(`(() => {
+      const search = document.getElementById('search');
+      search.value = 'review-3.jpg';
+      search.dispatchEvent(new Event('input', { bubbles: true }));
+    })()`);
+    await page.waitFor(
+      `state.total === 1 && document.querySelector('[data-asset-id="${REVIEW_ASSET_IDS[2]}"]')`,
+      { label: 'search narrows Curate to one photo' },
+    );
+    assert.equal(Number(await page.evaluate('document.querySelector(".p-tab.active .count").textContent')), baseline);
+    await page.evaluate(`
+      [...document.querySelectorAll('[data-asset-id="${REVIEW_ASSET_IDS[2]}"] .card-actions button')]
+        .find((button) => button.textContent === 'Yes').click()
+    `);
+    await page.waitFor(
+      `!document.querySelector('[data-asset-id="${REVIEW_ASSET_IDS[2]}"]') && !document.getElementById('toastUndo').hidden`,
+      { label: 'filtered decision offers undo' },
+    );
+    assert.equal(Number(await page.evaluate('document.querySelector(".p-tab.active .count").textContent')), baseline - 1);
+    await page.evaluate('document.getElementById("toastUndo").click()');
+    await page.waitFor(
+      `document.querySelector('[data-asset-id="${REVIEW_ASSET_IDS[2]}"]') && document.getElementById('toastMessage').textContent === 'Decision undone'`,
+      { label: 'filtered photo restored' },
+    );
+    assert.equal(Number(await page.evaluate('document.querySelector(".p-tab.active .count").textContent')), baseline);
+
+    await page.evaluate(`(() => {
+      const search = document.getElementById('search');
+      search.value = '';
+      search.dispatchEvent(new Event('input', { bubbles: true }));
+    })()`);
+    await page.waitFor(
+      `state.total === ${baseline} && document.querySelector('[data-asset-id="${REVIEW_ASSET_IDS[3]}"]')`,
+      { label: 'full Curate bucket restored' },
+    );
+
+    // A lightbox decision advances immediately. Undo must reopen the restored
+    // photo so the image, index, and next keyboard decision all agree.
+    await page.evaluate(`document.querySelector('[data-asset-id="${REVIEW_ASSET_IDS[3]}"] img').click()`);
+    await page.waitFor(
+      `document.getElementById('lbImage').src.includes('${REVIEW_ASSET_IDS[3]}')`,
+      { label: 'undo target opens in lightbox' },
+    );
+    await page.evaluate('document.querySelector(\'[data-lb="approve"]\').click()');
+    await page.waitFor(
+      `!document.getElementById('lbImage').src.includes('${REVIEW_ASSET_IDS[3]}') && !document.getElementById('toastUndo').hidden`,
+      { label: 'lightbox advances after decision' },
+    );
+    await page.evaluate('document.getElementById("toastUndo").click()');
+    await page.waitFor(
+      `document.getElementById('lbImage').src.includes('${REVIEW_ASSET_IDS[3]}') && state.assets[state.lightboxIndex]?.assetId === '${REVIEW_ASSET_IDS[3]}'`,
+      { label: 'lightbox image and state return to undone photo' },
+    );
+    await page.evaluate('document.getElementById("lbClose").click()');
+  });
+
+  await t.test('Curate keeps a live Undo when its background append fails', async () => {
+    await page.navigate(`${server.base}/curate.html?limit=5`);
+    await page.waitFor(
+      'state.assets.length === 5 && !document.querySelector(".gate-backdrop")',
+      { label: 'short Curate page ready' },
+    );
+    const baseline = Number(await page.evaluate('document.querySelector(".p-tab.active .count").textContent'));
+    const targetId = await page.evaluate(`(() => {
+      const asset = state.assets.find((item) => document.querySelector('[data-asset-id="' + item.assetId + '"]'));
+      return asset.assetId;
+    })()`);
+
+    // The decision succeeds, but the low-water append it starts returns an
+    // ordinary load error. The error replaces the message, not the Undo.
+    await page.evaluate(`(() => {
+      const realFetch = window.fetch;
+      window.fetch = (input, init) => {
+        const url = new URL(typeof input === 'string' ? input : input.url, location.href);
+        if (url.pathname === '/api/review/assets' && Number(url.searchParams.get('offset')) > 0) {
+          window.fetch = realFetch;
+          return Promise.resolve(new Response(JSON.stringify({ error: { message: 'append blocked' } }), {
+            status: 500,
+            headers: { 'content-type': 'application/json' },
+          }));
+        }
+        return realFetch(input, init);
+      };
+    })()`);
+    await page.evaluate(`
+      [...document.querySelectorAll('[data-asset-id="${targetId}"] .card-actions button')]
+        .find((button) => button.textContent === 'Yes').click()
+    `);
+    await page.waitFor(
+      `document.getElementById('toastMessage').textContent === 'append blocked' && !document.getElementById('toastUndo').hidden`,
+      { label: 'append error retains undo action' },
+    );
+    await page.evaluate('document.getElementById("toastUndo").click()');
+    await page.waitFor(
+      `state.assets.some((asset) => asset.assetId === '${targetId}') && document.getElementById('toastMessage').textContent === 'Decision undone'`,
+      { label: 'undo survives append error' },
+    );
+    assert.equal(Number(await page.evaluate('document.querySelector(".p-tab.active .count").textContent')), baseline);
+  });
+
   await t.test('Curate lightbox contains long filenames and model names inside its sidebar', async () => {
     await page.navigate(`${server.base}/curate.html`);
     await page.waitFor(

@@ -104,7 +104,9 @@ async function doLoadAssets(append) {
     // Stacks/singles passes don't apply to the decided list.
     el('groupFilter').hidden = state.view === 'decided';
   } catch (error) {
-    toast(error.message, true);
+    // A low-water append can fail after the decision itself succeeded. Keep
+    // that decision's short Undo window alive while reporting the load error.
+    toast(error.message, true, { preserveUndo: true });
   } finally {
     state.loading = false;
     updateLoadMoreControls();
@@ -523,10 +525,21 @@ function restoreUndecided(undo) {
   state.total = Math.max(state.assets.length, state.total + restored);
   state.offset = state.assets.length;
   const active = tabs.querySelector('.p-tab.active .count');
-  if (active) active.textContent = String(state.total);
+  // Tabs show the whole bucket while state.total follows the current search.
+  // Mirror removeDecided's relative adjustment instead of replacing the
+  // bucket count with a filtered result count.
+  if (active) active.textContent = String(Number(active.textContent) + restored);
   renderGrid();
   updateBulkbar();
   if (state.compareBurstId) renderBurstbox();
+  // A lightbox decision advances to the next row. Reinserting the undone
+  // photo before that row changes the meaning of lightboxIndex, so reopen the
+  // restored photo before another shortcut can act on the wrong asset.
+  if (state.lightboxIndex !== -1) {
+    const restoredId = undo.removed[0]?.asset.assetId;
+    const restoredIndex = state.assets.findIndex((asset) => asset.assetId === restoredId);
+    if (restoredIndex !== -1) openLightbox(restoredIndex);
+  }
   updateLoadMoreControls();
   return Promise.resolve();
 }
@@ -1201,6 +1214,7 @@ document.addEventListener('keydown', (event) => {
 let toastTimer = null;
 let toastGeneration = 0;
 let pendingUndo = null;
+let pendingUndoUntil = 0;
 
 function dismissToast() {
   toastGeneration += 1;
@@ -1210,34 +1224,44 @@ function dismissToast() {
   el('toastUndo').hidden = true;
   el('toastUndo').disabled = false;
   pendingUndo = null;
+  pendingUndoUntil = 0;
 }
 
 function showUndoingToast() {
   toastGeneration += 1;
   clearTimeout(toastTimer);
   pendingUndo = null;
+  pendingUndoUntil = 0;
   el('toastMessage').textContent = 'Undoing…';
   el('toastUndo').hidden = true;
   el('toast').className = 'p-toast visible';
 }
 
-function toast(message, isError = false, { undo = null, durationMs = 2400 } = {}) {
+function toast(message, isError = false, { undo = null, durationMs = 2400, preserveUndo = false } = {}) {
+  const now = Date.now();
+  const retainedUndo = preserveUndo && pendingUndoUntil > now ? pendingUndo : null;
+  const nextUndo = undo ?? retainedUndo;
+  const nextDurationMs = retainedUndo && !undo
+    ? Math.max(1, pendingUndoUntil - now)
+    : durationMs;
   const generation = ++toastGeneration;
   const node = el('toast');
   el('toastMessage').textContent = message;
   const undoButton = el('toastUndo');
-  undoButton.hidden = !undo;
+  undoButton.hidden = !nextUndo;
   undoButton.disabled = false;
-  pendingUndo = undo;
+  pendingUndo = nextUndo;
+  pendingUndoUntil = nextUndo ? now + nextDurationMs : 0;
   node.className = `p-toast visible ${isError ? 'error' : ''}`;
-  node.classList.toggle('undoable', Boolean(undo));
+  node.classList.toggle('undoable', Boolean(nextUndo));
   clearTimeout(toastTimer);
   toastTimer = setTimeout(() => {
     if (generation !== toastGeneration) return;
     node.classList.remove('visible', 'undoable');
     undoButton.hidden = true;
     pendingUndo = null;
-  }, durationMs);
+    pendingUndoUntil = 0;
+  }, nextDurationMs);
 }
 
 el('toastUndo').addEventListener('click', undoLastDecision);
