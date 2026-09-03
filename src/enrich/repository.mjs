@@ -1878,6 +1878,72 @@ export class Repository {
     `).run(MAX_JOB_RUNS);
   }
 
+  // Reconstruct the per-photo failures that belong to one historical job.
+  // Runs are single-flight, so the exact provider/model/prompt/taxonomy key
+  // plus the job's time window identifies its processing rows without adding
+  // a job id to the durable processing history. The set is evaluated live:
+  // any success (under any setup), a confirmed Immich deletion, or a human
+  // discard removes the photo before a retry can start.
+  jobRunRetryFailures(id, { limit = 10000 } = {}) {
+    const runId = Number(id);
+    if (!Number.isSafeInteger(runId) || runId < 1) return null;
+    const run = this.db.prepare(`
+      SELECT id, title, provider, model, prompt_version, taxonomy_version,
+             started_at, finished_at
+      FROM job_runs WHERE id = ?
+    `).get(runId);
+    if (!run) return null;
+
+    const boundedLimit = Number.isSafeInteger(limit)
+      ? Math.max(0, Math.min(limit, 10000))
+      : 10000;
+    const rows = this.db.prepare(`
+      WITH candidates AS (
+        SELECT f.asset_id, MIN(f.id) AS first_failure_id
+        FROM processing_runs f
+        WHERE f.status IN ('failed', 'failed_infra')
+          AND f.provider IS ? AND f.model IS ?
+          AND f.prompt_version IS ? AND f.taxonomy_version IS ?
+          AND f.started_at >= ? AND f.started_at <= ?
+          AND NOT EXISTS (
+            SELECT 1 FROM processing_runs s
+            WHERE s.asset_id = f.asset_id AND s.status = 'succeeded'
+          )
+          AND NOT EXISTS (
+            SELECT 1 FROM assets a
+            WHERE a.asset_id = f.asset_id
+              AND (a.missing_since IS NOT NULL OR a.enrich_discarded_at IS NOT NULL)
+          )
+        GROUP BY f.asset_id
+      )
+      SELECT asset_id, COUNT(*) OVER() AS total
+      FROM candidates
+      ORDER BY first_failure_id ASC
+      LIMIT ?
+    `).all(
+      run.provider,
+      run.model,
+      run.prompt_version,
+      run.taxonomy_version,
+      run.started_at,
+      run.finished_at,
+      boundedLimit + 1,
+    );
+    const assetIds = rows.slice(0, boundedLimit).map((row) => row.asset_id);
+    const count = Number(rows[0]?.total ?? 0);
+    return {
+      runId: Number(run.id),
+      title: run.title,
+      provider: run.provider,
+      model: run.model,
+      promptVersion: run.prompt_version,
+      taxonomyVersion: run.taxonomy_version,
+      count,
+      assetIds,
+      truncated: count > assetIds.length,
+    };
+  }
+
   listJobRuns(limit = 20) {
     // The log stays out of the list payload (it can be hundreds of KB);
     // fetch it per run via getJobRunLog.
@@ -1885,21 +1951,25 @@ export class Repository {
       SELECT id, title, provider, model, prompt_version, taxonomy_version, targeted,
              status, error, counters_json, log_json IS NOT NULL AS has_log, started_at, finished_at
       FROM job_runs ORDER BY id DESC LIMIT ?
-    `).all(limit).map((row) => ({
-      id: Number(row.id),
-      title: row.title,
-      provider: row.provider,
-      model: row.model,
-      promptVersion: row.prompt_version,
-      taxonomyVersion: row.taxonomy_version,
-      targeted: row.targeted === null ? null : Number(row.targeted),
-      status: row.status,
-      error: row.error,
-      counters: row.counters_json ? JSON.parse(row.counters_json) : null,
-      hasLog: Boolean(row.has_log),
-      startedAt: row.started_at,
-      finishedAt: row.finished_at,
-    }));
+    `).all(limit).map((row) => {
+      const id = Number(row.id);
+      return {
+        id,
+        title: row.title,
+        provider: row.provider,
+        model: row.model,
+        promptVersion: row.prompt_version,
+        taxonomyVersion: row.taxonomy_version,
+        targeted: row.targeted === null ? null : Number(row.targeted),
+        status: row.status,
+        error: row.error,
+        counters: row.counters_json ? JSON.parse(row.counters_json) : null,
+        hasLog: Boolean(row.has_log),
+        startedAt: row.started_at,
+        finishedAt: row.finished_at,
+        retryableFailures: this.jobRunRetryFailures(id, { limit: 0 })?.count ?? 0,
+      };
+    });
   }
 
   getJobRunLog(id) {

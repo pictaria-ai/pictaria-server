@@ -819,6 +819,65 @@ test('job run logs round-trip and stay out of the list payload', () => {
   });
 });
 
+test('job run retries reconstruct content and infrastructure failures that still need work', () => {
+  withRepo((repo) => {
+    const key = { provider: 'openrouter', model: 'vision-model', promptVersion: 'v2', taxonomyVersion: 'v1' };
+    const recordAt = (assetId, status, startedAt, overrides = {}) => {
+      repo.upsertAsset({ id: assetId });
+      const id = repo.recordProcessingRun({
+        assetId,
+        ...key,
+        ...overrides,
+        status,
+        ...(status === 'succeeded' ? { normalizedOutput: {} } : { error: `${status} test` }),
+      });
+      repo.db.prepare('UPDATE processing_runs SET started_at = ?, finished_at = ? WHERE id = ?')
+        .run(startedAt, startedAt, id);
+      return id;
+    };
+
+    recordAt('content-failure', 'failed', '2026-07-09T12:02:00.000Z');
+    recordAt('infra-failure', 'failed_infra', '2026-07-09T12:03:00.000Z');
+    recordAt('later-success', 'failed', '2026-07-09T12:04:00.000Z');
+    recordAt('later-success', 'succeeded', '2026-07-09T12:20:00.000Z', { provider: 'venice' });
+    recordAt('outside-window', 'failed', '2026-07-09T11:59:59.000Z');
+    recordAt('other-model', 'failed', '2026-07-09T12:05:00.000Z', { model: 'other-model' });
+    recordAt('missing', 'failed_infra', '2026-07-09T12:06:00.000Z');
+    repo.markAssetsMissing(['missing']);
+    recordAt('discarded', 'failed', '2026-07-09T12:07:00.000Z');
+    repo.discardAssets(['discarded']);
+
+    repo.recordJobRun({
+      title: 'Original sweep', ...key, targeted: 8, status: 'finished', error: null,
+      counters: { failed: 6 }, log: [],
+      startedAt: '2026-07-09T12:00:00.000Z', finishedAt: '2026-07-09T12:10:00.000Z',
+    });
+    const run = repo.listJobRuns(1)[0];
+    assert.equal(run.retryableFailures, 2);
+    assert.deepEqual(repo.jobRunRetryFailures(run.id), {
+      runId: run.id,
+      title: 'Original sweep',
+      provider: 'openrouter',
+      model: 'vision-model',
+      promptVersion: 'v2',
+      taxonomyVersion: 'v1',
+      count: 2,
+      assetIds: ['content-failure', 'infra-failure'],
+      truncated: false,
+    });
+    assert.deepEqual(repo.jobRunRetryFailures(run.id, { limit: 1 }).assetIds, ['content-failure']);
+    assert.equal(repo.jobRunRetryFailures(run.id, { limit: 1 }).count, 2);
+    assert.equal(repo.jobRunRetryFailures(run.id, { limit: 1 }).truncated, true);
+
+    // A success after the history card was rendered removes the photo from
+    // the live retry set and therefore updates the card count too.
+    recordAt('content-failure', 'succeeded', '2026-07-09T12:30:00.000Z', { provider: 'cloud_openai' });
+    assert.deepEqual(repo.jobRunRetryFailures(run.id).assetIds, ['infra-failure']);
+    assert.equal(repo.listJobRuns(1)[0].retryableFailures, 1);
+    assert.equal(repo.jobRunRetryFailures(9999), null);
+  });
+});
+
 test('job history has aggregate retention and bounded logs with a marker', () => {
   withRepo((repo) => {
     const largeLog = Array.from({ length: 700 }, (_, index) => `${index} ${'x'.repeat(1000)}`);
