@@ -119,6 +119,7 @@ export async function analyzeWithValidationRetry(provider, image, {
   retrySleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms)),
   overloadRetryLimit = PROVIDER_OVERLOAD_RETRY_LIMIT,
   onProviderResponse = () => {},
+  signal = null,
 }) {
   const prompts = [userPrompt];
   // Every local provider (local_*), plus generic endpoints that explicitly
@@ -138,6 +139,7 @@ export async function analyzeWithValidationRetry(provider, image, {
           systemPrompt,
           userPrompt: prompts[attemptIndex],
           jsonSchema,
+          signal,
         });
         // A completed provider response proves a persistent 429/503 wave has
         // ended even if local schema validation later rejects its content.
@@ -196,6 +198,7 @@ export async function runBatch({
   log = () => {},
   now = Date.now,
   retrySleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms)),
+  signal = null,
 }) {
   const diagnosticSecrets = configuredSecrets(immich, provider);
   if (maxAnalyzed !== null && maxAnalyzed < 1) {
@@ -393,6 +396,7 @@ export async function runBatch({
             retrySleep,
             overloadRetryLimit,
             onProviderResponse: noteProviderResponse,
+            signal,
           },
         );
         // One transaction: a run may never read as 'succeeded' without its
@@ -435,6 +439,7 @@ export async function runBatch({
           stopped = true;
           break;
         }
+        const cancelledMidRequest = error?.name === 'ProviderRequestError' && error.cancelled === true;
         if (overloadRetryLimit > 0 && isRetryableProviderOverload(error)) {
           exhaustedOverloadPhotos += 1;
           if (exhaustedOverloadPhotos >= PROVIDER_OVERLOAD_EXHAUSTION_LIMIT) {
@@ -458,6 +463,11 @@ export async function runBatch({
         counters.failed += 1;
         if (infrastructure) {
           infraFailed += 1;
+        }
+        if (cancelledMidRequest) {
+          log(`${position} cancelled mid-request; photo will retry next run`);
+          stopped = true;
+          break;
         }
         log(`  failed: ${diagnostic}`);
         // Every photo failing from the start means the provider is down or

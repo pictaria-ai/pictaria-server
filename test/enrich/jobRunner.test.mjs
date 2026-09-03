@@ -1,5 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { createServer } from 'node:http';
 import { fileURLToPath } from 'node:url';
 
 import { EnrichJobRunner } from '../../src/enrich/jobRunner.mjs';
@@ -23,16 +24,20 @@ function makeConfig() {
 
 function makeRepo({ alreadyEnriched = true } = {}) {
   const runs = [];
+  const processingRuns = [];
   const reviewListCalls = [];
   return {
     runs,
+    processingRuns,
     reviewListCalls,
     upsertAsset() {},
     hasAnySuccessfulRun: () => alreadyEnriched,
     hasSuccessfulRun: () => false,
     failureCount: () => 0,
     isAssetDiscarded: () => false,
-    recordProcessingRun() {},
+    recordProcessingRun(row) {
+      processingRuns.push(row);
+    },
     recordJobRun(row) {
       runs.push(row);
     },
@@ -190,6 +195,49 @@ test('a failed run never touches the review list', async () => {
   await finished(runner);
 
   assert.equal(repo.reviewListCalls.length, 0);
+});
+
+test('cancel aborts an in-flight provider request and leaves the photo retryable', { timeout: 5000 }, async () => {
+  let markRequestStarted;
+  const requestStarted = new Promise((resolve) => { markRequestStarted = resolve; });
+  const server = createServer((request) => {
+    request.resume();
+    request.once('end', markRequestStarted);
+    // Deliberately never answer: cancellation must tear down the request
+    // rather than wait for the provider timeout.
+  });
+  await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
+
+  const repo = makeRepo({ alreadyEnriched: false });
+  const config = makeConfig();
+  config.providers.local_lmstudio.baseUrl = `http://127.0.0.1:${server.address().port}/v1`;
+  config.providers.local_lmstudio.timeoutMs = 60000;
+  const runner = new EnrichJobRunner({
+    repo,
+    immich: {
+      getAsset: async (id) => ({ id, originalPath: `${id}.jpg` }),
+      getAssetThumbnail: async () => ({ data: Buffer.from('image'), contentType: 'image/jpeg' }),
+    },
+    taxonomy,
+    config,
+  });
+
+  try {
+    runner.start({ assetIds: ['a1'], sendToCurate: false });
+    await requestStarted;
+    assert.equal(runner.cancel(), true);
+    await finished(runner);
+
+    assert.equal(repo.processingRuns.length, 1);
+    assert.equal(repo.processingRuns[0].status, 'failed_infra');
+    assert.equal(repo.runs.length, 1);
+    assert.equal(repo.runs[0].status, 'cancelled');
+    assert.ok(runner.status().log.some((line) => line.includes('cancelled mid-request')));
+    assert.equal(runner.status().error, null);
+  } finally {
+    server.closeAllConnections?.();
+    await new Promise((resolve) => server.close(resolve));
+  }
 });
 
 test('onFinished is skipped when the run fails', async () => {

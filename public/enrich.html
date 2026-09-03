@@ -186,7 +186,7 @@
         <strong>Status</strong>
         <div class="p-grow"></div>
         <button id="viewLogBtn" class="p-btn quiet">Log</button>
-        <button id="enrichCancel" class="p-btn danger" hidden title="Finishes the photo it's on, then stops. A queued job stays in the queue — run it again to continue where it left off.">Cancel</button>
+        <button id="enrichCancel" class="p-btn danger" hidden title="Stops the active model request. An interrupted photo retries next time, and a queued job stays in the queue.">Cancel</button>
       </div>
       <div id="enrichStatusLine" class="es-line"></div>
       <div id="enrichStatusLine2" class="es-line es-line2" hidden></div>
@@ -462,7 +462,7 @@
         }
         el('enrichStatusLine').textContent = statusLine1;
         el('enrichStatusLine').title = status.running && status.cancelRequested
-          ? 'Finishing the photo it’s on, then stopping. The queue item stays for the next run.'
+          ? 'Stopping the active model request. An interrupted photo and the queue item stay for the next run.'
           : '';
         el('enrichStatusLine2').textContent = statusLine2;
         el('enrichStatusLine2').hidden = !statusLine2;
@@ -474,9 +474,8 @@
           el('enrichBarText').textContent = `${done.toLocaleString()} / ${goal.toLocaleString()}`;
         }
         el('enrichCancel').hidden = !status.running;
-        // Cancel is cooperative — the model finishes its current photo, which
-        // can take a minute locally. Acknowledge the press instantly and keep
-        // acknowledging until the run actually stops.
+        // Acknowledge the press instantly while the server tears down the
+        // active provider request (or finishes an Immich call already underway).
         if (status.cancelRequested && status.running) {
           el('enrichCancel').disabled = true;
           el('enrichCancel').textContent = 'Cancelling…';

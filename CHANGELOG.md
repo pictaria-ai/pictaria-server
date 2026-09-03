@@ -29,6 +29,9 @@ All notable changes to Pictaria Server are documented here. This project follows
 
 ### Changed
 
+- Enrich cancellation now aborts the active AI-provider request immediately
+  instead of waiting out that photo's provider timeout. The cancelled photo
+  remains retryable on the next run, and queued work stays in place.
 - The persisted Settings contract advances to version 5 and the installation
   state contract to version 7. Existing installations take the standard
   automatic pre-migration recovery snapshot before adopting the additive
