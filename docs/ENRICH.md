@@ -377,15 +377,20 @@ your approved tags on every request.
   Failures are classified by *whose fault they are*. When a provider reports
   a temporary rate limit (429) or unavailable service (503), Enrich retries
   that same photo twice before moving on. It follows the provider's
-  `Retry-After` request up to five minutes; without one it waits 15 seconds,
-  then 30 seconds. The live run log shows each retry, and Cancel interrupts
-  those waits promptly. If both attempts still fail — or for another clearly
-  environmental error such as a timeout, dropped connection, auth error
-  (401/403), or other 5xx — the result records as an **infrastructure
-  failure**: it shows up in the run's failure count, but it is never counted
-  against the photo, and the next run over the same slice retries every
-  affected photo automatically. Nothing to reset, nothing lost. Immich-side
-  network errors and 5xx are treated the same way.
+  `Retry-After` request between one second and five minutes; without one it
+  waits 15 seconds, then 30 seconds. The live run log shows each retry, and
+  Cancel interrupts those waits promptly. If two photos exhaust both retries
+  without a successful provider response in between, Enrich stops adding
+  overload waits for the rest of that provider-down probe; one successful
+  response turns them back on.
+  That keeps an exhausted quota from stretching the existing fast-failure
+  check across more than 20 minutes of requested wait. If both attempts still
+  fail — or for another clearly environmental error such as a timeout, dropped
+  connection, auth error (401/403), or other 5xx — the result records as an
+  **infrastructure failure**: it shows up in the run's failure count, but it is
+  never counted against the photo, and the next run over the same slice retries
+  every affected photo automatically. Nothing to reset, nothing lost.
+  Immich-side network errors and 5xx are treated the same way.
 - **A photo that keeps genuinely failing is dropped after two strikes.**
   Failures the provider pins on the request itself — most commonly a
   response the schema rejects (an unparseable answer, too many tags) —

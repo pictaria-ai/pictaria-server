@@ -213,6 +213,79 @@ test('exhausted overload retries produce one infrastructure failure for the phot
   assert.deepEqual(repo.processing.map((row) => row.status), ['failed_infra']);
 });
 
+test('persistent overload stops multiplying capped waits across the provider-down probe', async () => {
+  const repo = makeRepo();
+  const log = [];
+  const sleeps = [];
+  let calls = 0;
+  const provider = {
+    providerName: 'venice',
+    modelName: 'test-model',
+    analyzeImage: async () => {
+      calls += 1;
+      throw new ProviderRequestError('quota remains exhausted', { status: 429, retryAfterMs: 300000 });
+    },
+  };
+
+  await assert.rejects(
+    runBatch(batchOptions({
+      repo,
+      provider,
+      retrySleep: async (ms) => sleeps.push(ms),
+      log: (message) => log.push(message),
+    })),
+    /unreachable or misconfigured/,
+  );
+
+  // Two photos receive the complete 3-call treatment; the remaining six
+  // provider-down probes are single calls, so four capped waits total 20m.
+  assert.equal(calls, 12);
+  assert.equal(sleeps.reduce((total, ms) => total + ms, 0), 20 * 60000);
+  assert.equal(repo.processing.filter((row) => row.status === 'failed_infra').length, 8);
+  assert.ok(log.some((line) => line.includes('skipping further overload waits until a request succeeds')));
+});
+
+test('a successful provider response re-enables overload retries after suppression', async () => {
+  const repo = makeRepo();
+  const log = [];
+  const sleeps = [];
+  const callsByAsset = new Map();
+  const provider = {
+    providerName: 'venice',
+    modelName: 'test-model',
+    analyzeImage: async (image) => {
+      const calls = (callsByAsset.get(image.assetId) ?? 0) + 1;
+      callsByAsset.set(image.assetId, calls);
+      if (['photo-1', 'photo-2', 'photo-3'].includes(image.assetId) || (image.assetId === 'photo-5' && calls < 3)) {
+        throw new ProviderRequestError('temporary overload', { status: 429, retryAfterMs: 0 });
+      }
+      return { rawOutput: {}, normalizedOutput: sampleOutput() };
+    },
+  };
+
+  const { counters } = await runBatch(batchOptions({
+    repo,
+    provider,
+    assetIds: IDS_9.slice(0, 5),
+    retrySleep: async (ms) => sleeps.push(ms),
+    log: (message) => log.push(message),
+  }));
+
+  assert.deepEqual(Object.fromEntries(callsByAsset), {
+    'photo-1': 3,
+    'photo-2': 3,
+    'photo-3': 1,
+    'photo-4': 1,
+    'photo-5': 3,
+  });
+  assert.equal(counters.succeeded, 2);
+  assert.equal(counters.failed, 3);
+  // Retry-After: 0 gets the polite one-second floor: four waits before
+  // suppression and two after the successful photo resets the breaker.
+  assert.equal(sleeps.reduce((total, ms) => total + ms, 0), 6000);
+  assert.ok(log.some((line) => line.includes('overload retries re-enabled')));
+});
+
 test('other provider errors are not retried merely because they are infrastructure failures', async () => {
   const repo = makeRepo();
   let calls = 0;
