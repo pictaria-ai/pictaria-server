@@ -32,6 +32,8 @@ export const ENRICH_QUEUE_MAX_ITEM_BYTES = 64 * 1024;
 export const ENRICH_QUEUE_MAX_AGE_MS = 30 * 24 * 60 * 60 * 1000;
 export const ENRICH_QUEUE_DEFAULT_PAGE_SIZE = 50;
 export const ENRICH_QUEUE_MAX_PAGE_SIZE = 100;
+export const ENRICH_RUN_DEFAULT_PAGE_SIZE = 20;
+export const ENRICH_RUN_MAX_PAGE_SIZE = 50;
 
 // Local source of truth for enrichment runs, tags, and review decisions.
 // Uses the same SQLite schema as the Python reference implementation, so an
@@ -1976,14 +1978,26 @@ export class Repository {
     };
   }
 
-  listJobRuns(limit = 20) {
+  jobRunsPage({ beforeId = null, limit = ENRICH_RUN_DEFAULT_PAGE_SIZE } = {}) {
     // The log stays out of the list payload (it can be hundreds of KB);
     // fetch it per run via getJobRunLog.
-    return this.db.prepare(`
+    const boundedLimit = Math.max(
+      1,
+      Math.min(ENRICH_RUN_MAX_PAGE_SIZE, Math.floor(Number(limit) || ENRICH_RUN_DEFAULT_PAGE_SIZE)),
+    );
+    const cursor = Number(beforeId);
+    const hasCursor = Number.isSafeInteger(cursor) && cursor > 0;
+    const rows = (hasCursor ? this.db.prepare(`
+      SELECT id, title, provider, model, prompt_version, taxonomy_version, inference_host_label, targeted,
+             status, error, counters_json, log_json IS NOT NULL AS has_log, started_at, finished_at
+      FROM job_runs WHERE id < ? ORDER BY id DESC LIMIT ?
+    `).all(cursor, boundedLimit + 1) : this.db.prepare(`
       SELECT id, title, provider, model, prompt_version, taxonomy_version, inference_host_label, targeted,
              status, error, counters_json, log_json IS NOT NULL AS has_log, started_at, finished_at
       FROM job_runs ORDER BY id DESC LIMIT ?
-    `).all(limit).map((row) => {
+    `).all(boundedLimit + 1));
+    const hasMore = rows.length > boundedLimit;
+    const runs = rows.slice(0, boundedLimit).map((row) => {
       const id = Number(row.id);
       const counters = row.counters_json ? JSON.parse(row.counters_json) : null;
       // Modern completed runs record failed=0 authoritatively. Avoid a
@@ -2011,6 +2025,15 @@ export class Repository {
         retryableFailures,
       };
     });
+    return {
+      runs,
+      nextBeforeId: hasMore ? runs.at(-1)?.id ?? null : null,
+      total: Number(this.db.prepare('SELECT COUNT(*) AS count FROM job_runs').get()?.count ?? 0),
+    };
+  }
+
+  listJobRuns(limit = ENRICH_RUN_DEFAULT_PAGE_SIZE) {
+    return this.jobRunsPage({ limit }).runs;
   }
 
   getJobRunLog(id) {

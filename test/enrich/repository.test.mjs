@@ -819,6 +819,52 @@ test('job run logs round-trip and stay out of the list payload', () => {
   });
 });
 
+test('job run history uses stable newest-first keyset pages', () => {
+  withRepo((repo) => {
+    for (let index = 1; index <= 120; index += 1) {
+      repo.recordJobRun({
+        title: `Run ${index}`, provider: 'p', model: 'm', promptVersion: 'v1', taxonomyVersion: 'v1',
+        targeted: 1, status: 'finished', error: null, counters: { succeeded: 1, failed: 0 }, log: [],
+        startedAt: '2026-07-09T12:00:00.000Z', finishedAt: '2026-07-09T12:00:01.000Z',
+      });
+    }
+
+    const first = repo.jobRunsPage({ limit: 20 });
+    assert.deepEqual(first.runs.map((run) => run.id), Array.from({ length: 20 }, (_, index) => 120 - index));
+    assert.equal(first.nextBeforeId, 101);
+    assert.equal(first.total, 100);
+
+    const retainedIds = [...first.runs.map((run) => run.id)];
+    let cursor = first.nextBeforeId;
+    while (cursor !== null) {
+      const page = repo.jobRunsPage({ beforeId: cursor, limit: 20 });
+      retainedIds.push(...page.runs.map((run) => run.id));
+      cursor = page.nextBeforeId;
+    }
+    assert.deepEqual(retainedIds, Array.from({ length: 100 }, (_, index) => 120 - index));
+    assert.equal(new Set(retainedIds).size, 100);
+
+    // A new run prunes only the oldest retained row. A page walk that held
+    // the first cursor continues without offsets, duplicates, or skipped
+    // surviving ids; the newly inserted row belongs to a future fresh walk.
+    repo.recordJobRun({
+      title: 'New after first page', provider: 'p', model: 'm', promptVersion: 'v1', taxonomyVersion: 'v1',
+      targeted: 1, status: 'finished', error: null, counters: { succeeded: 1, failed: 0 }, log: [],
+      startedAt: '2026-07-09T12:01:00.000Z', finishedAt: '2026-07-09T12:01:01.000Z',
+    });
+    const continuedIds = [...first.runs.map((run) => run.id)];
+    cursor = first.nextBeforeId;
+    while (cursor !== null) {
+      const page = repo.jobRunsPage({ beforeId: cursor, limit: 20 });
+      assert.equal(page.total, 100);
+      continuedIds.push(...page.runs.map((run) => run.id));
+      cursor = page.nextBeforeId;
+    }
+    assert.deepEqual(continuedIds, Array.from({ length: 99 }, (_, index) => 120 - index));
+    assert.equal(new Set(continuedIds).size, 99);
+  });
+});
+
 test('job run history derives honest end-to-end throughput and snapshots bounded host context', () => {
   withRepo((repo) => {
     repo.recordJobRun({

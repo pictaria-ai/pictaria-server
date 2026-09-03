@@ -242,6 +242,11 @@ latest successful run per photo is what Curate and the caption data use.
   (30–60 s on large local models). Cancel doubles as pause — a queued job
   stays in the queue unless its run finishes cleanly, and running it again
   continues where it left off (already-enriched photos are skipped).
+- **Recent runs** starts with the newest 20 summaries. **Load more** walks
+  through all 100 retained summaries without loading their potentially large
+  logs; each log is fetched only when you open it. Retry actions remain
+  available on older loaded runs and always recalculate which failed photos
+  still need work before starting.
 
 ### Enrich and Curate are composable
 
@@ -743,8 +748,10 @@ and expect the queue to breathe a little while enrichment is running.
 
 - `GET /api/enrich/status` — runner state, live counters, log tail, provider
   availability, library stats, `enabled`.
-- `GET /api/enrich/runs` — the newest run summaries, including a live
-  `retryableFailures` count for each history card.
+- `GET /api/enrich/runs` — newest-first, stable cursor pages of retained run
+  summaries, including a live `retryableFailures` count for each returned
+  history card. Accepts `cursor` and `limit` (default 20, maximum 50) and
+  returns `{ runs, nextCursor, total }`.
 - `POST /api/enrich/runs/:id/retry` — re-evaluate and start a targeted retry
   of that run's content and infrastructure failures that still need work,
   using the original provider's current configuration; accepts optional
@@ -818,7 +825,8 @@ and expect the queue to breathe a little while enrichment is running.
 - `POST /api/enrich/captions/writeback/backfill` — queue every enriched
   photo with a caption for description writeback (409 when the setting is
   off).
-- `GET /api/enrich/runs` — run history (latest 20).
+- `GET /api/enrich/runs` — paged retained run history (newest first; default
+  20, maximum 50 per request).
 - `GET /api/enrich/runs/:id/log` — one run's full log.
 - `GET /api/enrich/caption?assetId=…` — one photo's full stored caption
   (the Curate lightbox uses it).
