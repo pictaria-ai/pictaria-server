@@ -260,6 +260,24 @@ function seedEnrichment(dbPath) {
       startedAt: '2026-07-15T12:00:00.000Z',
       finishedAt: '2026-07-15T12:02:00.000Z',
     });
+    // Keep the failed run beyond the initial 20-card page so the browser
+    // smoke exercises pagination plus retry/log actions on loaded history.
+    for (let index = 1; index <= 20; index += 1) {
+      repo.recordJobRun({
+        title: `Seeded historical run ${index}`,
+        provider: 'local_lmstudio',
+        model: 'smoke-vision-model',
+        promptVersion: 'v1',
+        taxonomyVersion: 'v1',
+        targeted: 1,
+        status: 'finished',
+        error: null,
+        counters: { analyzed: 1, succeeded: 1, failed: 0 },
+        log: [],
+        startedAt: '2026-07-15T12:02:00.000Z',
+        finishedAt: '2026-07-15T12:02:01.000Z',
+      });
+    }
     repo.recordJobRun({
       title: 'Seeded successful run',
       provider: 'local_lmstudio',
@@ -571,8 +589,24 @@ test('admin UI smoke: gate, Insights lens, Curate, Smart Albums', { timeout: 120
       { label: 'enrich page authenticated by session cookie' },
     );
     await page.waitFor(
+      'document.getElementById("runsCount")?.textContent === "Showing 20 of 23 retained runs" && !document.getElementById("runsMoreBtn")?.hidden',
+      { label: 'initial bounded run-history page' },
+    );
+    assert.equal(
+      await page.evaluate('[...document.querySelectorAll("#runsList .qitem")].some((item) => item.textContent.includes("Seeded failed run"))'),
+      false,
+    );
+    await page.evaluate('document.getElementById("runsMoreBtn").click()');
+    await page.waitFor(
+      'document.getElementById("runsCount")?.textContent === "Showing 23 of 23 retained runs" && document.getElementById("runsMoreBtn")?.hidden',
+      { label: 'all retained run history loaded' },
+    );
+    await page.evaluate('window.__runsRefreshDone = false; loadRuns().then(() => { window.__runsRefreshDone = true; })');
+    await page.waitFor('window.__runsRefreshDone === true', { label: 'loaded-depth history refresh' });
+    assert.equal(await page.evaluate('document.querySelectorAll("#runsList .qitem").length'), 23);
+    await page.waitFor(
       'document.querySelector("#runsList .run-retry:not([disabled])")?.textContent === "Re-run 1 failed photo"',
-      { label: 'historical failure retry action' },
+      { label: 'historical failure retry action on an older page' },
     );
     const runComparison = await page.evaluate(`(() => {
       const card = [...document.querySelectorAll('#runsList .qitem')]
@@ -587,6 +621,16 @@ test('admin UI smoke: gate, Insights lens, Curate, Smart Albums', { timeout: 120
       return card?.textContent ?? '';
     })()`);
     assert.match(onePhotoComparison, /End-to-end: 150 photos\/min · 0\.40 sec\/photo · over 1 photo/);
+    await page.evaluate(`(() => {
+      const card = [...document.querySelectorAll('#runsList .qitem')]
+        .find((item) => item.textContent.includes('Seeded failed run'));
+      [...card.querySelectorAll('button')].find((button) => button.textContent === 'Log').click();
+    })()`);
+    await page.waitFor(
+      'document.getElementById("logPopupTitle")?.textContent === "Seeded failed run" && !document.getElementById("logPopup")?.hidden',
+      { label: 'older run log opens after pagination' },
+    );
+    await page.evaluate('document.getElementById("logPopupClose").click()');
     await page.evaluate(`
       window.__historyRetry = null;
       const realFetch = window.fetch.bind(window);
