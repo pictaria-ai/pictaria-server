@@ -14,6 +14,7 @@ function configWith(voice = {}, providers = {}) {
       cloud_openai: { apiKey: 'k', modelName: 'enrich-model' },
       venice: { apiKey: 'v', modelName: 'venice-enrich-model', baseUrl: 'https://api.venice.ai/api/v1' },
       local_ollama: { modelName: 'ollama-enrich-model', baseUrl: 'http://127.0.0.1:11434' },
+      openai_compatible: { apiKey: '', modelName: 'compatible-model', baseUrl: 'http://llama.local:8080/v1' },
       ...providers,
     },
   };
@@ -41,6 +42,14 @@ test('any other provider falls back to the model it is configured with', () => {
     openAiDefaultModel: 'gpt-5.4-nano', // must not leak onto a non-OpenAI provider
   });
   assert.equal(provider.modelName, 'venice-enrich-model');
+});
+
+test('voice resolves the generic OpenAI-compatible provider without requiring a key', () => {
+  const provider = resolveProseProvider(configWith({ proseProvider: 'openai_compatible' }));
+  assert.equal(provider.providerName, 'openai_compatible');
+  assert.equal(provider.modelName, 'compatible-model');
+  assert.equal(provider.baseUrl, 'http://llama.local:8080/v1');
+  assert.equal(provider.apiKey, '');
 });
 
 test('voice gets its own short timeout, not the enrichment budget', () => {
@@ -365,7 +374,7 @@ test('readiness knows LM Studio cannot describe images off macOS', () => {
   assert.equal(canDescribeImages('local_lmstudio', 'darwin'), true);
   assert.equal(canDescribeImages('local_lmstudio', 'linux'), false);
   // Every other provider is fine everywhere.
-  for (const name of ['cloud_openai', 'venice', 'openrouter', 'cloud_ollama', 'local_ollama']) {
+  for (const name of ['cloud_openai', 'venice', 'openrouter', 'cloud_ollama', 'local_ollama', 'openai_compatible']) {
     assert.equal(canDescribeImages(name, 'linux'), true, name);
   }
 });

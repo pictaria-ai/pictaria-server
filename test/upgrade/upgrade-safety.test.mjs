@@ -79,7 +79,7 @@ test('the activity schema contract creates a recovery point before changing an e
       currentServerVersion: '0.1.0-with-activity',
       now: new Date('2026-08-08T02:00:00Z'),
     });
-    assert.equal(PERSISTENT_STATE_VERSION, 5);
+    assert.equal(PERSISTENT_STATE_VERSION, 6);
     assert.equal(prepared.action, 'create');
 
     const snapshot = new DatabaseSync(join(config.backup.dir, prepared.snapshotName, 'enrichment.sqlite'), {
@@ -96,7 +96,7 @@ test('the activity schema contract creates a recovery point before changing an e
       successfulStateVersion: PERSISTENT_STATE_VERSION,
       successfulServerVersion: '0.1.0-with-activity',
     });
-    assert.equal(sealed.upgrade.stateVersion, 5);
+    assert.equal(sealed.upgrade.stateVersion, 6);
     assert.equal(sealed.upgrade.recoveryPoint.snapshotName, prepared.snapshotName);
   });
 });
@@ -116,7 +116,7 @@ test('a zero-model v2 installation creates a complete schedule-confirmation reco
       now: new Date('2026-08-08T02:00:00Z'),
     });
 
-    assert.equal(PERSISTENT_STATE_VERSION, 5);
+    assert.equal(PERSISTENT_STATE_VERSION, 6);
     assert.deepEqual({
       action: prepared.action,
       fromStateVersion: prepared.fromStateVersion,
@@ -124,7 +124,7 @@ test('a zero-model v2 installation creates a complete schedule-confirmation reco
     }, {
       action: 'create',
       fromStateVersion: 2,
-      toStateVersion: 5,
+      toStateVersion: 6,
     });
     assert.equal(
       readFileSync(join(config.backup.dir, prepared.snapshotName, 'smart-albums.json'), 'utf8'),
@@ -146,7 +146,7 @@ test('a zero-model v2 installation creates a complete schedule-confirmation reco
       purpose: {
         type: 'pre-migration',
         fromStateVersion: 2,
-        toStateVersion: 5,
+        toStateVersion: 6,
         fromServerVersion: '0.1.0-before-schedule-confirmation',
         toServerVersion: '0.1.0-with-schedule-confirmation',
       },

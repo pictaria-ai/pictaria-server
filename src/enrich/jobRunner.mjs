@@ -453,6 +453,7 @@ function availableProviders(config) {
   const requirements = {
     cloud_openai: (options) => Boolean(options.apiKey),
     local_lmstudio: (options) => Boolean(options.modelName),
+    openai_compatible: (options) => Boolean(options.baseUrl && options.modelName),
     openrouter: (options) => Boolean(options.apiKey),
     cloud_ollama: (options) => Boolean(options.apiKey),
     local_ollama: (options) => Boolean(options.modelName),

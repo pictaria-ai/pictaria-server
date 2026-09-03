@@ -422,13 +422,14 @@
             <option value="cloud_ollama">Ollama (cloud)</option>
             <option value="local_lmstudio">LM Studio (local — macOS only for "interesting")</option>
             <option value="local_ollama">Ollama (local)</option>
+            <option value="openai_compatible">OpenAI-compatible (image support varies)</option>
           </select>
           <div class="setting-desc">Uses the connection configured under <a href="#sec-providers" style="color: var(--p-accent)">AI Providers</a>.</div>
         </div>
         <div class="field">
           <label for="f-interestingModel">Interesting command <span id="src-interestingModel" class="p-chip from-env" hidden>env</span></label>
           <input id="f-interestingModel" class="p-input" type="text" placeholder="empty = the provider’s usual model">
-          <div class="setting-desc">Vision model for photo questions. Leave empty to use the provider&rsquo;s default. LM Studio supports this command only when Pictaria Server runs on macOS.</div>
+          <div class="setting-desc">Vision model for photo questions. Leave empty to use the provider&rsquo;s default. LM Studio supports this command only when Pictaria Server runs on macOS; a generic OpenAI-compatible endpoint must accept Immich&rsquo;s WebP preview.</div>
         </div>
         <div class="field">
           <label for="f-askModel">Tell Me command <span id="src-askModel" class="p-chip from-env" hidden>env</span></label>
@@ -616,6 +617,7 @@
     const ENRICH_PROVIDER_NAMES = {
       local_lmstudio: 'LM Studio',
       local_ollama: 'Ollama (local)',
+      openai_compatible: 'OpenAI-compatible',
       cloud_ollama: 'Ollama Cloud',
       cloud_openai: 'OpenAI',
       openrouter: 'OpenRouter',
@@ -640,6 +642,10 @@
         { head: 'LM Studio' },
         { key: 'lmStudioBaseUrl', sourceSection: 'enrich', type: 'text', placeholder: 'http://127.0.0.1:1234/v1', desc: 'The address of LM Studio’s OpenAI-compatible server.' },
         { key: 'lmStudioModel', sourceSection: 'enrich', type: 'text', desc: 'The model identifier exactly as LM Studio lists it — swap it here when trying out models.' },
+        { head: 'OpenAI-compatible' },
+        { key: 'openAiCompatibleBaseUrl', sourceSection: 'enrich', type: 'text', placeholder: 'http://llama-host:8080/v1', desc: 'The base URL of a compatible chat-completions server, including its API prefix. Tested first with llama.cpp.' },
+        { key: 'openAiCompatibleApiKey', sourceSection: 'enrich', type: 'secret', desc: 'Optional. Leave blank when the endpoint does not require a bearer API key.' },
+        { key: 'openAiCompatibleModel', sourceSection: 'enrich', type: 'text', desc: 'The vision-capable model identifier the endpoint accepts.' },
         { head: 'Ollama' },
         { key: 'ollamaLocalBaseUrl', sourceSection: 'enrich', type: 'text', placeholder: 'http://127.0.0.1:11434', desc: 'The address of your local Ollama server.' },
         { key: 'ollamaLocalModel', sourceSection: 'enrich', type: 'text', desc: 'The model identifier exactly as Ollama lists it — swap it here when trying out models.' },
@@ -672,7 +678,7 @@
       curate: [
         { key: 'burstGrouping', type: 'switch', desc: 'Collapses photos of the same moment — rapid bursts, re-shoots, duplicates — into one Stack with a suggested keeper. Turn off for a flat photo-by-photo queue.' },
         { key: 'refereeEnabled', type: 'switch', desc: 'The gold star: whenever enrichment is idle, an AI model compares each Stack side by side — people-shots beat empty scenes, open eyes beat blinks — and explains its pick in the compare view. Needs enrichment enabled; works through the backlog on its own, most-undecided Stacks first. A background worker with no start or cancel: an enrich run always takes priority (the referee finishes its current Stack, then waits), and it resumes by itself when enrichment is idle. Pause it any time from the Curate strip.', docs: 'https://github.com/pictaria-ai/pictaria-server/blob/main/docs/ENRICH.md' },
-        { key: 'refereeProvider', type: 'select', labels: { '': 'Follow Enrich provider', local_lmstudio: 'LM Studio (local)', local_ollama: 'Ollama (local)', cloud_ollama: 'Ollama (cloud)', cloud_openai: 'OpenAI (cloud)', openrouter: 'OpenRouter (cloud)', venice: 'Venice (cloud)' }, desc: 'Follow Enrich provider uses the provider currently selected on the Enrich page; a change there applies when the next Stack starts. Choose a specific provider here to keep Curate independent.' },
+        { key: 'refereeProvider', type: 'select', labels: { '': 'Follow Enrich provider', local_lmstudio: 'LM Studio (local)', local_ollama: 'Ollama (local)', openai_compatible: 'OpenAI-compatible', cloud_ollama: 'Ollama (cloud)', cloud_openai: 'OpenAI (cloud)', openrouter: 'OpenRouter (cloud)', venice: 'Venice (cloud)' }, desc: 'Follow Enrich provider uses the provider currently selected on the Enrich page; a change there applies when the next Stack starts. Choose a specific provider here to keep Curate independent.' },
         { key: 'refereeModel', type: 'text', placeholder: 'empty = the provider’s usual model', desc: 'Optional. Leave blank to use the chosen provider’s configured model. If the referee follows Enrich, this override must also be valid for every provider you select there; clear it or choose a fixed referee provider when switching providers. A smaller vision model works well here, but it must accept multiple images.', docs: 'https://docs.venice.ai/models/overview' },
       ],
       insights: [
@@ -1190,6 +1196,7 @@
       if (settings.server && settings.enrich && settings.voice) {
         const configuredProviders = [
           settings.enrich.lmStudioModel?.value,
+          settings.enrich.openAiCompatibleBaseUrl?.value && settings.enrich.openAiCompatibleModel?.value,
           settings.enrich.ollamaLocalModel?.value,
           settings.enrich.ollamaApiKey?.configured,
           settings.server.openAiApiKey?.configured,

@@ -154,6 +154,19 @@ test('every local provider gets the stricter-prompt retry, not just lm studio', 
   assert.ok(provider.calls[1].userPrompt.includes('Local retry instructions'));
 });
 
+test('a generic compatible endpoint can opt into the local-model validation retry', async () => {
+  const provider = fakeProvider({ providerName: 'openai_compatible', failOnFirst: true });
+  provider.retryValidationOnce = true;
+  const { retryCount } = await analyzeWithValidationRetry(
+    provider,
+    { data: Buffer.from('x'), mimeType: 'image/jpeg', assetId: 'a1' },
+    { systemPrompt: 'system', userPrompt: 'user', jsonSchema: {}, taxonomy },
+  );
+
+  assert.equal(retryCount, 1);
+  assert.equal(provider.calls.length, 2);
+});
+
 test('cloud validation failures do not retry', async () => {
   const provider = fakeProvider({ providerName: 'cloud_openai', failOnFirst: true });
 

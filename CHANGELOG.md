@@ -5,6 +5,21 @@ All notable changes to Pictaria Server are documented here. This project follows
 
 ## Unreleased
 
+### Added
+
+- A generic OpenAI-compatible provider can now connect Enrich, the Curate AI
+  referee, and provider-selectable voice answers to llama.cpp and similar
+  chat-completions servers using a configurable base URL, model, and optional
+  bearer key. It uses portable JSON-object output and keeps Pictaria's full
+  local response validation.
+
+### Changed
+
+- The persisted Settings contract advances to version 4 and the installation
+  state contract to version 6. Existing installations take the standard
+  automatic pre-migration recovery snapshot before adopting the additive
+  provider settings.
+
 ## 1.0.1 - 2026-09-02
 
 ### Changed

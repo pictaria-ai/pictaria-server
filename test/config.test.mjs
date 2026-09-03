@@ -39,6 +39,7 @@ test('every environment-configurable service base URL rejects query components',
     'IMMICH_BASE_URL',
     'IMMICH_PUBLIC_URL',
     'LMSTUDIO_BASE_URL',
+    'OPENAI_COMPATIBLE_BASE_URL',
     'OLLAMA_LOCAL_BASE_URL',
     'OPENROUTER_BASE_URL',
     'OLLAMA_BASE_URL',
@@ -73,6 +74,22 @@ test('empty Compose values preserve native LM Studio defaults', () => {
   assert.equal(configured.apiKey, 'proxy-token');
   assert.equal(configured.maxTokens, 4096);
   assert.equal(configured.temperature, 0.7);
+});
+
+test('OpenAI-compatible configuration is explicit and keeps authentication optional', () => {
+  const empty = loadConfig({}).providers.openai_compatible;
+  assert.deepEqual(empty, { apiKey: '', modelName: '', baseUrl: '' });
+
+  const configured = loadConfig({
+    OPENAI_COMPATIBLE_BASE_URL: 'llama-host:8080/v1/',
+    OPENAI_COMPATIBLE_MODEL: 'qwen-vision',
+    OPENAI_COMPATIBLE_API_KEY: 'proxy-token',
+  }).providers.openai_compatible;
+  assert.deepEqual(configured, {
+    apiKey: 'proxy-token',
+    modelName: 'qwen-vision',
+    baseUrl: 'http://llama-host:8080/v1',
+  });
 });
 
 test('server auth configuration fails closed unless open mode is explicit', () => {

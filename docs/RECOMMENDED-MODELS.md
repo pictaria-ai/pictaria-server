@@ -51,13 +51,25 @@ not mean every role or hardware profile has been benchmarked with them.
 | OpenRouter | `qwen/qwen3-vl-32b-instruct` | Cloud | Vision-capable Enrich alternative with structured-response support. |
 | Ollama Cloud | `qwen3.5:cloud` | Cloud | Multimodal Enrich alternative. |
 
+The **OpenAI-compatible** entry in Settings is an endpoint adapter, not a
+separate model recommendation. It is intended first for llama.cpp and similar
+servers: use the exact identifier that endpoint accepts, verify that the model
+supports images (and multiple images for the Curate referee), and run a small
+Enrich test before a library sweep. Current llama.cpp accepts JPEG/PNG-style
+stb_image inputs rather than WebP, so set Pictaria's Image source to
+**original** for that setup. Also leave context headroom for Pictaria's output
+contract: with the shipped taxonomy, the schema embedded in each Enrich prompt
+is roughly 1,100 text tokens before the image and the rest of the prompt; a
+larger custom taxonomy increases that cost.
+
 The upstream references are LM Studio's
 [identifier guidance](https://lmstudio.ai/docs/cli/local-models/load), Ollama's
 [`qwen3-vl`](https://ollama.com/library/qwen3-vl) and
 [`qwen3.5:cloud`](https://ollama.com/library/qwen3.5:cloud) model pages, and
 OpenRouter's
 [`qwen/qwen3-vl-32b-instruct`](https://openrouter.ai/qwen/qwen3-vl-32b-instruct)
-entry.
+entry, and llama.cpp's
+[server guide](https://github.com/ggml-org/llama.cpp/blob/master/tools/server/README.md).
 
 ## Where each value goes
 

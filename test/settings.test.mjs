@@ -41,6 +41,7 @@ function makeConfig() {
     providers: {
       cloud_openai: { apiKey: 'env-key', modelName: 'gpt-5.5' },
       local_lmstudio: { apiKey: 'lm-studio', modelName: '', baseUrl: 'http://127.0.0.1:1234/v1' },
+      openai_compatible: { apiKey: '', modelName: '', baseUrl: '' },
       local_ollama: { apiKey: '', modelName: '', baseUrl: 'http://127.0.0.1:11434' },
       openrouter: { apiKey: '', modelName: 'qwen/qwen3-vl-32b-instruct', baseUrl: 'https://openrouter.ai/api/v1' },
       cloud_ollama: { apiKey: '', modelName: 'qwen3.5:cloud', baseUrl: 'https://ollama.com' },
@@ -202,7 +203,7 @@ test('an existing settings file is loaded without being rewritten or gaining a s
   const dir = mkdtempSync(join(tmpdir(), 'pictaria-settings-'));
   try {
     const path = join(dir, 'settings.json');
-    const original = '{"version":3,"credentialBindings":{},"voice":{"openAiTtsVoice":"ash"}}\n';
+    const original = '{"version":4,"credentialBindings":{},"voice":{"openAiTtsVoice":"ash"}}\n';
     writeFileSync(path, original, { mode: 0o600 });
 
     const config = makeConfig();
@@ -476,11 +477,15 @@ test('enrichment provider fields write through to config.providers', () => {
         defaultProvider: 'local_lmstudio',
         lmStudioBaseUrl: 'http://10.0.0.5:1234/v1',
         lmStudioModel: 'qwen2.5-vl-7b',
+        openAiCompatibleBaseUrl: 'http://llama.local:8080/v1/',
+        openAiCompatibleModel: 'qwen-vision',
       },
     });
     assert.equal(config.defaultProvider, 'local_lmstudio');
     assert.equal(config.providers.local_lmstudio.baseUrl, 'http://10.0.0.5:1234/v1');
     assert.equal(config.providers.local_lmstudio.modelName, 'qwen2.5-vl-7b');
+    assert.equal(config.providers.openai_compatible.baseUrl, 'http://llama.local:8080/v1');
+    assert.equal(config.providers.openai_compatible.modelName, 'qwen-vision');
     const reloadedConfig = makeConfig();
     const reloaded = new SettingsStore({
       filePath: join(dir, 'settings.json'),
@@ -501,7 +506,7 @@ test('enrichment provider fields write through to config.providers', () => {
     assert.equal(config.providers.local_ollama.baseUrl, 'https://ollama.example/api');
 
     const persistedBeforeRejection = readFileSync(join(dir, 'settings.json'), 'utf8');
-    for (const key of ['lmStudioBaseUrl', 'ollamaLocalBaseUrl']) {
+    for (const key of ['lmStudioBaseUrl', 'openAiCompatibleBaseUrl', 'ollamaLocalBaseUrl']) {
       for (const delimiter of ['?', '#']) {
         assert.throws(
           () => store.update({ enrich: { [key]: `http://internal.invalid/chosen${delimiter}` } }),
@@ -510,6 +515,7 @@ test('enrichment provider fields write through to config.providers', () => {
       }
     }
     assert.equal(config.providers.local_lmstudio.baseUrl, 'https://models.example/api');
+    assert.equal(config.providers.openai_compatible.baseUrl, 'http://llama.local:8080/v1');
     assert.equal(config.providers.local_ollama.baseUrl, 'https://ollama.example/api');
     assert.equal(readFileSync(join(dir, 'settings.json'), 'utf8'), persistedBeforeRejection);
   });
@@ -525,9 +531,39 @@ test('environment-backed local-provider keys stay bound to their authorities', (
       () => store.update({ enrich: { ollamaLocalBaseUrl: 'http://attacker.example' } }),
       /Local Ollama has an environment-backed API key/,
     );
+    assert.throws(
+      () => store.update({ enrich: { openAiCompatibleBaseUrl: 'http://attacker.example/v1' } }),
+      /OpenAI-compatible provider has an environment-backed API key/,
+    );
   }, {
     LMSTUDIO_API_KEY: 'private-lm-proxy-token',
     OLLAMA_LOCAL_API_KEY: 'private-ollama-proxy-token',
+    OPENAI_COMPATIBLE_API_KEY: 'private-compatible-proxy-token',
+  });
+});
+
+test('a saved OpenAI-compatible key is bound to its configured destination', () => {
+  withStore((store, config, dir) => {
+    store.update({
+      enrich: {
+        openAiCompatibleBaseUrl: 'http://llama.local:8080/v1',
+        openAiCompatibleApiKey: 'saved-compatible-key',
+        openAiCompatibleModel: 'qwen-vision',
+      },
+    });
+    assert.equal(config.providers.openai_compatible.apiKey, 'saved-compatible-key');
+    assert.equal(config.providers.openai_compatible.modelName, 'qwen-vision');
+    let saved = JSON.parse(readFileSync(join(dir, 'settings.json'), 'utf8'));
+    assert.equal(saved.credentialBindings['enrich.openAiCompatibleApiKey'], 'http://llama.local:8080');
+
+    store.update({ enrich: { openAiCompatibleBaseUrl: 'http://other.local:8080/v1' } });
+    assert.equal(config.providers.openai_compatible.apiKey, '');
+    assert.equal(store.describe().enrich.openAiCompatibleApiKey.credentialUnavailable, true);
+
+    store.update({ enrich: { openAiCompatibleApiKey: 'replacement-key' } });
+    assert.equal(config.providers.openai_compatible.apiKey, 'replacement-key');
+    saved = JSON.parse(readFileSync(join(dir, 'settings.json'), 'utf8'));
+    assert.equal(saved.credentialBindings['enrich.openAiCompatibleApiKey'], 'http://other.local:8080');
   });
 });
 
@@ -535,6 +571,7 @@ test('startup binds newly provisioned local-provider keys to their environment a
   const cases = [
     {
       name: 'LM Studio',
+      providerKey: 'local_lmstudio',
       urlKey: 'lmStudioBaseUrl',
       baselineUrl: 'http://127.0.0.1:1234/v1',
       savedUrl: 'http://attacker.example/v1',
@@ -542,10 +579,19 @@ test('startup binds newly provisioned local-provider keys to their environment a
     },
     {
       name: 'Local Ollama',
+      providerKey: 'local_ollama',
       urlKey: 'ollamaLocalBaseUrl',
       baselineUrl: 'http://127.0.0.1:11434',
       savedUrl: 'http://attacker.example',
       env: { OLLAMA_LOCAL_API_KEY: 'private-ollama-proxy-token' },
+    },
+    {
+      name: 'OpenAI-compatible provider',
+      providerKey: 'openai_compatible',
+      urlKey: 'openAiCompatibleBaseUrl',
+      baselineUrl: '',
+      savedUrl: 'http://attacker.example/v1',
+      env: { OPENAI_COMPATIBLE_API_KEY: 'private-compatible-proxy-token' },
     },
   ];
 
@@ -564,7 +610,7 @@ test('startup binds newly provisioned local-provider keys to their environment a
         () => new SettingsStore({ filePath: path, config, env: provider.env }).load(),
         new RegExp(`environment-backed ${provider.name} API key cannot be used with the saved`),
       );
-      assert.equal(config.providers[provider.name === 'LM Studio' ? 'local_lmstudio' : 'local_ollama'].baseUrl, provider.baselineUrl);
+      assert.equal(config.providers[provider.providerKey].baseUrl, provider.baselineUrl);
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }
@@ -581,9 +627,11 @@ test('startup allows an environment local-provider key with a saved path on the 
       enrich: {
         lmStudioBaseUrl: 'http://127.0.0.1:1234/compatible/v1',
         ollamaLocalBaseUrl: 'http://127.0.0.1:11434/compatible',
+        openAiCompatibleBaseUrl: 'http://llama.local:8080/compatible/v1',
       },
     }));
     const config = makeConfig();
+    config.providers.openai_compatible.baseUrl = 'http://llama.local:8080/v1';
 
     new SettingsStore({
       filePath: path,
@@ -591,11 +639,14 @@ test('startup allows an environment local-provider key with a saved path on the 
       env: {
         LMSTUDIO_API_KEY: 'private-lm-proxy-token',
         OLLAMA_LOCAL_API_KEY: 'private-ollama-proxy-token',
+        OPENAI_COMPATIBLE_BASE_URL: 'http://llama.local:8080/v1',
+        OPENAI_COMPATIBLE_API_KEY: 'private-compatible-proxy-token',
       },
     }).load();
 
     assert.equal(config.providers.local_lmstudio.baseUrl, 'http://127.0.0.1:1234/compatible/v1');
     assert.equal(config.providers.local_ollama.baseUrl, 'http://127.0.0.1:11434/compatible');
+    assert.equal(config.providers.openai_compatible.baseUrl, 'http://llama.local:8080/compatible/v1');
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
@@ -1147,6 +1198,20 @@ test('the version 1 fixture migrates deterministically without mutating its inpu
   assert.equal(first.state.voice.openAiAskModel, 'gpt-4o-mini');
 });
 
+test('version 3 settings migrate to version 4 without inventing provider configuration', () => {
+  const migrated = migrateSettingsState({
+    version: 3,
+    credentialBindings: {},
+    enrich: { defaultProvider: 'local_lmstudio' },
+  });
+
+  assert.equal(migrated.from, 3);
+  assert.equal(migrated.to, 4);
+  assert.equal(migrated.migrated, true);
+  assert.equal(migrated.state.enrich.defaultProvider, 'local_lmstudio');
+  assert.equal(Object.hasOwn(migrated.state.enrich, 'openAiCompatibleBaseUrl'), false);
+});
+
 test('a migrated settings document survives another save and restart', () => {
   const dir = mkdtempSync(join(tmpdir(), 'pictaria-settings-'));
   try {
@@ -1189,8 +1254,8 @@ test('unknown same-version fields fail with downgrade-safe guidance', () => {
   );
 });
 
-test('the persisted settings contract matches the frozen version 3 snapshot', () => {
-  const expected = JSON.parse(readFileSync(new URL('./fixtures/upgrades/settings-contract-v3.json', import.meta.url), 'utf8'));
+test('the persisted settings contract matches the frozen version 4 snapshot', () => {
+  const expected = JSON.parse(readFileSync(new URL('./fixtures/upgrades/settings-contract-v4.json', import.meta.url), 'utf8'));
   assert.deepEqual(settingsContract(), expected);
 });
 

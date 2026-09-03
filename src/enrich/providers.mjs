@@ -90,6 +90,9 @@ export function createProvider(name, options) {
   if (name === 'local_lmstudio') {
     return new LmStudioProvider(options);
   }
+  if (name === 'openai_compatible') {
+    return new OpenAiCompatibleProvider(options);
+  }
   if (name === 'openrouter') {
     return new OpenRouterProvider(options);
   }
@@ -187,6 +190,7 @@ export class OpenAiProvider {
 
 export class LmStudioProvider {
   providerName = 'local_lmstudio';
+  isolateConnection = true;
 
   constructor({
     modelName,
@@ -277,9 +281,106 @@ export class LmStudioProvider {
   }
 }
 
-// The OpenAI-compatible /chat/completions request shared by LM Studio,
-// OpenRouter, and Venice for prose: no response_format, a caller-supplied
-// token budget, and the provider's default temperature.
+export class OpenAiCompatibleProvider {
+  providerName = 'openai_compatible';
+  isolateConnection = true;
+  retryValidationOnce = true;
+
+  constructor({
+    modelName,
+    baseUrl,
+    apiKey = '',
+    timeoutMs = 300000,
+    maxTokens = 2400,
+    fetchImpl = fetch,
+  } = {}) {
+    if (!baseUrl) {
+      throw new Error('OPENAI_COMPATIBLE_BASE_URL is required for openai_compatible');
+    }
+    if (!modelName) {
+      throw new Error('OPENAI_COMPATIBLE_MODEL is required for openai_compatible');
+    }
+    this.modelName = modelName;
+    this.baseUrl = normalizeHttpUrl(baseUrl);
+    this.apiKey = apiKey;
+    this.timeoutMs = timeoutMs;
+    this.maxTokens = maxTokens;
+    this.fetchImpl = fetchImpl;
+  }
+
+  async analyzeImage(image, options) {
+    return this.analyzeImages([image], options);
+  }
+
+  async analyzeImages(images, { systemPrompt, userPrompt, jsonSchema }) {
+    // JSON-object mode constrains only the outer syntax. Unlike a strict
+    // json_schema request, it does not tell the model which fields Pictaria
+    // requires, so include the deterministic schema text in the prompt and
+    // keep the existing full local validation as the acceptance boundary.
+    const schemaText = JSON.stringify(sortKeysDeep(jsonSchema));
+    const schemaAwareUserPrompt =
+      `${userPrompt}\n\n` +
+      'Return only one valid JSON object. Do not include markdown fences, commentary, or extra text.\n' +
+      'The JSON object must conform to this schema:\n' +
+      schemaText;
+    const body = {
+      model: this.modelName,
+      messages: [
+        { role: 'system', content: systemPrompt },
+        {
+          role: 'user',
+          content: [
+            { type: 'text', text: schemaAwareUserPrompt },
+            ...images.map((image) => ({
+              type: 'image_url',
+              image_url: { url: toDataUrl(image) },
+            })),
+          ],
+        },
+      ],
+      // JSON-object mode is the common denominator across OpenAI-compatible
+      // servers. The prompt above communicates the fields, and Pictaria still
+      // applies its complete schema locally before accepting a result; do not
+      // assume OpenAI's nested strict-schema dialect is portable everywhere.
+      response_format: { type: 'json_object' },
+      temperature: 0,
+      stream: false,
+      max_tokens: this.maxTokens,
+    };
+    const headers = this.apiKey ? { Authorization: `Bearer ${this.apiKey}` } : {};
+    const rawOutput = await postJson(this, appendHttpUrlPath(this.baseUrl, '/chat/completions'), body, headers);
+    const outputText = extractSchemaConstrainedChoiceContent(rawOutput);
+    if (!outputText) {
+      throw new Error('OpenAI-compatible response did not include message content');
+    }
+    try {
+      return { rawOutput, normalizedOutput: parseJsonContent(outputText) };
+    } catch (error) {
+      const ordinaryContent = extractChoiceMessageContent(rawOutput);
+      if (!(typeof ordinaryContent === 'string' && ordinaryContent.trim())) {
+        throw new Error('OpenAI-compatible provider returned JSON output that was not valid JSON');
+      }
+      throw error;
+    }
+  }
+
+  async generateProse({ systemPrompt, userPrompt, images = [], maxOutputTokens }) {
+    const body = chatCompletionsProseBody({
+      model: this.modelName,
+      systemPrompt,
+      userPrompt,
+      images,
+      maxOutputTokens,
+    });
+    const headers = this.apiKey ? { Authorization: `Bearer ${this.apiKey}` } : {};
+    const rawOutput = await postJson(this, appendHttpUrlPath(this.baseUrl, '/chat/completions'), body, headers);
+    return { rawOutput, text: extractChoiceMessageContent(rawOutput) };
+  }
+}
+
+// The OpenAI-compatible /chat/completions request shared by the generic
+// adapter, LM Studio, OpenRouter, and Venice for prose: no response_format,
+// a caller-supplied token budget, and the provider's default temperature.
 function chatCompletionsProseBody({ model, systemPrompt, userPrompt, images, maxOutputTokens }) {
   return {
     model,
@@ -784,15 +885,14 @@ function nodePostJson(provider, url, headers, payload) {
   return new Promise((resolve, reject) => {
     const target = new URL(url);
     const makeRequest = target.protocol === 'https:' ? httpsRequest : httpRequest;
-    // LM Studio's OpenAI-compatible surface can also reach lightweight local
-    // servers such as llama.cpp, some of which close a completed keep-alive
-    // connection just as the stricter validation retry
-    // begins, so Node's global Agent can reuse a socket that is already being
-    // torn down and report ECONNRESET / "socket hang up". A model generation
-    // takes orders of magnitude longer than a TCP handshake; isolate these
+    // Lightweight OpenAI-compatible servers can close a completed keep-alive
+    // connection just as the stricter validation retry begins, so Node's
+    // global Agent can reuse a socket that is already being torn down and
+    // report ECONNRESET / "socket hang up". A model generation takes orders
+    // of magnitude longer than a TCP handshake; adapters opt into isolated
     // requests instead of retrying a POST that may already have consumed
     // inference work upstream.
-    const isolateConnection = provider.providerName === 'local_lmstudio';
+    const isolateConnection = provider.isolateConnection === true;
     const chunks = [];
     const fail = (reason, { timeout = false } = {}) => reject(
       new ProviderRequestError(
@@ -985,11 +1085,10 @@ export function extractSchemaConstrainedChoiceContent(response) {
   if (typeof content === 'string' && content.trim()) {
     return content;
   }
-  // Some thinking-capable models in LM Studio route the entire
-  // grammar-constrained JSON answer into reasoning_content while leaving
-  // content empty. This extractor is used only for strict-schema requests;
-  // prose continues to read content alone so genuine reasoning is never
-  // displayed or spoken.
+  // Some thinking-capable models behind OpenAI-compatible endpoints route the
+  // requested JSON answer into reasoning_content while leaving content empty.
+  // This extractor is used only for machine-readable requests; prose continues
+  // to read content alone so genuine reasoning is never displayed or spoken.
   const reasoningContent = response?.choices?.[0]?.message?.reasoning_content;
   if (typeof reasoningContent === 'string' && reasoningContent.trim()) {
     return reasoningContent;

@@ -39,6 +39,9 @@ const INERT_PROVIDER_ENV = Object.freeze({
   LMSTUDIO_API_KEY: '',
   LMSTUDIO_MODEL: '',
   LMSTUDIO_BASE_URL: 'http://127.0.0.1:9/v1',
+  OPENAI_COMPATIBLE_API_KEY: '',
+  OPENAI_COMPATIBLE_MODEL: '',
+  OPENAI_COMPATIBLE_BASE_URL: 'http://127.0.0.1:9/v1',
   OLLAMA_LOCAL_API_KEY: '',
   OLLAMA_LOCAL_MODEL: '',
   OLLAMA_LOCAL_BASE_URL: 'http://127.0.0.1:9',
@@ -312,6 +315,15 @@ test('HTTP children ignore inherited provider configuration but allow explicit l
         LMSTUDIO_API_KEY: 'inherited-lm-studio-key',
         LMSTUDIO_MODEL: 'inherited-lm-studio-model',
         LMSTUDIO_BASE_URL: 'http://127.0.0.1:9/v1',
+      },
+    },
+    {
+      name: 'OpenAI-compatible',
+      provider: 'openai_compatible',
+      env: {
+        OPENAI_COMPATIBLE_API_KEY: 'inherited-compatible-key',
+        OPENAI_COMPATIBLE_MODEL: 'inherited-compatible-model',
+        OPENAI_COMPATIBLE_BASE_URL: 'http://127.0.0.1:9/v1',
       },
     },
   ];

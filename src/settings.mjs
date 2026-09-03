@@ -85,7 +85,7 @@ const ENRICH_FIELDS = {
     label: 'Selected provider',
     // Enum order is dropdown order: local options first, then cloud,
     // alphabetical within each group.
-    enum: ['local_lmstudio', 'local_ollama', 'cloud_ollama', 'cloud_openai', 'openrouter', 'venice'],
+    enum: ['local_lmstudio', 'local_ollama', 'openai_compatible', 'cloud_ollama', 'cloud_openai', 'openrouter', 'venice'],
     read: (config) => config.defaultProvider,
     apply: (config, value) => {
       config.defaultProvider = value;
@@ -123,6 +123,32 @@ const ENRICH_FIELDS = {
     read: (config) => config.providers.local_lmstudio.modelName,
     apply: (config, value) => {
       config.providers.local_lmstudio.modelName = value;
+    },
+  },
+  openAiCompatibleBaseUrl: {
+    env: 'OPENAI_COMPATIBLE_BASE_URL',
+    label: 'OpenAI-compatible base URL',
+    normalize: normalizeHttpSettingUrl,
+    read: (config) => config.providers.openai_compatible.baseUrl,
+    apply: (config, value) => {
+      config.providers.openai_compatible.baseUrl = normalizeHttpSettingUrl(value);
+    },
+  },
+  openAiCompatibleApiKey: {
+    env: 'OPENAI_COMPATIBLE_API_KEY',
+    label: 'OpenAI-compatible API key',
+    secret: true,
+    read: (config) => config.providers.openai_compatible.apiKey,
+    apply: (config, value) => {
+      config.providers.openai_compatible.apiKey = value;
+    },
+  },
+  openAiCompatibleModel: {
+    env: 'OPENAI_COMPATIBLE_MODEL',
+    label: 'OpenAI-compatible model',
+    read: (config) => config.providers.openai_compatible.modelName,
+    apply: (config, value) => {
+      config.providers.openai_compatible.modelName = value;
     },
   },
   ollamaLocalBaseUrl: {
@@ -302,7 +328,7 @@ const VOICE_FIELDS = {
   proseProvider: {
     env: 'VOICE_PROSE_PROVIDER',
     label: 'Voice answer provider',
-    enum: ['cloud_openai', 'local_lmstudio', 'local_ollama', 'cloud_ollama', 'openrouter', 'venice'],
+    enum: ['cloud_openai', 'local_lmstudio', 'local_ollama', 'openai_compatible', 'cloud_ollama', 'openrouter', 'venice'],
   },
   interestingModel: { env: 'VOICE_INTERESTING_MODEL', label: 'Interesting model' },
   askModel: { env: 'VOICE_ASK_MODEL', label: 'Ask model' },
@@ -455,7 +481,7 @@ const CURATE_FIELDS = {
   refereeProvider: {
     env: 'CURATE_REFEREE_PROVIDER',
     label: 'Referee provider',
-    enum: ['', 'local_lmstudio', 'local_ollama', 'cloud_ollama', 'cloud_openai', 'openrouter', 'venice'],
+    enum: ['', 'local_lmstudio', 'local_ollama', 'openai_compatible', 'cloud_ollama', 'cloud_openai', 'openrouter', 'venice'],
     read: (config) => config.curateRefereeProvider,
     apply: (config, value) => {
       config.curateRefereeProvider = value;
@@ -508,7 +534,7 @@ const SECTIONS = {
 
 const PROTOTYPE_SPECIAL_KEYS = new Set(['__proto__', 'prototype', 'constructor']);
 
-export const SETTINGS_VERSION = 3;
+export const SETTINGS_VERSION = 4;
 
 // Only credentials whose destination authority can vary belong here. Fixed
 // public APIs (OpenAI, ElevenLabs, Geoapify) do not need a stored binding.
@@ -529,6 +555,19 @@ const SAVED_CREDENTIAL_BINDINGS = [
     name: 'OpenRouter API key',
     envUrl: 'OPENROUTER_BASE_URL',
     authority: (store) => httpAuthority(store.config.providers.openrouter.baseUrl),
+  },
+  {
+    id: 'enrich.openAiCompatibleApiKey',
+    section: 'enrich',
+    key: 'openAiCompatibleApiKey',
+    name: 'OpenAI-compatible API key',
+    envUrl: 'OPENAI_COMPATIBLE_BASE_URL',
+    authority: (store, staged) => effectiveSettingsAuthority(
+      store,
+      staged,
+      'enrich',
+      'openAiCompatibleBaseUrl',
+    ),
   },
   {
     id: 'enrich.ollamaApiKey',
@@ -595,6 +634,11 @@ const SETTINGS_MIGRATIONS = new Map([
     // this migration boot; ambiguous legacy values remain quarantined.
     migrated.credentialBindings = {};
     migrated.version = 3;
+    return migrated;
+  }],
+  [3, (state) => {
+    const migrated = structuredClone(state);
+    migrated.version = 4;
     return migrated;
   }],
 ]);
@@ -889,6 +933,12 @@ export class SettingsStore {
         envKey: 'OLLAMA_LOCAL_API_KEY',
         envUrl: 'OLLAMA_LOCAL_BASE_URL',
         urlKey: 'ollamaLocalBaseUrl',
+      },
+      {
+        name: 'OpenAI-compatible provider',
+        envKey: 'OPENAI_COMPATIBLE_API_KEY',
+        envUrl: 'OPENAI_COMPATIBLE_BASE_URL',
+        urlKey: 'openAiCompatibleBaseUrl',
       },
     ]) {
       if (!this.env[provider.envKey]) {

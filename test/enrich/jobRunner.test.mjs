@@ -45,6 +45,26 @@ function makeRepo({ alreadyEnriched = true } = {}) {
   };
 }
 
+test('OpenAI-compatible is available only when its URL and model are configured', () => {
+  const config = makeConfig();
+  config.providers.openai_compatible = {
+    baseUrl: 'http://llama.local:8080/v1',
+    modelName: 'qwen-vision',
+    apiKey: '',
+  };
+  const runner = new EnrichJobRunner({ repo: makeRepo(), immich: {}, taxonomy, config });
+  assert.equal(
+    runner.status().available.find((provider) => provider.name === 'openai_compatible').configured,
+    true,
+  );
+
+  config.providers.openai_compatible.modelName = '';
+  assert.equal(
+    runner.status().available.find((provider) => provider.name === 'openai_compatible').configured,
+    false,
+  );
+});
+
 async function finished(runner) {
   for (let i = 0; i < 200 && runner.isRunning(); i += 1) {
     await new Promise((resolve) => setTimeout(resolve, 10));

@@ -71,10 +71,11 @@ const LOCAL_RETRY_SUFFIX =
 
 export async function analyzeWithValidationRetry(provider, image, { systemPrompt, userPrompt, jsonSchema, taxonomy, log = () => {} }) {
   const prompts = [userPrompt];
-  // Every local provider (local_*), not one runtime by name: smaller local
-  // models earn one retry with stricter instructions before a validation
-  // failure is recorded.
-  if (provider.providerName?.startsWith('local_')) {
+  // Every local provider (local_*), plus generic endpoints that explicitly
+  // opt in, earns one retry with stricter instructions before a validation
+  // failure is recorded. The generic endpoint may be remote, but its primary
+  // use is small operator-hosted servers such as llama.cpp.
+  if (provider.providerName?.startsWith('local_') || provider.retryValidationOnce === true) {
     prompts.push(`${userPrompt}${LOCAL_RETRY_SUFFIX}`);
   }
 
