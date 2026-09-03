@@ -12,6 +12,9 @@ All notable changes to Pictaria Server are documented here. This project follows
   chat-completions servers using a configurable base URL, model, and optional
   bearer key. It uses portable JSON-object output and keeps Pictaria's full
   local response validation.
+- Curate decision confirmations now offer a five-second **Undo (Z)** action
+  for individual photos and whole Stacks, returning the most recently decided
+  photos to the queue without interrupting the review flow.
 
 ### Changed
 

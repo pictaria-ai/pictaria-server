@@ -564,6 +564,13 @@ Human decisions always win for display eligibility; buckets only organize the
 queue. Decisions are recorded locally first (source of truth), then pushed to
 Immich by the sync worker.
 
+After a single-photo or Stack decision, the confirmation at the bottom of
+Curate offers **Undo (Z)** for five seconds. The decision still applies and
+the queue advances immediately; selecting Undo, or pressing `Z`, clears that
+most recent decision and returns the affected photo or whole Stack to the
+queue. A newer decision replaces the pending Undo. The multi-select bulk bar
+keeps its existing deliberate recovery path through the Decided tab.
+
 ### Stacks and the AI referee
 
 Photos of the **same moment** are grouped by three signals: capture time
