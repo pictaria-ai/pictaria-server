@@ -706,6 +706,256 @@ test('admin UI smoke: gate, Insights lens, Curate, Smart Albums', { timeout: 120
     assert.equal(await page.evaluate('document.getElementById("metaEnrich").hidden'), true);
   });
 
+  await t.test('Curate offers one transient Undo for single photos and whole Stacks', async () => {
+    await page.navigate(`${server.base}/curate.html`);
+    await page.waitFor(
+      `document.querySelector('[data-asset-id="${REVIEW_ASSET_IDS[0]}"]') && !document.querySelector(".gate-backdrop")`,
+      { label: 'curate ready for undo' },
+    );
+    const baseline = Number(await page.evaluate('document.querySelector(".p-tab.active .count").textContent'));
+    const yesButton = (assetId) =>
+      `[...document.querySelectorAll('[data-asset-id="${assetId}"] .card-actions button')].find((button) => button.textContent === "Yes")`;
+
+    // Hold the first request while the second finishes: even when rapid
+    // decisions complete out of order, the newest click owns the one Undo.
+    await page.evaluate(`(() => {
+      const realFetch = window.fetch;
+      window.__firstDecisionHeld = false;
+      window.fetch = (input, init) => {
+        const body = init?.body ? JSON.parse(init.body) : null;
+        if (
+          String(input).includes('/api/review/decision')
+          && body?.action === 'approve'
+          && body?.asset_ids?.[0] === ${JSON.stringify(REVIEW_ASSET_IDS[0])}
+        ) {
+          window.__firstDecisionHeld = true;
+          return new Promise((resolve, reject) => {
+            window.__releaseFirstDecision = () => {
+              window.fetch = realFetch;
+              realFetch(input, init).then(resolve, reject);
+            };
+          });
+        }
+        return realFetch(input, init);
+      };
+    })()`);
+    await page.evaluate(`${yesButton(REVIEW_ASSET_IDS[0])}.click()`);
+    await page.waitFor(
+      'window.__firstDecisionHeld',
+      { label: 'first decision held in flight' },
+    );
+    await page.evaluate(`${yesButton(REVIEW_ASSET_IDS[1])}.click()`);
+    await page.waitFor(
+      `!document.querySelector('[data-asset-id="${REVIEW_ASSET_IDS[1]}"]') && !document.getElementById("toastUndo").hidden`,
+      { label: 'second decision replaces pending undo' },
+    );
+    await page.evaluate('window.__releaseFirstDecision()');
+    await page.waitFor(
+      `!document.querySelector('[data-asset-id="${REVIEW_ASSET_IDS[0]}"]')`,
+      { label: 'older decision completes after newest' },
+    );
+    assert.equal(await page.evaluate('document.getElementById("toastUndo").textContent'), 'Undo (Z)');
+    const toastLayout = await page.evaluate(`(() => {
+      const message = document.getElementById('toastMessage').getBoundingClientRect();
+      const button = document.getElementById('toastUndo').getBoundingClientRect();
+      return {
+        centerDifference: Math.abs((message.top + message.height / 2) - (button.top + button.height / 2)),
+        pointerEvents: getComputedStyle(document.getElementById('toast')).pointerEvents,
+      };
+    })()`);
+    assert.ok(toastLayout.centerDifference < 1, 'Undo is vertically aligned with the confirmation');
+    assert.equal(toastLayout.pointerEvents, 'auto', 'Undo remains clickable');
+    await page.evaluate('document.dispatchEvent(new KeyboardEvent("keydown", { key: "z" }))');
+    await page.waitFor(
+      `document.querySelector('[data-asset-id="${REVIEW_ASSET_IDS[1]}"]') && document.getElementById("toastMessage").textContent === "Decision undone"`,
+      { label: 'Z restores newest photo' },
+    );
+    assert.equal(
+      await page.evaluate(`Boolean(document.querySelector('[data-asset-id="${REVIEW_ASSET_IDS[0]}"]'))`),
+      false,
+      'the superseded decision remains applied',
+    );
+    assert.equal(Number(await page.evaluate('document.querySelector(".p-tab.active .count").textContent')), baseline - 1);
+
+    // Restore the first photo directly so this subtest leaves the shared
+    // fixture unchanged for the remaining Curate flows.
+    await page.evaluate(`(async () => {
+      const response = await fetch('/api/review/decision', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ action: 'clear', asset_ids: [${JSON.stringify(REVIEW_ASSET_IDS[0])}] }),
+      });
+      if (!response.ok) throw new Error('test cleanup failed');
+      await loadAssetsFresh();
+    })()`);
+    await page.waitFor(
+      `document.querySelector('[data-asset-id="${REVIEW_ASSET_IDS[0]}"]') && document.querySelector(".p-tab.active .count").textContent === "${baseline}"`,
+      { label: 'single-photo test state restored' },
+    );
+
+    // Keep-best creates two different decisions under the hood (approve the
+    // star, review the rest); one Undo clears and restores the exact group.
+    const stack = await page.evaluate(`(() => {
+      const card = [...document.querySelectorAll('#grid .p-card.stack')]
+        .find((item) => [...item.querySelectorAll('button')].some((button) => button.textContent.startsWith('★ Keep')));
+      const ids = state.assets.filter((asset) => asset.burstId === card.dataset.burstId).map((asset) => asset.assetId);
+      return { burstId: card.dataset.burstId, ids };
+    })()`);
+    assert.equal(stack.ids.length, 2, 'seeded stack has two live photos');
+    await page.evaluate(`(() => {
+      const card = document.querySelector('[data-burst-id="${stack.burstId}"]');
+      [...card.querySelectorAll('button')].find((button) => button.textContent.startsWith('★ Keep')).click();
+    })()`);
+    await page.waitFor(
+      `${JSON.stringify(stack.ids)}.every((id) => !state.assets.some((asset) => asset.assetId === id)) && !document.getElementById("toastUndo").hidden`,
+      { label: 'stack decision offers one undo' },
+    );
+    await page.evaluate('document.getElementById("toastUndo").click()');
+    await page.waitFor(
+      `${JSON.stringify(stack.ids)}.every((id) => state.assets.some((asset) => asset.assetId === id)) && document.getElementById("toastMessage").textContent === "Decision undone"`,
+      { label: 'button restores whole stack' },
+    );
+    assert.equal(Number(await page.evaluate('document.querySelector(".p-tab.active .count").textContent')), baseline);
+  });
+
+  await t.test('Curate Undo preserves bucket counts under search and restores lightbox identity', async () => {
+    await page.navigate(`${server.base}/curate.html`);
+    await page.waitFor(
+      `document.querySelector('[data-asset-id="${REVIEW_ASSET_IDS[2]}"]') && !document.querySelector(".gate-backdrop")`,
+      { label: 'curate ready for filtered undo' },
+    );
+    const baseline = Number(await page.evaluate('document.querySelector(".p-tab.active .count").textContent'));
+
+    // The tab is the complete bucket count even while the grid total follows
+    // a search. Undo must adjust that tab relatively, not replace it with 1.
+    await page.evaluate(`(() => {
+      const search = document.getElementById('search');
+      search.value = 'review-3.jpg';
+      search.dispatchEvent(new Event('input', { bubbles: true }));
+    })()`);
+    await page.waitFor(
+      `state.total === 1 && document.querySelector('[data-asset-id="${REVIEW_ASSET_IDS[2]}"]')`,
+      { label: 'search narrows Curate to one photo' },
+    );
+    assert.equal(Number(await page.evaluate('document.querySelector(".p-tab.active .count").textContent')), baseline);
+    await page.evaluate(`
+      [...document.querySelectorAll('[data-asset-id="${REVIEW_ASSET_IDS[2]}"] .card-actions button')]
+        .find((button) => button.textContent === 'Yes').click()
+    `);
+    await page.waitFor(
+      `!document.querySelector('[data-asset-id="${REVIEW_ASSET_IDS[2]}"]') && !document.getElementById('toastUndo').hidden`,
+      { label: 'filtered decision offers undo' },
+    );
+    assert.equal(Number(await page.evaluate('document.querySelector(".p-tab.active .count").textContent')), baseline - 1);
+    await page.evaluate('document.getElementById("toastUndo").click()');
+    await page.waitFor(
+      `document.querySelector('[data-asset-id="${REVIEW_ASSET_IDS[2]}"]') && document.getElementById('toastMessage').textContent === 'Decision undone'`,
+      { label: 'filtered photo restored' },
+    );
+    assert.equal(Number(await page.evaluate('document.querySelector(".p-tab.active .count").textContent')), baseline);
+
+    await page.evaluate(`(() => {
+      const search = document.getElementById('search');
+      search.value = '';
+      search.dispatchEvent(new Event('input', { bubbles: true }));
+    })()`);
+    await page.waitFor(
+      `state.total === ${baseline} && document.querySelector('[data-asset-id="${REVIEW_ASSET_IDS[3]}"]')`,
+      { label: 'full Curate bucket restored' },
+    );
+
+    // A lightbox decision advances immediately. Undo must reopen the restored
+    // photo so the image, index, and next keyboard decision all agree.
+    await page.evaluate(`document.querySelector('[data-asset-id="${REVIEW_ASSET_IDS[3]}"] img').click()`);
+    await page.waitFor(
+      `document.getElementById('lbImage').src.includes('${REVIEW_ASSET_IDS[3]}')`,
+      { label: 'undo target opens in lightbox' },
+    );
+    await page.evaluate('document.querySelector(\'[data-lb="approve"]\').click()');
+    await page.waitFor(
+      `!document.getElementById('lbImage').src.includes('${REVIEW_ASSET_IDS[3]}') && !document.getElementById('toastUndo').hidden`,
+      { label: 'lightbox advances after decision' },
+    );
+    await page.evaluate('document.getElementById("toastUndo").click()');
+    await page.waitFor(
+      `document.getElementById('lbImage').src.includes('${REVIEW_ASSET_IDS[3]}') && state.assets[state.lightboxIndex]?.assetId === '${REVIEW_ASSET_IDS[3]}'`,
+      { label: 'lightbox image and state return to undone photo' },
+    );
+    await page.evaluate('document.getElementById("lbClose").click()');
+
+    // The next queue item can be a Stack, which replaces the standalone
+    // lightbox with compare. Undo must still rewind to the original single
+    // photo rather than strand the user in the auto-opened Stack.
+    await page.evaluate(`(() => {
+      const targetId = ${JSON.stringify(REVIEW_ASSET_IDS[4])};
+      const stackIds = new Set(${JSON.stringify([ARROW_A_ID, ARROW_B_ID])});
+      const target = state.assets.find((asset) => asset.assetId === targetId);
+      const stack = state.assets.filter((asset) => stackIds.has(asset.assetId));
+      if (!target || stack.length !== 2) throw new Error('single-to-Stack fixture missing');
+      const moved = new Set([targetId, ...stackIds]);
+      state.assets = [target, ...stack, ...state.assets.filter((asset) => !moved.has(asset.assetId))];
+      state.offset = state.assets.length;
+      renderGrid();
+      openLightbox(0);
+    })()`);
+    await page.evaluate('document.querySelector(\'[data-lb="approve"]\').click()');
+    await page.waitFor(
+      `document.getElementById('burstbox').classList.contains('open') && !document.getElementById('lightbox').classList.contains('open') && !document.getElementById('toastUndo').hidden`,
+      { label: 'lightbox advances into the next Stack' },
+    );
+    await page.evaluate('document.getElementById("toastUndo").click()');
+    await page.waitFor(
+      `!document.getElementById('burstbox').classList.contains('open') && document.getElementById('lightbox').classList.contains('open') && state.assets[state.lightboxIndex]?.assetId === '${REVIEW_ASSET_IDS[4]}'`,
+      { label: 'Undo leaves Stack and rewinds to original single photo' },
+    );
+    await page.evaluate('document.getElementById("lbClose").click()');
+    assert.equal(Number(await page.evaluate('document.querySelector(".p-tab.active .count").textContent')), baseline);
+  });
+
+  await t.test('Curate keeps a live Undo when its background append fails', async () => {
+    await page.navigate(`${server.base}/curate.html?limit=5`);
+    await page.waitFor(
+      'state.assets.length === 5 && !document.querySelector(".gate-backdrop")',
+      { label: 'short Curate page ready' },
+    );
+    const baseline = Number(await page.evaluate('document.querySelector(".p-tab.active .count").textContent'));
+    const targetId = await page.evaluate(`(() => {
+      const asset = state.assets.find((item) => document.querySelector('[data-asset-id="' + item.assetId + '"]'));
+      return asset.assetId;
+    })()`);
+
+    // The decision succeeds, but the low-water append it starts returns an
+    // ordinary load error. The error replaces the message, not the Undo.
+    await page.evaluate(`(() => {
+      const realFetch = window.fetch;
+      window.fetch = (input, init) => {
+        const url = new URL(typeof input === 'string' ? input : input.url, location.href);
+        if (url.pathname === '/api/review/assets' && Number(url.searchParams.get('offset')) > 0) {
+          window.fetch = realFetch;
+          return Promise.resolve(new Response(JSON.stringify({ error: { message: 'append blocked' } }), {
+            status: 500,
+            headers: { 'content-type': 'application/json' },
+          }));
+        }
+        return realFetch(input, init);
+      };
+    })()`);
+    await page.evaluate(`
+      [...document.querySelectorAll('[data-asset-id="${targetId}"] .card-actions button')]
+        .find((button) => button.textContent === 'Yes').click()
+    `);
+    await page.waitFor(
+      `document.getElementById('toastMessage').textContent === 'append blocked' && !document.getElementById('toastUndo').hidden`,
+      { label: 'append error retains undo action' },
+    );
+    await page.evaluate('document.getElementById("toastUndo").click()');
+    await page.waitFor(
+      `state.assets.some((asset) => asset.assetId === '${targetId}') && document.getElementById('toastMessage').textContent === 'Decision undone'`,
+      { label: 'undo survives append error' },
+    );
+    assert.equal(Number(await page.evaluate('document.querySelector(".p-tab.active .count").textContent')), baseline);
+  });
+
   await t.test('Curate lightbox contains long filenames and model names inside its sidebar', async () => {
     await page.navigate(`${server.base}/curate.html`);
     await page.waitFor(

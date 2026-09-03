@@ -360,6 +360,19 @@ body {
 }
 .p-toast.visible { opacity: 1; transform: translate(-50%, 0); }
 .p-toast.error { border-color: var(--p-danger); }
+.p-toast.undoable {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  pointer-events: auto;
+}
+.p-toast .toast-undo {
+  height: 26px;
+  padding: 0 9px;
+  color: var(--p-accent);
+  border-color: var(--p-accent-deep);
+  flex: none;
+}
 
 /* ---- Product / license footer ---- */
 .p-legal-footer {

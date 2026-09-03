@@ -25,6 +25,7 @@ const state = {
 // runs below it and the server has more, the next page appends by itself —
 // no "Load more" click, no lightbox dead-end mid-queue.
 const LOAD_AHEAD = 25;
+const UNDO_WINDOW_MS = 5000;
 
 // Page-size override for tests and power users: /curate.html?limit=5.
 {
@@ -103,7 +104,9 @@ async function doLoadAssets(append) {
     // Stacks/singles passes don't apply to the decided list.
     el('groupFilter').hidden = state.view === 'decided';
   } catch (error) {
-    toast(error.message, true);
+    // A low-water append can fail after the decision itself succeeded. Keep
+    // that decision's short Undo window alive while reporting the load error.
+    toast(error.message, true, { preserveUndo: true });
   } finally {
     state.loading = false;
     updateLoadMoreControls();
@@ -435,19 +438,58 @@ async function keepBest(asset) {
   const best = asset.burstBestAssetId;
   const rest = (asset.burstAssetIds ?? []).filter((id) => id !== best && live.has(id));
   if (!best || !live.has(best) || rest.length === 0) return;
+  const assetIds = [best, ...rest];
+  const decision = beginDecision(assetIds, true);
   try {
     await api('/api/review/decision', { method: 'POST', body: JSON.stringify({ action: 'approve', asset_ids: [best] }) });
     const payload = await api('/api/review/decision', { method: 'POST', body: JSON.stringify({ action: 'reviewed', asset_ids: rest }) });
-    removeDecided([best, ...rest]);
+    removeDecided(assetIds);
     renderSync(payload.sync);
-    toast(`kept ★, skipped ${rest.length}`);
+    showDecisionToast(`kept ★, skipped ${rest.length}`, decision);
   } catch (error) {
-    toast(error.message, true);
+    showDecisionError(error, decision);
   }
 }
 
 // ---------- Decisions ----------
-async function decide(action, assetIds) {
+let decisionGeneration = 0;
+
+function snapshotForUndo(assetIds, { returnToLightboxId = null } = {}) {
+  if (state.view === 'decided') return null;
+  const ids = [...new Set(assetIds)];
+  const wanted = new Set(ids);
+  const removed = state.assets.flatMap((asset, index) =>
+    wanted.has(asset.assetId) ? [{ asset, index }] : []);
+  if (removed.length !== ids.length) return null;
+  return {
+    assetIds: ids,
+    removed,
+    context: { view: state.view, q: state.q, group: state.group },
+    returnToLightboxId,
+  };
+}
+
+function beginDecision(assetIds, undoable, options = {}) {
+  const generation = ++decisionGeneration;
+  dismissToast();
+  return {
+    generation,
+    undo: undoable ? snapshotForUndo(assetIds, options) : null,
+  };
+}
+
+function showDecisionToast(message, decision) {
+  if (decision.generation !== decisionGeneration) return;
+  toast(message, false, decision.undo ? { undo: decision.undo, durationMs: UNDO_WINDOW_MS } : undefined);
+}
+
+function showDecisionError(error, decision) {
+  if (decision.generation !== decisionGeneration) return;
+  toast(error?.message || String(error), true);
+}
+
+async function decide(action, assetIds, { undoable = true, returnToLightboxId = null } = {}) {
+  const decision = beginDecision(assetIds, undoable, { returnToLightboxId });
   try {
     const payload = await api('/api/review/decision', { method: 'POST', body: JSON.stringify({ action, asset_ids: assetIds }) });
     if (state.view === 'decided') {
@@ -457,9 +499,80 @@ async function decide(action, assetIds) {
       removeDecided(assetIds);
     }
     renderSync(payload.sync);
-    toast(`${action}: ${assetIds.length} photo${assetIds.length === 1 ? '' : 's'}`);
+    showDecisionToast(`${action}: ${assetIds.length} photo${assetIds.length === 1 ? '' : 's'}`, decision);
   } catch (error) {
-    toast(error.message, true);
+    showDecisionError(error, decision);
+  }
+}
+
+function restoreUndecided(undo) {
+  for (const id of undo.assetIds) state.recentlyDecided.delete(id);
+  const sameContext = state.view === undo.context.view
+    && state.q === undo.context.q
+    && state.group === undo.context.group;
+  // If the user changed context or deliberately started another load while
+  // Undo was crossing the network, refresh from the authoritative list. The
+  // ordinary path below preserves the user's exact place in a long queue.
+  if (!sameContext || state.loading) return loadAssetsFresh();
+
+  const present = new Set(state.assets.map((asset) => asset.assetId));
+  let restored = 0;
+  for (const { asset, index } of undo.removed) {
+    if (present.has(asset.assetId)) continue;
+    state.assets.splice(Math.min(index, state.assets.length), 0, asset);
+    present.add(asset.assetId);
+    restored += 1;
+  }
+  state.total = Math.max(state.assets.length, state.total + restored);
+  state.offset = state.assets.length;
+  const active = tabs.querySelector('.p-tab.active .count');
+  // Tabs show the whole bucket while state.total follows the current search.
+  // Mirror removeDecided's relative adjustment instead of replacing the
+  // bucket count with a filtered result count.
+  if (active) active.textContent = String(Number(active.textContent) + restored);
+  renderGrid();
+  updateBulkbar();
+  // A standalone lightbox can advance directly into a Stack, which closes it
+  // and opens compare. Undo is a rewind: leave that auto-opened Stack and
+  // return to the exact photo where the decision began. Stack-wide decisions
+  // do not set this marker, so their Undo still restores the card in place.
+  if (undo.returnToLightboxId) {
+    if (state.compareBurstId) closeBurstbox();
+    const restoredIndex = state.assets.findIndex((asset) => asset.assetId === undo.returnToLightboxId);
+    if (restoredIndex !== -1) openLightbox(restoredIndex);
+  } else {
+    if (state.compareBurstId) renderBurstbox();
+    // A lightbox decision normally advances to the next row. Reinserting the
+    // undone photo before that row changes the meaning of lightboxIndex, so
+    // reopen the restored photo before another shortcut can act on the wrong
+    // asset.
+    const restoredId = state.lightboxIndex !== -1 ? undo.removed[0]?.asset.assetId : null;
+    const restoredIndex = state.assets.findIndex((asset) => asset.assetId === restoredId);
+    if (restoredIndex !== -1) openLightbox(restoredIndex);
+  }
+  updateLoadMoreControls();
+  return Promise.resolve();
+}
+
+async function undoLastDecision() {
+  const undo = pendingUndo;
+  if (!undo) return;
+  const generation = ++decisionGeneration;
+  showUndoingToast();
+  try {
+    // removeDecided can start a low-water append. Let any request made while
+    // the decision was still applied settle before clearing it, so a stale
+    // count cannot overwrite the restored queue moments later.
+    while (state.loading) await state.loadingPromise;
+    const payload = await api('/api/review/decision', {
+      method: 'POST',
+      body: JSON.stringify({ action: 'clear', asset_ids: undo.assetIds }),
+    });
+    await restoreUndecided(undo);
+    renderSync(payload.sync);
+    if (generation === decisionGeneration) toast('Decision undone');
+  } catch (error) {
+    if (generation === decisionGeneration) toast(`Couldn’t undo: ${error?.message || String(error)}`, true);
   }
 }
 
@@ -582,7 +695,11 @@ function lightboxDecide(action) {
   // lbBurst scoping note in openLightbox).
   const ids = el('lbBurstApply').checked && asset.burstAssetIds ? undecidedStackIds(asset) : [asset.assetId];
   const nextIndex = state.lightboxIndex; // list shrinks; same index = next photo
-  decide(action, ids).then(() => {
+  // Only a one-photo decision from the standalone lightbox rewinds here.
+  // Zoomed Stack members return to compare, while apply-to-all remains a
+  // Stack-wide action whose Undo restores the Stack card without reopening it.
+  const returnToLightboxId = !state.compareBurstId && ids.length === 1 ? asset.assetId : null;
+  decide(action, ids, { returnToLightboxId }).then(() => {
     if (state.view === 'decided') return;
     if (state.compareBurstId) closeLightbox(); // zoomed from compare: back to it
     else advanceLightbox(nextIndex);
@@ -1013,9 +1130,10 @@ function renderSync(sync) {
   }
 }
 
-function loadAssetsFresh() {
+async function loadAssetsFresh() {
+  while (state.loading) await state.loadingPromise;
   state.offset = 0;
-  loadAssets(false);
+  return loadAssets(false);
 }
 
 // ---------- Wiring ----------
@@ -1045,7 +1163,7 @@ el('selectVisible').addEventListener('change', () => {
   updateBulkbar();
 });
 document.querySelectorAll('[data-bulk]').forEach((button) => {
-  button.addEventListener('click', () => decide(button.dataset.bulk, [...state.selected]));
+  button.addEventListener('click', () => decide(button.dataset.bulk, [...state.selected], { undoable: false }));
 });
 function setConnected(connected) {
   el('connStatus').hidden = !connected;
@@ -1072,7 +1190,15 @@ el('burstbox').addEventListener('click', (event) => {
 });
 
 document.addEventListener('keydown', (event) => {
-  if (event.target.tagName === 'INPUT') return;
+  if (event.target.closest?.('input, textarea, select, [contenteditable="true"]')) return;
+  if (
+    event.key.toLowerCase() === 'z' && pendingUndo
+    && !event.metaKey && !event.ctrlKey && !event.altKey
+  ) {
+    event.preventDefault();
+    undoLastDecision();
+    return;
+  }
   if (event.key === 'Escape') {
     // Innermost layer first: lightbox above compare view above the grid.
     if (state.lightboxIndex !== -1) closeLightbox();
@@ -1100,13 +1226,59 @@ document.addEventListener('keydown', (event) => {
 });
 
 let toastTimer = null;
-function toast(message, isError = false) {
-  const node = el('toast');
-  node.textContent = message;
-  node.className = `p-toast visible ${isError ? 'error' : ''}`;
+let toastGeneration = 0;
+let pendingUndo = null;
+let pendingUndoUntil = 0;
+
+function dismissToast() {
+  toastGeneration += 1;
   clearTimeout(toastTimer);
-  toastTimer = setTimeout(() => node.classList.remove('visible'), 2400);
+  const node = el('toast');
+  node.classList.remove('visible', 'undoable', 'error');
+  el('toastUndo').hidden = true;
+  el('toastUndo').disabled = false;
+  pendingUndo = null;
+  pendingUndoUntil = 0;
 }
+
+function showUndoingToast() {
+  toastGeneration += 1;
+  clearTimeout(toastTimer);
+  pendingUndo = null;
+  pendingUndoUntil = 0;
+  el('toastMessage').textContent = 'Undoing…';
+  el('toastUndo').hidden = true;
+  el('toast').className = 'p-toast visible';
+}
+
+function toast(message, isError = false, { undo = null, durationMs = 2400, preserveUndo = false } = {}) {
+  const now = Date.now();
+  const retainedUndo = preserveUndo && pendingUndoUntil > now ? pendingUndo : null;
+  const nextUndo = undo ?? retainedUndo;
+  const nextDurationMs = retainedUndo && !undo
+    ? Math.max(1, pendingUndoUntil - now)
+    : durationMs;
+  const generation = ++toastGeneration;
+  const node = el('toast');
+  el('toastMessage').textContent = message;
+  const undoButton = el('toastUndo');
+  undoButton.hidden = !nextUndo;
+  undoButton.disabled = false;
+  pendingUndo = nextUndo;
+  pendingUndoUntil = nextUndo ? now + nextDurationMs : 0;
+  node.className = `p-toast visible ${isError ? 'error' : ''}`;
+  node.classList.toggle('undoable', Boolean(nextUndo));
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => {
+    if (generation !== toastGeneration) return;
+    node.classList.remove('visible', 'undoable');
+    undoButton.hidden = true;
+    pendingUndo = null;
+    pendingUndoUntil = 0;
+  }, nextDurationMs);
+}
+
+el('toastUndo').addEventListener('click', undoLastDecision);
 
 function escapeHtml(value) {
   return String(value ?? '').replace(/[&<>"']/g, (ch) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[ch]));
