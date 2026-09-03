@@ -882,6 +882,34 @@ test('admin UI smoke: gate, Insights lens, Curate, Smart Albums', { timeout: 120
       { label: 'lightbox image and state return to undone photo' },
     );
     await page.evaluate('document.getElementById("lbClose").click()');
+
+    // The next queue item can be a Stack, which replaces the standalone
+    // lightbox with compare. Undo must still rewind to the original single
+    // photo rather than strand the user in the auto-opened Stack.
+    await page.evaluate(`(() => {
+      const targetId = ${JSON.stringify(REVIEW_ASSET_IDS[4])};
+      const stackIds = new Set(${JSON.stringify([ARROW_A_ID, ARROW_B_ID])});
+      const target = state.assets.find((asset) => asset.assetId === targetId);
+      const stack = state.assets.filter((asset) => stackIds.has(asset.assetId));
+      if (!target || stack.length !== 2) throw new Error('single-to-Stack fixture missing');
+      const moved = new Set([targetId, ...stackIds]);
+      state.assets = [target, ...stack, ...state.assets.filter((asset) => !moved.has(asset.assetId))];
+      state.offset = state.assets.length;
+      renderGrid();
+      openLightbox(0);
+    })()`);
+    await page.evaluate('document.querySelector(\'[data-lb="approve"]\').click()');
+    await page.waitFor(
+      `document.getElementById('burstbox').classList.contains('open') && !document.getElementById('lightbox').classList.contains('open') && !document.getElementById('toastUndo').hidden`,
+      { label: 'lightbox advances into the next Stack' },
+    );
+    await page.evaluate('document.getElementById("toastUndo").click()');
+    await page.waitFor(
+      `!document.getElementById('burstbox').classList.contains('open') && document.getElementById('lightbox').classList.contains('open') && state.assets[state.lightboxIndex]?.assetId === '${REVIEW_ASSET_IDS[4]}'`,
+      { label: 'Undo leaves Stack and rewinds to original single photo' },
+    );
+    await page.evaluate('document.getElementById("lbClose").click()');
+    assert.equal(Number(await page.evaluate('document.querySelector(".p-tab.active .count").textContent')), baseline);
   });
 
   await t.test('Curate keeps a live Undo when its background append fails', async () => {

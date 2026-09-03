@@ -454,7 +454,7 @@ async function keepBest(asset) {
 // ---------- Decisions ----------
 let decisionGeneration = 0;
 
-function snapshotForUndo(assetIds) {
+function snapshotForUndo(assetIds, { returnToLightboxId = null } = {}) {
   if (state.view === 'decided') return null;
   const ids = [...new Set(assetIds)];
   const wanted = new Set(ids);
@@ -465,15 +465,16 @@ function snapshotForUndo(assetIds) {
     assetIds: ids,
     removed,
     context: { view: state.view, q: state.q, group: state.group },
+    returnToLightboxId,
   };
 }
 
-function beginDecision(assetIds, undoable) {
+function beginDecision(assetIds, undoable, options = {}) {
   const generation = ++decisionGeneration;
   dismissToast();
   return {
     generation,
-    undo: undoable ? snapshotForUndo(assetIds) : null,
+    undo: undoable ? snapshotForUndo(assetIds, options) : null,
   };
 }
 
@@ -487,8 +488,8 @@ function showDecisionError(error, decision) {
   toast(error?.message || String(error), true);
 }
 
-async function decide(action, assetIds, { undoable = true } = {}) {
-  const decision = beginDecision(assetIds, undoable);
+async function decide(action, assetIds, { undoable = true, returnToLightboxId = null } = {}) {
+  const decision = beginDecision(assetIds, undoable, { returnToLightboxId });
   try {
     const payload = await api('/api/review/decision', { method: 'POST', body: JSON.stringify({ action, asset_ids: assetIds }) });
     if (state.view === 'decided') {
@@ -531,12 +532,21 @@ function restoreUndecided(undo) {
   if (active) active.textContent = String(Number(active.textContent) + restored);
   renderGrid();
   updateBulkbar();
-  if (state.compareBurstId) renderBurstbox();
-  // A lightbox decision advances to the next row. Reinserting the undone
-  // photo before that row changes the meaning of lightboxIndex, so reopen the
-  // restored photo before another shortcut can act on the wrong asset.
-  if (state.lightboxIndex !== -1) {
-    const restoredId = undo.removed[0]?.asset.assetId;
+  // A standalone lightbox can advance directly into a Stack, which closes it
+  // and opens compare. Undo is a rewind: leave that auto-opened Stack and
+  // return to the exact photo where the decision began. Stack-wide decisions
+  // do not set this marker, so their Undo still restores the card in place.
+  if (undo.returnToLightboxId) {
+    if (state.compareBurstId) closeBurstbox();
+    const restoredIndex = state.assets.findIndex((asset) => asset.assetId === undo.returnToLightboxId);
+    if (restoredIndex !== -1) openLightbox(restoredIndex);
+  } else {
+    if (state.compareBurstId) renderBurstbox();
+    // A lightbox decision normally advances to the next row. Reinserting the
+    // undone photo before that row changes the meaning of lightboxIndex, so
+    // reopen the restored photo before another shortcut can act on the wrong
+    // asset.
+    const restoredId = state.lightboxIndex !== -1 ? undo.removed[0]?.asset.assetId : null;
     const restoredIndex = state.assets.findIndex((asset) => asset.assetId === restoredId);
     if (restoredIndex !== -1) openLightbox(restoredIndex);
   }
@@ -685,7 +695,11 @@ function lightboxDecide(action) {
   // lbBurst scoping note in openLightbox).
   const ids = el('lbBurstApply').checked && asset.burstAssetIds ? undecidedStackIds(asset) : [asset.assetId];
   const nextIndex = state.lightboxIndex; // list shrinks; same index = next photo
-  decide(action, ids).then(() => {
+  // Only a one-photo decision from the standalone lightbox rewinds here.
+  // Zoomed Stack members return to compare, while apply-to-all remains a
+  // Stack-wide action whose Undo restores the Stack card without reopening it.
+  const returnToLightboxId = !state.compareBurstId && ids.length === 1 ? asset.assetId : null;
+  decide(action, ids, { returnToLightboxId }).then(() => {
     if (state.view === 'decided') return;
     if (state.compareBurstId) closeLightbox(); // zoomed from compare: back to it
     else advanceLightbox(nextIndex);
