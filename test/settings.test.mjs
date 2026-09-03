@@ -22,6 +22,7 @@ function makeConfig() {
     immichApiKey: 'env-immich-key',
     defaultProvider: 'cloud_openai',
     imageSource: 'preview',
+    inferenceHostLabel: '',
     curateBurstGrouping: true,
     curateRefereeEnabled: false,
     curateRefereeProvider: '',
@@ -203,7 +204,7 @@ test('an existing settings file is loaded without being rewritten or gaining a s
   const dir = mkdtempSync(join(tmpdir(), 'pictaria-settings-'));
   try {
     const path = join(dir, 'settings.json');
-    const original = '{"version":4,"credentialBindings":{},"voice":{"openAiTtsVoice":"ash"}}\n';
+    const original = '{"version":5,"credentialBindings":{},"voice":{"openAiTtsVoice":"ash"}}\n';
     writeFileSync(path, original, { mode: 0o600 });
 
     const config = makeConfig();
@@ -519,6 +520,19 @@ test('enrichment provider fields write through to config.providers', () => {
     assert.equal(config.providers.local_ollama.baseUrl, 'https://ollama.example/api');
     assert.equal(readFileSync(join(dir, 'settings.json'), 'utf8'), persistedBeforeRejection);
   });
+});
+
+test('inference host labels persist as bounded operator-authored run context', () => {
+  withStore((store, config, dir) => {
+    store.update({ enrich: { inferenceHostLabel: '  M4 Mac mini · LM Studio  ' } });
+    assert.equal(config.inferenceHostLabel, 'M4 Mac mini · LM Studio');
+    assert.equal(JSON.parse(readFileSync(join(dir, 'settings.json'), 'utf8')).enrich.inferenceHostLabel,
+      'M4 Mac mini · LM Studio');
+    assert.throws(
+      () => store.update({ enrich: { inferenceHostLabel: 'x'.repeat(121) } }),
+      /inferenceHostLabel is too long/,
+    );
+  }, { INFERENCE_HOST_LABEL: 'Environment host' });
 });
 
 test('environment-backed local-provider keys stay bound to their authorities', () => {
@@ -1198,7 +1212,7 @@ test('the version 1 fixture migrates deterministically without mutating its inpu
   assert.equal(first.state.voice.openAiAskModel, 'gpt-4o-mini');
 });
 
-test('version 3 settings migrate to version 4 without inventing provider configuration', () => {
+test('version 3 settings migrate through version 5 without inventing provider configuration', () => {
   const migrated = migrateSettingsState({
     version: 3,
     credentialBindings: {},
@@ -1206,10 +1220,23 @@ test('version 3 settings migrate to version 4 without inventing provider configu
   });
 
   assert.equal(migrated.from, 3);
-  assert.equal(migrated.to, 4);
+  assert.equal(migrated.to, 5);
   assert.equal(migrated.migrated, true);
   assert.equal(migrated.state.enrich.defaultProvider, 'local_lmstudio');
   assert.equal(Object.hasOwn(migrated.state.enrich, 'openAiCompatibleBaseUrl'), false);
+});
+
+test('version 4 settings migrate to version 5 without inventing an inference host label', () => {
+  const migrated = migrateSettingsState({
+    version: 4,
+    credentialBindings: {},
+    enrich: { defaultProvider: 'local_lmstudio' },
+  });
+
+  assert.equal(migrated.from, 4);
+  assert.equal(migrated.to, 5);
+  assert.equal(migrated.migrated, true);
+  assert.equal(Object.hasOwn(migrated.state.enrich, 'inferenceHostLabel'), false);
 });
 
 test('a migrated settings document survives another save and restart', () => {
@@ -1254,8 +1281,8 @@ test('unknown same-version fields fail with downgrade-safe guidance', () => {
   );
 });
 
-test('the persisted settings contract matches the frozen version 4 snapshot', () => {
-  const expected = JSON.parse(readFileSync(new URL('./fixtures/upgrades/settings-contract-v4.json', import.meta.url), 'utf8'));
+test('the persisted settings contract matches the frozen version 5 snapshot', () => {
+  const expected = JSON.parse(readFileSync(new URL('./fixtures/upgrades/settings-contract-v5.json', import.meta.url), 'utf8'));
   assert.deepEqual(settingsContract(), expected);
 });
 

@@ -260,6 +260,21 @@ function seedEnrichment(dbPath) {
       startedAt: '2026-07-15T12:00:00.000Z',
       finishedAt: '2026-07-15T12:02:00.000Z',
     });
+    repo.recordJobRun({
+      title: 'Seeded successful run',
+      provider: 'local_lmstudio',
+      model: 'smoke-vision-model',
+      promptVersion: 'v1',
+      taxonomyVersion: 'v1',
+      inferenceHostLabel: 'Smoke inference host',
+      targeted: 12,
+      status: 'finished',
+      error: null,
+      counters: { analyzed: 12, succeeded: 12, failed: 0 },
+      log: ['12:03:00 successful seed run'],
+      startedAt: '2026-07-15T12:03:00.000Z',
+      finishedAt: '2026-07-15T12:05:00.000Z',
+    });
   } finally {
     repo.close();
   }
@@ -545,6 +560,13 @@ test('admin UI smoke: gate, Insights lens, Curate, Smart Albums', { timeout: 120
       'document.querySelector("#runsList .run-retry:not([disabled])")?.textContent === "Re-run 1 failed photo"',
       { label: 'historical failure retry action' },
     );
+    const runComparison = await page.evaluate(`(() => {
+      const card = [...document.querySelectorAll('#runsList .qitem')]
+        .find((item) => item.textContent.includes('Seeded successful run'));
+      return card?.textContent ?? '';
+    })()`);
+    assert.match(runComparison, /local_lmstudio · smoke-vision-model · host: Smoke inference host/);
+    assert.match(runComparison, /End-to-end: 6\.00 photos\/min · 10\.0 sec\/photo/);
     await page.evaluate(`
       window.__historyRetry = null;
       const realFetch = window.fetch.bind(window);

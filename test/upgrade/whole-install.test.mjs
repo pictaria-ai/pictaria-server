@@ -41,7 +41,7 @@ test('a complete legacy installation upgrades, restarts, backs up, and restores 
     const sourceConfig = fixtureConfig(sourceRoot);
 
     const first = await openInstallation(sourceConfig, 'initialize');
-    assert.deepEqual(first.enrichmentMigration.applied, [1, 2, 3, 4, 5, 6]);
+    assert.deepEqual(first.enrichmentMigration.applied, [1, 2, 3, 4, 5, 6, 7]);
     await assertRepresentativeState(first, sourceConfig);
 
     const migratedSettings = readFileSync(sourceConfig.settingsPath, 'utf8');

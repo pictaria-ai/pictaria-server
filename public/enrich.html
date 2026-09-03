@@ -230,6 +230,7 @@
 
     <details id="runsPanel" class="p-panel panel">
       <summary><span class="chev">&#9654;</span> Recent runs <span class="sub">— what ran, with which model and versions, and each run's log</span></summary>
+      <div class="provider-note" style="margin-top: 10px">End-to-end throughput uses successful photos only and covers Pictaria’s whole photo path: Immich download, image preparation, network, model response, and any retries. Skips do not count. It is useful for comparing your setups, but it is not pure model or token speed.</div>
       <div id="runsList" class="qlist queue" style="margin-top: 12px"></div>
     </details>
   </main>
@@ -1004,6 +1005,13 @@
 
     // --- run history ---
 
+    function fmtThroughput(value) {
+      if (!Number.isFinite(value) || value <= 0) return null;
+      return value >= 100 ? Math.round(value).toLocaleString()
+        : value >= 10 ? value.toFixed(1)
+          : value.toFixed(2);
+    }
+
     async function loadRuns() {
       let runs = [];
       try { runs = (await api('/api/enrich/runs')).runs ?? []; } catch { return; }
@@ -1028,8 +1036,13 @@
         title.title = run.title;
         const when = document.createElement('span');
         when.className = 'm';
-        const mins = run.startedAt && run.finishedAt ? Math.max(1, Math.round((new Date(run.finishedAt) - new Date(run.startedAt)) / 60000)) : null;
-        when.textContent = `${fmtWhen(run.startedAt)}${mins ? ` · ${mins}m` : ''}`;
+        const durationMs = run.startedAt && run.finishedAt
+          ? new Date(run.finishedAt) - new Date(run.startedAt)
+          : null;
+        const duration = Number.isFinite(durationMs) && durationMs > 0
+          ? durationMs < 60_000 ? `${Math.max(1, Math.round(durationMs / 1000))}s` : `${Math.round(durationMs / 60_000)}m`
+          : null;
+        when.textContent = `${fmtWhen(run.startedAt)}${duration ? ` · ${duration}` : ''}`;
         top.append(title, when);
         let retryBtn = null;
         if ((run.retryableFailures ?? 0) > 0) {
@@ -1050,9 +1063,9 @@
           top.append(logBtn);
         }
 
-        // The row answers "how did it go" — counters for every outcome, just
-        // the provider for context. Full model/version detail lives in the
-        // log popup.
+        // The row answers "how did it go" — counters for every outcome, plus
+        // the exact provider/model/optional host context needed to compare
+        // two end-to-end runs. Full version detail lives in the log popup.
         const c = run.counters;
         const counts = c ? [
           `${(c.succeeded ?? 0).toLocaleString()} ok`,
@@ -1065,12 +1078,23 @@
         detail.className = 'detail';
         detail.textContent = [
           run.provider,
+          run.model,
+          run.inferenceHostLabel ? `host: ${run.inferenceHostLabel}` : null,
           run.status === 'finished' ? null : run.status + (run.error ? `: ${String(run.error).slice(0, 80)}` : ''),
           counts,
         ].filter(Boolean).join(' · ');
         if (run.status === 'failed') detail.classList.add('bad');
 
         card.append(top, detail);
+        const photosPerMinute = fmtThroughput(run.throughput?.photosPerMinute);
+        const secondsPerPhoto = fmtThroughput(run.throughput?.secondsPerPhoto);
+        if (photosPerMinute && secondsPerPhoto) {
+          const throughput = document.createElement('div');
+          throughput.className = 'detail';
+          throughput.textContent = `End-to-end: ${photosPerMinute} photos/min · ${secondsPerPhoto} sec/photo`;
+          throughput.title = 'Whole-run wall clock: Immich download, image preparation, network, model response, and retries. This is not pure model or token speed.';
+          card.append(throughput);
+        }
         if (retryBtn) {
           const actions = document.createElement('div');
           actions.className = 'qline run-actions';
@@ -1123,6 +1147,7 @@
       el('logPopupMeta').textContent = [
         entry.provider,
         entry.model,
+        entry.inferenceHostLabel ? `host: ${entry.inferenceHostLabel}` : null,
         entry.taxonomyVersion ? `tax ${entry.taxonomyVersion}` : null,
         entry.promptVersion ? `prompt ${entry.promptVersion}` : null,
         entry.status,
@@ -1145,7 +1170,11 @@
       el('logPopupTitle').textContent = status?.title
         ? `${status.title}${status.running ? ' — running' : ''}`
         : 'Current session log';
-      el('logPopupMeta').textContent = [status?.provider, status?.model].filter(Boolean).join(' · ');
+      el('logPopupMeta').textContent = [
+        status?.provider,
+        status?.model,
+        status?.inferenceHostLabel ? `host: ${status.inferenceHostLabel}` : null,
+      ].filter(Boolean).join(' · ');
       renderLiveLog();
       el('logPopup').hidden = false;
       el('logPopupBody').scrollTop = el('logPopupBody').scrollHeight;

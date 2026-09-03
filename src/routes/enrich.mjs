@@ -696,6 +696,7 @@ export function createEnrichRoutes({ review, enrichRunner, taxonomy, repo, requi
             model: null,
             promptVersion: null,
             taxonomyVersion: null,
+            inferenceHostLabel: config.inferenceHostLabel,
             targeted: null,
             status: 'failed',
             error: message,

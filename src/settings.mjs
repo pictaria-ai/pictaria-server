@@ -100,6 +100,15 @@ const ENRICH_FIELDS = {
       config.imageSource = value;
     },
   },
+  inferenceHostLabel: {
+    env: 'INFERENCE_HOST_LABEL',
+    label: 'Inference host label',
+    maxLength: 120,
+    read: (config) => config.inferenceHostLabel,
+    apply: (config, value) => {
+      config.inferenceHostLabel = value;
+    },
+  },
   openAiModel: {
     env: 'OPENAI_MODEL',
     label: 'OpenAI model',
@@ -534,7 +543,7 @@ const SECTIONS = {
 
 const PROTOTYPE_SPECIAL_KEYS = new Set(['__proto__', 'prototype', 'constructor']);
 
-export const SETTINGS_VERSION = 4;
+export const SETTINGS_VERSION = 5;
 
 // Only credentials whose destination authority can vary belong here. Fixed
 // public APIs (OpenAI, ElevenLabs, Geoapify) do not need a stored binding.
@@ -639,6 +648,11 @@ const SETTINGS_MIGRATIONS = new Map([
   [3, (state) => {
     const migrated = structuredClone(state);
     migrated.version = 4;
+    return migrated;
+  }],
+  [4, (state) => {
+    const migrated = structuredClone(state);
+    migrated.version = 5;
     return migrated;
   }],
 ]);

@@ -129,6 +129,7 @@ CREATE TABLE IF NOT EXISTS job_runs (
   model TEXT,
   prompt_version TEXT,
   taxonomy_version TEXT,
+  inference_host_label TEXT,
   targeted INTEGER,
   status TEXT NOT NULL,
   error TEXT,

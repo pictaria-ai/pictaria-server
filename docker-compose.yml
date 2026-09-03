@@ -34,6 +34,7 @@ services:
       ENRICH_ENABLED: ${ENRICH_ENABLED:-false}
       CAPTION_WRITEBACK: ${CAPTION_WRITEBACK:-false}
       IMAGE_SOURCE: ${IMAGE_SOURCE:-preview}
+      INFERENCE_HOST_LABEL: ${INFERENCE_HOST_LABEL:-}
       MAX_FAILURES_PER_ASSET: ${MAX_FAILURES_PER_ASSET:-2}
       PROMPT_VERSION: ${PROMPT_VERSION:-v2}
       # Unlike ${VAR:-default}, ${VAR-default} preserves an explicitly blank

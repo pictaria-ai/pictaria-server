@@ -160,7 +160,7 @@ test('a pre-v3 database backfills latest_success from the latest succeeded runs'
     // Simulate a pre-v3 database, then re-init as an upgraded server would.
     repo.db.exec('DROP TABLE latest_success');
     repo.db.exec('PRAGMA user_version = 2');
-    assert.deepEqual(repo.initSchema().applied, [3, 4, 5, 6]);
+    assert.deepEqual(repo.initSchema().applied, [3, 4, 5, 6, 7]);
 
     const rows = repo.db.prepare('SELECT * FROM latest_success ORDER BY asset_id').all();
     assert.equal(rows.length, 1, 'only assets with a succeeded run are projected');

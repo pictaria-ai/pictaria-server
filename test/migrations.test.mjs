@@ -129,7 +129,7 @@ test('a fresh enrichment database is stamped and fully shaped', () => {
     const repo = new Repository(join(dir, 'enrichment.sqlite'));
     const result = repo.initSchema();
     assert.equal(result.fresh, true);
-    assert.equal(getUserVersion(repo.db), 6);
+    assert.equal(getUserVersion(repo.db), 7);
     for (const column of ['subject_group']) {
       const names = repo.db.prepare("SELECT name FROM pragma_table_info('referee_picks')").all().map((row) => row.name);
       assert.ok(names.includes(column));
@@ -178,8 +178,8 @@ test('a legacy enrichment database lands in the current shape via migration 1', 
     const repo = new Repository(path);
     const result = repo.initSchema();
     assert.equal(result.fresh, false);
-    assert.deepEqual(result.applied, [1, 2, 3, 4, 5, 6]);
-    assert.equal(getUserVersion(repo.db), 6);
+    assert.deepEqual(result.applied, [1, 2, 3, 4, 5, 6, 7]);
+    assert.equal(getUserVersion(repo.db), 7);
 
     // manual_overrides rebuilt append-only with data preserved.
     const overrideColumns = repo.db.prepare("SELECT name FROM pragma_table_info('manual_overrides')").all().map((row) => row.name);
@@ -189,6 +189,7 @@ test('a legacy enrichment database lands in the current shape via migration 1', 
     // Columns added to legacy tables.
     const jobRunColumns = repo.db.prepare("SELECT name FROM pragma_table_info('job_runs')").all().map((row) => row.name);
     assert.ok(jobRunColumns.includes('log_json'));
+    assert.ok(jobRunColumns.includes('inference_host_label'));
     const assetColumns = repo.db.prepare("SELECT name FROM pragma_table_info('assets')").all().map((row) => row.name);
     assert.ok(assetColumns.includes('thumbhash') && assetColumns.includes('duplicate_id'));
     assert.ok(assetColumns.includes('missing_since'));
@@ -226,7 +227,7 @@ test('provider-payload migration removes raw envelopes and superseded normalized
       .run(JSON.stringify({ caption: 'old', short_caption: 'old' }), rows[0].id);
     repo.db.exec('PRAGMA user_version = 5');
 
-    assert.deepEqual(repo.initSchema().applied, [6]);
+    assert.deepEqual(repo.initSchema().applied, [6, 7]);
     const migrated = repo.db.prepare(`
       SELECT raw_output_json, normalized_output_json
       FROM processing_runs ORDER BY id

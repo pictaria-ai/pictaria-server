@@ -74,11 +74,13 @@ async function finished(runner) {
 
 test('onFinished fires after a clean targeted run and history records it', async () => {
   const repo = makeRepo();
+  const config = makeConfig();
+  config.inferenceHostLabel = 'M4 Mac mini · LM Studio';
   const runner = new EnrichJobRunner({
     repo,
     immich: { getAsset: async (id) => ({ id, originalPath: `${id}.jpg` }) },
     taxonomy,
-    config: makeConfig(),
+    config,
   });
   let reopened = 0;
   runner.start({
@@ -88,6 +90,7 @@ test('onFinished fires after a clean targeted run and history records it', async
     reopenDecided: true,
     onFinished: () => { reopened += 1; },
   });
+  config.inferenceHostLabel = 'A different host';
   await finished(runner);
 
   assert.equal(reopened, 1);
@@ -95,6 +98,7 @@ test('onFinished fires after a clean targeted run and history records it', async
   assert.equal(repo.runs[0].status, 'finished');
   assert.equal(repo.runs[0].targeted, 2);
   assert.equal(repo.runs[0].promptVersion, 'v1');
+  assert.equal(repo.runs[0].inferenceHostLabel, 'M4 Mac mini · LM Studio');
   assert.equal(runner.status().options.reopenDecided, true);
   assert.ok(runner.status().log.some((line) => line.includes('back in the review queue')));
 });
@@ -271,7 +275,9 @@ test('needsWorkFilter resolves the run key start() would use and delegates to th
 
 test('recordCoveredResolution writes a zero-analysis history row with the resolved run key', () => {
   const repo = makeRepo();
-  const runner = new EnrichJobRunner({ repo, immich: {}, taxonomy, config: makeConfig() });
+  const config = makeConfig();
+  config.inferenceHostLabel = 'Home GPU';
+  const runner = new EnrichJobRunner({ repo, immich: {}, taxonomy, config });
 
   runner.recordCoveredResolution({ title: 'Paris', covered: 998, failureLimited: 2 });
 
@@ -283,6 +289,7 @@ test('recordCoveredResolution writes a zero-analysis history row with the resolv
   assert.equal(row.model, 'test-model');
   assert.equal(row.promptVersion, 'v1');
   assert.equal(row.taxonomyVersion, taxonomy.version);
+  assert.equal(row.inferenceHostLabel, 'Home GPU');
   assert.equal(row.targeted, 0);
   assert.equal(row.counters.analyzed, 0);
   assert.equal(row.counters.skippedSuccessful, 998);

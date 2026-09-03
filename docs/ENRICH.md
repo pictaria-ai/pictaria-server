@@ -436,7 +436,22 @@ The Enrich page lists recent runs: what ran (slice title or library sweep),
 when, provider + model, taxonomy + prompt versions, counters
 (analyzed / ok / failed), and outcome (finished / cancelled / failed). Model
 comparisons stay honest — you can always see which model and prompt produced
-a batch of tags. The failed counter includes infrastructure failures
+a batch of tags. Runs with at least one successful photo also show two
+end-to-end rates: successful photos per minute and average wall-clock seconds
+per successful photo. These cover the whole Pictaria path — Immich download,
+image preparation, network, model response, and retries — so they are useful
+for comparing your own setups but are not pure inference or token speed.
+Already-enriched skips are not counted as successes. Failed and cancelled runs
+retain their status alongside any rate earned by photos that did finish; a run
+with no successful photo shows no rate.
+
+Under **Settings → Enrich**, an optional **Inference host label** (for example,
+`M4 Mac mini · LM Studio`) can be saved with each new run. The label is text
+you supply: Pictaria does not inspect or infer remote hardware. Each run keeps
+the label that applied when it started, so changing it never rewrites earlier
+comparisons.
+
+The failed counter includes infrastructure failures
 (rate limits, timeouts, outages), which don't count against the photos and
 retry on the next run — see "When things go wrong" above for the split.
 
