@@ -104,6 +104,7 @@ const ENRICH_FIELDS = {
     env: 'INFERENCE_HOST_LABEL',
     label: 'Inference host label',
     maxLength: 120,
+    normalize: (value) => value.replace(/\s+/g, ' '),
     read: (config) => config.inferenceHostLabel,
     apply: (config, value) => {
       config.inferenceHostLabel = value;

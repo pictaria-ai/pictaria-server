@@ -101,7 +101,7 @@ export function loadConfig(env = process.env) {
     // Optional operator-authored context copied into each run summary. This
     // deliberately describes the inference host without probing hardware or
     // deriving identity from a provider URL.
-    inferenceHostLabel: String(env.INFERENCE_HOST_LABEL || '').trim().slice(0, 120),
+    inferenceHostLabel: String(env.INFERENCE_HOST_LABEL || '').trim().replace(/\s+/g, ' ').slice(0, 120),
     maxFailuresPerAsset: parseInteger(env.MAX_FAILURES_PER_ASSET, 2),
     albums: {
       dataFile: resolvePath(env.ALBUMS_DATA_FILE, join(ROOT_DIR, 'data', 'smart-albums.json')),

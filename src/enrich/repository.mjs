@@ -283,13 +283,14 @@ function jobRunThroughput(counters, startedAt, finishedAt) {
   }
   return {
     basis: 'end_to_end',
+    successfulPhotos,
     photosPerMinute: successfulPhotos * 60_000 / durationMs,
     secondsPerPhoto: durationMs / 1000 / successfulPhotos,
   };
 }
 
 function jobRunHostLabel(value) {
-  return typeof value === 'string' ? value.trim().slice(0, 120) || null : null;
+  return typeof value === 'string' ? value.trim().replace(/\s+/g, ' ').slice(0, 120) || null : null;
 }
 
 // Migration 1 is the pre-user_version era: every probe-based fixup this

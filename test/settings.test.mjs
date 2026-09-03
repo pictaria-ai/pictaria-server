@@ -524,7 +524,7 @@ test('enrichment provider fields write through to config.providers', () => {
 
 test('inference host labels persist as bounded operator-authored run context', () => {
   withStore((store, config, dir) => {
-    store.update({ enrich: { inferenceHostLabel: '  M4 Mac mini · LM Studio  ' } });
+    store.update({ enrich: { inferenceHostLabel: '  M4\n Mac\tmini · LM Studio  ' } });
     assert.equal(config.inferenceHostLabel, 'M4 Mac mini · LM Studio');
     assert.equal(JSON.parse(readFileSync(join(dir, 'settings.json'), 'utf8')).enrich.inferenceHostLabel,
       'M4 Mac mini · LM Studio');

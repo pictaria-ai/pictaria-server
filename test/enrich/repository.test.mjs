@@ -846,7 +846,7 @@ test('job run history derives honest end-to-end throughput and snapshots bounded
     // A restored/tampered database cannot turn the bounded API field into an
     // arbitrarily large response even though normal writes already clamp it.
     repo.db.prepare('UPDATE job_runs SET inference_host_label = ? WHERE id = ?')
-      .run(`  ${'M'.repeat(140)}  `, comparableId);
+      .run(`  ${'M'.repeat(60)}\n\t${'M'.repeat(80)}  `, comparableId);
 
     const [invalid, empty, comparable] = repo.listJobRuns(3);
     assert.equal(invalid.throughput, null);
@@ -854,11 +854,13 @@ test('job run history derives honest end-to-end throughput and snapshots bounded
     assert.equal(empty.inferenceHostLabel, null);
     assert.deepEqual(comparable.throughput, {
       basis: 'end_to_end',
+      successfulPhotos: 12,
       photosPerMinute: 6,
       secondsPerPhoto: 10,
     });
-    assert.equal(comparable.inferenceHostLabel, 'M'.repeat(120));
-    assert.equal(repo.getJobRunLog(comparable.id).inferenceHostLabel, 'M'.repeat(120));
+    const boundedLabel = `${'M'.repeat(60)} ${'M'.repeat(59)}`;
+    assert.equal(comparable.inferenceHostLabel, boundedLabel);
+    assert.equal(repo.getJobRunLog(comparable.id).inferenceHostLabel, boundedLabel);
   });
 });
 

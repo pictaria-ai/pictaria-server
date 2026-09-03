@@ -1091,7 +1091,8 @@
         if (photosPerMinute && secondsPerPhoto) {
           const throughput = document.createElement('div');
           throughput.className = 'detail';
-          throughput.textContent = `End-to-end: ${photosPerMinute} photos/min · ${secondsPerPhoto} sec/photo`;
+          const sampleSize = run.throughput.successfulPhotos;
+          throughput.textContent = `End-to-end: ${photosPerMinute} photos/min · ${secondsPerPhoto} sec/photo · over ${sampleSize.toLocaleString()} photo${sampleSize === 1 ? '' : 's'}`;
           throughput.title = 'Whole-run wall clock: Immich download, image preparation, network, model response, and retries. This is not pure model or token speed.';
           card.append(throughput);
         }
