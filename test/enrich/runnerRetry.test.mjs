@@ -2,8 +2,9 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 
 import { runBatch } from '../../src/enrich/runner.mjs';
+import { ProviderRequestError } from '../../src/enrich/providers.mjs';
 import { ImmichApiError } from '../../src/immich.mjs';
-import { loadV1Taxonomy } from './helpers.mjs';
+import { loadV1Taxonomy, sampleOutput } from './helpers.mjs';
 
 // runBatch-level coverage for the retry-mode edges the jobRunner tests can't
 // reach: the provider-down abort heuristic against known-hard photos, and
@@ -38,6 +39,10 @@ function makeRepo() {
     recordProcessingRun(row) {
       processing.push(row);
     },
+    transaction(work) {
+      return work();
+    },
+    replaceAssetTags() {},
     reviewListAdd: () => 0,
     markAssetsMissing(assetIds) {
       missingMarked.push(...assetIds);
@@ -121,6 +126,144 @@ test('infrastructure failures increment the folded failed counter used by run hi
   }));
   assert.equal(counters.failed, 2);
   assert.equal(repo.processing.filter((row) => row.status === 'failed_infra').length, 2);
+});
+
+test('429 overloads honor Retry-After and retry the same photo before succeeding', async () => {
+  const repo = makeRepo();
+  const log = [];
+  const sleeps = [];
+  let calls = 0;
+  const provider = {
+    providerName: 'venice',
+    modelName: 'test-model',
+    analyzeImage: async () => {
+      calls += 1;
+      if (calls < 3) {
+        throw new ProviderRequestError('venice request failed with status 429', {
+          status: 429,
+          retryAfterMs: 2000,
+        });
+      }
+      return { rawOutput: {}, normalizedOutput: sampleOutput() };
+    },
+  };
+
+  const { counters } = await runBatch(batchOptions({
+    repo,
+    provider,
+    assetIds: ['photo-1'],
+    retrySleep: async (ms) => sleeps.push(ms),
+    log: (message) => log.push(message),
+  }));
+
+  assert.equal(calls, 3);
+  assert.equal(counters.succeeded, 1);
+  assert.equal(counters.failed, 0);
+  assert.equal(counters.retried, 2);
+  assert.equal(sleeps.reduce((total, ms) => total + ms, 0), 4000);
+  assert.equal(repo.processing.at(-1).status, 'succeeded');
+  assert.ok(log.some((line) => line.includes('429 — retrying in 2s (1/2)')));
+  assert.ok(log.some((line) => line.includes('429 — retrying in 2s (2/2)')));
+});
+
+test('503 overloads use growing fallback delays when Retry-After is absent', async () => {
+  const sleeps = [];
+  let calls = 0;
+  const provider = {
+    providerName: 'openrouter',
+    modelName: 'test-model',
+    analyzeImage: async () => {
+      calls += 1;
+      if (calls < 3) throw new ProviderRequestError('temporarily unavailable', { status: 503 });
+      return { rawOutput: {}, normalizedOutput: sampleOutput() };
+    },
+  };
+
+  const { counters } = await runBatch(batchOptions({
+    provider,
+    assetIds: ['photo-1'],
+    retrySleep: async (ms) => sleeps.push(ms),
+  }));
+
+  assert.equal(counters.succeeded, 1);
+  assert.equal(sleeps.reduce((total, ms) => total + ms, 0), 45000);
+});
+
+test('exhausted overload retries produce one infrastructure failure for the photo', async () => {
+  const repo = makeRepo();
+  let calls = 0;
+  const provider = {
+    providerName: 'venice',
+    modelName: 'test-model',
+    analyzeImage: async () => {
+      calls += 1;
+      throw new ProviderRequestError('still overloaded', { status: 429, retryAfterMs: 0 });
+    },
+  };
+
+  const { counters } = await runBatch(batchOptions({
+    repo,
+    provider,
+    assetIds: ['photo-1'],
+    retrySleep: async () => {},
+  }));
+
+  assert.equal(calls, 3);
+  assert.equal(counters.failed, 1);
+  assert.deepEqual(repo.processing.map((row) => row.status), ['failed_infra']);
+});
+
+test('other provider errors are not retried merely because they are infrastructure failures', async () => {
+  const repo = makeRepo();
+  let calls = 0;
+  const provider = {
+    providerName: 'openrouter',
+    modelName: 'test-model',
+    analyzeImage: async () => {
+      calls += 1;
+      throw new ProviderRequestError('internal provider failure', { status: 500, retryAfterMs: 1000 });
+    },
+  };
+
+  const { counters } = await runBatch(batchOptions({
+    repo,
+    provider,
+    assetIds: ['photo-1'],
+    retrySleep: async () => { throw new Error('must not wait'); },
+  }));
+
+  assert.equal(calls, 1);
+  assert.equal(counters.failed, 1);
+  assert.deepEqual(repo.processing.map((row) => row.status), ['failed_infra']);
+});
+
+test('cancellation during an overload wait stops without recording a photo failure', async () => {
+  const repo = makeRepo();
+  const log = [];
+  let cancelRequested = false;
+  let calls = 0;
+  const provider = {
+    providerName: 'venice',
+    modelName: 'test-model',
+    analyzeImage: async () => {
+      calls += 1;
+      throw new ProviderRequestError('overloaded', { status: 429, retryAfterMs: 30000 });
+    },
+  };
+
+  const { counters } = await runBatch(batchOptions({
+    repo,
+    provider,
+    assetIds: ['photo-1'],
+    shouldStop: () => cancelRequested,
+    retrySleep: async () => { cancelRequested = true; },
+    log: (message) => log.push(message),
+  }));
+
+  assert.equal(calls, 1);
+  assert.equal(counters.failed, 0);
+  assert.equal(repo.processing.length, 0);
+  assert.ok(log.some((line) => line.includes('cancellation requested during provider retry wait')));
 });
 
 test('run persistence and logs redact reflected active integration secrets', async () => {

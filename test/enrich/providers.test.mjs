@@ -16,9 +16,10 @@ import {
   extractOpenAiOutputText,
   extractSchemaConstrainedChoiceContent,
   lmStudioSupportedImage,
+  parseRetryAfterMs,
 } from '../../src/enrich/providers.mjs';
 
-function fakeFetch(responseBody, { status = 200, capture = {} } = {}) {
+function fakeFetch(responseBody, { status = 200, headers = {}, capture = {} } = {}) {
   return async (url, options) => {
     capture.url = url;
     capture.options = options;
@@ -26,6 +27,7 @@ function fakeFetch(responseBody, { status = 200, capture = {} } = {}) {
     return {
       ok: status >= 200 && status < 300,
       status,
+      headers: { get: (name) => headers[String(name).toLowerCase()] ?? null },
       json: async () => responseBody,
       text: async () => JSON.stringify(responseBody),
     };
@@ -499,17 +501,29 @@ test('venice requires both an api key and an explicit model', () => {
   assert.throws(() => new VeniceProvider({ apiKey: 'k' }), /Venice model is required/);
 });
 
-test('http errors surface provider name, status, and response detail', async () => {
+test('http errors surface provider name, status, response detail, and Retry-After', async () => {
   const provider = new OpenRouterProvider({
     apiKey: 'key',
     modelName: 'm',
-    fetchImpl: fakeFetch({ error: 'rate limited' }, { status: 429 }),
+    fetchImpl: fakeFetch({ error: 'rate limited' }, { status: 429, headers: { 'retry-after': '30' } }),
   });
 
   await assert.rejects(
     () => provider.analyzeImage(image, prompts),
-    /openrouter request failed with status 429.*rate limited/,
+    (error) => {
+      assert.match(error.message, /openrouter request failed with status 429.*rate limited/);
+      assert.equal(error.retryAfterMs, 30000);
+      return true;
+    },
   );
+});
+
+test('Retry-After parsing accepts seconds and future HTTP dates, but rejects stale values', () => {
+  const now = Date.parse('2026-09-03T12:00:00.000Z');
+  assert.equal(parseRetryAfterMs('1.5', now), 1500);
+  assert.equal(parseRetryAfterMs('Thu, 03 Sep 2026 12:02:00 GMT', now), 120000);
+  assert.equal(parseRetryAfterMs('Thu, 03 Sep 2026 11:59:00 GMT', now), null);
+  assert.equal(parseRetryAfterMs('not-a-delay', now), null);
 });
 
 test('openrouter HTTP errors safely expose structured native-provider metadata', async () => {
@@ -662,6 +676,34 @@ test('missing message content raises a clear error', async () => {
   });
 
   await assert.rejects(() => provider.analyzeImage(image, prompts), /did not include message content/);
+});
+
+test('node transport carries Retry-After metadata from provider errors', async () => {
+  const server = createServer((request, response) => {
+    request.resume();
+    response.writeHead(429, { 'content-type': 'application/json', 'retry-after': '7' });
+    response.end(JSON.stringify({ error: 'busy' }));
+  });
+  await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
+
+  const provider = new LmStudioProvider({
+    modelName: 'm',
+    baseUrl: `http://127.0.0.1:${server.address().port}/v1`,
+  });
+
+  try {
+    await assert.rejects(
+      () => provider.analyzeImage(image, prompts),
+      (error) => {
+        assert.equal(error.status, 429);
+        assert.equal(error.retryAfterMs, 7000);
+        return true;
+      },
+    );
+  } finally {
+    server.closeAllConnections?.();
+    await new Promise((resolve) => server.close(resolve));
+  }
 });
 
 test('lm studio node transport isolates consecutive requests from stale keep-alive sockets', async () => {

@@ -33,6 +33,11 @@ All notable changes to Pictaria Server are documented here. This project follows
   state contract to version 7. Existing installations take the standard
   automatic pre-migration recovery snapshot before adopting the additive
   provider and per-run benchmark-context settings.
+- Enrich now retries a photo twice when any configured provider reports a
+  temporary 429 or 503 response, honoring bounded `Retry-After` guidance and
+  keeping cancellation responsive during the wait. The Curate AI referee also
+  uses bounded provider retry guidance before its existing five-minute
+  fallback.
 
 ## 1.0.1 - 2026-09-02
 

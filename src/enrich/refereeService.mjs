@@ -2,7 +2,7 @@ import { createHash } from 'node:crypto';
 
 import { awaitDrain } from '../lifecycle.mjs';
 import { MAX_STACK_MEMBERS } from './reviewService.mjs';
-import { fetchImage } from './runner.mjs';
+import { fetchImage, PROVIDER_RETRY_AFTER_CAP_MS } from './runner.mjs';
 import { createProvider } from './providers.mjs';
 import { configuredSecrets, sanitizeDiagnostic } from '../diagnostics.mjs';
 
@@ -143,6 +143,7 @@ export class RefereeService {
 
     this._lastError = null;
     this._lastErrorAt = 0;
+    this._errorBackoffMs = ERROR_BACKOFF_MS;
     this._current = null; // group key being refereed, for status
     this._currentSize = null;
     this._currentStartedAt = null;
@@ -292,7 +293,7 @@ export class RefereeService {
   async tick() {
     if (this._working || this._stopped || this._paused || !this.enabled()) return;
     if (this.enrichRunner.isRunning()) return; // the model belongs to enrichment
-    if (this._lastError && Date.now() - this._lastErrorAt < ERROR_BACKOFF_MS) return;
+    if (this._lastError && Date.now() - this._lastErrorAt < this._errorBackoffMs) return;
     this._working = true;
     try {
       // Contiguous block: keep going while there is work and the model is
@@ -317,9 +318,12 @@ export class RefereeService {
         secrets: configuredSecrets(this.config, this.immich),
       });
       this._lastErrorAt = Date.now();
+      this._errorBackoffMs = Number.isFinite(error?.retryAfterMs) && error.retryAfterMs >= 0
+        ? Math.min(error.retryAfterMs, PROVIDER_RETRY_AFTER_CAP_MS)
+        : ERROR_BACKOFF_MS;
       this._recentErrors.unshift({ at: new Date().toISOString(), message: this._lastError });
       this._recentErrors.length = Math.min(this._recentErrors.length, 50);
-      this.log(`referee: ${this._lastError} — backing off`);
+      this.log(`referee: ${this._lastError} — backing off for ${formatBackoff(this._errorBackoffMs)}`);
     } finally {
       this._working = false;
       this._current = null;
@@ -482,6 +486,7 @@ export class RefereeService {
       durationMs: Date.now() - started,
     });
     this._lastError = null;
+    this._errorBackoffMs = ERROR_BACKOFF_MS;
     const best = picks.find((pick) => pick.rank === 1);
     this.log(
       `referee: ranked ${group.members.length}-photo group in ${Math.round((Date.now() - started) / 1000)}s`
@@ -489,6 +494,11 @@ export class RefereeService {
     );
     return true;
   }
+}
+
+function formatBackoff(ms) {
+  if (ms >= 60000 && ms % 60000 === 0) return `${ms / 60000}m`;
+  return `${Math.max(0, Math.round(ms / 1000))}s`;
 }
 
 // Turn the model's photo-indexed answers into asset-keyed picks, defending

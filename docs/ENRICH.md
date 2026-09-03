@@ -374,16 +374,18 @@ your approved tags on every request.
   upstream provider, so review it before posting it publicly in case that
   provider echoed request content in its message.
 - **Rate limits, outages, and timeouts never cost a photo anything.**
-  Failures are classified by *whose fault they are*. A provider error that
-  is clearly environmental — a timeout or dropped connection, an auth
-  error (401/403), a rate limit (429, e.g. "model currently overloaded"),
-  or any 5xx — records as an **infrastructure failure**: it shows up in
-  the run's failure count, but it is never counted against the photo, and
-  the next run over the same slice retries every affected photo
-  automatically. Nothing to reset, nothing lost — when a cloud model has
-  a bad day and bounces 15% of a run, one re-run later (with "Only
-  unenriched" on, the default) mops them all up. Immich-side network
-  errors and 5xx are treated the same way.
+  Failures are classified by *whose fault they are*. When a provider reports
+  a temporary rate limit (429) or unavailable service (503), Enrich retries
+  that same photo twice before moving on. It follows the provider's
+  `Retry-After` request up to five minutes; without one it waits 15 seconds,
+  then 30 seconds. The live run log shows each retry, and Cancel interrupts
+  those waits promptly. If both attempts still fail — or for another clearly
+  environmental error such as a timeout, dropped connection, auth error
+  (401/403), or other 5xx — the result records as an **infrastructure
+  failure**: it shows up in the run's failure count, but it is never counted
+  against the photo, and the next run over the same slice retries every
+  affected photo automatically. Nothing to reset, nothing lost. Immich-side
+  network errors and 5xx are treated the same way.
 - **A photo that keeps genuinely failing is dropped after two strikes.**
   Failures the provider pins on the request itself — most commonly a
   response the schema rejects (an unparseable answer, too many tags) —
@@ -678,8 +680,9 @@ pauses until the run ends and resumes by itself). Turning the toggle off
 in Settings stops it after the in-flight Stack; existing verdicts stay.
 Errors are handled the patient way: when a judgment fails — the model
 overloaded (429), unreachable, or returning garbage — the strip shows
-*"retrying after an error"* with the message, the referee waits five
-minutes before touching the provider again, and the stack is **not**
+*"retrying after an error"* with the message. The referee follows a provider's
+`Retry-After` guidance up to five minutes, or waits five minutes when no hint
+is supplied, before touching the provider again. The stack is **not**
 marked judged, so the exact same group is retried once the backoff ends.
 Nothing is skipped or lost to a flaky provider; a batch just takes longer.
 The activity popup keeps the recent errors if you want the history.
