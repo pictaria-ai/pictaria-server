@@ -440,6 +440,17 @@ a batch of tags. The failed counter includes infrastructure failures
 (rate limits, timeouts, outages), which don't count against the photos and
 retry on the next run — see "When things go wrong" above for the split.
 
+A card with failures that still need work offers **Re-run N failed photos**.
+This starts a normal targeted run through the original provider (using that
+provider's current connection and model settings), including both content and
+infrastructure failures. The server recalculates the set when you click: a
+photo that has since succeeded under any setup, disappeared from Immich, or
+been deliberately discarded is left out. The content-failure cap is disabled
+for this deliberate retry only, so photos already at the limit get another
+chance; the run remains capped at 10,000 photos and records its own history
+card. If the original provider is no longer configured, its retry button stays
+disabled until its connection details are restored in Settings.
+
 Pictaria retains the newest 100 run summaries and bounded diagnostic logs.
 For each photo it keeps the newest normalized enrichment result needed by
 Curate and caption search; older run metadata remains, but raw provider
@@ -714,6 +725,13 @@ and expect the queue to breathe a little while enrichment is running.
 
 - `GET /api/enrich/status` — runner state, live counters, log tail, provider
   availability, library stats, `enabled`.
+- `GET /api/enrich/runs` — the newest run summaries, including a live
+  `retryableFailures` count for each history card.
+- `POST /api/enrich/runs/:id/retry` — re-evaluate and start a targeted retry
+  of that run's content and infrastructure failures that still need work,
+  using the original provider's current configuration; accepts optional
+  `{ sendToCurate }` (403 when enrichment is off, 404 when history expired,
+  409 while another run or queue resolution is active).
 - `POST /api/enrich/run` — start a library sweep, or a targeted run with
   `assetIds`; `retryFailureLimited: true` (targeted only) turns the
   per-photo failure cap off for that run (403 when enrichment is off;

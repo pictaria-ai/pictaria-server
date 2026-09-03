@@ -292,6 +292,9 @@ export class EnrichJobRunner {
       ),
       options: {
         retryFailureLimited,
+        retrySourceRunId: Number.isSafeInteger(Number(options.retrySourceRunId)) && Number(options.retrySourceRunId) > 0
+          ? Number(options.retrySourceRunId)
+          : null,
         limit: clampInt(options.limit, 1, 100000, 100),
         offset: clampInt(options.offset, 0, 10000000, 0),
         skipAnySuccessful: options.skipAnySuccessful !== false,
@@ -313,9 +316,10 @@ export class EnrichJobRunner {
       this.#log(`targeted run: ${assetIds.length} assets from a slice${options.sliceTruncated ? ' (capped — send again for the rest)' : ''}`);
     }
     if (retryFailureLimited) {
-      this.#log(
-        `retrying photos at the failure limit: the ${this.config.maxFailuresPerAsset}-failure cap is off for this run; failures still count toward each photo's history`,
-      );
+      const source = this.state.options.retrySourceRunId;
+      this.#log(source
+        ? `retrying failures from run #${source}: the content-failure cap is off for this run; failures still count toward each photo's history`
+        : `retrying photos at the failure limit: the ${this.config.maxFailuresPerAsset}-failure cap is off for this run; failures still count toward each photo's history`);
     }
     if (options.reopenDecided) {
       this.#log('when this run finishes, earlier Curate decisions for these photos will be cleared for re-review');
@@ -393,12 +397,13 @@ export class EnrichJobRunner {
       if (this.state.options.sendToCurate && this.state.counters) {
         const failed = this.state.counters.failed ?? 0;
         // Honest about the failure limit: a normal run's failures re-enter
-        // only until they hit the cap, and a retry run's failures are by
-        // definition already there — "next run" would be a false promise.
+        // only until they hit the cap. A deliberate retry can also include
+        // first-time or infrastructure failures from a history card, so
+        // describe their retry path without claiming they are all capped.
         const failedNote = failed === 0
           ? ''
           : this.state.options.retryFailureLimited
-            ? `; ${failed} failed photo(s) stay out — still at the failure limit; Retry again to re-attempt them`
+            ? `; ${failed} failed photo(s) stay out — re-run them again from Recent runs if needed`
             : `; ${failed} failed photo(s) stay out and retry on the next run (until they hit the failure limit)`;
         this.#log(`sent to Curate: ${listed} photo(s) newly listed for review${failedNote}`);
       }

@@ -15,6 +15,10 @@ All notable changes to Pictaria Server are documented here. This project follows
 - Curate decision confirmations now offer a five-second **Undo (Z)** action
   for individual photos and whole Stacks, returning the most recently decided
   photos to the queue without interrupting the review flow.
+- Enrich Recent Runs cards now offer **Re-run N failed photos** for content
+  and infrastructure failures that still need work. The server recalculates
+  the set at click time, so later successes, deleted photos, and deliberately
+  discarded photos are never reprocessed from a stale card.
 
 ### Changed
 

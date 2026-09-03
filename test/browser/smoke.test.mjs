@@ -230,6 +230,36 @@ function seedEnrichment(dbPath) {
       });
       repo.reviewListAdd([assetId], 'seed');
     }
+
+    // Recent-runs failure retry: one infrastructure failure tied to a
+    // completed run. Its configured provider lets the browser affordance be
+    // exercised without contacting the provider itself.
+    repo.upsertAsset({ id: 'vienna-1', originalPath: '/photos/vienna-1.jpg' });
+    const failedRunId = repo.recordProcessingRun({
+      assetId: 'vienna-1',
+      provider: 'local_lmstudio',
+      model: 'smoke-vision-model',
+      promptVersion: 'v1',
+      taxonomyVersion: 'v1',
+      status: 'failed_infra',
+      error: 'provider unavailable during seed run',
+    });
+    repo.db.prepare('UPDATE processing_runs SET started_at = ?, finished_at = ? WHERE id = ?')
+      .run('2026-07-15T12:01:00.000Z', '2026-07-15T12:01:00.000Z', failedRunId);
+    repo.recordJobRun({
+      title: 'Seeded failed run',
+      provider: 'local_lmstudio',
+      model: 'smoke-vision-model',
+      promptVersion: 'v1',
+      taxonomyVersion: 'v1',
+      targeted: 1,
+      status: 'finished',
+      error: null,
+      counters: { analyzed: 1, succeeded: 0, failed: 1 },
+      log: ['12:01:00 provider unavailable during seed run'],
+      startedAt: '2026-07-15T12:00:00.000Z',
+      finishedAt: '2026-07-15T12:02:00.000Z',
+    });
   } finally {
     repo.close();
   }
@@ -282,6 +312,7 @@ test('admin UI smoke: gate, Insights lens, Curate, Smart Albums', { timeout: 120
     env: {
       IMMICH_BASE_URL: immich.base,
       IMMICH_API_KEY: 'fake-key',
+      ENRICH_ENABLED: 'true',
       DEFAULT_PROVIDER: 'local_lmstudio',
       LMSTUDIO_MODEL: 'smoke-vision-model',
     },
@@ -510,6 +541,35 @@ test('admin UI smoke: gate, Insights lens, Curate, Smart Albums', { timeout: 120
       '!document.getElementById("connStatus")?.hidden && !document.querySelector(".gate-backdrop")',
       { label: 'enrich page authenticated by session cookie' },
     );
+    await page.waitFor(
+      'document.querySelector("#runsList .run-retry:not([disabled])")?.textContent === "Re-run 1 failed photo"',
+      { label: 'historical failure retry action' },
+    );
+    await page.evaluate(`
+      window.__historyRetry = null;
+      const realFetch = window.fetch.bind(window);
+      window.fetch = async (input, init = {}) => {
+        if (/^\\/api\\/enrich\\/runs\\/\\d+\\/retry$/.test(String(input))) {
+          window.__historyRetry = { path: String(input), body: JSON.parse(init.body) };
+          return new Response(JSON.stringify({
+            running: true,
+            retryTargeted: 1,
+            retryableFailures: 1,
+            retryTruncated: false,
+          }), { status: 202, headers: { 'Content-Type': 'application/json' } });
+        }
+        return realFetch(input, init);
+      };
+      document.querySelector('#runsList .run-retry').click();
+    `);
+    await page.waitFor(
+      'document.getElementById("toast").textContent === "Re-running 1 failed photo"',
+      { label: 'historical failure retry confirmation' },
+    );
+    assert.deepEqual(await page.evaluate('window.__historyRetry'), {
+      path: '/api/enrich/runs/1/retry',
+      body: { sendToCurate: true },
+    });
 
     await page.navigate(`${server.base}/remote.html`);
     await page.waitFor(

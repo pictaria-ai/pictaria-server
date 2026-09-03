@@ -59,6 +59,7 @@
     .qitem .t { flex: 1 1 auto; font-weight: 700; min-width: 40px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
     .qitem .m { flex: 0 1 auto; min-width: 0; color: var(--p-muted); font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
     .qitem .p-btn { height: 26px; font-size: 12px; flex-shrink: 0; }
+    .qitem .run-actions { justify-content: flex-end; }
     .qitem .opts { gap: 16px; }
     .qitem .opts label { color: var(--p-muted); font-size: 12px; display: inline-flex; align-items: center; gap: 5px; cursor: pointer; }
     .qitem .detail { color: var(--p-muted); font-size: 12px; min-width: 0; overflow-wrap: anywhere; }
@@ -391,6 +392,13 @@
       el('retryFailedBtn').disabled = off || busy || providerUnavailable;
       for (const button of document.querySelectorAll('#queueList .p-btn.accent')) {
         button.disabled = off || busy || providerUnavailable;
+      }
+      for (const button of document.querySelectorAll('#runsList .run-retry')) {
+        const retryProviderReady = state.providerConfigured.get(button.dataset.provider) === true;
+        button.disabled = off || busy || !retryProviderReady;
+        button.title = retryProviderReady
+          ? 'Start a new run for the failures from this run that still need enrichment.'
+          : 'This run’s provider is no longer configured. Add its connection details in AI Providers to retry.';
       }
       const activeId = busy ? status.options?.queueItemId : null;
       for (const button of document.querySelectorAll('#queueList .p-btn.quiet[data-qid]')) {
@@ -1023,6 +1031,16 @@
         const mins = run.startedAt && run.finishedAt ? Math.max(1, Math.round((new Date(run.finishedAt) - new Date(run.startedAt)) / 60000)) : null;
         when.textContent = `${fmtWhen(run.startedAt)}${mins ? ` · ${mins}m` : ''}`;
         top.append(title, when);
+        let retryBtn = null;
+        if ((run.retryableFailures ?? 0) > 0) {
+          retryBtn = document.createElement('button');
+          retryBtn.className = 'p-btn accent run-retry';
+          retryBtn.dataset.provider = run.provider;
+          retryBtn.dataset.runId = String(run.id);
+          retryBtn.disabled = true; // enabled below once provider state is known
+          retryBtn.textContent = `Re-run ${run.retryableFailures.toLocaleString()} failed photo${run.retryableFailures === 1 ? '' : 's'}`;
+          retryBtn.addEventListener('click', () => void retryRunFailures(run, retryBtn));
+        }
         if (run.hasLog) {
           const logBtn = document.createElement('button');
           logBtn.className = 'p-btn quiet';
@@ -1053,7 +1071,40 @@
         if (run.status === 'failed') detail.classList.add('bad');
 
         card.append(top, detail);
+        if (retryBtn) {
+          const actions = document.createElement('div');
+          actions.className = 'qline run-actions';
+          actions.append(retryBtn);
+          card.append(actions);
+        }
         box.append(card);
+      }
+      syncRunButtons(state.lastStatus);
+    }
+
+    async function retryRunFailures(run, button) {
+      button.disabled = true;
+      try {
+        const body = await api(`/api/enrich/runs/${run.id}/retry`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ sendToCurate: el('enrichCurate').checked }),
+        });
+        if (body.started === false) {
+          toast('Those photos no longer need enrichment.');
+          await loadRuns();
+          return;
+        }
+        const targeted = body.retryTargeted ?? 0;
+        const total = body.retryableFailures ?? targeted;
+        toast(body.retryTruncated
+          ? `Re-running ${targeted.toLocaleString()} of ${total.toLocaleString()} failed photos`
+          : `Re-running ${targeted.toLocaleString()} failed photo${targeted === 1 ? '' : 's'}`);
+        await refresh();
+      } catch (error) {
+        toast(error.message, true);
+      } finally {
+        syncRunButtons(state.lastStatus);
       }
     }
 

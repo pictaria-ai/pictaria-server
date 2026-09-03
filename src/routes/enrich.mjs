@@ -808,6 +808,53 @@ export function createEnrichRoutes({ review, enrichRunner, taxonomy, repo, requi
       return true;
     }
 
+    const runRetryMatch = url.pathname.match(/^\/api\/enrich\/runs\/(\d+)\/retry$/);
+    if (request.method === 'POST' && runRetryMatch) {
+      if (!requireImmich(response)) {
+        return true;
+      }
+      if (!config.enrichEnabled) {
+        sendError(response, 403, 'enrichment_disabled', 'Enrichment is turned off — enable it in Settings → Enrich.');
+        return true;
+      }
+      const body = await readJsonBody(request);
+      if (queueBusy()) {
+        sendError(response, 409, 'enrich_run_conflict', 'An enrichment run or queued-job resolution is already in progress.');
+        return true;
+      }
+      const failures = repo.jobRunRetryFailures(Number(runRetryMatch[1]));
+      if (!failures) {
+        sendError(response, 404, 'run_not_found', 'That run is no longer in the history.');
+        return true;
+      }
+      // Re-evaluated at click time: a stale history card cannot re-run a
+      // photo that has since succeeded, disappeared, or been discarded.
+      if (failures.count === 0) {
+        sendJson(response, 200, { started: false, retryableFailures: 0 });
+        return true;
+      }
+      try {
+        const status = enrichRunner.start({
+          provider: failures.provider,
+          assetIds: failures.assetIds,
+          skipAnySuccessful: true,
+          retryFailureLimited: true,
+          retrySourceRunId: failures.runId,
+          title: `Retry failures · ${failures.title}`,
+          sendToCurate: body?.sendToCurate !== false,
+        });
+        sendJson(response, 202, {
+          ...status,
+          retryableFailures: failures.count,
+          retryTargeted: failures.assetIds.length,
+          retryTruncated: failures.truncated,
+        });
+      } catch (error) {
+        sendError(response, 409, 'enrich_run_conflict', diagnostic(error));
+      }
+      return true;
+    }
+
     const runLogMatch = url.pathname.match(/^\/api\/enrich\/runs\/(\d+)\/log$/);
     if (request.method === 'GET' && runLogMatch) {
       const entry = repo.getJobRunLog(Number(runLogMatch[1]));
