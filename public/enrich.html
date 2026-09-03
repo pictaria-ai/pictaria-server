@@ -1136,24 +1136,24 @@
       state.runsLoading = true;
       syncRunsPaging();
       try {
-        let cursor = more ? state.runsNextCursor : null;
-        const target = more ? state.runs.length + 20 : Math.max(20, state.runs.length);
-        let runs = more ? [...state.runs] : [];
-        let total = state.runsTotal;
-        do {
-          const remaining = more ? 20 : Math.max(1, target - runs.length);
-          const params = new URLSearchParams({ limit: String(Math.min(20, remaining)) });
-          if (cursor) params.set('cursor', cursor);
-          const page = await api(`/api/enrich/runs?${params}`);
-          total = Number.isSafeInteger(page.total) ? page.total : runs.length + (page.runs?.length ?? 0);
-          const byId = new Map(runs.map((run) => [run.id, run]));
-          for (const run of page.runs ?? []) byId.set(run.id, run);
-          runs = [...byId.values()].sort((a, b) => b.id - a.id);
-          cursor = page.nextCursor ?? null;
-          if (more) break;
-        } while (cursor && runs.length < Math.min(target, total));
+        const previousCursor = state.runsNextCursor;
+        const params = new URLSearchParams({ limit: '20' });
+        if (more) params.set('cursor', previousCursor);
+        const page = await api(`/api/enrich/runs?${params}`);
+        const total = Number.isSafeInteger(page.total)
+          ? page.total
+          : state.runs.length + (page.runs?.length ?? 0);
+        // A newest-page refresh replaces matching cards with fresh counters
+        // while keeping older pages the operator explicitly loaded. New job
+        // ids sort ahead of them; retention can only evict the oldest tail.
+        const byId = new Map(state.runs.map((run) => [run.id, run]));
+        for (const run of page.runs ?? []) byId.set(run.id, run);
+        let runs = [...byId.values()].sort((a, b) => b.id - a.id);
+        if (runs.length > total) runs = runs.slice(0, total);
         state.runs = runs;
-        state.runsNextCursor = cursor;
+        state.runsNextCursor = runs.length >= total
+          ? null
+          : more ? page.nextCursor ?? null : previousCursor ?? page.nextCursor ?? null;
         state.runsTotal = total;
         renderRuns();
       } catch (error) {

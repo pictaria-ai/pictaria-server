@@ -821,7 +821,7 @@ test('job run logs round-trip and stay out of the list payload', () => {
 
 test('job run history uses stable newest-first keyset pages', () => {
   withRepo((repo) => {
-    for (let index = 1; index <= 45; index += 1) {
+    for (let index = 1; index <= 120; index += 1) {
       repo.recordJobRun({
         title: `Run ${index}`, provider: 'p', model: 'm', promptVersion: 'v1', taxonomyVersion: 'v1',
         targeted: 1, status: 'finished', error: null, counters: { succeeded: 1, failed: 0 }, log: [],
@@ -830,27 +830,38 @@ test('job run history uses stable newest-first keyset pages', () => {
     }
 
     const first = repo.jobRunsPage({ limit: 20 });
-    assert.deepEqual(first.runs.map((run) => run.id), Array.from({ length: 20 }, (_, index) => 45 - index));
-    assert.equal(first.nextBeforeId, 26);
-    assert.equal(first.total, 45);
+    assert.deepEqual(first.runs.map((run) => run.id), Array.from({ length: 20 }, (_, index) => 120 - index));
+    assert.equal(first.nextBeforeId, 101);
+    assert.equal(first.total, 100);
 
-    // A new run between requests does not shift or duplicate older pages.
+    const retainedIds = [...first.runs.map((run) => run.id)];
+    let cursor = first.nextBeforeId;
+    while (cursor !== null) {
+      const page = repo.jobRunsPage({ beforeId: cursor, limit: 20 });
+      retainedIds.push(...page.runs.map((run) => run.id));
+      cursor = page.nextBeforeId;
+    }
+    assert.deepEqual(retainedIds, Array.from({ length: 100 }, (_, index) => 120 - index));
+    assert.equal(new Set(retainedIds).size, 100);
+
+    // A new run prunes only the oldest retained row. A page walk that held
+    // the first cursor continues without offsets, duplicates, or skipped
+    // surviving ids; the newly inserted row belongs to a future fresh walk.
     repo.recordJobRun({
       title: 'New after first page', provider: 'p', model: 'm', promptVersion: 'v1', taxonomyVersion: 'v1',
       targeted: 1, status: 'finished', error: null, counters: { succeeded: 1, failed: 0 }, log: [],
       startedAt: '2026-07-09T12:01:00.000Z', finishedAt: '2026-07-09T12:01:01.000Z',
     });
-    const second = repo.jobRunsPage({ beforeId: first.nextBeforeId, limit: 20 });
-    const third = repo.jobRunsPage({ beforeId: second.nextBeforeId, limit: 20 });
-    assert.deepEqual(second.runs.map((run) => run.id), Array.from({ length: 20 }, (_, index) => 25 - index));
-    assert.deepEqual(third.runs.map((run) => run.id), [5, 4, 3, 2, 1]);
-    assert.equal(second.nextBeforeId, 6);
-    assert.equal(third.nextBeforeId, null);
-    assert.equal(second.total, 46);
-    assert.deepEqual(
-      [...first.runs, ...second.runs, ...third.runs].map((run) => run.id),
-      Array.from({ length: 45 }, (_, index) => 45 - index),
-    );
+    const continuedIds = [...first.runs.map((run) => run.id)];
+    cursor = first.nextBeforeId;
+    while (cursor !== null) {
+      const page = repo.jobRunsPage({ beforeId: cursor, limit: 20 });
+      assert.equal(page.total, 100);
+      continuedIds.push(...page.runs.map((run) => run.id));
+      cursor = page.nextBeforeId;
+    }
+    assert.deepEqual(continuedIds, Array.from({ length: 99 }, (_, index) => 120 - index));
+    assert.equal(new Set(continuedIds).size, 99);
   });
 });
 

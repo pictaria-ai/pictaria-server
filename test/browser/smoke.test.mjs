@@ -601,9 +601,19 @@ test('admin UI smoke: gate, Insights lens, Curate, Smart Albums', { timeout: 120
       'document.getElementById("runsCount")?.textContent === "Showing 23 of 23 retained runs" && document.getElementById("runsMoreBtn")?.hidden',
       { label: 'all retained run history loaded' },
     );
-    await page.evaluate('window.__runsRefreshDone = false; loadRuns().then(() => { window.__runsRefreshDone = true; })');
+    await page.evaluate(`
+      window.__runListFetches = 0;
+      const runListFetch = window.fetch.bind(window);
+      window.fetch = async (input, init = {}) => {
+        if (String(input).startsWith('/api/enrich/runs?')) window.__runListFetches += 1;
+        return runListFetch(input, init);
+      };
+      window.__runsRefreshDone = false;
+      loadRuns().then(() => { window.__runsRefreshDone = true; });
+    `);
     await page.waitFor('window.__runsRefreshDone === true', { label: 'loaded-depth history refresh' });
     assert.equal(await page.evaluate('document.querySelectorAll("#runsList .qitem").length'), 23);
+    assert.equal(await page.evaluate('window.__runListFetches'), 1);
     await page.waitFor(
       'document.querySelector("#runsList .run-retry:not([disabled])")?.textContent === "Re-run 1 failed photo"',
       { label: 'historical failure retry action on an older page' },
