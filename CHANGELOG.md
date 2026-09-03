@@ -23,6 +23,9 @@ All notable changes to Pictaria Server are documented here. This project follows
   photos, with the provider, model, and an optional operator-authored inference
   host label for comparing setups without adding prompts or provider responses
   to run history.
+- Enrich Recent Runs now starts with the newest 20 summaries and offers
+  **Load more** until every retained run is visible, including its log and any
+  still-retryable failed photos.
 
 ### Changed
 

@@ -232,6 +232,11 @@
       <summary><span class="chev">&#9654;</span> Recent runs <span class="sub">— what ran, with which model and versions, and each run's log</span></summary>
       <div class="provider-note" style="margin-top: 10px">End-to-end throughput uses successful photos only and covers Pictaria’s whole photo path: Immich download, image preparation, network, model response, and any retries. Skips do not count. It is useful for comparing your setups, but it is not pure model or token speed.</div>
       <div id="runsList" class="qlist queue" style="margin-top: 12px"></div>
+      <div class="qline" style="margin-top: 10px">
+        <span id="runsCount" class="m"></span>
+        <div class="p-grow"></div>
+        <button id="runsMoreBtn" class="p-btn quiet" hidden>Load more</button>
+      </div>
     </details>
   </main>
 
@@ -279,6 +284,11 @@
       lastStatus: null,
       liveLog: false,
       lastRunStartedAt: null,
+      runs: [],
+      runsNextCursor: null,
+      runsTotal: 0,
+      runsLoading: false,
+      runsRefreshPending: false,
     };
     const el = (id) => document.getElementById(id);
 
@@ -1012,9 +1022,19 @@
           : value.toFixed(2);
     }
 
-    async function loadRuns() {
-      let runs = [];
-      try { runs = (await api('/api/enrich/runs')).runs ?? []; } catch { return; }
+    function syncRunsPaging() {
+      const count = el('runsCount');
+      const button = el('runsMoreBtn');
+      count.textContent = state.runsTotal > 0
+        ? `Showing ${state.runs.length.toLocaleString()} of ${state.runsTotal.toLocaleString()} retained run${state.runsTotal === 1 ? '' : 's'}`
+        : '';
+      button.hidden = !state.runsNextCursor;
+      button.disabled = state.runsLoading;
+      button.textContent = state.runsLoading ? 'Loading…' : 'Load more';
+    }
+
+    function renderRuns() {
+      const runs = state.runs;
       const box = el('runsList');
       box.replaceChildren();
       if (!runs.length) {
@@ -1106,6 +1126,49 @@
       }
       syncRunButtons(state.lastStatus);
     }
+
+    async function loadRuns({ more = false } = {}) {
+      if (state.runsLoading) {
+        if (!more) state.runsRefreshPending = true;
+        return;
+      }
+      if (more && !state.runsNextCursor) return;
+      state.runsLoading = true;
+      syncRunsPaging();
+      try {
+        let cursor = more ? state.runsNextCursor : null;
+        const target = more ? state.runs.length + 20 : Math.max(20, state.runs.length);
+        let runs = more ? [...state.runs] : [];
+        let total = state.runsTotal;
+        do {
+          const remaining = more ? 20 : Math.max(1, target - runs.length);
+          const params = new URLSearchParams({ limit: String(Math.min(20, remaining)) });
+          if (cursor) params.set('cursor', cursor);
+          const page = await api(`/api/enrich/runs?${params}`);
+          total = Number.isSafeInteger(page.total) ? page.total : runs.length + (page.runs?.length ?? 0);
+          const byId = new Map(runs.map((run) => [run.id, run]));
+          for (const run of page.runs ?? []) byId.set(run.id, run);
+          runs = [...byId.values()].sort((a, b) => b.id - a.id);
+          cursor = page.nextCursor ?? null;
+          if (more) break;
+        } while (cursor && runs.length < Math.min(target, total));
+        state.runs = runs;
+        state.runsNextCursor = cursor;
+        state.runsTotal = total;
+        renderRuns();
+      } catch (error) {
+        if (more) toast(`Could not load older runs: ${error.message}`, true);
+      } finally {
+        state.runsLoading = false;
+        syncRunsPaging();
+        if (state.runsRefreshPending) {
+          state.runsRefreshPending = false;
+          void loadRuns();
+        }
+      }
+    }
+
+    el('runsMoreBtn').addEventListener('click', () => void loadRuns({ more: true }));
 
     async function retryRunFailures(run, button) {
       button.disabled = true;

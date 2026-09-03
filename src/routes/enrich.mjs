@@ -8,6 +8,8 @@ import {
   ENRICH_QUEUE_DEFAULT_PAGE_SIZE,
   ENRICH_QUEUE_MAX_PAGE_SIZE,
   ENRICH_QUEUE_MAX_ITEMS_GLOBAL,
+  ENRICH_RUN_DEFAULT_PAGE_SIZE,
+  ENRICH_RUN_MAX_PAGE_SIZE,
 } from '../enrich/repository.mjs';
 
 import { configuredSecrets, sanitizeDiagnostic } from '../diagnostics.mjs';
@@ -43,6 +45,42 @@ function queuePageLimit(value) {
       `Enrichment queue pages must contain 1-${ENRICH_QUEUE_MAX_PAGE_SIZE} items.`,
       400,
       'invalid_queue_limit',
+    );
+  }
+  return limit;
+}
+
+function encodeRunCursor(id) {
+  return Buffer.from(String(id), 'utf8').toString('base64url');
+}
+
+function decodeRunCursor(value) {
+  if (value === null || value === undefined || value === '') return null;
+  if (!/^[A-Za-z0-9_-]+$/.test(value)) {
+    throw new HttpBodyError('Invalid enrichment run cursor.', 400, 'invalid_run_cursor');
+  }
+  const decoded = Buffer.from(value, 'base64url').toString('utf8');
+  if (!/^[1-9]\d*$/.test(decoded)) {
+    throw new HttpBodyError('Invalid enrichment run cursor.', 400, 'invalid_run_cursor');
+  }
+  const id = Number(decoded);
+  if (!Number.isSafeInteger(id)) {
+    throw new HttpBodyError('Invalid enrichment run cursor.', 400, 'invalid_run_cursor');
+  }
+  return id;
+}
+
+function runPageLimit(value) {
+  if (value === null || value === undefined || value === '') return ENRICH_RUN_DEFAULT_PAGE_SIZE;
+  if (!/^\d+$/.test(value)) {
+    throw new HttpBodyError('Invalid enrichment run page limit.', 400, 'invalid_run_limit');
+  }
+  const limit = Number(value);
+  if (!Number.isSafeInteger(limit) || limit < 1 || limit > ENRICH_RUN_MAX_PAGE_SIZE) {
+    throw new HttpBodyError(
+      `Enrichment run pages must contain 1-${ENRICH_RUN_MAX_PAGE_SIZE} items.`,
+      400,
+      'invalid_run_limit',
     );
   }
   return limit;
@@ -805,7 +843,15 @@ export function createEnrichRoutes({ review, enrichRunner, taxonomy, repo, requi
     }
 
     if (request.method === 'GET' && url.pathname === '/api/enrich/runs') {
-      sendJson(response, 200, { runs: repo.listJobRuns(20) });
+      const page = repo.jobRunsPage({
+        beforeId: decodeRunCursor(url.searchParams.get('cursor')),
+        limit: runPageLimit(url.searchParams.get('limit')),
+      });
+      sendJson(response, 200, {
+        runs: page.runs,
+        nextCursor: page.nextBeforeId === null ? null : encodeRunCursor(page.nextBeforeId),
+        total: page.total,
+      });
       return true;
     }
 
