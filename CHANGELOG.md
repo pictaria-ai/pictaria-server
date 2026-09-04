@@ -5,6 +5,8 @@ All notable changes to Pictaria Server are documented here. This project follows
 
 ## Unreleased
 
+## 1.1.0 - 2026-09-03
+
 ### Added
 
 - Optional **Daily Enrich** runs can process a user-set budget of new,
@@ -57,6 +59,19 @@ All notable changes to Pictaria Server are documented here. This project follows
 - A server shutdown that outlasts an Enrich run's drain now records exactly
   one interrupted Recent Runs entry. If abandoned work later settles, it
   cannot append a contradictory outcome or advance the queued job.
+
+### Compatibility
+
+- Persisted Settings advance from version 5 to 6 and the installation-state
+  contract advances from version 7 to 8. An existing installation creates and
+  verifies the standard automatic pre-migration snapshot before applying the
+  additive provider, run-context, and Daily Enrich settings.
+- A rollback to 1.0.1 after 1.1.0 has started requires restoring the complete
+  pre-migration snapshot before the older server is started. Pointing 1.0.1 at
+  a 1.1.0-migrated data directory is not the documented rollback path.
+- The Frame protocol, Node requirements, and Immich 2.0+ compatibility floor
+  are unchanged. Docker Compose installations should download the 1.1.0
+  Compose file and review the new OpenAI-compatible and Daily Enrich settings.
 
 ## 1.0.1 - 2026-09-02
 
