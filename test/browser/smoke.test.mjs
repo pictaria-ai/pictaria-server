@@ -1474,6 +1474,34 @@ test('admin UI smoke: gate, Insights lens, Curate, Smart Albums', { timeout: 120
       1,
       'Enrich retains only its advanced prompt and taxonomy subsection',
     );
+    assert.deepEqual(
+      await page.evaluate(`
+        (() => {
+          const status = document.getElementById('captionWbStatus');
+          const writebackField = document.getElementById('f2-enrich-captionWriteback').closest('.field');
+          return {
+            followsWriteback: writebackField.nextElementSibling === status,
+            precedesImageSource: status.nextElementSibling.querySelector('#f2-enrich-imageSource') !== null,
+            ownsBackfillAction: status.contains(document.getElementById('captionWbNow')),
+            explanation: status.querySelectorAll('.setting-desc')[1].textContent,
+          };
+        })()
+      `),
+      {
+        followsWriteback: true,
+        precedesImageSource: true,
+        ownsBackfillAction: true,
+        explanation: 'Counts are photos. Synced means written or already matching; left unchanged means Pictaria preserved an existing description or the photo/caption was unavailable.',
+      },
+      'Immich description-sync status and backfill controls stay with their setting',
+    );
+    assert.equal(
+      await page.evaluate(`
+        formatCaptionWbStatus({ enabled: true, pending: 2, written: 48154, skipped: 78, failed: 1, lastError: null })
+      `),
+      '2 queued · 48,154 synced · 78 left unchanged · 1 failed after retries',
+      'caption writeback counters use clear photo-state language',
+    );
     assert.equal(
       await page.evaluate('!!document.getElementById("f2-enrich-defaultProvider")'),
       false,
