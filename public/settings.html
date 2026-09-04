@@ -414,9 +414,9 @@
     </details>
 
     <details id="sec-voice" class="p-panel section">
-      <summary><span class="chev">&#9654;</span><h2>Voice TTS</h2><span class="sec-sub" id="sub-voice"></span><span id="secdirty-voice" class="sec-dirty" hidden>unsaved changes</span></summary>
+      <summary><span class="chev">&#9654;</span><h2>Voice TTS (Pictaria Frame)</h2><span class="sec-sub" id="sub-voice"></span><span id="secdirty-voice" class="sec-dirty" hidden>unsaved changes</span></summary>
       <div class="sec-body">
-      <div class="setting-desc">Configure how Pictaria answers spoken questions and turns replies into speech. Provider connections live under <a href="#sec-providers" style="color: var(--p-accent)">AI Providers</a>; Voice Commands and the wake phrase are configured in Pictaria Frame. Changes apply immediately.</div>
+      <div class="setting-desc">Configure how Pictaria Frame answers voice commands. Provider connections live under <a href="#sec-providers" style="color: var(--p-accent)">AI Providers</a>; Voice Commands and the wake phrase are configured in Pictaria Frame. Changes apply immediately.</div>
       <div id="voiceForm" hidden>
         <h3>Interesting and Tell Me commands</h3>
         <div class="setting-desc">
@@ -672,7 +672,7 @@
         { key: 'veniceApiKey', sourceSection: 'enrich', type: 'secret', desc: 'Venice offers private models. Choose one marked “private” for contractual zero retention; “anonymized” only removes your identity.', docs: 'https://docs.venice.ai/overview/privacy' },
         { key: 'veniceModel', sourceSection: 'enrich', type: 'text', placeholder: 'e.g. qwen3-vl-235b-a22b' },
         { head: 'ElevenLabs' },
-        { key: 'elevenLabsApiKey', sourceSection: 'voice', type: 'secret', desc: 'Used only for text-to-speech. Select ElevenLabs as the TTS provider under Voice TTS.' },
+        { key: 'elevenLabsApiKey', sourceSection: 'voice', type: 'secret', desc: 'Used for text-to-speech in Pictaria Frame. Select ElevenLabs as the TTS provider under Voice TTS.' },
       ],
       enrich: [
         { key: 'enabled', type: 'switch', desc: 'Lets a model you choose analyze your photos. Off by default. Local providers keep requests within infrastructure you operate; cloud providers receive them through your account.', docs: 'https://github.com/pictaria-ai/pictaria-server/blob/main/docs/ENRICH.md' },
