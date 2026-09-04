@@ -1,8 +1,10 @@
 # Pictaria Server
 
-Self-hosted companion server for [Pictaria Frame](https://pictaria.ai/frame), the photo-frame app. One container, one Node process, zero npm dependencies, works with your [Immich](https://immich.app) library.
+Self-hosted photo intelligence, enrichment, curation, and automation for your [Immich](https://immich.app) library. Pictaria Server helps you explore and understand your collection, optionally enrich it with AI, review your best photos, and build Smart Albums that stay up to date—all through a private web dashboard running on your hardware.
 
-Pictaria Server bundles everything the frame needs on the server side — and a dashboard that helps you understand your whole library:
+Use it as a standalone Immich application or pair it with [Pictaria Frame](https://pictaria.ai/frame). When paired, it also powers centralized curation, remote control, voice features, ambient information, and display history across your Frames. It runs as one container with one Node process and zero npm dependencies.
+
+Pictaria Server includes:
 
 - **Insights** — understand your collection (`/insights.html`): photos per year with a person/place/tag lens, a "where you were" timeline with auto-detected trips, a people constellation (faces linked by shared photos), records (busiest day, home base, furthest from home), and leaderboards for people, places, cameras, and tags. Every number is clickable — browse the photos behind it, open the same view in Immich, or turn it into an album. Everything is computed by Pictaria from a periodic Immich sweep; optional Geoapify place naming sends coordinates to the provider you configured.
 - **Enrich** — AI photo classification into a controlled taxonomy (`/enrich.html`). Works with operator-hosted Ollama, LM Studio, llama.cpp and other OpenAI-compatible endpoints, or through the cloud with OpenAI, OpenRouter, Venice, or Ollama's cloud models.
