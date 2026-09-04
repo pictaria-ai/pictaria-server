@@ -55,9 +55,55 @@ function makeHarness({
     jobRuns: [],
     searches: 0,
     runnerRunning: false,
+    runnerReserved: false,
     activeQueueItemId: null,
     maintenanceProtected: [],
     decisions: [],
+  };
+  const startRunner = (options) => {
+    state.started.push(options);
+    if (runnerRunningOnStart) {
+      state.runnerRunning = true;
+      state.activeQueueItemId = options.queueItemId;
+    }
+    return { running: true };
+  };
+  const enrichRunner = {
+    isRunning: () => state.runnerRunning,
+    isBusy: () => state.runnerRunning || state.runnerReserved,
+    reserve() {
+      if (this.isBusy()) throw new Error('An enrichment run is already in progress.');
+      state.runnerReserved = true;
+      let active = true;
+      return {
+        start(options) {
+          if (!active || !state.runnerReserved) throw new Error('The enrichment reservation is no longer active.');
+          active = false;
+          state.runnerReserved = false;
+          return startRunner(options);
+        },
+        release() {
+          if (!active) return false;
+          active = false;
+          state.runnerReserved = false;
+          return true;
+        },
+      };
+    },
+    status: () => (state.runnerRunning
+      ? { running: true, options: { queueItemId: state.activeQueueItemId } }
+      : { running: false }),
+    needsWorkFilter(options) {
+      state.filterRequests.push(options);
+      if (filters) {
+        return filters[Math.min(state.filterRequests.length - 1, filters.length - 1)];
+      }
+      return defaultFilter;
+    },
+    recordCoveredResolution(entry) {
+      state.coveredRuns.push(entry);
+    },
+    start: startRunner,
   };
   const handler = createEnrichRoutes({
     review: {
@@ -110,32 +156,9 @@ function makeHarness({
         assetIds.filter((assetId) => currentMembers === null || currentMembers.includes(assetId)),
       ),
     },
-    enrichRunner: {
-      isRunning: () => state.runnerRunning,
-      status: () => (state.runnerRunning
-        ? { running: true, options: { queueItemId: state.activeQueueItemId } }
-        : { running: false }),
-      needsWorkFilter(options) {
-        state.filterRequests.push(options);
-        if (filters) {
-          return filters[Math.min(state.filterRequests.length - 1, filters.length - 1)];
-        }
-        return defaultFilter;
-      },
-      recordCoveredResolution(entry) {
-        state.coveredRuns.push(entry);
-      },
-      start(options) {
-        state.started.push(options);
-        if (runnerRunningOnStart) {
-          state.runnerRunning = true;
-          state.activeQueueItemId = options.queueItemId;
-        }
-        return { running: true };
-      },
-    },
+    enrichRunner,
   });
-  return { handler, state };
+  return { handler, state, enrichRunner };
 }
 
 test('queue run targets only photos needing work and still sends covered ones to Curate', async () => {
@@ -505,6 +528,7 @@ test('competing starts are rejected while a slice resolution is in flight', asyn
 
   assert.equal((await post('/api/enrich/queue/run-all', { plan: [{ id: 88 }, { id: 89 }] })).statusCode, 202);
   state.started[0].onFinished(); // chain now resolving B, blocked on the gate
+  assert.equal(state.runnerReserved, true, 'the shared runner slot stays reserved during resolution');
 
   // Every start route holds the line while the resolution owns the queue.
   const single = await post('/api/enrich/queue/89/run', {});
@@ -523,6 +547,7 @@ test('competing starts are rejected while a slice resolution is in flight', asyn
   assert.equal(state.started.length, 1);
   assert.deepEqual(state.coveredRuns, [{ title: 'Lyon', provider: undefined, covered: 0, failureLimited: 5, discarded: 0 }]);
   assert.deepEqual(state.jobRuns, []); // no chain-stop record — nothing went wrong
+  assert.equal(state.runnerReserved, false);
 });
 
 test('removing an item mid-resolution wins: no start, no retirement record', async () => {

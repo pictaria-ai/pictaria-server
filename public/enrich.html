@@ -274,8 +274,10 @@
   <div id="toast" class="p-toast"></div>
 
   <script>
+    const IDLE_STATUS_POLL_MS = 15_000;
     const state = {
       polling: null,
+      idlePolling: null,
       providersLoaded: false,
       providerConfigured: new Map(),
       providerSavedValue: '',
@@ -520,6 +522,13 @@
       } catch (error) {
         el('enrichStatusLine').textContent = error.message;
       }
+    }
+
+    // Scheduled runs can begin while this page is otherwise idle. Keep one
+    // lightweight status check alive while the visible page is open, then let
+    // the existing two-second poll take over as soon as work is detected.
+    function refreshIfIdle() {
+      if (!state.polling && document.visibilityState === 'visible') void refresh();
     }
 
     el('enrichStart').addEventListener('click', async () => {
@@ -1361,6 +1370,8 @@
       if (Number.isFinite(photos)) { state.libraryPhotos = photos; void refresh(); }
     }).catch(() => {});
 
+    state.idlePolling = setInterval(refreshIfIdle, IDLE_STATUS_POLL_MS);
+    document.addEventListener('visibilitychange', refreshIfIdle);
     refresh();
     loadQueue();
     loadRuns();

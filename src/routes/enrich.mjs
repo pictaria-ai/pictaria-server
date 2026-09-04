@@ -106,16 +106,28 @@ export function createEnrichRoutes({ review, enrichRunner, taxonomy, repo, requi
   // stale second tab can't begin resolving (and review-listing covered
   // photos) only to die at start(). The chain's own next item never
   // passes through here — it starts after the runner is already idle.
-  const queueBusy = () => enrichRunner.isRunning() || sliceResolutions > 0;
+  const queueBusy = () => enrichRunner.isBusy() || sliceResolutions > 0;
   // Start one queued item. Shared by the single Run button and the Run-all
   // chain; `chainNext` (if given) fires after this item's clean finish, so
   // a cancel or failure stops the chain with the queue intact.
   async function startQueuedItem(item, { provider, sendToCurate = true, reopenDecided = false, skipAnySuccessful, chainNext } = {}) {
+    // Claim the shared runner synchronously, before slice resolution awaits
+    // Immich. Daily Enrich and other starts now see the same ownership state
+    // as the queue routes, including between Run-all items.
+    const reservation = enrichRunner.reserve();
     sliceResolutions += 1;
     resolvingQueueItemIds.add(item.id);
     try {
-      return await resolveAndStart(item, { provider, sendToCurate, reopenDecided, skipAnySuccessful, chainNext });
+      return await resolveAndStart(item, {
+        provider,
+        sendToCurate,
+        reopenDecided,
+        skipAnySuccessful,
+        chainNext,
+        reservation,
+      });
     } finally {
+      reservation.release();
       sliceResolutions -= 1;
       resolvingQueueItemIds.delete(item.id);
     }
@@ -151,7 +163,14 @@ export function createEnrichRoutes({ review, enrichRunner, taxonomy, repo, requi
     };
   }
 
-  async function resolveAndStart(item, { provider, sendToCurate, reopenDecided, skipAnySuccessful, chainNext }) {
+  async function resolveAndStart(item, {
+    provider,
+    sendToCurate,
+    reopenDecided,
+    skipAnySuccessful,
+    chainNext,
+    reservation,
+  }) {
     const reopen = reopenDecided === true;
     const skip = skipAnySuccessful === undefined ? !reopen : skipAnySuccessful !== false;
     // Skip-aware resolution collects photos the run would analyze, so a capped
@@ -208,7 +227,7 @@ export function createEnrichRoutes({ review, enrichRunner, taxonomy, repo, requi
       throw error;
     }
     return {
-      status: enrichRunner.start({
+      status: reservation.start({
         provider,
         skipAnySuccessful: skip,
         assetIds: resolved.assetIds,

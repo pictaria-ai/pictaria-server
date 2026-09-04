@@ -676,6 +676,10 @@
       ],
       enrich: [
         { key: 'enabled', type: 'switch', desc: 'Lets a model you choose analyze your photos. Off by default. Local providers keep requests within infrastructure you operate; cloud providers receive them through your account.', docs: 'https://github.com/pictaria-ai/pictaria-server/blob/main/docs/ENRICH.md' },
+        { head: 'Daily Enrich' },
+        { key: 'scheduledEnabled', type: 'switch', desc: 'Enrich photos, once a day, that haven\'t been previously enriched. Uses the provider last selected and sends successful results to Curate. If today\'s time has passed, enabling starts today\'s catch-up promptly. Runs only once per day. Requires Enable AI enrichment above.' },
+        { key: 'scheduledTime', type: 'time', width: 150, desc: 'Your browser’s local time. Pictaria remembers this browser’s time zone when you save.' },
+        { key: 'scheduledPhotoBudget', type: 'number', width: 110, desc: 'The most new photos to analyze each day. Photos already enriched do not use the budget.' },
         { key: 'captionWriteback', type: 'switch', desc: 'Copies each photo’s AI caption into its Immich description, making photos searchable in Immich by what’s in them. Pictaria fills an empty description or updates its own earlier text and checks immediately before writing; Immich cannot make that check and update atomic, so a narrow concurrent human-edit race remains. Runs in the background; new enrichments follow automatically.', docs: 'https://github.com/pictaria-ai/pictaria-server/blob/main/docs/ENRICH.md#writing-captions-to-immich-descriptions' },
         { key: 'imageSource', type: 'select', labels: { preview: 'Preview (recommended)', thumbnail: 'Thumbnail (fastest, least detail)', original: 'Original (largest upload)' }, desc: 'The image size sent to the model for analysis.' },
         { key: 'inferenceHostLabel', type: 'text', placeholder: 'e.g. M4 Mac mini · LM Studio', desc: 'Optional label copied into each new run’s history, useful when comparing the same model on different machines. You supply and maintain this text; Pictaria does not inspect the model host.' },
@@ -907,7 +911,7 @@
           } else {
             input = document.createElement('input');
             input.className = 'p-input';
-            input.type = row.type === 'secret' ? 'password' : row.type === 'number' ? 'number' : 'text';
+            input.type = row.type === 'secret' ? 'password' : row.type === 'number' ? 'number' : row.type === 'time' ? 'time' : 'text';
             input.autocomplete = 'off';
             if (row.placeholder) input.placeholder = row.placeholder;
             if (row.width) input.style.width = `${row.width}px`;
@@ -1235,7 +1239,7 @@
         const custom = settings.enrich.systemPrompt?.value || settings.enrich.userTemplate?.value;
         el('sub-enrich').textContent = settings.enrich.enabled && !settings.enrich.enabled.value
           ? 'off'
-          : `on${custom ? ' · custom prompt' : ''}`;
+          : `on${settings.enrich.scheduledEnabled?.value ? ' · daily' : ''}${custom ? ' · custom prompt' : ''}`;
       }
       if (settings.curate?.burstGrouping) {
         el('sub-curate').textContent = [
@@ -1290,6 +1294,13 @@
         } else {
           values[row.key] = input.value;
         }
+      }
+      if (section === 'enrich' && patch.enrich && [
+        'scheduledEnabled',
+        'scheduledTime',
+        'scheduledPhotoBudget',
+      ].some((key) => Object.hasOwn(patch.enrich, key))) {
+        patch.enrich.scheduledTimeZone = Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC';
       }
       el(`save-${section}`).disabled = true;
       const note = el(`note-${section}`);
