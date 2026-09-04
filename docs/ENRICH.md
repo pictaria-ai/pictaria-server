@@ -205,6 +205,19 @@ light even on remote links.
   analyzes up to the *Photos* budget (skips don't consume the budget).
   *Only unenriched* (default on) skips photos that already have a
   successful run from any model.
+- **Daily Enrich** — an optional set-it-and-forget-it library sweep under
+  **Settings → Enrich**. Choose a local time and daily photo budget; Pictaria
+  uses the provider currently selected on the Enrich page, analyzes only
+  photos with no successful enrichment, and sends successful results to
+  Curate. The browser's current time zone is remembered when the schedule is
+  saved, even when Pictaria itself runs in a UTC Docker container. A manual or
+  queued run already in progress keeps priority and the daily sweep waits
+  quietly. Enabling the schedule after today's chosen time starts that day's
+  catch-up promptly. Each attempt appears in **Recent runs** as `Daily Enrich`,
+  including a zero-photo run when the library was already caught up. A run
+  that starts but fails is recorded there and waits until the next day rather
+  than retrying automatically; after correcting the problem, start a manual
+  run if you do not want to wait.
 
 **"Enriched" is per setup**: a photo counts as enriched for a specific
 combination of provider + model + prompt version + taxonomy version.

@@ -7,6 +7,10 @@ All notable changes to Pictaria Server are documented here. This project follows
 
 ### Added
 
+- Optional **Daily Enrich** runs can process a user-set budget of new,
+  unenriched photos once per day with the currently selected provider. The
+  Settings UI remembers the browser's time zone, busy manual runs keep
+  priority, and the result appears in normal run history.
 - A generic OpenAI-compatible provider can now connect Enrich, the Curate AI
   referee, and provider-selectable voice answers to llama.cpp and similar
   chat-completions servers using a configurable base URL, model, and optional
@@ -32,10 +36,10 @@ All notable changes to Pictaria Server are documented here. This project follows
 - Enrich cancellation now aborts the active AI-provider request immediately
   instead of waiting out that photo's provider timeout. The cancelled photo
   remains retryable on the next run, and queued work stays in place.
-- The persisted Settings contract advances to version 5 and the installation
-  state contract to version 7. Existing installations take the standard
+- The persisted Settings contract advances to version 6 and the installation
+  state contract to version 8. Existing installations take the standard
   automatic pre-migration recovery snapshot before adopting the additive
-  provider and per-run benchmark-context settings.
+  provider, per-run benchmark-context, and daily Enrich settings.
 - Enrich now retries a photo twice when any configured provider reports a
   temporary 429 or 503 response, honoring bounded `Retry-After` guidance and
   keeping cancellation responsive during the wait. Persistent overloads stop

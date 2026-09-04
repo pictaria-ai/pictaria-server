@@ -77,6 +77,15 @@ export function loadConfig(env = process.env) {
     // Off by default because a run sends the selected image rendition to its
     // chosen model. Voice Interesting is a separate user-invoked model path.
     enrichEnabled: parseBoolean(env.ENRICH_ENABLED),
+    enrichSchedule: {
+      enabled: parseBoolean(env.ENRICH_SCHEDULE_ENABLED),
+      time: normalizeDailyTime(env.ENRICH_SCHEDULE_TIME, '03:00'),
+      timeZone: normalizeTimeZone(
+        env.ENRICH_SCHEDULE_TIME_ZONE,
+        Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC',
+      ),
+      photoBudget: clamp(parseInteger(env.ENRICH_SCHEDULE_PHOTO_BUDGET, 100), 1, 10000),
+    },
     // On by default: Curate collapses same-moment photos into stacked cards.
     curateBurstGrouping:
       env.CURATE_BURST_GROUPING === undefined ? true : parseBoolean(env.CURATE_BURST_GROUPING),
@@ -240,6 +249,23 @@ export function loadConfig(env = process.env) {
   };
   validatePersistentStatePaths(config);
   return config;
+}
+
+function normalizeDailyTime(value, fallback) {
+  const text = String(value || '').trim();
+  const match = /^(\d{2}):(\d{2})$/.exec(text);
+  if (!match || Number(match[1]) > 23 || Number(match[2]) > 59) return fallback;
+  return text;
+}
+
+function normalizeTimeZone(value, fallback) {
+  const candidate = String(value || fallback || 'UTC').trim();
+  try {
+    new Intl.DateTimeFormat('en', { timeZone: candidate }).format();
+    return candidate;
+  } catch {
+    return 'UTC';
+  }
 }
 
 export function validatePersistentStatePaths(config) {
