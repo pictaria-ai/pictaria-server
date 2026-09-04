@@ -5,6 +5,8 @@ All notable changes to Pictaria Server are documented here. This project follows
 
 ## Unreleased
 
+## 1.1.0 - 2026-09-03
+
 ### Added
 
 - Optional **Daily Enrich** runs can process a user-set budget of new,
@@ -41,10 +43,11 @@ All notable changes to Pictaria Server are documented here. This project follows
 - Enrich cancellation now aborts the active AI-provider request immediately
   instead of waiting out that photo's provider timeout. The cancelled photo
   remains retryable on the next run, and queued work stays in place.
-- The persisted Settings contract advances to version 6 and the installation
-  state contract to version 8. Existing installations take the standard
-  automatic pre-migration recovery snapshot before adopting the additive
-  provider, per-run benchmark-context, and daily Enrich settings.
+- The persisted Settings contract advances from the shipped version 3 to 6
+  and the installation-state contract from the shipped version 5 to 8;
+  intermediate versions were never released. Existing installations take the
+  standard automatic pre-migration recovery snapshot before adopting the
+  additive provider, per-run benchmark-context, and Daily Enrich settings.
 - Enrich now retries a photo twice when any configured provider reports a
   temporary 429 or 503 response, honoring bounded `Retry-After` guidance and
   keeping cancellation responsive during the wait. Persistent overloads stop
@@ -57,6 +60,24 @@ All notable changes to Pictaria Server are documented here. This project follows
 - A server shutdown that outlasts an Enrich run's drain now records exactly
   one interrupted Recent Runs entry. If abandoned work later settles, it
   cannot append a contradictory outcome or advance the queued job.
+
+### Compatibility
+
+- A 1.0.1 installation migrates persisted Settings from version 3 to 6 and
+  the installation-state contract from version 5 to 8. It creates and verifies
+  the standard automatic pre-migration snapshot before applying the additive
+  provider, run-context, and Daily Enrich settings.
+- Before upgrading, operators using a custom `BACKUP_DIR` must complete its
+  one-time adoption as documented in [Backup and restore](docs/BACKUP.md).
+  Startup intentionally stops if that destination is unavailable or unadopted,
+  even when scheduled backups are disabled, rather than migrating without a
+  verified recovery point.
+- A rollback to 1.0.1 after 1.1.0 has started requires restoring the complete
+  pre-migration snapshot before the older server is started. Pointing 1.0.1 at
+  a 1.1.0-migrated data directory is not the documented rollback path.
+- The Frame protocol, Node requirements, and Immich 2.0+ compatibility floor
+  are unchanged. Docker Compose installations should download the 1.1.0
+  Compose file and review the new OpenAI-compatible and Daily Enrich settings.
 
 ## 1.0.1 - 2026-09-02
 

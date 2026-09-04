@@ -24,7 +24,7 @@ upgrade.
 ## Upgrade — Docker
 
 ```sh
-PICTARIA_RELEASE=v1.0.1 # replace with the release you are installing
+PICTARIA_RELEASE=v1.1.0 # replace with the release you are installing
 curl -fsSL -o docker-compose.release.yml \
   "https://raw.githubusercontent.com/pictaria-ai/pictaria-server/${PICTARIA_RELEASE}/docker-compose.yml"
 diff -u docker-compose.yml docker-compose.release.yml
@@ -45,7 +45,7 @@ docker compose -f docker-compose.release.yml config --images
 ```
 
 The printed image must end in the numeric image version corresponding to the
-source release you selected (`v1.0.1` uses image tag `1.0.1`). Next, make a
+source release you selected (`v1.1.0` uses image tag `1.1.0`). Next, make a
 rollback definition from the currently running Compose file. It should already
 resolve to the version you noted under Settings → Server; verify it before
 replacing the active definition:
@@ -72,7 +72,7 @@ test -z "$(git status --porcelain)" || {
   echo "Stop: preserve or reconcile local changes before upgrading."
   exit 1
 }
-PICTARIA_RELEASE=v1.0.1 # replace with the release you are installing
+PICTARIA_RELEASE=v1.1.0 # replace with the release you are installing
 git fetch --tags --prune
 git switch --detach "$PICTARIA_RELEASE"
 docker compose up -d --build
@@ -97,7 +97,7 @@ test -z "$(git status --porcelain)" || {
   echo "Stop: preserve or reconcile local changes before upgrading."
   exit 1
 }
-PICTARIA_RELEASE=v1.0.1 # replace with the release you are installing
+PICTARIA_RELEASE=v1.1.0 # replace with the release you are installing
 git fetch --tags --prune
 git switch --detach "$PICTARIA_RELEASE"
 ```

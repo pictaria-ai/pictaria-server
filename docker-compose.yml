@@ -3,7 +3,7 @@ services:
     # Release files default to their matching versioned image tag. A tag is a
     # release name, not a cryptographic digest. Set PICTARIA_IMAGE_TAG only
     # when deliberately testing another published tag.
-    image: ghcr.io/pictaria-ai/pictaria-server:${PICTARIA_IMAGE_TAG:-1.0.1}
+    image: ghcr.io/pictaria-ai/pictaria-server:${PICTARIA_IMAGE_TAG:-1.1.0}
     build: .
     container_name: pictaria
     restart: unless-stopped
