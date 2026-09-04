@@ -77,6 +77,31 @@ async function finished(runner) {
   assert.equal(runner.isRunning(), false, 'run should have finished');
 }
 
+test('a reservation owns the single-flight slot until release or start', async () => {
+  const runner = new EnrichJobRunner({
+    repo: makeRepo(),
+    immich: { getAsset: async (id) => ({ id, originalPath: `${id}.jpg` }) },
+    taxonomy,
+    config: makeConfig(),
+  });
+
+  const released = runner.reserve();
+  assert.equal(runner.isRunning(), false);
+  assert.equal(runner.isBusy(), true);
+  assert.throws(() => runner.start({ assetIds: ['a1'] }), /already in progress/);
+  assert.equal(released.release(), true);
+  assert.equal(released.release(), false);
+  assert.equal(runner.isBusy(), false);
+
+  const transferred = runner.reserve();
+  transferred.start({ assetIds: ['a1'], skipAnySuccessful: true });
+  assert.equal(runner.isRunning(), true);
+  assert.equal(runner.isBusy(), true);
+  assert.equal(transferred.release(), false);
+  await finished(runner);
+  assert.equal(runner.isBusy(), false);
+});
+
 test('onFinished fires after a clean targeted run and history records it', async () => {
   const repo = makeRepo();
   const config = makeConfig();

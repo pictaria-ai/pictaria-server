@@ -2036,6 +2036,12 @@ export class Repository {
     return this.jobRunsPage({ limit }).runs;
   }
 
+  latestJobRunStartedAtByTitle(title) {
+    return this.db.prepare(`
+      SELECT started_at FROM job_runs WHERE title = ? ORDER BY id DESC LIMIT 1
+    `).get(String(title))?.started_at ?? null;
+  }
+
   getJobRunLog(id) {
     const row = this.db.prepare(`
       SELECT title, provider, model, prompt_version, taxonomy_version, inference_host_label, status, log_json

@@ -16,6 +16,7 @@ import { backfillAssetVisuals } from './enrich/visualBackfill.mjs';
 import { CaptionWritebackService } from './enrich/captionWriteback.mjs';
 import { RefereeService } from './enrich/refereeService.mjs';
 import { EnrichJobRunner } from './enrich/jobRunner.mjs';
+import { EnrichScheduler } from './enrich/scheduler.mjs';
 import { loadActiveTaxonomy, replaceTaxonomy } from './enrich/taxonomy.mjs';
 import { SmartAlbumStore } from './albums/store.mjs';
 import { SmartAlbumValidationError } from './albums/smartAlbums.mjs';
@@ -125,6 +126,7 @@ settingsStore.onApplied = () => {
     client.apiKey = config.immichApiKey;
   }
   immichPing = emptyImmichStatus();
+  enrichScheduler.settingsChanged();
   // First-time setup: the moment Immich becomes reachable, populate
   // Insights instead of waiting for the hourly staleness check. A no-op
   // whenever the snapshot is fresh or Immich is still unconfigured.
@@ -167,6 +169,7 @@ const immich = new ImmichClient({
 const review = new ReviewService({ repo, immich, taxonomy, config, log: (message) => console.log(`[Pictaria] ${message}`) });
 const captionWriteback = new CaptionWritebackService({ repo, immich, config, log: (message) => console.log(`[Pictaria] ${message}`) });
 const enrichRunner = new EnrichJobRunner({ repo, immich, taxonomy, config });
+const enrichScheduler = new EnrichScheduler({ runner: enrichRunner, repo, config });
 const referee = new RefereeService({ repo, immich, review, enrichRunner, config, log: (message) => console.log(`[Pictaria] ${message}`) });
 const albumStore = new SmartAlbumStore(config.albums.dataFile, { installationSecret });
 const albumScheduler = new SmartAlbumScheduler({ immich, store: albumStore, config: config.albums, enrichRepo: repo });
@@ -216,6 +219,7 @@ try {
   process.exit(1);
 }
 albumScheduler.start();
+enrichScheduler.start();
 insightsCollector.startAutoRefresh();
 
 // Automatic backups: catch up on boot if the newest snapshot is older than
@@ -268,6 +272,7 @@ lifecycle.setTimeout(scheduleBackupTick, 60000);
 lifecycle.register('review-sync', 3000, (timeoutMs) => review.stopSyncWorker(timeoutMs));
 lifecycle.register('caption-writeback', 3000, (timeoutMs) => captionWriteback.stop(timeoutMs));
 lifecycle.register('enrich-runner', 3000, (timeoutMs) => enrichRunner.stop(timeoutMs));
+lifecycle.register('enrich-scheduler', 3000, () => enrichScheduler.stop());
 lifecycle.register('insights-collector', 3000, (timeoutMs) => insightsCollector.stop(timeoutMs));
 lifecycle.register('curate-referee', 3000, (timeoutMs) => referee.stop(timeoutMs));
 lifecycle.register('album-scheduler', 3000, (timeoutMs) => albumScheduler.stop(timeoutMs));

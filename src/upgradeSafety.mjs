@@ -4,7 +4,7 @@ import { backupTargets, readSnapshotStatus, runBackup } from './backup.mjs';
 
 // Bump only when a release changes a persisted contract and therefore needs
 // a pre-migration recovery point. Ordinary server releases keep this value.
-export const PERSISTENT_STATE_VERSION = 7;
+export const PERSISTENT_STATE_VERSION = 8;
 
 export class UpgradeSafetyError extends Error {
   constructor(message, { code = 'upgrade_safety_error' } = {}) {

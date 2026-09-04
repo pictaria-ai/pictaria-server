@@ -18,6 +18,10 @@ export class EnrichJobRunner {
     this.state = idleState();
     this.runPromise = null;
     this.runLifecycle = null;
+    // Queue runs resolve their Immich slice before start(). Reserve the
+    // single-flight slot across that await so schedulers and other callers
+    // cannot claim the model in the gap.
+    this.reserved = false;
     // One-way shutdown latch: a request landing during the drain window
     // must not start a run nobody will drain or record.
     this.stopped = false;
@@ -34,6 +38,37 @@ export class EnrichJobRunner {
 
   isRunning() {
     return this.state.running;
+  }
+
+  isBusy() {
+    return this.state.running || this.reserved;
+  }
+
+  reserve() {
+    if (this.stopped) {
+      throw new Error('The server is shutting down.');
+    }
+    if (this.isBusy()) {
+      throw new Error('An enrichment run is already in progress.');
+    }
+    this.reserved = true;
+    let active = true;
+    return {
+      start: (options = {}) => {
+        if (!active || !this.reserved) {
+          throw new Error('The enrichment reservation is no longer active.');
+        }
+        active = false;
+        this.reserved = false;
+        return this.start(options);
+      },
+      release: () => {
+        if (!active) return false;
+        active = false;
+        this.reserved = false;
+        return true;
+      },
+    };
   }
 
   cancel() {
@@ -283,7 +318,7 @@ export class EnrichJobRunner {
     if (this.stopped) {
       throw new Error('The server is shutting down.');
     }
-    if (this.state.running) {
+    if (this.isBusy()) {
       throw new Error('An enrichment run is already in progress.');
     }
     const { providerName, provider } = this.#resolveProvider(options.provider);

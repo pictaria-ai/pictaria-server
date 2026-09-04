@@ -592,6 +592,10 @@ test('admin UI smoke: gate, Insights lens, Curate, Smart Albums', { timeout: 120
       'document.getElementById("runsCount")?.textContent === "Showing 20 of 23 retained runs" && !document.getElementById("runsMoreBtn")?.hidden',
       { label: 'initial bounded run-history page' },
     );
+    assert.deepEqual(await page.evaluate(`({
+      interval: IDLE_STATUS_POLL_MS,
+      armed: state.idlePolling !== null,
+    })`), { interval: 15000, armed: true });
     assert.equal(
       await page.evaluate('[...document.querySelectorAll("#runsList .qitem")].some((item) => item.textContent.includes("Seeded failed run"))'),
       false,
@@ -1494,6 +1498,34 @@ test('admin UI smoke: gate, Insights lens, Curate, Smart Albums', { timeout: 120
       1,
       'Enrich retains only its advanced prompt and taxonomy subsection',
     );
+    assert.deepEqual(
+      await page.evaluate(`
+        (() => {
+          const status = document.getElementById('captionWbStatus');
+          const writebackField = document.getElementById('f2-enrich-captionWriteback').closest('.field');
+          return {
+            followsWriteback: writebackField.nextElementSibling === status,
+            precedesImageSource: status.nextElementSibling.querySelector('#f2-enrich-imageSource') !== null,
+            ownsBackfillAction: status.contains(document.getElementById('captionWbNow')),
+            explanation: status.querySelectorAll('.setting-desc')[1].textContent,
+          };
+        })()
+      `),
+      {
+        followsWriteback: true,
+        precedesImageSource: true,
+        ownsBackfillAction: true,
+        explanation: 'Counts are photos. Synced means written or already matching; left unchanged means Pictaria preserved an existing description or the photo/caption was unavailable.',
+      },
+      'Immich description-sync status and backfill controls stay with their setting',
+    );
+    assert.equal(
+      await page.evaluate(`
+        formatCaptionWbStatus({ enabled: true, pending: 2, written: 48154, skipped: 78, failed: 1, lastError: null })
+      `),
+      '2 queued · 48,154 synced · 78 left unchanged · 1 failed after retries',
+      'caption writeback counters use clear photo-state language',
+    );
     assert.equal(
       await page.evaluate('!!document.getElementById("f2-enrich-defaultProvider")'),
       false,
@@ -1605,6 +1637,43 @@ test('admin UI smoke: gate, Insights lens, Curate, Smart Albums', { timeout: 120
     assert.equal(persisted.elevenLabs.configured, true);
     assert.equal(persisted.elevenLabs.value, '', 'the ElevenLabs key remains redacted');
     assert.equal(await page.evaluate('document.getElementById("sub-providers").textContent'), '3 configured');
+
+    // Daily Enrich stays a three-control setup. The browser contributes its
+    // IANA zone invisibly so a UTC Docker container still honors local time.
+    assert.equal(
+      await page.evaluate('document.getElementById("f2-enrich-scheduledTime").type'),
+      'time',
+    );
+    assert.equal(
+      await page.evaluate('document.getElementById("f2-enrich-scheduledEnabled").closest(".field").querySelector(".setting-desc").textContent'),
+      'Enrich photos, once a day, that haven\'t been previously enriched. Uses the provider last selected and sends successful results to Curate. If today\'s time has passed, enabling starts today\'s catch-up promptly. Runs only once per day. Requires Enable AI enrichment above.',
+    );
+    const browserTimeZone = await page.evaluate('Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC"');
+    await page.evaluate(`
+      const enabled = document.getElementById("f2-enrich-scheduledEnabled");
+      enabled.checked = true;
+      enabled.dispatchEvent(new Event("change"));
+      const time = document.getElementById("f2-enrich-scheduledTime");
+      time.value = "04:30";
+      time.dispatchEvent(new Event("input"));
+      const budget = document.getElementById("f2-enrich-scheduledPhotoBudget");
+      budget.value = "25";
+      budget.dispatchEvent(new Event("input"));
+    `);
+    await page.evaluate('document.getElementById("save-enrich").click()');
+    await page.waitFor(
+      'document.getElementById("note-enrich").textContent.startsWith("Saved")',
+      { label: 'Daily Enrich settings saved' },
+    );
+    assert.deepEqual(await page.evaluate('window.__settingsPatch'), {
+      enrich: {
+        scheduledEnabled: true,
+        scheduledTime: '04:30',
+        scheduledPhotoBudget: '25',
+        scheduledTimeZone: browserTimeZone,
+      },
+    });
+    assert.match(await page.evaluate('document.getElementById("sub-enrich").textContent'), /daily/);
   });
 
   await t.test('Enrich remembers its provider selection through server settings', async () => {
