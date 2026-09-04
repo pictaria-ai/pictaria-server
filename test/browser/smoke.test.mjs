@@ -592,6 +592,10 @@ test('admin UI smoke: gate, Insights lens, Curate, Smart Albums', { timeout: 120
       'document.getElementById("runsCount")?.textContent === "Showing 20 of 23 retained runs" && !document.getElementById("runsMoreBtn")?.hidden',
       { label: 'initial bounded run-history page' },
     );
+    assert.deepEqual(await page.evaluate(`({
+      interval: IDLE_STATUS_POLL_MS,
+      armed: state.idlePolling !== null,
+    })`), { interval: 15000, armed: true });
     assert.equal(
       await page.evaluate('[...document.querySelectorAll("#runsList .qitem")].some((item) => item.textContent.includes("Seeded failed run"))'),
       false,
@@ -1587,6 +1591,10 @@ test('admin UI smoke: gate, Insights lens, Curate, Smart Albums', { timeout: 120
     assert.equal(
       await page.evaluate('document.getElementById("f2-enrich-scheduledTime").type'),
       'time',
+    );
+    assert.equal(
+      await page.evaluate('document.getElementById("f2-enrich-scheduledEnabled").closest(".field").querySelector(".setting-desc").textContent'),
+      'Enrich photos, once a day, that haven\'t been previously enriched. Uses the provider last selected and sends successful results to Curate. If today\'s time has passed, enabling starts today\'s catch-up promptly. Runs only once per day. Requires Enable AI enrichment above.',
     );
     const browserTimeZone = await page.evaluate('Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC"');
     await page.evaluate(`
