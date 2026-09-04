@@ -95,6 +95,9 @@
     .save-row .p-btn { flex-shrink: 0; }
     .save-note { font-size: 12px; color: var(--p-muted); flex: 1; min-width: 0; }
     .save-note.bad { color: var(--p-danger); }
+    .caption-wb-status { padding: 0 0 9px; }
+    .caption-wb-actions { display: flex; align-items: center; gap: 10px; margin-top: 8px; }
+    .caption-wb-actions .p-btn { flex-shrink: 0; }
     /* Show/hide toggle inside API-key fields. The wrapper must
        share the input's 340px cap — positioned against a full-width
        wrapper, the eye would float far right of the field on desktop. */
@@ -278,10 +281,16 @@
       <div class="sec-body">
         <div class="setting-desc">Controls enrichment, the image size sent to AI, and the prompts and taxonomy that govern what the model may say. Choose the provider for new runs on the Enrich page; your selection is remembered. Provider connections and model names live under AI Providers. How the pieces fit — prompts, taxonomy, and the response schema — is explained in the <a href="https://github.com/pictaria-ai/pictaria-server/blob/main/docs/ENRICH.md" target="_blank" rel="noopener" style="color: var(--p-accent)">enrichment guide</a>.</div>
         <div id="fields-enrich"></div>
-        <div id="captionWbLine" class="setting-desc"></div>
+        <div id="captionWbStatus" class="caption-wb-status">
+          <div id="captionWbLine" class="setting-desc" role="status" aria-live="polite"></div>
+          <div class="setting-desc">Counts are photos. Synced means written or already matching; left unchanged means Pictaria preserved an existing description or the photo/caption was unavailable.</div>
+          <div class="caption-wb-actions">
+            <button id="captionWbNow" class="p-btn accent" type="button" hidden>Write existing captions now</button>
+            <span id="captionWbNote" class="save-note" aria-live="polite"></span>
+          </div>
+        </div>
         <div class="save-row">
           <button id="save-enrich" class="p-btn primary">Save Enrich settings</button>
-          <button id="captionWbNow" class="p-btn accent" type="button" hidden>Write existing captions now</button>
           <span id="note-enrich" class="save-note"></span>
         </div>
       </div>
@@ -987,6 +996,9 @@
             field.append(warning);
           }
           target.append(field);
+          if (section === 'enrich' && row.key === 'captionWriteback') {
+            target.append(el('captionWbStatus'));
+          }
         }
         if (!box.querySelector('.field')) {
           // Server process predates this section — fields will appear after
@@ -1101,6 +1113,23 @@
 
     // --- caption writeback status + backfill ---
 
+    function formatCaptionWbStatus(status) {
+      const written = Number(status.written) || 0;
+      const skipped = Number(status.skipped) || 0;
+      const pending = Number(status.pending) || 0;
+      const failed = Number(status.failed) || 0;
+      const done = written + skipped;
+      if (!status.enabled && done + pending + failed === 0) return '';
+      return [
+        pending ? `${pending.toLocaleString()} queued` : null,
+        written ? `${written.toLocaleString()} synced` : null,
+        skipped ? `${skipped.toLocaleString()} left unchanged` : null,
+        failed ? `${failed.toLocaleString()} failed after retries` : null,
+        status.lastError ? `latest error: ${status.lastError}` : null,
+        !pending && !done && !failed ? 'nothing synced yet — use "Write existing captions now" to include photos enriched before this was turned on' : null,
+      ].filter(Boolean).join(' · ');
+    }
+
     async function loadCaptionWbStatus() {
       let status;
       try {
@@ -1111,15 +1140,8 @@
         return;
       }
       el('captionWbNow').hidden = !status.enabled;
-      const done = status.written + status.skipped;
-      el('captionWbLine').textContent = !status.enabled && done + status.pending + status.failed === 0 ? '' : [
-        status.pending ? `${status.pending.toLocaleString()} caption${status.pending === 1 ? '' : 's'} queued for Immich` : null,
-        status.written ? `${status.written.toLocaleString()} written` : null,
-        status.skipped ? `${status.skipped.toLocaleString()} kept as-is` : null,
-        status.failed ? `${status.failed.toLocaleString()} failed` : null,
-        status.lastError ? `last error: ${status.lastError}` : null,
-        !status.pending && !done && !status.failed ? 'Descriptions: nothing written yet — use "Write existing captions now" to cover photos enriched before this was on.' : null,
-      ].filter(Boolean).join(' · ');
+      const summary = formatCaptionWbStatus(status);
+      el('captionWbLine').textContent = summary ? `Immich description sync: ${summary}` : '';
     }
 
     el('captionWbNow').addEventListener('click', async () => {
@@ -1128,15 +1150,15 @@
         const response = await fetch('/api/enrich/captions/writeback/backfill', { method: 'POST', headers: headers() });
         const body = await response.json().catch(() => null);
         if (!response.ok) throw new Error(body?.error?.message ?? 'Could not start the backfill');
-        el('note-enrich').textContent = body.queued
+        el('captionWbNote').textContent = body.queued
           ? `Queued ${body.queued.toLocaleString()} caption${body.queued === 1 ? '' : 's'} — writes continue in the background.`
-          : 'Nothing new to write — all captions are already in Immich or kept as-is.';
+          : 'Nothing new to write — all captions are already synced or left unchanged.';
         void loadCaptionWbStatus();
       } catch (error) {
-        el('note-enrich').textContent = error.message;
+        el('captionWbNote').textContent = error.message;
       } finally {
         el('captionWbNow').disabled = false;
-        setTimeout(() => { el('note-enrich').textContent = ''; }, 8000);
+        setTimeout(() => { el('captionWbNote').textContent = ''; }, 8000);
       }
     });
 
