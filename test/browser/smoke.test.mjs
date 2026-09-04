@@ -1464,6 +1464,30 @@ test('admin UI smoke: gate, Insights lens, Curate, Smart Albums', { timeout: 120
       'save buttons mirror their Settings section titles',
     );
     assert.equal(await page.evaluate('document.getElementById("sub-providers").textContent'), '1 configured');
+    assert.deepEqual(
+      await page.evaluate(`
+        (() => {
+          const intro = document.querySelector('#sec-voice > .sec-body > .setting-desc');
+          const providerLink = intro.querySelector('a');
+          return {
+            title: document.querySelector('#sec-voice h2').textContent,
+            intro: intro.textContent,
+            providerLinkText: providerLink.textContent,
+            providerLinkTarget: providerLink.getAttribute('href'),
+            elevenLabsHelp: document.getElementById('f2-providers-elevenLabsApiKey')
+              .closest('.field').querySelector('.setting-desc').textContent,
+          };
+        })()
+      `),
+      {
+        title: 'Voice TTS (Pictaria Frame)',
+        intro: 'Configure how Pictaria Frame answers voice commands. Provider connections live under AI Providers; Voice Commands and the wake phrase are configured in Pictaria Frame. Changes apply immediately.',
+        providerLinkText: 'AI Providers',
+        providerLinkTarget: '#sec-providers',
+        elevenLabsHelp: 'Used for text-to-speech in Pictaria Frame. Select ElevenLabs as the TTS provider under Voice TTS.',
+      },
+      'Frame voice settings use clear product-specific copy and a portable provider link',
+    );
 
     assert.equal(
       await page.evaluate('document.querySelectorAll("#fields-enrich details.sub-details").length'),

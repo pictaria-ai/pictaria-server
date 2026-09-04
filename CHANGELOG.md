@@ -29,6 +29,8 @@ All notable changes to Pictaria Server are documented here. This project follows
 
 ### Changed
 
+- Settings now identifies Voice TTS as a Pictaria Frame feature and clarifies
+  where its provider connections and Frame-owned voice controls are configured.
 - Enrich cancellation now aborts the active AI-provider request immediately
   instead of waiting out that photo's provider timeout. The cancelled photo
   remains retryable on the next run, and queued work stays in place.
