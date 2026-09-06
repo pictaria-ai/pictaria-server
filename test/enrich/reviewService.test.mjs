@@ -1215,3 +1215,41 @@ test('a stack hoists to the highest bucket any undecided member earned', async (
     assert.deepEqual(after.assets[0].burstMemberStates, { 'hoist-good': 'approved', 'hoist-bad': 'undecided' });
   });
 });
+
+test('assetsResponse sorts assets by date, score, stack size, filename, and default', async () => {
+  await withService(async ({ repo, service }) => {
+    seedAsset(repo, 'a-photo', { frameScore: 0.95, capturedAt: '2026-01-01T10:00:00.000Z' });
+    seedAsset(repo, 'b-photo', { frameScore: 0.88, capturedAt: '2026-06-01T10:00:00.000Z' });
+    seedAsset(repo, 'c-stack-1', { frameScore: 0.85, capturedAt: '2026-03-01T10:00:00.000Z' });
+    seedAsset(repo, 'c-stack-2', { frameScore: 0.80, capturedAt: '2026-03-01T10:00:05.000Z' });
+
+    // date_desc: newest captured date first
+    const dateDesc = service.assetsResponse(new URLSearchParams({ view: 'candidates', sort: 'date_desc' }));
+    assert.equal(dateDesc.sort, 'date_desc');
+    assert.equal(dateDesc.assets[0].assetId, 'b-photo');
+
+    // date_asc: oldest captured date first
+    const dateAsc = service.assetsResponse(new URLSearchParams({ view: 'candidates', sort: 'date_asc' }));
+    assert.equal(dateAsc.sort, 'date_asc');
+    assert.equal(dateAsc.assets[0].assetId, 'a-photo');
+
+    // score_desc: highest frame score first
+    const scoreDesc = service.assetsResponse(new URLSearchParams({ view: 'candidates', sort: 'score_desc' }));
+    assert.equal(scoreDesc.assets[0].assetId, 'a-photo');
+
+    // score_asc: lowest frame score first
+    const scoreAsc = service.assetsResponse(new URLSearchParams({ view: 'candidates', sort: 'score_asc' }));
+    assert.equal(scoreAsc.assets[0].assetId, 'c-stack-2');
+
+    // name_asc: alphabetical by filename
+    const nameAsc = service.assetsResponse(new URLSearchParams({ view: 'candidates', sort: 'name_asc' }));
+    assert.equal(nameAsc.assets[0].assetId, 'a-photo');
+    assert.equal(nameAsc.assets[1].assetId, 'b-photo');
+
+    // stack_desc: largest stacks first
+    const stackDesc = service.assetsResponse(new URLSearchParams({ view: 'candidates', sort: 'stack_desc' }));
+    assert.ok(['c-stack-1', 'c-stack-2'].includes(stackDesc.assets[0].assetId));
+    assert.ok(['c-stack-1', 'c-stack-2'].includes(stackDesc.assets[1].assetId));
+  });
+});
+

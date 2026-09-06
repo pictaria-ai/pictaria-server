@@ -4,7 +4,8 @@ import { join } from 'node:path';
 import { OutputValidationError, enrichmentJsonSchema, validateAiOutput } from './schema.mjs';
 import { approvedModelTags } from './taxonomy.mjs';
 import { mapOutputToTags } from './mapTags.mjs';
-import { ImmichApiError, tagId, tagValue } from '../immich.mjs';
+import { buildEnrichmentPhotoContext, resolveEnrichmentLocation } from './photoContext.mjs';
+import { ImmichApiError, extractImageAssets, tagId, tagValue } from '../immich.mjs';
 import { configuredSecrets, sanitizeDiagnostic } from '../diagnostics.mjs';
 import { createTraversalBudget } from '../pagination.mjs';
 
@@ -19,8 +20,13 @@ export function loadPrompts(promptsDir, promptVersion = 'v1') {
   };
 }
 
-export function buildUserPrompt(userTemplate, taxonomy) {
-  return userTemplate.replaceAll('{approved_tags}', approvedModelTags(taxonomy).join('\n'));
+export function buildUserPrompt(userTemplate, taxonomy, context = '') {
+  const renderedApproved = userTemplate.replaceAll('{approved_tags}', approvedModelTags(taxonomy).join('\n'));
+  const renderedContext = context ? `Photo context:\n${context}\n\n` : '';
+  if (renderedApproved.includes('{photo_context}')) {
+    return renderedApproved.replaceAll('{photo_context}', renderedContext);
+  }
+  return context ? `${renderedContext}${renderedApproved}` : renderedApproved;
 }
 
 // maxBytes tightens the download cap for original-class fetches only (the
@@ -114,6 +120,10 @@ export async function analyzeWithValidationRetry(provider, image, {
   userPrompt,
   jsonSchema,
   taxonomy,
+  asset = null,
+  primaryPersonId = null,
+  primaryPersonName = null,
+  closeConnections = [],
   log = () => {},
   shouldStop = () => false,
   retrySleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms)),
@@ -145,7 +155,12 @@ export async function analyzeWithValidationRetry(provider, image, {
         // ended even if local schema validation later rejects its content.
         onProviderResponse();
         const normalized = validateAiOutput(result.normalizedOutput, taxonomy);
-        const decisions = mapOutputToTags(normalized, taxonomy);
+        const decisions = mapOutputToTags(normalized, taxonomy, undefined, {
+          asset,
+          primaryPersonId,
+          primaryPersonName,
+          closeConnections,
+        });
         return { result, normalized, decisions, retryCount: attemptIndex + overloadRetryCount };
       } catch (error) {
         if (isRetryableProviderOverload(error) && overloadRetryCount < overloadRetryLimit) {
@@ -172,6 +187,55 @@ export async function analyzeWithValidationRetry(provider, image, {
   throw lastError ?? new Error('model analysis did not run');
 }
 
+async function fetchRandomAssets(immich, { limit, takenAfter = null, takenBefore = null, shouldStop }) {
+  if (typeof immich?.listRandomImageAssets === 'function') {
+    return immich.listRandomImageAssets({ limit, takenAfter, takenBefore, shouldStop });
+  }
+  if (typeof immich?.searchRandom === 'function') {
+    const assets = [];
+    const seen = new Set();
+    let consecutiveDuplicates = 0;
+    const maxConsecutiveDuplicates = 3;
+    while (assets.length < limit) {
+      if (shouldStop?.()) break;
+      const count = Math.min(Math.max(1, limit - assets.length), 250);
+      const query = {
+        count,
+        ...(takenAfter ? { takenAfter } : {}),
+        ...(takenBefore ? { takenBefore } : {}),
+      };
+      const response = await immich.searchRandom(query);
+      const imageAssets = extractImageAssets(response);
+      if (imageAssets.length === 0) break;
+      let addedAny = false;
+      for (const asset of imageAssets) {
+        if (!asset?.id || seen.has(asset.id)) continue;
+        seen.add(asset.id);
+        assets.push(asset);
+        addedAny = true;
+        if (assets.length >= limit) break;
+      }
+      if (!addedAny) {
+        consecutiveDuplicates += 1;
+        if (consecutiveDuplicates >= maxConsecutiveDuplicates) break;
+      } else {
+        consecutiveDuplicates = 0;
+      }
+    }
+    return assets.slice(0, limit);
+  }
+  if (typeof immich?.listImageAssets === 'function') {
+    const assets = await immich.listImageAssets({ limit, takenAfter, takenBefore, shouldStop });
+    const shuffled = [...assets];
+    for (let i = shuffled.length - 1; i > 0; i -= 1) {
+      const j = Math.floor(Math.random() * (i + 1));
+      [shuffled[i], shuffled[j]] = [shuffled[j], shuffled[i]];
+    }
+    return shuffled;
+  }
+  return [];
+}
+
 export async function runBatch({
   immich,
   repo,
@@ -182,6 +246,9 @@ export async function runBatch({
   limit = 5,
   offset = 0,
   assetIds = null,
+  random = false,
+  takenAfter = null,
+  takenBefore = null,
   skipAi = false,
   reprocess = false,
   skipAnySuccessful = false,
@@ -194,11 +261,14 @@ export async function runBatch({
   dryRun = true,
   listForReview = false,
   captionWriteback = false,
+  config = {},
   shouldStop = () => false,
   log = () => {},
   now = Date.now,
   retrySleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms)),
   signal = null,
+  shouldSkipAsset = null,
+  onAssetsFetched = null,
 }) {
   const diagnosticSecrets = configuredSecrets(immich, provider);
   if (maxAnalyzed !== null && maxAnalyzed < 1) {
@@ -219,6 +289,10 @@ export async function runBatch({
     if (assetIds.length > MAX_TARGETED_ASSETS) {
       throw new Error(`assetIds must contain ${MAX_TARGETED_ASSETS} or fewer unique entries`);
     }
+  }
+
+  if (takenAfter || takenBefore) {
+    log(`timeframe filter: ${takenAfter ? `after ${takenAfter}` : ''}${takenAfter && takenBefore ? ', ' : ''}${takenBefore ? `before ${takenBefore}` : ''}`);
   }
 
   // Only Immich traversal time belongs to this deadline. Provider inference
@@ -258,11 +332,19 @@ export async function runBatch({
       // Stamp the confirmed-gone ids so their old failure rows stop feeding
       // the retry strip; upsertAsset un-stamps any photo that reappears.
       repo.markAssetsMissing(targeted.missingIds);
+    } else if (random) {
+      if (shouldStop()) return { assets: [], fetchedCount: 0, stopped: true };
+      traversal.beginPage();
+      fetched = await chargeImmichFetch(
+        () => fetchRandomAssets(immich, { limit, takenAfter, takenBefore, shouldStop }),
+      );
+      traversal.recordItems(fetched.length);
+      log(`fetched ${fetched.length} image assets (random)`);
     } else {
       if (shouldStop()) return { assets: [], fetchedCount: 0, stopped: true };
       traversal.beginPage();
       fetched = await chargeImmichFetch(
-        () => immich.listImageAssets({ limit, offset: windowOffset, shouldStop }),
+        () => immich.listImageAssets({ limit, offset: windowOffset, takenAfter, takenBefore, shouldStop }),
       );
       traversal.recordItems(fetched.length);
       log(`fetched ${fetched.length} image assets starting at offset ${windowOffset}`);
@@ -275,6 +357,7 @@ export async function runBatch({
     for (const asset of uniqueAssets) {
       repo.upsertAsset(asset);
     }
+    onAssetsFetched?.(uniqueAssets);
     return { assets: uniqueAssets, fetchedCount: fetched.length, stopped: shouldStop() };
   };
 
@@ -328,6 +411,11 @@ export async function runBatch({
       }
       const assetId = asset.id;
       const position = `[${scanned + index + 1}/${scanTotal}]`;
+
+      if (shouldSkipAsset?.(assetId)) {
+        log(`${position} skipping ${assetId}; removed from active run`);
+        continue;
+      }
 
       if (skipAnySuccessful && repo.hasAnySuccessfulRun(assetId)) {
         counters.skippedSuccessful += 1;
@@ -391,14 +479,54 @@ export async function runBatch({
           stopped = true;
           break;
         }
+        let fullAsset = asset;
+        if (!assetIds) {
+          try {
+            if (typeof immich?.getAsset === 'function') {
+              const fetched = await immich.getAsset(assetId);
+              if (fetched && typeof fetched === 'object') {
+                fullAsset = fetched;
+              }
+            }
+          } catch {
+            // Gracefully continue with asset summary
+          }
+        }
+
+        let enrichedLocation = null;
+        try {
+          enrichedLocation = await resolveEnrichmentLocation({ asset: fullAsset, config });
+        } catch {
+          // Gracefully continue without geocoded location
+        }
+
+        const primaryPersonId = config.curatePrimaryPersonId || config.primaryPersonId || null;
+        const primaryPersonName = config.curatePrimaryPersonName || config.primaryPersonName || null;
+        const closeConnections = Array.isArray(config.closeConnections)
+          ? config.closeConnections
+          : (typeof config.getCloseConnections === 'function' && primaryPersonId ? config.getCloseConnections(primaryPersonId) : []);
+
+        const photoContext = buildEnrichmentPhotoContext({
+          asset: fullAsset,
+          enrichedLocation,
+          primaryPersonId,
+          primaryPersonName,
+          closeConnections,
+        });
+        const assetUserPrompt = buildUserPrompt(userTemplate, taxonomy, photoContext);
+
         const { normalized, decisions, retryCount } = await analyzeWithValidationRetry(
           provider,
           { data: image.data, mimeType: image.contentType, assetId },
           {
             systemPrompt,
-            userPrompt,
+            userPrompt: assetUserPrompt,
             jsonSchema,
             taxonomy,
+            asset: fullAsset,
+            primaryPersonId,
+            primaryPersonName,
+            closeConnections,
             log,
             shouldStop,
             retrySleep,
@@ -503,16 +631,29 @@ export async function runBatch({
     if (stopped || window.stopped || assetIds || maxAnalyzed === null || analyzed >= maxAnalyzed) {
       break;
     }
-    if (window.fetchedCount < limit) {
-      log(`no more assets to scan; analyzed ${analyzed} of ${maxAnalyzed} requested`);
-      break;
-    }
-    windowOffset += window.fetchedCount;
-    window = await fetchWindow(windowOffset);
-    assets = window.assets;
-    if (window.fetchedCount === 0) {
-      log(`no more assets to scan; analyzed ${analyzed} of ${maxAnalyzed} requested`);
-      break;
+    if (random) {
+      if (window.assets.length === 0 || window.fetchedCount === 0) {
+        log(`no more unseen assets to scan; analyzed ${analyzed} of ${maxAnalyzed} requested`);
+        break;
+      }
+      window = await fetchWindow(0);
+      assets = window.assets;
+      if (window.assets.length === 0) {
+        log(`no more unseen assets to scan; analyzed ${analyzed} of ${maxAnalyzed} requested`);
+        break;
+      }
+    } else {
+      if (window.fetchedCount < limit) {
+        log(`no more assets to scan; analyzed ${analyzed} of ${maxAnalyzed} requested`);
+        break;
+      }
+      windowOffset += window.fetchedCount;
+      window = await fetchWindow(windowOffset);
+      assets = window.assets;
+      if (window.fetchedCount === 0) {
+        log(`no more assets to scan; analyzed ${analyzed} of ${maxAnalyzed} requested`);
+        break;
+      }
     }
   }
 
@@ -527,27 +668,42 @@ export async function runBatch({
 }
 
 export async function syncTagDecisions(immich, assetDecisions) {
-  const allTags = [...new Set(Object.values(assetDecisions).flat().map((decision) => decision.tag))].sort();
-  if (allTags.length === 0) {
+  const allAssetIds = Object.keys(assetDecisions);
+  if (allAssetIds.length === 0) {
     return;
   }
-  const tagIds = await ensureImmichTagIds(immich, allTags);
-  for (const [assetId, decisions] of Object.entries(assetDecisions)) {
-    const ids = decisions.map((decision) => tagIds[decision.tag]).filter(Boolean);
-    if (ids.length > 0) {
-      await immich.tagAssetsBulk({ assetIds: [assetId], tagIds: ids });
+  const partitions = typeof immich.partitionAssetIdsByOwner === 'function'
+    ? await immich.partitionAssetIdsByOwner(allAssetIds)
+    : [{ apiKey: immich.apiKey, assetIds: allAssetIds }];
+
+  for (const partition of partitions) {
+    const partitionDecisions = Object.fromEntries(
+      partition.assetIds
+        .map((id) => [id, assetDecisions[id]])
+        .filter(([, d]) => Array.isArray(d) && d.length > 0),
+    );
+    const partitionTags = [...new Set(Object.values(partitionDecisions).flat().map((decision) => decision.tag))].sort();
+    if (partitionTags.length === 0) {
+      continue;
+    }
+    const tagIds = await ensureImmichTagIds(immich, partitionTags, { apiKey: partition.apiKey });
+    for (const [assetId, decisions] of Object.entries(partitionDecisions)) {
+      const ids = decisions.map((decision) => tagIds[decision.tag]).filter(Boolean);
+      if (ids.length > 0) {
+        await immich.tagAssetsBulk({ assetIds: [assetId], tagIds: ids, apiKey: partition.apiKey });
+      }
     }
   }
 }
 
-export async function ensureImmichTagIds(immich, tags) {
-  const existing = tagMap(await immich.listTags());
+export async function ensureImmichTagIds(immich, tags, { apiKey } = {}) {
+  const existing = tagMap(await immich.listTags({ apiKey }));
   const missing = tags.filter((tag) => !(tag in existing));
   if (missing.length > 0) {
-    Object.assign(existing, tagMap(await immich.upsertTags(missing)));
+    Object.assign(existing, tagMap(await immich.upsertTags(missing, { apiKey })));
   }
   for (const tag of tags.filter((candidate) => !(candidate in existing))) {
-    const created = await immich.createTag(tag);
+    const created = await immich.createTag(tag, { apiKey });
     const value = tagValue(created);
     const identifier = tagId(created);
     if (value && identifier) {

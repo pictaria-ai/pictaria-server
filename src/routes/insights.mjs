@@ -372,6 +372,66 @@ export async function resolveSliceAssetIds({ immich, rawFilters, max = 1000, fil
     maxItems: SLICE_MAX_ITEMS,
     timeoutMs: SLICE_TRAVERSAL_TIMEOUT_MS,
   });
+
+  if (Array.isArray(filters.assetIds) && filters.assetIds.length > 0) {
+    let wanted = filters.assetIds;
+    if (filterNeedsWork) {
+      const verdict = await filterNeedsWork(wanted);
+      wanted = wanted.filter((id) => verdict.needy.has(id));
+      coveredAssetIds.push(...verdict.successful);
+      failureLimitedCount += verdict.failureLimited.size;
+      discardedCount += verdict.discarded?.size ?? 0;
+    }
+    const finalIds = wanted.slice(0, max);
+    return {
+      assetIds: finalIds,
+      assets: finalIds.map((id) => ({ id, originalPath: id })),
+      truncated: wanted.length > max,
+      scannedImages: filters.assetIds.length,
+      coveredAssetIds,
+      failureLimitedCount,
+      discardedCount,
+    };
+  }
+
+  if (filters.random === true) {
+    const fetchLimit = Math.min(1000, Math.max(max * 3, 100));
+    let randomAssets = [];
+    if (typeof immich.listRandomImageAssets === 'function') {
+      randomAssets = await immich.listRandomImageAssets({
+        limit: fetchLimit,
+        takenAfter: filters.takenAfter || null,
+        takenBefore: filters.takenBefore || null,
+      });
+    } else if (typeof immich.searchRandom === 'function') {
+      const res = await immich.searchRandom({
+        count: Math.min(fetchLimit, 250),
+        ...(filters.takenAfter ? { takenAfter: filters.takenAfter } : {}),
+        ...(filters.takenBefore ? { takenBefore: filters.takenBefore } : {}),
+      });
+      randomAssets = (res || []).filter((a) => a?.type === 'IMAGE');
+    }
+    scannedImages += randomAssets.length;
+    let wanted = randomAssets;
+    if (filterNeedsWork && randomAssets.length > 0) {
+      const verdict = await filterNeedsWork(randomAssets.map((item) => item.id));
+      wanted = randomAssets.filter((item) => verdict.needy.has(item.id));
+      coveredAssetIds.push(...verdict.successful);
+      failureLimitedCount += verdict.failureLimited.size;
+      discardedCount += verdict.discarded?.size ?? 0;
+    }
+    const finalAssets = wanted.slice(0, max);
+    return {
+      assetIds: finalAssets.map((a) => a.id),
+      assets: finalAssets.map((a) => ({ id: a.id, originalPath: a.originalPath || a.id, fileCreatedAt: a.fileCreatedAt })),
+      truncated: wanted.length > max,
+      scannedImages,
+      coveredAssetIds,
+      failureLimitedCount,
+      discardedCount,
+    };
+  }
+
   while (true) {
     // Unfiltered, fetch just past the remaining need so an overflow item
     // marks truncation. Filtered, always fetch full pages: most of a page
@@ -562,6 +622,17 @@ export function normalizeSliceFilters(raw) {
   const ids = (value) => (Array.isArray(value) ? value.map((id) => String(id || '').trim()).filter(Boolean) : []);
   const personIds = ids(raw.personIds);
   const tagIds = ids(raw.tagIds);
+  const albumIds = ids(raw.albumIds || (raw.albumId ? [raw.albumId] : []));
+  const assetIds = ids(raw.assetIds).slice(0, 10000);
+  if (assetIds.length > 0) {
+    filters.assetIds = assetIds;
+  }
+  if (raw.random === true) {
+    filters.random = true;
+  }
+  if (albumIds.length > 0) {
+    filters.albumIds = albumIds;
+  }
   if (personIds.length > 0) {
     filters.personIds = personIds;
   }

@@ -1263,3 +1263,30 @@ test('failureLimitedAssetIds finds the library-wide stuck set under one run key'
     );
   });
 });
+
+test('enrichment queue items can be reordered, updated, and cleared', () => {
+  withRepo((repo) => {
+    const a = repo.queueAdd({ title: 'A', filters: { city: 'A' } }).id;
+    const b = repo.queueAdd({ title: 'B', filters: { city: 'B' } }).id;
+    const c = repo.queueAdd({ title: 'C', filters: { city: 'C' } }).id;
+
+    const initial = repo.queuePage();
+    assert.deepEqual(initial.items.map((item) => item.id), [a, b, c]);
+
+    repo.queueReorder([c, a, b]);
+    const reordered = repo.queuePage();
+    assert.deepEqual(reordered.items.map((item) => item.id), [c, a, b]);
+
+    const updated = repo.queueUpdate(b, { title: 'Updated B' });
+    assert.equal(updated.title, 'Updated B');
+    assert.equal(repo.queueGet(b).title, 'Updated B');
+
+    repo.queueClear({ protectedIds: [a] });
+    const afterProtectedClear = repo.queuePage();
+    assert.deepEqual(afterProtectedClear.items.map((item) => item.id), [a]);
+
+    repo.queueClear();
+    assert.equal(repo.queuePage().total, 0);
+  });
+});
+

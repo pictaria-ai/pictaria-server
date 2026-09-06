@@ -48,6 +48,15 @@ const SERVER_FIELDS = {
       config.immichApiKey = value;
     },
   },
+  immichPartnerApiKey: {
+    env: 'IMMICH_PARTNER_API_KEY',
+    label: 'Immich partner API key',
+    secret: true,
+    read: (config) => config.immichPartnerApiKey,
+    apply: (config, value) => {
+      config.immichPartnerApiKey = value;
+    },
+  },
   openAiApiKey: {
     env: 'OPENAI_API_KEY',
     label: 'OpenAI API key',
@@ -543,6 +552,22 @@ const CURATE_FIELDS = {
       config.curateRefereeModel = value;
     },
   },
+  primaryPersonId: {
+    env: 'PRIMARY_PERSON_ID',
+    label: "Primary person ('Me') ID",
+    read: (config) => config.curatePrimaryPersonId,
+    apply: (config, value) => {
+      config.curatePrimaryPersonId = String(value ?? '').trim();
+    },
+  },
+  primaryPersonName: {
+    env: 'PRIMARY_PERSON_NAME',
+    label: "Primary person ('Me') name",
+    read: (config) => config.curatePrimaryPersonName,
+    apply: (config, value) => {
+      config.curatePrimaryPersonName = String(value ?? '').trim();
+    },
+  },
 };
 
 // The supporter key rides the settings store: entry is a normal settings
@@ -582,7 +607,7 @@ const SECTIONS = {
 
 const PROTOTYPE_SPECIAL_KEYS = new Set(['__proto__', 'prototype', 'constructor']);
 
-export const SETTINGS_VERSION = 6;
+export const SETTINGS_VERSION = 7;
 
 // Only credentials whose destination authority can vary belong here. Fixed
 // public APIs (OpenAI, ElevenLabs, Geoapify) do not need a stored binding.
@@ -594,6 +619,13 @@ const SAVED_CREDENTIAL_BINDINGS = [
     section: 'server',
     key: 'immichApiKey',
     name: 'Immich API key',
+    authority: (store, staged) => effectiveSettingsAuthority(store, staged, 'server', 'immichBaseUrl'),
+  },
+  {
+    id: 'server.immichPartnerApiKey',
+    section: 'server',
+    key: 'immichPartnerApiKey',
+    name: 'Immich partner API key',
     authority: (store, staged) => effectiveSettingsAuthority(store, staged, 'server', 'immichBaseUrl'),
   },
   {
@@ -697,6 +729,11 @@ const SETTINGS_MIGRATIONS = new Map([
   [5, (state) => {
     const migrated = structuredClone(state);
     migrated.version = 6;
+    return migrated;
+  }],
+  [6, (state) => {
+    const migrated = structuredClone(state);
+    migrated.version = 7;
     return migrated;
   }],
 ]);

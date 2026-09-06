@@ -513,6 +513,27 @@ export class InsightsRepository {
       }));
   }
 
+  closeConnectionsFor(personId, limit = 25) {
+    if (!personId) return [];
+    return this.db
+      .prepare(`
+        SELECT
+          CASE WHEN person_a = ? THEN person_b ELSE person_a END AS person_id,
+          CASE WHEN person_a = ? THEN name_b ELSE name_a END AS name,
+          count
+        FROM pair_stats
+        WHERE person_a = ? OR person_b = ?
+        ORDER BY count DESC
+        LIMIT ?
+      `)
+      .all(personId, personId, personId, personId, limit)
+      .map((row) => ({
+        personId: row.person_id,
+        name: row.name,
+        count: Number(row.count),
+      }));
+  }
+
   personYearHistogram(personId) {
     return this.db
       .prepare(`

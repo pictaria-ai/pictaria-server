@@ -639,6 +639,7 @@
       server: [
         { key: 'immichBaseUrl', type: 'text', placeholder: 'http://192.168.1.10:2283', desc: 'Your Immich server, as reachable from the machine running Pictaria.' },
         { key: 'immichApiKey', type: 'secret', desc: 'Create one in Immich under Account Settings → API Keys.' },
+        { key: 'immichPartnerApiKey', type: 'secret', desc: 'Optional partner API key. Used to resolve people, faces, and tags on partner and shared assets.' },
         { key: 'immichPublicUrl', type: 'text', placeholder: 'defaults to the server URL', desc: 'Only needed if your browser reaches Immich at a different address (e.g. behind a reverse proxy) — used for the "Open in Immich" links.' },
       ],
       // Presentation-only grouping: sourceSection keeps the persisted/API
@@ -690,6 +691,7 @@
         { groupEnd: true },
       ],
       curate: [
+        { key: 'primaryPersonId', type: 'select', labels: { '': 'None (not configured)' }, desc: 'Identify yourself ("Me") in photos. Pictaria will prioritize moments featuring you and your closest companions in vision prompts, Curate frame-worthiness scoring, and burst selection.' },
         { key: 'burstGrouping', type: 'switch', desc: 'Collapses photos of the same moment — rapid bursts, re-shoots, duplicates — into one Stack with a suggested keeper. Turn off for a flat photo-by-photo queue.' },
         { key: 'refereeEnabled', type: 'switch', desc: 'The gold star: whenever enrichment is idle, an AI model compares each Stack side by side — people-shots beat empty scenes, open eyes beat blinks — and explains its pick in the compare view. Needs enrichment enabled; works through the backlog on its own, most-undecided Stacks first. A background worker with no start or cancel: an enrich run always takes priority (the referee finishes its current Stack, then waits), and it resumes by itself when enrichment is idle. Pause it any time from the Curate strip.', docs: 'https://github.com/pictaria-ai/pictaria-server/blob/main/docs/ENRICH.md' },
         { key: 'refereeProvider', type: 'select', labels: { '': 'Follow Enrich provider', local_lmstudio: 'LM Studio (local)', local_ollama: 'Ollama (local)', openai_compatible: 'OpenAI-compatible', cloud_ollama: 'Ollama (cloud)', cloud_openai: 'OpenAI (cloud)', openrouter: 'OpenRouter (cloud)', venice: 'Venice (cloud)' }, desc: 'Follow Enrich provider uses the provider currently selected on the Enrich page; a change there applies when the next Stack starts. Choose a specific provider here to keep Curate independent.' },
@@ -1078,6 +1080,39 @@
       void loadCaptionWbStatus();
       void loadRefereeStatus();
       void loadServerVersion();
+      void loadPeopleOptions(settings);
+    }
+
+    async function loadPeopleOptions(settings) {
+      const select = el('f2-curate-primaryPersonId');
+      if (!select) return;
+      try {
+        const response = await fetch('/api/insights/people', { headers: headers() });
+        if (!response.ok) return;
+        const data = await response.json();
+        const currentVal = settings?.curate?.primaryPersonId?.value || select.value;
+        const currentName = settings?.curate?.primaryPersonName?.value || '';
+        select.innerHTML = '<option value="">None (not configured)</option>';
+        for (const p of data.people || []) {
+          const opt = document.createElement('option');
+          opt.value = p.id;
+          opt.textContent = `${p.name || 'Unnamed'} (${Number(p.count).toLocaleString()} photos)`;
+          opt.dataset.name = p.name || '';
+          select.appendChild(opt);
+        }
+        if (currentVal) {
+          select.value = currentVal;
+        } else if (currentName) {
+          for (const opt of select.options) {
+            if (opt.dataset.name && opt.dataset.name.toLowerCase() === currentName.toLowerCase()) {
+              select.value = opt.value;
+              break;
+            }
+          }
+        }
+        (cleanState.curate ??= {}).primaryPersonId = select.value;
+        updateDirty('curate');
+      } catch { /* insights not yet swept or endpoint unavailable */ }
     }
 
     // The running build's version (authed health payload) — the findable
@@ -1243,6 +1278,7 @@
       }
       if (settings.curate?.burstGrouping) {
         el('sub-curate').textContent = [
+          settings.curate.primaryPersonName?.value ? `Me: ${settings.curate.primaryPersonName.value}` : null,
           settings.curate.burstGrouping.value ? 'same-moment stacks' : 'flat queue',
           settings.curate.refereeEnabled?.value ? 'referee on' : null,
         ].filter(Boolean).join(' · ');
@@ -1294,6 +1330,12 @@
         } else {
           values[row.key] = input.value;
         }
+      }
+      if (section === 'curate' && patch.curate && ('primaryPersonId' in patch.curate)) {
+        const select = el('f2-curate-primaryPersonId');
+        const opt = select?.options[select?.selectedIndex];
+        const name = opt?.dataset?.name || (select?.value ? opt?.textContent?.replace(/\s*\(\d+.*photos\)$/, '').trim() : '');
+        patch.curate.primaryPersonName = name || '';
       }
       if (section === 'enrich' && patch.enrich && [
         'scheduledEnabled',

@@ -1586,3 +1586,27 @@ test('resolveSliceAssetIds distinguishes fully covered from empty and counts ter
   assert.deepEqual(empty.assetIds, []);
   assert.equal(empty.scannedImages, 0); // a slice matching nothing at all
 });
+
+test('closeConnectionsFor returns co-occurring persons ordered by count', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'insights-conn-'));
+  const dbPath = join(dir, 'test.db');
+  try {
+    const repo = new InsightsRepository(dbPath);
+    repo.replacePairs([
+      { personA: 'me-1', personB: 'friend-1', nameA: 'Me', nameB: 'Alice', count: 42 },
+      { personA: 'friend-2', personB: 'me-1', nameA: 'Bob', nameB: 'Me', count: 18 },
+      { personA: 'other-1', personB: 'other-2', nameA: 'Charlie', nameB: 'Dave', count: 50 },
+    ]);
+
+    const connections = repo.closeConnectionsFor('me-1');
+    assert.equal(connections.length, 2);
+    assert.deepEqual(connections[0], { personId: 'friend-1', name: 'Alice', count: 42 });
+    assert.deepEqual(connections[1], { personId: 'friend-2', name: 'Bob', count: 18 });
+
+    assert.deepEqual(repo.closeConnectionsFor(''), []);
+    assert.deepEqual(repo.closeConnectionsFor(null), []);
+    repo.close();
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});

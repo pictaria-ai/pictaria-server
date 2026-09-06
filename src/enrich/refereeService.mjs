@@ -44,9 +44,10 @@ const SYSTEM_PROMPT = [
   'for display in a home photo frame.',
   '',
   'Ranking rules, in priority order:',
-  '1. A photo that clearly shows people beats a photo of the same scene without',
-  '   people — unless the people shot is technically bad (badly blurred, person',
-  '   cut off, all eyes closed).',
+  '1. A photo that clearly shows the primary user ("Me") or close family and',
+  '   companions beats photos without them, and beats photos of the same scene',
+  '   without people — unless the people shot is technically bad (badly blurred,',
+  '   person cut off, all eyes closed).',
   '2. Among photos of people: everyone sharp, eyes open, and natural expressions',
   '   beat blinks, grimaces, and motion blur.',
   '3. Otherwise judge sharpness, composition, and overall appeal.',
@@ -101,11 +102,11 @@ export function refereeGroupKey(assetIds) {
   return createHash('sha1').update([...assetIds].sort().join('\n')).digest('hex');
 }
 
-export function buildRefereeUserPrompt(members) {
+export function buildRefereeUserPrompt(members, options = {}) {
   const lines = members.map((member, index) => {
     const facts = [];
     if (member.capturedAt) facts.push(`taken ${String(member.capturedAt).replace('T', ' ').slice(0, 19)}`);
-    facts.push(describePeople(member));
+    facts.push(describePeople(member, options));
     return `Photo ${index + 1}: ${facts.filter(Boolean).join(' · ')}`;
   });
   return [
@@ -118,22 +119,47 @@ export function buildRefereeUserPrompt(members) {
   ].join('\n');
 }
 
-function describePeople(member) {
+function describePeople(member, { primaryPersonId = null, primaryPersonName = null, closeConnections = [] } = {}) {
   const tags = member.aiTags ?? [];
-  if (tags.includes('ai/people/group')) return '3+ people detected';
-  if (tags.includes('ai/people/couple')) return '2 people detected';
-  if (tags.includes('ai/people/one')) return '1 person detected';
-  if (tags.includes('ai/people/none')) return 'no people detected';
-  return 'people unknown (not yet analyzed)';
+  let base = 'people unknown (not yet analyzed)';
+  if (tags.includes('ai/people/group')) base = '3+ people detected';
+  else if (tags.includes('ai/people/couple')) base = '2 people detected';
+  else if (tags.includes('ai/people/one')) base = '1 person detected';
+  else if (tags.includes('ai/people/none')) base = 'no people detected';
+
+  const notes = [];
+  const people = Array.isArray(member.people) ? member.people : [];
+  const primaryId = primaryPersonId ? String(primaryPersonId).trim() : null;
+  const primaryName = primaryPersonName ? String(primaryPersonName).trim().toLowerCase() : null;
+  const hasPrimary = people.some((p) => (
+    (primaryId && p?.id === primaryId) ||
+    (primaryName && p?.name && p.name.trim().toLowerCase() === primaryName)
+  ));
+  if (hasPrimary) {
+    notes.push('features primary user "Me"');
+  } else if (closeConnections.length > 0 && people.length > 0) {
+    const closeSet = new Set(closeConnections.filter((c) => c.count >= 2).map((c) => c.personId));
+    const closeNames = new Set(closeConnections.filter((c) => c.count >= 2).map((c) => (c.name || '').toLowerCase()));
+    const foundCompanions = people.filter((p) => closeSet.has(p?.id) || (p?.name && closeNames.has(p.name.trim().toLowerCase())));
+    if (foundCompanions.length > 0) {
+      notes.push(`features close companions (${foundCompanions.map((p) => p.name).filter(Boolean).join(', ')})`);
+    }
+  }
+
+  if (notes.length > 0) {
+    return `${base} (${notes.join(', ')})`;
+  }
+  return base;
 }
 
 export class RefereeService {
-  constructor({ repo, immich, review, enrichRunner, config, log = () => {} }) {
+  constructor({ repo, immich, review, enrichRunner, config, insightsRepo = null, log = () => {} }) {
     this.repo = repo;
     this.immich = immich;
     this.review = review;
     this.enrichRunner = enrichRunner;
     this.config = config;
+    this.insightsRepo = insightsRepo;
     this.log = log;
     this._timer = null;
     this._tickPromise = null; // in-flight poll, drained by stop()
@@ -469,9 +495,14 @@ export class RefereeService {
     this._previewFallbacks.budget += result.stats.budget;
     this._previewFallbacks.thumbnail += result.stats.thumbnail;
     const images = result.images;
+    const primaryPersonId = this.config.curatePrimaryPersonId || this.config.primaryPersonId || null;
+    const primaryPersonName = this.config.curatePrimaryPersonName || this.config.primaryPersonName || null;
+    const closeConnections = this.insightsRepo && primaryPersonId
+      ? this.insightsRepo.closeConnectionsFor(primaryPersonId)
+      : [];
     const { normalizedOutput } = await provider.analyzeImages(images, {
       systemPrompt: SYSTEM_PROMPT,
-      userPrompt: buildRefereeUserPrompt(group.members),
+      userPrompt: buildRefereeUserPrompt(group.members, { primaryPersonId, primaryPersonName, closeConnections }),
       jsonSchema: refereeJsonSchema(group.members.length),
       schemaName: 'pictaria_group_referee',
     });

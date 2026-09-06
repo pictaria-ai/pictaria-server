@@ -456,3 +456,69 @@ test('retryFailureLimited without an asset list is refused', () => {
   assert.throws(() => runner.start({ retryFailureLimited: true }), /explicit asset list/);
   assert.equal(runner.isRunning(), false);
 });
+
+test('random sweep sets random option and title', async () => {
+  const runner = new EnrichJobRunner({
+    repo: makeRepo(),
+    immich: {
+      async searchRandom() {
+        return [];
+      },
+    },
+    taxonomy,
+    config: makeConfig(),
+  });
+  runner.start({ random: true, sendToCurate: false });
+  assert.equal(runner.status().title, 'Random library sweep');
+  assert.equal(runner.status().options.random, true);
+  await finished(runner);
+});
+
+test('random sweep with timeframe formats title and saves options', async () => {
+  const runner = new EnrichJobRunner({
+    repo: makeRepo(),
+    immich: {
+      async searchRandom() {
+        return [];
+      },
+    },
+    taxonomy,
+    config: makeConfig(),
+  });
+  runner.start({
+    random: true,
+    timeline: '1m',
+    timelineLabel: 'past month',
+    takenAfter: '2026-08-01T00:00:00.000Z',
+    sendToCurate: false,
+  });
+  assert.equal(runner.status().title, 'Random library sweep (past month)');
+  assert.equal(runner.status().options.random, true);
+  assert.equal(runner.status().options.timeline, '1m');
+  assert.equal(runner.status().options.timelineLabel, 'past month');
+  assert.equal(runner.status().options.takenAfter, '2026-08-01T00:00:00.000Z');
+  await finished(runner);
+});
+
+test('reprocess run sets skipAnySuccessful to false and updates run title', async () => {
+  const runner = new EnrichJobRunner({
+    repo: makeRepo(),
+    immich: {
+      async searchRandom() {
+        return [];
+      },
+    },
+    taxonomy,
+    config: makeConfig(),
+  });
+  runner.start({
+    reprocess: true,
+    sendToCurate: false,
+  });
+  assert.equal(runner.status().title, 'Refresh library sweep');
+  assert.equal(runner.status().options.reprocess, true);
+  assert.equal(runner.status().options.skipAnySuccessful, false);
+  await finished(runner);
+});
+
+

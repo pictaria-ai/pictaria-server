@@ -103,6 +103,11 @@ function makeHarness({
     recordCoveredResolution(entry) {
       state.coveredRuns.push(entry);
     },
+    removeActiveAsset: (assetId) => {
+      state.removedActive = state.removedActive || [];
+      state.removedActive.push(assetId);
+      return true;
+    },
     start: startRunner,
   };
   const handler = createEnrichRoutes({
@@ -119,6 +124,9 @@ function makeHarness({
     requireImmich: () => true,
     config: { enrichEnabled: true },
     immich: {
+      async getAlbums() {
+        return [{ id: 'alb-1', albumName: 'Goa Trip', assetCount: 12, shared: true }];
+      },
       async searchMetadata({ page }) {
         state.searches += 1;
         const start = (page - 1) * 2;
@@ -128,6 +136,12 @@ function makeHarness({
     },
     repo: {
       queueGet: (id) => state.queue.find((item) => item.id === id) ?? null,
+      queueAdd: ({ title, filters, estimatedCount } = {}) => {
+        const nextId = (state.queue.at(-1)?.id ?? 0) + 1;
+        const newItem = { id: nextId, title, filters, estimatedCount };
+        state.queue.push(newItem);
+        return { id: nextId, duplicate: false };
+      },
       queueMaintain: ({ protectedIds = [] } = {}) => {
         state.maintenanceProtected.push([...protectedIds]);
         return 0;
@@ -143,6 +157,32 @@ function makeHarness({
       queueRemove: (id) => {
         state.removed.push(id);
         state.queue = state.queue.filter((item) => item.id !== id);
+        return true;
+      },
+      queueClear: ({ protectedIds = [] } = {}) => {
+        const protectedSet = new Set(protectedIds);
+        const removed = state.queue.filter((item) => !protectedSet.has(item.id)).length;
+        state.queue = state.queue.filter((item) => protectedSet.has(item.id));
+        return removed;
+      },
+      queueUpdate: (id, { title, filters, estimatedCount } = {}) => {
+        const item = state.queue.find((it) => it.id === id);
+        if (!item) return null;
+        if (title !== undefined) item.title = title;
+        if (filters !== undefined) item.filters = filters;
+        if (estimatedCount !== undefined) item.estimatedCount = estimatedCount;
+        return item;
+      },
+      queueReorder: (ids) => {
+        const idMap = new Map(state.queue.map((it) => [it.id, it]));
+        const reordered = [];
+        for (const id of ids) {
+          if (idMap.has(id)) {
+            reordered.push(idMap.get(id));
+            idMap.delete(id);
+          }
+        }
+        state.queue = [...reordered, ...idMap.values()];
         return true;
       },
       queueList: () => state.queue,
@@ -662,3 +702,130 @@ test('the queue item behind the active run cannot be deleted; others can', async
   assert.equal(del89.out.statusCode, 200);
   assert.deepEqual(state.removed, [89]);
 });
+
+test('queue photos, patch, reorder, and clear endpoints work as expected', async () => {
+  const { handler, state } = makeHarness();
+  state.queue.push({ id: 89, title: 'Lyon', filters: { city: 'Paris' }, estimatedCount: 5 });
+
+  // GET /api/enrich/queue/88/photos returns slice photos
+  const photosRes = fakeResponse();
+  const getReq = jsonRequest('GET');
+  getReq.method = 'GET';
+  await handler(getReq, photosRes, new URL('http://x/api/enrich/queue/88/photos'));
+  assert.equal(photosRes.out.statusCode, 200);
+  assert.equal(photosRes.out.body.id, 88);
+  assert.ok(Array.isArray(photosRes.out.body.assets));
+
+  // PATCH /api/enrich/queue/88 updates title
+  const patchRes = fakeResponse();
+  await handler(jsonRequest('PATCH', { title: 'Renamed Paris' }), patchRes, new URL('http://x/api/enrich/queue/88'));
+  assert.equal(patchRes.out.statusCode, 200);
+  assert.equal(state.queue.find((it) => it.id === 88).title, 'Renamed Paris');
+
+  // POST /api/enrich/queue/reorder reorders items
+  const reorderRes = fakeResponse();
+  await handler(jsonRequest('POST', { ids: [89, 88] }), reorderRes, new URL('http://x/api/enrich/queue/reorder'));
+  assert.equal(reorderRes.out.statusCode, 200);
+  assert.deepEqual(state.queue.map((it) => it.id), [89, 88]);
+
+  // DELETE /api/enrich/queue clears all
+  const clearRes = fakeResponse();
+  await handler(jsonRequest('DELETE'), clearRes, new URL('http://x/api/enrich/queue'));
+  assert.equal(clearRes.out.statusCode, 200);
+  assert.equal(state.queue.length, 0);
+});
+
+test('POST /api/enrich/queue/sweep resolves photos and adds item with explicit assetIds to queue', async () => {
+  const { handler, state } = makeHarness({
+    all: ['p1', 'p2', 'p3', 'p4'],
+    covered: ['p1'],
+  });
+
+  const res = fakeResponse();
+  await handler(
+    jsonRequest('POST', { maxAnalyzed: 2, timelineLabel: 'Past week' }),
+    res,
+    new URL('http://x/api/enrich/queue/sweep'),
+  );
+
+  assert.equal(res.out.statusCode, 201);
+  assert.ok(res.out.body.item);
+  assert.equal(res.out.body.item.estimatedCount, 2);
+  assert.deepEqual(res.out.body.item.filters.assetIds, ['p2', 'p3']);
+  assert.match(res.out.body.item.title, /Library sweep \(Past week\) — 2 photos/);
+});
+
+test('DELETE /api/enrich/queue/:id/photos/:assetId removes photo from queued slice', async () => {
+  const { handler, state } = makeHarness();
+  state.queue = [
+    { id: 101, title: 'Test Slice', filters: { assetIds: ['p1', 'p2', 'p3'] }, estimatedCount: 3 },
+  ];
+
+  const delRes = fakeResponse();
+  await handler(
+    jsonRequest('DELETE'),
+    delRes,
+    new URL('http://x/api/enrich/queue/101/photos/p2'),
+  );
+
+  assert.equal(delRes.out.statusCode, 200);
+  assert.equal(delRes.out.body.removed, true);
+  assert.equal(delRes.out.body.remaining, 2);
+  const updated = state.queue.find((it) => it.id === 101);
+  assert.deepEqual(updated.filters.assetIds, ['p1', 'p3']);
+  assert.equal(updated.estimatedCount, 2);
+});
+
+test('DELETE /api/enrich/active/photos/:assetId removes photo from ongoing active run and queued item', async () => {
+  const { handler, state } = makeHarness();
+  state.runnerRunning = true;
+  state.activeQueueItemId = 88;
+  state.queue = [
+    { id: 88, title: 'Active Queue Item', filters: { assetIds: ['p1', 'p2', 'p3'] }, estimatedCount: 3 },
+  ];
+
+  const delRes = fakeResponse();
+  await handler(
+    jsonRequest('DELETE'),
+    delRes,
+    new URL('http://x/api/enrich/active/photos/p2'),
+  );
+
+  assert.equal(delRes.out.statusCode, 200);
+  assert.equal(delRes.out.body.removed, true);
+  assert.equal(delRes.out.body.assetId, 'p2');
+  assert.deepEqual(state.removedActive, ['p2']);
+  assert.deepEqual(state.queue.find((it) => it.id === 88).filters.assetIds, ['p1', 'p3']);
+});
+
+test('GET /api/enrich/albums returns Immich albums and POST /api/enrich/queue queues album', async () => {
+  const { handler, state } = makeHarness();
+  const albumsRes = fakeResponse();
+  await handler(
+    jsonRequest('GET'),
+    albumsRes,
+    new URL('http://x/api/enrich/albums'),
+  );
+  assert.equal(albumsRes.out.statusCode, 200);
+  assert.equal(albumsRes.out.body.length, 1);
+  assert.equal(albumsRes.out.body[0].albumName, 'Goa Trip');
+
+  const queueRes = fakeResponse();
+  await handler(
+    jsonRequest('POST', {
+      title: 'Album: Goa Trip',
+      filters: { albumIds: ['alb-1'] },
+      estimatedCount: 12,
+    }),
+    queueRes,
+    new URL('http://x/api/enrich/queue'),
+  );
+  assert.equal(queueRes.out.statusCode, 201);
+  const queued = state.queue.find((item) => item.title === 'Album: Goa Trip');
+  assert.ok(queued);
+  assert.deepEqual(queued.filters.albumIds, ['alb-1']);
+});
+
+
+
+

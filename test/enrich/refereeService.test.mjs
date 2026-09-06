@@ -55,6 +55,32 @@ test('referee schema pins the photo count; prompt carries face counts', () => {
   assert.ok(prompt.includes('Photo 3: people unknown (not yet analyzed)'));
 });
 
+test('buildRefereeUserPrompt annotates primary user and close companions', () => {
+  const prompt = buildRefereeUserPrompt(
+    [
+      {
+        assetId: 'a',
+        capturedAt: '2026-07-01T10:00:00.000Z',
+        aiTags: ['ai/people/one'],
+        people: [{ id: 'me-1', name: 'Me' }],
+      },
+      {
+        assetId: 'b',
+        capturedAt: '2026-07-01T10:00:05.000Z',
+        aiTags: ['ai/people/one'],
+        people: [{ id: 'friend-1', name: 'Alice' }],
+      },
+    ],
+    {
+      primaryPersonId: 'me-1',
+      primaryPersonName: 'Me',
+      closeConnections: [{ personId: 'friend-1', name: 'Alice', count: 25 }],
+    },
+  );
+  assert.ok(prompt.includes('features primary user "Me"'));
+  assert.ok(prompt.includes('features close companions (Alice)'));
+});
+
 test('LM Studio analyzeImages sends every image in one request with the custom schema name', async () => {
   let captured = null;
   const provider = new LmStudioProvider({

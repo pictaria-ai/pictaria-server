@@ -10,7 +10,7 @@ const GEOAPIFY_MAX_RESPONSE_BYTES = 256 * 1024;
 // sweep over a large library touches many cells, and without a bound the
 // cache grows for the life of the process. Hot cells (home, frequent trips)
 // stay resident; the long tail recycles.
-const locationCache = createBoundedMap(5000);
+export const locationCache = createBoundedMap(5000);
 
 export async function enrichAssetLocation(asset, config) {
   if (!shouldReverseGeocode(asset, config)) {
@@ -171,7 +171,7 @@ function hasCityOrState(asset) {
   );
 }
 
-function getCoordinates(asset) {
+export function getCoordinates(asset) {
   const latitude = Number(asset?.latitude ?? asset?.exifInfo?.latitude);
   const longitude = Number(asset?.longitude ?? asset?.exifInfo?.longitude);
 
@@ -186,12 +186,12 @@ function getCoordinates(asset) {
   return { latitude, longitude };
 }
 
-function getCacheKey(coordinates, precision = 3) {
+export function getCacheKey(coordinates, precision = 3) {
   const safePrecision = Number.isInteger(precision) ? Math.min(5, Math.max(0, precision)) : 3;
   return `${coordinates.latitude.toFixed(safePrecision)},${coordinates.longitude.toFixed(safePrecision)}`;
 }
 
-async function reverseGeocode(coordinates, config) {
+export async function reverseGeocode(coordinates, config) {
   const url = new URL('https://api.geoapify.com/v1/geocode/reverse');
   url.searchParams.set('lat', String(coordinates.latitude));
   url.searchParams.set('lon', String(coordinates.longitude));

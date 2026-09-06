@@ -99,7 +99,8 @@ normalizes that one trailing segment if supplied.
 | `TRUSTED_PROXY_IPS` | *(empty)* | Comma-separated exact IP addresses or CIDRs for reverse proxies allowed to supply `X-Forwarded-For` (for example `127.0.0.1` or `172.16.0.0/12`). Leave empty for direct LAN/VPN access. Configure only addresses that can actually connect directly to Pictaria; never use a catch-all such as `0.0.0.0/0`. Invalid entries refuse startup. Trusted chains are evaluated from right to left so caller-prepended values cannot choose the lockout key. |
 | `REQUEST_TIMEOUT_MS` | `60000` | Timeout for outbound Immich requests. |
 | `PICTARIA_SUPPORT_PUBLIC_KEY` | *(pinned key)* | Overrides the pinned supporter-key verification key (PEM) — the key-rotation escape hatch, also used by tests. A malformed value makes every supporter key read as invalid; the failure is logged when a key is first checked, not at startup. |
-| `IMMICH_PUBLIC_URL` | `IMMICH_BASE_URL` | Browser-facing HTTP or HTTPS Immich root used for deep links in the web UI (person pages, map, search). Set it only when your browser reaches Immich at a different address than the server does—for example, internal HTTP for the container and an HTTPS reverse proxy for browsers. **UI** |
+| `IMMICH_PUBLIC_URL` | `IMMICH_BASE_URL` | Browser-facing HTTP or HTTPS Immich root used for deep links in the web UI (person pages, map, search). Set it only when your browser reaches Immich at a different address than the server does, such as internal HTTP for the container and an HTTPS reverse proxy for browsers. **UI** |
+| `IMMICH_PARTNER_API_KEY` | *(empty)* | Optional partner API key used to resolve people, faces, and tags on partner or shared assets. **UI** |
 
 ## Storage
 

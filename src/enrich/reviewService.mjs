@@ -209,15 +209,84 @@ export class ReviewService {
       const inViewStack = (row) => Boolean(row.burstId) && (visibleMembers.get(row.burstId) ?? 0) >= 2;
       filtered = filtered.filter((row) => inViewStack(row) === (group === 'stacks'));
     }
+    const sort = first(query, 'sort', 'default');
     const bucketConfig = config.buckets.find((bucket) => bucket.id === view);
-    if (view === 'decided') {
+    if (sort === 'date_desc') {
+      filtered.sort((left, right) => {
+        const a = left.capturedAt ? String(left.capturedAt) : '';
+        const b = right.capturedAt ? String(right.capturedAt) : '';
+        if (a && b) return b.localeCompare(a);
+        if (a) return -1;
+        if (b) return 1;
+        return 0;
+      });
+    } else if (sort === 'date_asc') {
+      filtered.sort((left, right) => {
+        const a = left.capturedAt ? String(left.capturedAt) : '';
+        const b = right.capturedAt ? String(right.capturedAt) : '';
+        if (a && b) return a.localeCompare(b);
+        if (a) return 1;
+        if (b) return -1;
+        return 0;
+      });
+    } else if (sort === 'score_desc') {
+      filtered.sort((left, right) => {
+        const aScore = typeof left.frameScore === 'number' ? left.frameScore : null;
+        const bScore = typeof right.frameScore === 'number' ? right.frameScore : null;
+        if (aScore !== null && bScore !== null) {
+          if (aScore !== bScore) return bScore - aScore;
+          const aAes = typeof left.aestheticScore === 'number' ? left.aestheticScore : 0;
+          const bAes = typeof right.aestheticScore === 'number' ? right.aestheticScore : 0;
+          return bAes - aAes;
+        }
+        if (aScore !== null) return -1;
+        if (bScore !== null) return 1;
+        return 0;
+      });
+    } else if (sort === 'score_asc') {
+      filtered.sort((left, right) => {
+        const aScore = typeof left.frameScore === 'number' ? left.frameScore : null;
+        const bScore = typeof right.frameScore === 'number' ? right.frameScore : null;
+        if (aScore !== null && bScore !== null) {
+          if (aScore !== bScore) return aScore - bScore;
+          const aAes = typeof left.aestheticScore === 'number' ? left.aestheticScore : 0;
+          const bAes = typeof right.aestheticScore === 'number' ? right.aestheticScore : 0;
+          return aAes - bAes;
+        }
+        if (aScore !== null) return -1;
+        if (bScore !== null) return 1;
+        return 0;
+      });
+    } else if (sort === 'stack_desc') {
+      const burstCounts = new Map();
+      for (const row of filtered) {
+        if (row.burstId) {
+          burstCounts.set(row.burstId, (burstCounts.get(row.burstId) ?? 0) + 1);
+        }
+      }
+      filtered.sort((left, right) => {
+        const countA = left.burstId ? (burstCounts.get(left.burstId) ?? 1) : 1;
+        const countB = right.burstId ? (burstCounts.get(right.burstId) ?? 1) : 1;
+        if (countA !== countB) return countB - countA;
+        const scoreA = typeof left.frameScore === 'number' ? left.frameScore : -1;
+        const scoreB = typeof right.frameScore === 'number' ? right.frameScore : -1;
+        return scoreB - scoreA;
+      });
+    } else if (sort === 'name_asc') {
+      filtered.sort((left, right) =>
+        String(left.filename ?? '').localeCompare(String(right.filename ?? '')),
+      );
+    } else if (view === 'decided') {
       filtered.sort((left, right) => String(right.finishedAt ?? '').localeCompare(String(left.finishedAt ?? '')));
     } else {
       filtered.sort(bucketSortComparator(bucketConfig ?? config.buckets.at(-1)));
-      // Stacks render as one card, so a group must never straddle a page:
-      // cluster members behind their best-ranked member, and let the page
-      // run past the limit to finish the group it ends inside.
-      if (grouping) filtered = clusterBursts(filtered);
+    }
+
+    // Stacks render as one card, so a group must never straddle a page:
+    // cluster members behind their best-ranked member, and let the page
+    // run past the limit to finish the group it ends inside.
+    if (view !== 'decided' && grouping) {
+      filtered = clusterBursts(filtered);
     }
 
     const offset = Math.max(0, intFirst(query, 'offset', 0));
@@ -233,6 +302,7 @@ export class ReviewService {
     }
     return {
       view,
+      sort,
       buckets: displayBuckets.map((bucket) => ({
         id: bucket.id,
         label: bucket.label,
@@ -417,26 +487,38 @@ export class ReviewService {
     if (job.assetIds.length > SYNC_ASSET_BATCH_SIZE) {
       throw new Error(`Review sync work exceeded the ${SYNC_ASSET_BATCH_SIZE}-asset worker slice.`);
     }
-    const existingTagIds = tagMap(await this.immich.listTags());
+    const partitions = typeof this.immich.partitionAssetIdsByOwner === 'function'
+      ? await this.immich.partitionAssetIdsByOwner(job.assetIds)
+      : [{ apiKey: this.immich.apiKey, assetIds: job.assetIds }];
+
+    for (const partition of partitions) {
+      await this.#pushDecisionPartition(job, partition);
+    }
+    await this.verifyAndRepairTags(job);
+  }
+
+  async #pushDecisionPartition(job, { apiKey, assetIds }) {
+    if (!assetIds || assetIds.length === 0) {
+      return;
+    }
+    const existingTagIds = tagMap(await this.immich.listTags({ apiKey }));
     const tagIds = { ...existingTagIds };
     if (job.add.length > 0) {
-      Object.assign(tagIds, await ensureImmichTagIds(this.immich, job.add));
+      Object.assign(tagIds, await ensureImmichTagIds(this.immich, job.add, { apiKey }));
     }
-    const assetIds = job.assetIds;
     for (const tag of job.remove) {
       const immichTagId = existingTagIds[tag];
       if (immichTagId) {
-        await this.immich.untagAssets({ tagId: immichTagId, assetIds });
+        await this.immich.untagAssets({ tagId: immichTagId, assetIds, apiKey });
       }
     }
     // One mutation event, not one per tag: Immich's per-mutation background
     // jobs race each other and can drop tags applied in rapid succession.
     const addIds = job.add.map((tag) => tagIds[tag]).filter(Boolean);
     if (addIds.length > 0) {
-      await this.immich.tagAssetsBulk({ assetIds, tagIds: addIds });
+      await this.immich.tagAssetsBulk({ assetIds, tagIds: addIds, apiKey });
     }
-    await this.syncAiTagsForAssets(assetIds, tagIds);
-    await this.verifyAndRepairTags(job);
+    await this.syncAiTagsForAssets(assetIds, tagIds, { apiKey });
   }
 
   // Immich can report a successful mutation before every requested addition
@@ -455,8 +537,10 @@ export class ReviewService {
       const missingByAsset = new Map();
       const retainedByAsset = new Map();
       const retainedTagIdsByAsset = new Map();
+      const remoteAssetsById = new Map();
       for (const assetId of job.assetIds) {
         const remoteAsset = await this.immich.getAsset(assetId);
+        remoteAssetsById.set(assetId, remoteAsset);
         if (!Array.isArray(remoteAsset?.tags)) {
           throw new Error(
             'Immich did not expose asset tags. Enable Tags under Account Settings → Features for the API-key account, confirm the key includes tag.read, tag.create, and tag.asset, then retry.',
@@ -498,25 +582,37 @@ export class ReviewService {
       }
       const inconsistentAssets = new Set([...missingByAsset.keys(), ...retainedByAsset.keys()]);
       this.log(`immich tag state is still inconsistent on ${inconsistentAssets.size} asset(s); repairing`);
-      if (retainedByAsset.size > 0) {
-        const assetsByTagId = new Map();
-        for (const [assetId, retainedTagIds] of retainedTagIdsByAsset) {
-          for (const retainedTagId of retainedTagIds) {
-            push(assetsByTagId, retainedTagId, assetId);
+
+      const repairPartitions = typeof this.immich.partitionAssetIdsByOwner === 'function'
+        ? await this.immich.partitionAssetIdsByOwner([...inconsistentAssets], { remoteAssets: remoteAssetsById })
+        : [{ apiKey: this.immich.apiKey, assetIds: [...inconsistentAssets] }];
+
+      for (const { apiKey, assetIds: partitionIds } of repairPartitions) {
+        if (retainedByAsset.size > 0) {
+          const assetsByTagId = new Map();
+          for (const assetId of partitionIds) {
+            const retainedTagIds = retainedTagIdsByAsset.get(assetId) ?? [];
+            for (const retainedTagId of retainedTagIds) {
+              push(assetsByTagId, retainedTagId, assetId);
+            }
+          }
+          for (const [retainedTagId, ids] of assetsByTagId) {
+            await this.immich.untagAssets({ tagId: retainedTagId, assetIds: ids, apiKey });
           }
         }
-        for (const [retainedTagId, assetIds] of assetsByTagId) {
-          await this.immich.untagAssets({ tagId: retainedTagId, assetIds });
-        }
-      }
-      if (missingByAsset.size > 0) {
-        const allMissing = [...new Set([...missingByAsset.values()].flat())].sort();
-        const resolved = await ensureImmichTagIds(this.immich, allMissing);
-        for (const [assetId, missing] of missingByAsset) {
-          await this.immich.tagAssetsBulk({
-            assetIds: [assetId],
-            tagIds: missing.map((tag) => resolved[tag]).filter(Boolean),
-          });
+        const partitionMissingByAsset = partitionIds
+          .filter((id) => missingByAsset.has(id))
+          .map((id) => [id, missingByAsset.get(id)]);
+        if (partitionMissingByAsset.length > 0) {
+          const allMissing = [...new Set(partitionMissingByAsset.flatMap(([, missing]) => missing))].sort();
+          const resolved = await ensureImmichTagIds(this.immich, allMissing, { apiKey });
+          for (const [assetId, missing] of partitionMissingByAsset) {
+            await this.immich.tagAssetsBulk({
+              assetIds: [assetId],
+              tagIds: missing.map((tag) => resolved[tag]).filter(Boolean),
+              apiKey,
+            });
+          }
         }
       }
     }
@@ -524,12 +620,12 @@ export class ReviewService {
 
   // Reconcile ai/* tags in Immich with the local source of truth for the
   // decided assets: parallel reads, then one grouped write per tag.
-  async syncAiTagsForAssets(assetIds, knownTagIds) {
+  async syncAiTagsForAssets(assetIds, knownTagIds, { apiKey = this.immich?.apiKey } = {}) {
     const localTagsByAsset = this.repo.loadAssetTagsFor(assetIds, { prefix: 'ai/' });
     const allLocalTags = [...new Set(assetIds.flatMap((assetId) => localTagsByAsset[assetId] ?? []))].sort();
     const tagIds = { ...knownTagIds };
     if (allLocalTags.length > 0) {
-      Object.assign(tagIds, await ensureImmichTagIds(this.immich, allLocalTags));
+      Object.assign(tagIds, await ensureImmichTagIds(this.immich, allLocalTags, { apiKey }));
     }
 
     const remoteMaps = await mapWithConcurrency(assetIds, REMOTE_FETCH_CONCURRENCY, async (assetId) => {
@@ -561,7 +657,7 @@ export class ReviewService {
     });
 
     for (const [immichTagId, ids] of [...removalsByTagId.entries()].sort()) {
-      await this.immich.untagAssets({ tagId: immichTagId, assetIds: ids });
+      await this.immich.untagAssets({ tagId: immichTagId, assetIds: ids, apiKey });
     }
     // Group assets sharing the same addition set into one bulk call: fewer
     // mutation events per asset means Immich's background jobs cannot race.
@@ -570,7 +666,7 @@ export class ReviewService {
       push(assetsByAdditionSet, JSON.stringify(additions), assetId);
     }
     for (const [signature, ids] of [...assetsByAdditionSet.entries()].sort()) {
-      await this.immich.tagAssetsBulk({ assetIds: ids, tagIds: JSON.parse(signature) });
+      await this.immich.tagAssetsBulk({ assetIds: ids, tagIds: JSON.parse(signature), apiKey });
     }
   }
 }

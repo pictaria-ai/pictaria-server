@@ -12,7 +12,8 @@ Prefer false negatives over false positives for frame-worthy classification.
 Apply exclusion tags aggressively for screenshots, documents, receipts, private information, financial material, text-heavy images, and low-quality images.
 Do not exclude ordinary personal photos because a small or incidental license plate is visible in the background.
 Do not exclude ordinary personal photos because a cast, sling, bandage, or mild visible injury is present.
-Do not identify people by name.
+When people names are provided in the photo context, you must always use those specific names in both full and short captions instead of generic terms like "a person", "a man", "a woman", "a couple", or "a group". Only use generic terms when no person names are provided in the context. Incorporate confirmed locations naturally. Never invent names or locations that are not provided in context or visually obvious.
+When photo context notes the primary user ("Me") or their close companions, recognize that genuine photos of the user and their close circle have primary sentimental value for a home display frame. Favor higher frame-worthy scores when sharpness and facial expressions are pleasant.
 Do not infer sensitive attributes.
-Do not invent locations unless visually obvious.
+Do not invent locations unless visually obvious or specified in the photo context.
 Do not include chain-of-thought. Provide only short evidence phrases.

@@ -10,11 +10,12 @@ import { configuredSecrets, sanitizeDiagnostic } from '../diagnostics.mjs';
 const LOG_TAIL_LIMIT = 500;
 
 export class EnrichJobRunner {
-  constructor({ repo, immich, taxonomy, config }) {
+  constructor({ repo, immich, taxonomy, config, insightsRepo = null }) {
     this.repo = repo;
     this.immich = immich;
     this.taxonomy = taxonomy;
     this.config = config;
+    this.insightsRepo = insightsRepo;
     this.state = idleState();
     this.runPromise = null;
     this.runLifecycle = null;
@@ -25,11 +26,27 @@ export class EnrichJobRunner {
     // One-way shutdown latch: a request landing during the drain window
     // must not start a run nobody will drain or record.
     this.stopped = false;
+    this.skipAssetIds = new Set();
+  }
+
+  removeActiveAsset(assetId) {
+    if (!this.state.running) return false;
+    this.skipAssetIds.add(assetId);
+    if (this.state.activePhotos) {
+      this.state.activePhotos = this.state.activePhotos.filter((p) => p.id !== assetId);
+    }
+    if (this.state.assetIds) {
+      this.state.assetIds = this.state.assetIds.filter((id) => id !== assetId);
+    }
+    return true;
   }
 
   status() {
     return {
       ...this.state,
+      activePhotos: [...(this.state.activePhotos || [])],
+      currentAssetId: this.state.currentAssetId || null,
+      assetIds: [...(this.state.assetIds || [])],
       log: [...this.state.log],
       defaults: { provider: this.config.defaultProvider, imageSource: this.config.imageSource },
       available: availableProviders(this.config),
@@ -342,6 +359,26 @@ export class EnrichJobRunner {
       throw new Error('Retrying failure-limited photos needs an explicit asset list.');
     }
 
+    const timelineLabel = typeof options.timelineLabel === 'string' && options.timelineLabel.trim()
+      ? options.timelineLabel.trim()
+      : null;
+    const takenAfter = sanitizeIsoTimestamp(options.takenAfter);
+    const takenBefore = sanitizeIsoTimestamp(options.takenBefore);
+
+    const reprocess = Boolean(options.reprocess);
+    const skipAnySuccessful = reprocess ? false : options.skipAnySuccessful !== false;
+
+    let defaultTitle;
+    if (assetIds) {
+      defaultTitle = retryFailureLimited ? 'Retry failed photos' : 'Targeted run';
+    } else {
+      const sweepType = options.random
+        ? (reprocess ? 'Random refresh sweep' : 'Random library sweep')
+        : (reprocess ? 'Refresh library sweep' : 'Library sweep');
+      defaultTitle = timelineLabel ? `${sweepType} (${timelineLabel})` : sweepType;
+    }
+
+    this.skipAssetIds.clear();
     this.state = {
       ...idleState(),
       running: true,
@@ -350,9 +387,10 @@ export class EnrichJobRunner {
       model: provider.modelName,
       inferenceHostLabel: this.config.inferenceHostLabel || null,
       promptVersion,
-      title: String(
-        options.title || (assetIds ? (retryFailureLimited ? 'Retry failed photos' : 'Targeted run') : 'Library sweep'),
-      ),
+      title: String(options.title || defaultTitle),
+      assetIds: assetIds ? assetIds.slice(0, 1000) : [],
+      activePhotos: assetIds ? assetIds.slice(0, 1000).map((id) => ({ id, status: 'queued' })) : [],
+      currentAssetId: null,
       options: {
         retryFailureLimited,
         retrySourceRunId: Number.isSafeInteger(Number(options.retrySourceRunId)) && Number(options.retrySourceRunId) > 0
@@ -360,7 +398,13 @@ export class EnrichJobRunner {
           : null,
         limit: clampInt(options.limit, 1, 100000, 100),
         offset: clampInt(options.offset, 0, 10000000, 0),
-        skipAnySuccessful: options.skipAnySuccessful !== false,
+        random: Boolean(options.random),
+        reprocess,
+        timeline: options.timeline ? String(options.timeline) : null,
+        timelineLabel,
+        takenAfter,
+        takenBefore,
+        skipAnySuccessful,
         maxAnalyzed: options.maxAnalyzed ? clampInt(options.maxAnalyzed, 1, 100000, null) : null,
         imageSource: ['preview', 'thumbnail', 'original'].includes(options.imageSource)
           ? options.imageSource
@@ -377,6 +421,13 @@ export class EnrichJobRunner {
     this.onRunFinished = typeof options.onFinished === 'function' ? options.onFinished : null;
     if (assetIds) {
       this.#log(`targeted run: ${assetIds.length} assets from a slice${options.sliceTruncated ? ' (capped — send again for the rest)' : ''}`);
+    } else if (this.state.options.random) {
+      this.#log(`random library sweep started${timelineLabel ? ` (${timelineLabel})` : ''}`);
+    } else if (timelineLabel) {
+      this.#log(`library sweep started (${timelineLabel})`);
+    }
+    if (reprocess) {
+      this.#log('refresh enrich mode: re-evaluating photos, updating tag decisions and writing updates to Immich');
     }
     if (retryFailureLimited) {
       const source = this.state.options.retrySourceRunId;
@@ -416,9 +467,13 @@ export class EnrichJobRunner {
         systemPrompt: prompts.systemPrompt,
         userTemplate: prompts.userTemplate,
         assetIds,
+        random: this.state.options.random,
+        takenAfter: this.state.options.takenAfter,
+        takenBefore: this.state.options.takenBefore,
         limit: this.state.options.limit,
         offset: this.state.options.offset,
         skipAnySuccessful: this.state.options.skipAnySuccessful,
+        reprocess: this.state.options.reprocess,
         maxAnalyzed: this.state.options.maxAnalyzed,
         maxFailuresPerAsset: this.state.options.retryFailureLimited ? 0 : this.config.maxFailuresPerAsset,
         retryFailureLimited: this.state.options.retryFailureLimited,
@@ -430,7 +485,24 @@ export class EnrichJobRunner {
         // Read at run start; the background worker also checks the live
         // setting, so a mid-run toggle just pauses the queue, not the run.
         captionWriteback: Boolean(this.config.captionWriteback),
+        config: {
+          ...this.config,
+          getCloseConnections: (id) => this.insightsRepo?.closeConnectionsFor(id) ?? [],
+        },
         shouldStop: () => this.state.cancelRequested,
+        shouldSkipAsset: (id) => this.skipAssetIds.has(id),
+        onAssetsFetched: (assets) => {
+          if (!this.state.activePhotos) this.state.activePhotos = [];
+          for (const a of assets) {
+            if (!this.state.activePhotos.some((p) => p.id === a.id) && !this.skipAssetIds.has(a.id)) {
+              this.state.activePhotos.push({
+                id: a.id,
+                originalPath: a.originalPath || a.id,
+                status: 'queued',
+              });
+            }
+          }
+        },
         signal: lifecycle.providerAbortController.signal,
         log: (message) => this.#onProgress(message),
       });
@@ -510,10 +582,26 @@ export class EnrichJobRunner {
     if (match) {
       this.state.progress = { position: Number(match[1]), total: Number(match[2]) };
     }
+    const analyzeMatch = /^\[(\d+)\/(\d+)\] analyzing ([a-zA-Z0-9_-]+)/.exec(message);
+    if (analyzeMatch) {
+      const assetId = analyzeMatch[3];
+      this.state.currentAssetId = assetId;
+      if (!this.state.activePhotos) this.state.activePhotos = [];
+      const existing = this.state.activePhotos.find((p) => p.id === assetId);
+      if (existing) {
+        existing.status = 'in_progress';
+      } else {
+        this.state.activePhotos.push({ id: assetId, status: 'in_progress' });
+      }
+    }
     const counterMatch = /^ {2}(tags|failed)/.exec(message);
     if (counterMatch) {
       const key = counterMatch[1] === 'tags' ? 'succeeded' : 'failed';
       this.state.liveCounters[key] += 1;
+      if (this.state.currentAssetId && this.state.activePhotos) {
+        const p = this.state.activePhotos.find((photo) => photo.id === this.state.currentAssetId);
+        if (p) p.status = key;
+      }
     }
     this.#log(message);
   }
@@ -571,6 +659,9 @@ function idleState() {
     counters: null,
     error: null,
     log: [],
+    activePhotos: [],
+    currentAssetId: null,
+    assetIds: [],
   };
 }
 
@@ -581,3 +672,12 @@ function clampInt(value, min, max, fallback) {
   }
   return Math.max(min, Math.min(max, parsed));
 }
+
+function sanitizeIsoTimestamp(value) {
+  if (typeof value !== 'string') return null;
+  const trimmed = value.trim();
+  if (!trimmed) return null;
+  const time = Date.parse(trimmed);
+  return Number.isFinite(time) ? new Date(time).toISOString() : null;
+}
+

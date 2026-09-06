@@ -16,6 +16,8 @@ const state = {
   syncPolling: null,
   loadingPromise: null,
   immichUrl: null,
+  unstacked: false,
+  sort: 'default',
   // Decisions made this session (per view load): appended pages are filtered
   // against this so a fetch that raced a decision can't resurrect the photo.
   recentlyDecided: new Set(),
@@ -27,10 +29,23 @@ const state = {
 const LOAD_AHEAD = 25;
 const UNDO_WINDOW_MS = 5000;
 
-// Page-size override for tests and power users: /curate.html?limit=5.
+// Page-size override and persistent sort preference: /curate.html?sort=date_desc&limit=5.
 {
-  const urlLimit = Number(new URLSearchParams(location.search).get('limit'));
+  const urlParams = new URLSearchParams(location.search);
+  const urlLimit = Number(urlParams.get('limit'));
   if (urlLimit > 0) state.limit = Math.min(urlLimit, 400);
+
+  const VALID_SORTS = ['default', 'date_desc', 'date_asc', 'score_desc', 'score_asc', 'stack_desc', 'name_asc'];
+  const urlSort = urlParams.get('sort');
+  let savedSort = null;
+  try {
+    savedSort = localStorage.getItem('pictariaCurateSort');
+  } catch {}
+  if (VALID_SORTS.includes(urlSort)) {
+    state.sort = urlSort;
+  } else if (VALID_SORTS.includes(savedSort)) {
+    state.sort = savedSort;
+  }
 }
 
 const el = (id) => document.getElementById(id);
@@ -67,6 +82,7 @@ function loadAssets(append = false) {
 async function doLoadAssets(append) {
   try {
     const params = new URLSearchParams({ view: state.view, q: state.q, offset: String(state.offset), limit: String(state.limit) });
+    if (state.sort && state.sort !== 'default') params.set('sort', state.sort);
     if (state.group !== 'all' && state.view !== 'decided') params.set('group', state.group);
     const payload = await api(`/api/review/assets?${params}`);
     state.total = payload.total;
@@ -103,6 +119,7 @@ async function doLoadAssets(append) {
     el('bulkUndo').hidden = state.view !== 'decided';
     // Stacks/singles passes don't apply to the decided list.
     el('groupFilter').hidden = state.view === 'decided';
+    if (el('toggleStackBtn')) el('toggleStackBtn').hidden = state.view === 'decided';
   } catch (error) {
     // A low-water append can fail after the decision itself succeeded. Keep
     // that decision's short Undo window alive while reporting the load error.
@@ -117,8 +134,11 @@ function updateLoadMoreControls() {
   const hasMore = state.offset < state.total;
   document.querySelectorAll('[data-load-more]').forEach((button) => {
     button.disabled = state.loading || !hasMore;
+    button.textContent = state.loading ? 'Loading…' : 'Load more';
   });
   el('loadMoreBottomRow').hidden = state.assets.length === 0 || !hasMore;
+  const sentinel = el('scrollSentinel');
+  if (sentinel) sentinel.hidden = !hasMore;
 }
 
 function renderTabs(payload) {
@@ -172,20 +192,60 @@ function renderGrid() {
       if (renderedBursts.has(asset.burstId)) continue;
       renderedBursts.add(asset.burstId);
       const members = state.assets.filter((a) => a.burstId === asset.burstId);
-      units.push({
-        render: () => (members.length > 1 ? renderStackCard(members) : renderCard(members[0])),
-        // Referee-judged stacks lead the grid — they're the ones with a
-        // verdict waiting, so they shouldn't have to be hunted for.
-        gold: members.length > 1 && members.some((m) => m.burstPickSource === 'referee'),
-      });
+      const isGold = members.length > 1 && members.some((m) => m.burstPickSource === 'referee');
+      if (state.unstacked) {
+        // Unstacked view: keep all members of the same stack together sequentially
+        const sortedMembers = [...members].sort((a, b) => {
+          if (state.sort === 'date_asc') {
+            return String(a.capturedAt ?? '').localeCompare(String(b.capturedAt ?? ''));
+          }
+          if (state.sort === 'date_desc') {
+            return String(b.capturedAt ?? '').localeCompare(String(a.capturedAt ?? ''));
+          }
+          if (state.sort === 'score_asc') {
+            const scoreA = typeof a.frameScore === 'number' ? a.frameScore : null;
+            const scoreB = typeof b.frameScore === 'number' ? b.frameScore : null;
+            if (scoreA !== null && scoreB !== null && scoreA !== scoreB) return scoreA - scoreB;
+            return (a.aestheticScore ?? 0) - (b.aestheticScore ?? 0);
+          }
+          if (state.sort === 'name_asc') {
+            return String(a.filename ?? '').localeCompare(String(b.filename ?? ''));
+          }
+          if (a.assetId === a.burstBestAssetId) return -1;
+          if (b.assetId === b.burstBestAssetId) return 1;
+          return 0;
+        });
+        units.push({
+          cards: sortedMembers.map((m, idx) => {
+            const card = renderCard(m);
+            if (members.length > 1) {
+              card.classList.add('unstacked-stack-member');
+              if (isGold) card.classList.add('referee-judged');
+              if (idx === 0) card.classList.add('unstacked-stack-lead');
+              card.dataset.burstId = m.burstId;
+            }
+            return card;
+          }),
+          gold: isGold,
+        });
+      } else {
+        units.push({
+          cards: [members.length > 1 ? renderStackCard(members) : renderCard(members[0])],
+          gold: isGold,
+        });
+      }
     } else {
-      units.push({ render: () => renderCard(asset), gold: false });
+      units.push({ cards: [renderCard(asset)], gold: false });
     }
   }
-  units.sort((a, b) => Number(b.gold) - Number(a.gold)); // stable: keeps queue order within each half
+  if (state.sort === 'default') {
+    units.sort((a, b) => Number(b.gold) - Number(a.gold)); // stable: keeps queue order within each half
+  }
   for (const unit of units) {
-    grid.append(unit.render());
-    state.cardCount += 1;
+    for (const card of unit.cards) {
+      grid.append(card);
+      state.cardCount += 1;
+    }
   }
   updateMeta();
 }
@@ -328,6 +388,14 @@ function renderCard(asset) {
         : asset.burstBestAssetId
           ? 'Part of a Stack whose other photos are in another tab or already decided; the ★ photo is the suggested keeper'
           : 'Part of a Stack whose other photos are in another tab or already decided (no signal to suggest a best pick)';
+    }
+    if (state.unstacked) {
+      badge.style.cursor = 'pointer';
+      badge.title += ' (click to compare all photos of this moment side by side)';
+      badge.addEventListener('click', (e) => {
+        e.stopPropagation();
+        openBurstbox(asset);
+      });
     }
     thumbWrap.append(badge);
   }
@@ -600,13 +668,30 @@ function removeDecided(assetIds) {
 }
 
 function updateBulkbar() {
-  el('bulkbar').hidden = state.selected.size === 0;
-  el('selectedCount').textContent = `${state.selected.size} selected`;
+  const count = state.selected.size;
+  const isSelected = count > 0;
+  if (el('bulkbar')) el('bulkbar').hidden = !isSelected;
+  if (el('toolbarBulkActions')) el('toolbarBulkActions').hidden = !isSelected;
+  const countText = `${count} selected`;
+  if (el('selectedCount')) el('selectedCount').textContent = countText;
+  if (el('toolbarSelectedCount')) el('toolbarSelectedCount').textContent = countText;
+
   const visible = state.assets.map((a) => a.assetId);
   const checked = visible.filter((id) => state.selected.has(id)).length;
   const box = el('selectVisible');
-  box.checked = visible.length > 0 && checked === visible.length;
-  box.indeterminate = checked > 0 && checked < visible.length;
+  if (box) {
+    box.checked = visible.length > 0 && checked === visible.length;
+    box.indeterminate = checked > 0 && checked < visible.length;
+  }
+}
+
+function clearSelection() {
+  state.selected.clear();
+  for (const box of grid.querySelectorAll('.card-check')) {
+    box.checked = false;
+    box.closest('.p-card')?.classList.remove('selected');
+  }
+  updateBulkbar();
 }
 
 // ---------- Lightbox ----------
@@ -769,8 +854,70 @@ function lightboxKeepBest() {
 }
 
 // ---------- Compare view (one "same moment" group side by side) ----------
+function getLoadedStacks() {
+  const seen = new Set();
+  const stacks = [];
+  for (const asset of state.assets) {
+    if (!asset.burstId || state.view === 'decided') continue;
+    if (seen.has(asset.burstId)) continue;
+    seen.add(asset.burstId);
+    const members = state.assets.filter((a) => a.burstId === asset.burstId);
+    if (members.length > 1) {
+      const best = members.find((m) => m.assetId === m.burstBestAssetId) ?? members[0];
+      const isGold = members.some((m) => m.burstPickSource === 'referee');
+      stacks.push({ rep: best, gold: isGold, burstId: asset.burstId });
+    }
+  }
+  if (state.sort === 'default') {
+    stacks.sort((a, b) => Number(b.gold) - Number(a.gold));
+  }
+  return stacks.map((s) => s.rep);
+}
+
+function updateBurstboxNav() {
+  const stacks = getLoadedStacks();
+  const index = stacks.findIndex((s) => s.burstId === state.compareBurstId);
+  const prevBtn = el('bbPrevStack');
+  const nextBtn = el('bbNextStack');
+  if (!prevBtn || !nextBtn) return;
+  if (index === -1) {
+    prevBtn.disabled = true;
+    nextBtn.disabled = true;
+    return;
+  }
+  prevBtn.disabled = index <= 0;
+  prevBtn.title = index > 0 ? `Previous stack (${index} of ${stacks.length}) [←]` : 'No previous stack';
+
+  const hasMore = index < stacks.length - 1 || state.offset < state.total;
+  nextBtn.disabled = !hasMore;
+  nextBtn.title = index < stacks.length - 1
+    ? `Next stack (${index + 2} of ${stacks.length}) [→]`
+    : (state.offset < state.total ? 'Load next stack [→]' : 'No more stacks');
+}
+
+async function stepBurstbox(delta) {
+  const stacks = getLoadedStacks();
+  const currentIndex = stacks.findIndex((s) => s.burstId === state.compareBurstId);
+  if (currentIndex === -1) return;
+  const targetIndex = currentIndex + delta;
+  if (targetIndex >= 0 && targetIndex < stacks.length) {
+    openBurstbox(stacks[targetIndex]);
+    return;
+  }
+  if (targetIndex >= stacks.length && state.offset < state.total) {
+    await loadAssets(true);
+    const updatedStacks = getLoadedStacks();
+    if (updatedStacks.length > currentIndex + 1) {
+      openBurstbox(updatedStacks[currentIndex + 1]);
+    }
+  }
+}
+
 function openBurstbox(anchor) {
   state.compareBurstId = anchor.burstId;
+  const stacks = getLoadedStacks();
+  const index = stacks.findIndex((s) => s.burstId === anchor.burstId);
+  state.compareStackIndex = index !== -1 ? index : 0;
   // The clicked card is the single source of truth for this compare session:
   // membership, count, and best pick all come from ITS annotation, so the
   // view can never disagree with the card the user just read — even when a
@@ -796,12 +943,14 @@ function openBurstbox(anchor) {
   );
   renderBurstbox();
   el('burstbox').classList.add('open');
+  updateBurstboxNav();
 }
 
 function closeBurstbox() {
   state.compareBurstId = null;
   state.compareMembers = [];
   state.compareBestAssetId = null;
+  state.compareStackIndex = null;
   el('burstbox').classList.remove('open');
 }
 
@@ -810,17 +959,40 @@ function renderBurstbox() {
   const members = (state.compareMembers ?? []).map((snap) => live.get(snap.assetId) ?? snap);
   const liveMembers = members.filter((member) => live.has(member.assetId));
   if (liveMembers.length === 0) {
+    // Current stack is fully decided. Advance to the next stack instead of closing.
+    const remainingStacks = getLoadedStacks();
+    if (remainingStacks.length > 0) {
+      const nextIndex = Math.min(state.compareStackIndex ?? 0, remainingStacks.length - 1);
+      openBurstbox(remainingStacks[nextIndex]);
+      return;
+    }
+    if (state.offset < state.total) {
+      loadAssets(true).then(() => {
+        const freshStacks = getLoadedStacks();
+        if (freshStacks.length > 0) {
+          openBurstbox(freshStacks[0]);
+        } else {
+          closeBurstbox();
+        }
+      }).catch(() => closeBurstbox());
+      return;
+    }
     closeBurstbox();
     return;
   }
   // The best pick is pinned at open time (the clicked card's ★): member rows
   // refreshed by a later append may carry a different generation's pick.
   const best = liveMembers.find((m) => m.assetId === state.compareBestAssetId) ?? null;
+  const stacks = getLoadedStacks();
+  const stackIdx = stacks.findIndex((s) => s.burstId === state.compareBurstId);
+  const stackNote = stackIdx !== -1 ? `Stack ${stackIdx + 1} of ${stacks.length} · ` : '';
+
   el('bbTitle').textContent = liveMembers.length === members.length
-    ? `Same moment · ${members.length} photo${members.length === 1 ? '' : 's'}`
-    : `Same moment · ${liveMembers.length} of ${members.length} photos left`;
+    ? `${stackNote}Same moment · ${members.length} photo${members.length === 1 ? '' : 's'}`
+    : `${stackNote}Same moment · ${liveMembers.length} of ${members.length} photos left`;
   const dated = members.find((member) => member.capturedAt);
   el('bbSub').textContent = dated ? new Date(dated.capturedAt).toLocaleString() : '';
+  updateBurstboxNav();
   // Header buttons hide via visibility so the head never changes height
   // (or wrap layout) mid-session as decisions land.
   const headButton = (id, show, label, onclick) => {
@@ -1153,6 +1325,30 @@ document.querySelectorAll('#groupFilter .p-tab').forEach((button) => {
     loadAssetsFresh();
   });
 });
+const toggleStackBtn = el('toggleStackBtn');
+if (toggleStackBtn) {
+  toggleStackBtn.addEventListener('click', () => {
+    state.unstacked = !state.unstacked;
+    toggleStackBtn.textContent = state.unstacked ? 'Restack' : 'Unstack all';
+    toggleStackBtn.title = state.unstacked
+      ? 'Restore stack grouping'
+      : 'Temporarily unstack photos to view each photo individually';
+    toggleStackBtn.classList.toggle('accent', state.unstacked);
+    toggleStackBtn.classList.toggle('quiet', !state.unstacked);
+    renderGrid();
+  });
+}
+const curateSort = el('curateSort');
+if (curateSort) {
+  curateSort.value = state.sort;
+  curateSort.addEventListener('change', () => {
+    state.sort = curateSort.value;
+    try {
+      localStorage.setItem('pictariaCurateSort', state.sort);
+    } catch {}
+    loadAssetsFresh();
+  });
+}
 el('selectVisible').addEventListener('change', () => {
   const check = el('selectVisible').checked;
   for (const asset of state.assets) check ? state.selected.add(asset.assetId) : state.selected.delete(asset.assetId);
@@ -1185,6 +1381,10 @@ document.querySelectorAll('[data-lb]').forEach((button) => {
 // so it needs its own wiring — the K shortcut goes through the same handler.
 el('lbKeepBest').addEventListener('click', lightboxKeepBest);
 el('bbClose').addEventListener('click', closeBurstbox);
+el('bbPrevStack')?.addEventListener('click', () => stepBurstbox(-1));
+el('bbNextStack')?.addEventListener('click', () => stepBurstbox(1));
+el('toolbarClearBtn')?.addEventListener('click', clearSelection);
+el('bulkClear')?.addEventListener('click', clearSelection);
 el('burstbox').addEventListener('click', (event) => {
   if (event.target === el('burstbox')) closeBurstbox();
 });
@@ -1206,13 +1406,35 @@ document.addEventListener('keydown', (event) => {
     return;
   }
   if (state.lightboxIndex === -1) {
-    // Compare view open, no lightbox: K keeps the group's best (B = legacy alias).
-    if (
-      state.compareBurstId &&
-      ['k', 'b'].includes(event.key.toLowerCase()) &&
-      el('bbKeepBest').style.visibility === 'visible'
-    ) {
-      el('bbKeepBest').click();
+    if (state.compareBurstId) {
+      if (event.key === 'ArrowLeft') {
+        event.preventDefault();
+        stepBurstbox(-1);
+        return;
+      }
+      if (event.key === 'ArrowRight') {
+        event.preventDefault();
+        stepBurstbox(1);
+        return;
+      }
+      // Compare view open, no lightbox: K keeps the group's best (B = legacy alias).
+      if (
+        ['k', 'b'].includes(event.key.toLowerCase()) &&
+        el('bbKeepBest').style.visibility === 'visible'
+      ) {
+        el('bbKeepBest').click();
+      }
+      return;
+    }
+    // Main grid: if photos are selected, hotkeys apply to the selected group
+    if (state.selected.size > 0) {
+      const bulkKeys = { a: 'approve', y: 'approve', r: 'reject', n: 'reject', f: 'favorite', s: 'reviewed', v: 'reviewed' };
+      const action = bulkKeys[event.key.toLowerCase()];
+      if (action) {
+        event.preventDefault();
+        decide(action, [...state.selected], { undoable: false });
+        return;
+      }
     }
     return;
   }
@@ -1284,8 +1506,37 @@ function escapeHtml(value) {
   return String(value ?? '').replace(/[&<>"']/g, (ch) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[ch]));
 }
 
+function initInfiniteScroll() {
+  const sentinel = el('scrollSentinel');
+  if (window.IntersectionObserver && sentinel) {
+    const observer = new IntersectionObserver((entries) => {
+      for (const entry of entries) {
+        if (entry.isIntersecting && !state.loading && state.offset < state.total) {
+          loadAssets(true);
+        }
+      }
+    }, { rootMargin: '600px' });
+    observer.observe(sentinel);
+  }
+
+  let scrollThrottle = null;
+  window.addEventListener('scroll', () => {
+    if (scrollThrottle || state.loading || state.offset >= state.total) return;
+    scrollThrottle = setTimeout(() => {
+      scrollThrottle = null;
+      if (state.loading || state.offset >= state.total) return;
+      const scrollRemaining = document.documentElement.scrollHeight - (window.innerHeight + window.scrollY);
+      if (scrollRemaining < 800) {
+        loadAssets(true);
+      }
+    }, 150);
+  }, { passive: true });
+}
+
 async function boot() {
+  initInfiniteScroll();
   await loadAssets(false);
 }
 
 boot();
+

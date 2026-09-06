@@ -110,7 +110,7 @@ export function createEnrichRoutes({ review, enrichRunner, taxonomy, repo, requi
   // Start one queued item. Shared by the single Run button and the Run-all
   // chain; `chainNext` (if given) fires after this item's clean finish, so
   // a cancel or failure stops the chain with the queue intact.
-  async function startQueuedItem(item, { provider, sendToCurate = true, reopenDecided = false, skipAnySuccessful, chainNext } = {}) {
+  async function startQueuedItem(item, { provider, sendToCurate = true, reopenDecided = false, skipAnySuccessful, reprocess = false, chainNext } = {}) {
     // Claim the shared runner synchronously, before slice resolution awaits
     // Immich. Daily Enrich and other starts now see the same ownership state
     // as the queue routes, including between Run-all items.
@@ -123,6 +123,7 @@ export function createEnrichRoutes({ review, enrichRunner, taxonomy, repo, requi
         sendToCurate,
         reopenDecided,
         skipAnySuccessful,
+        reprocess: Boolean(reprocess || item.reprocess),
         chainNext,
         reservation,
       });
@@ -168,17 +169,19 @@ export function createEnrichRoutes({ review, enrichRunner, taxonomy, repo, requi
     sendToCurate,
     reopenDecided,
     skipAnySuccessful,
+    reprocess = false,
     chainNext,
     reservation,
   }) {
     const reopen = reopenDecided === true;
-    const skip = skipAnySuccessful === undefined ? !reopen : skipAnySuccessful !== false;
+    const isReprocess = Boolean(reprocess);
+    const skip = isReprocess ? false : (skipAnySuccessful === undefined ? !reopen : skipAnySuccessful !== false);
     // Skip-aware resolution collects photos the run would analyze, so a capped
     // slice advances across repeat runs instead of re-resolving the same first
-    // window forever. Re-open runs
+    // window forever. Re-open and reprocess runs
     // stay unfiltered: their finish clears decisions on the whole resolved
     // set, which must include already-enriched photos.
-    const filterNeedsWork = reopen ? null : enrichRunner.needsWorkFilter({ provider, skipAnySuccessful: skip });
+    const filterNeedsWork = (reopen || isReprocess) ? null : enrichRunner.needsWorkFilter({ provider, skipAnySuccessful: skip });
     const resolved = await resolveSliceAssetIds({ immich, rawFilters: item.filters, filterNeedsWork });
     // Resolution can take a while on a big slice; if the user removed the
     // item in the meantime, that intent wins — no listing, no retirement
@@ -237,6 +240,7 @@ export function createEnrichRoutes({ review, enrichRunner, taxonomy, repo, requi
         // Re-opening decided photos only makes sense if results go to Curate.
         sendToCurate: sendToCurate !== false || reopen,
         reopenDecided: reopen,
+        reprocess: isReprocess,
         // Runs only on a clean finish: cancelled/failed runs leave the item
         // queued (Cancel doubles as pause). Capped slices stay queued so
         // repeat runs walk the rest.
@@ -594,6 +598,27 @@ export function createEnrichRoutes({ review, enrichRunner, taxonomy, repo, requi
       return true;
     }
 
+    if (request.method === 'GET' && url.pathname === '/api/enrich/albums') {
+      if (!requireImmich(response)) {
+        return true;
+      }
+      const albums = await immich.getAlbums();
+      sendJson(
+        response,
+        200,
+        albums
+          .map((album) => ({
+            id: album.id,
+            albumName: album.albumName ?? '',
+            assetCount: typeof album.assetCount === 'number' ? album.assetCount : undefined,
+            shared: Boolean(album.shared),
+          }))
+          .filter((album) => album.id && album.albumName)
+          .sort((left, right) => left.albumName.localeCompare(right.albumName)),
+      );
+      return true;
+    }
+
     // "Send to Enrich" queue: slices wait here until run from the Enrich page.
     if (request.method === 'GET' && url.pathname === '/api/enrich/queue') {
       sendJson(response, 200, queuePagePayload(url.searchParams));
@@ -607,7 +632,7 @@ export function createEnrichRoutes({ review, enrichRunner, taxonomy, repo, requi
         sendError(response, 400, 'invalid_slice', 'At least one slice filter is required.');
         return true;
       }
-      for (const key of ['personIds', 'tagIds', 'cities']) {
+      for (const key of ['personIds', 'tagIds', 'cities', 'albumIds']) {
         if (Array.isArray(filters[key])) {
           filters[key] = [...new Set(filters[key])].sort();
         }
@@ -631,6 +656,128 @@ export function createEnrichRoutes({ review, enrichRunner, taxonomy, repo, requi
         }
         throw error;
       }
+      return true;
+    }
+
+    if (request.method === 'POST' && url.pathname === '/api/enrich/queue/sweep') {
+      if (!requireImmich(response)) {
+        return true;
+      }
+      maintainQueue();
+      const body = await readJsonBody(request);
+      const maxAnalyzed = Math.max(1, Math.min(1000, Number(body?.maxAnalyzed) || 100));
+      const random = Boolean(body?.random);
+      const reprocess = Boolean(body?.reprocess);
+      const skipAnySuccessful = reprocess ? false : body?.skipAnySuccessful !== false;
+      const sendToCurate = body?.sendToCurate !== false;
+      const startNow = Boolean(body?.startNow);
+      const provider = body?.provider || undefined;
+
+      if (startNow) {
+        if (!config.enrichEnabled) {
+          sendError(response, 403, 'enrichment_disabled', 'Enrichment is turned off — enable it in Settings → Enrich.');
+          return true;
+        }
+        if (queueBusy()) {
+          sendError(response, 409, 'enrich_run_conflict', 'An enrichment run or queued-job resolution is already in progress.');
+          return true;
+        }
+      }
+
+      const rawFilters = {
+        type: 'IMAGE',
+        ...(random ? { random: true } : {}),
+        ...(body?.takenAfter ? { takenAfter: body.takenAfter } : {}),
+        ...(body?.takenBefore ? { takenBefore: body.takenBefore } : {}),
+      };
+
+      const filterNeedsWork = reprocess
+        ? null
+        : enrichRunner.needsWorkFilter({ provider, skipAnySuccessful });
+
+      let resolved;
+      try {
+        resolved = await resolveSliceAssetIds({
+          immich,
+          rawFilters,
+          max: maxAnalyzed,
+          filterNeedsWork,
+        });
+      } catch (error) {
+        sendError(response, 502, 'slice_resolution_failed', diagnostic(error));
+        return true;
+      }
+
+      if (!resolved || resolved.assetIds.length === 0) {
+        if (resolved && resolved.scannedImages > 0) {
+          sendJson(response, 200, {
+            fullyCovered: true,
+            message: 'All matching photos in this timeframe are already enriched.',
+            covered: resolved.coveredAssetIds?.length ?? 0,
+            assets: [],
+            ...queuePagePayload(),
+          });
+          return true;
+        }
+        sendError(response, 404, 'no_photos_found', 'No photos found matching this timeframe.');
+        return true;
+      }
+
+      const count = resolved.assetIds.length;
+      const sweepType = random ? 'Random sweep' : 'Library sweep';
+      const timeframeLabel = body?.timelineLabel && body.timelineLabel !== 'All time'
+        ? ` (${body.timelineLabel})`
+        : '';
+      const title = `${sweepType}${timeframeLabel} — ${count} photo${count === 1 ? '' : 's'}`;
+
+      let queueResult;
+      try {
+        queueResult = repo.queueAdd({
+          title,
+          filters: {
+            assetIds: resolved.assetIds,
+          },
+          estimatedCount: count,
+          protectedIds: protectedQueueIds(),
+        });
+      } catch (error) {
+        if (error?.code === 'enrich_queue_full' || error?.code === 'enrich_queue_item_too_large') {
+          sendError(response, error.status, error.code, diagnostic(error));
+          return true;
+        }
+        throw error;
+      }
+
+      const item = repo.queueGet(queueResult.id);
+
+      if (startNow) {
+        try {
+          const { status, truncated } = await startQueuedItem(item, {
+            provider,
+            sendToCurate,
+            reopenDecided: false,
+            skipAnySuccessful,
+            reprocess,
+          });
+          sendJson(response, 202, {
+            item,
+            assets: resolved.assets,
+            ...status,
+            queuedRemaining: truncated,
+            ...queuePagePayload(),
+          });
+        } catch (error) {
+          sendError(response, 409, 'enrich_run_conflict', diagnostic(error));
+        }
+        return true;
+      }
+
+      sendJson(response, 201, {
+        item,
+        assets: resolved.assets,
+        duplicate: queueResult.duplicate,
+        ...queuePagePayload(),
+      });
       return true;
     }
 
@@ -662,6 +809,7 @@ export function createEnrichRoutes({ review, enrichRunner, taxonomy, repo, requi
           sendToCurate: body?.sendToCurate,
           reopenDecided: body?.reopenDecided,
           skipAnySuccessful: body?.skipAnySuccessful,
+          reprocess: body?.reprocess,
         });
         sendJson(response, 202, { ...status, queuedRemaining: truncated, ...queuePagePayload() });
       } catch (error) {
@@ -722,6 +870,7 @@ export function createEnrichRoutes({ review, enrichRunner, taxonomy, repo, requi
           id,
           sendToCurate: entry?.sendToCurate !== false,
           reopenDecided: entry?.reopenDecided === true,
+          reprocess: entry?.reprocess === true,
         });
       }
       // No await between this check and startFromPlan → startQueuedItem
@@ -777,6 +926,7 @@ export function createEnrichRoutes({ review, enrichRunner, taxonomy, repo, requi
               provider,
               sendToCurate: entry.sendToCurate,
               reopenDecided: entry.reopenDecided,
+              reprocess: entry.reprocess,
               chainNext: () => {
                 runAllPlanIds.delete(entry.id);
                 void startFromPlan(i + 1).catch(recordChainStop);
@@ -858,6 +1008,163 @@ export function createEnrichRoutes({ review, enrichRunner, taxonomy, repo, requi
         return true;
       }
       sendJson(response, 200, { removed: repo.queueRemove(queueItemId), ...queuePagePayload() });
+      return true;
+    }
+
+    if (request.method === 'DELETE' && url.pathname === '/api/enrich/queue') {
+      maintainQueue();
+      const removed = repo.queueClear({ protectedIds: protectedQueueIds() });
+      sendJson(response, 200, { removed, ...queuePagePayload() });
+      return true;
+    }
+
+    const queuePhotosMatch = url.pathname.match(/^\/api\/enrich\/queue\/(\d+)\/photos$/);
+    if (request.method === 'GET' && queuePhotosMatch) {
+      if (!requireImmich(response)) return true;
+      const queueItemId = Number(queuePhotosMatch[1]);
+      const item = repo.queueGet(queueItemId);
+      if (!item) {
+        sendError(response, 404, 'queue_item_not_found', 'That queued job no longer exists.');
+        return true;
+      }
+      try {
+        const resolved = await resolveSliceAssetIds({
+          immich,
+          rawFilters: item.filters,
+          max: 200,
+        });
+        sendJson(response, 200, {
+          id: item.id,
+          title: item.title,
+          assets: resolved?.assets ?? [],
+          total: resolved?.assetIds?.length ?? 0,
+          truncated: Boolean(resolved?.truncated),
+        });
+      } catch (error) {
+        sendError(response, 502, 'slice_resolution_failed', diagnostic(error));
+      }
+      return true;
+    }
+
+    const queuePhotoDeleteMatch = url.pathname.match(/^\/api\/enrich\/queue\/(\d+)\/photos\/([a-zA-Z0-9_-]+)$/);
+    if (request.method === 'DELETE' && queuePhotoDeleteMatch) {
+      const queueItemId = Number(queuePhotoDeleteMatch[1]);
+      const assetId = queuePhotoDeleteMatch[2];
+      maintainQueue();
+      const item = repo.queueGet(queueItemId);
+      if (!item) {
+        sendError(response, 404, 'queue_item_not_found', 'That queued job no longer exists.');
+        return true;
+      }
+      if (enrichRunner.isRunning() && enrichRunner.status()?.options?.queueItemId === queueItemId) {
+        sendError(response, 409, 'queue_item_running', 'That job is running — cancel the run first.');
+        return true;
+      }
+
+      let currentAssetIds = [];
+      if (Array.isArray(item.filters?.assetIds)) {
+        currentAssetIds = item.filters.assetIds;
+      } else {
+        const resolved = await resolveSliceAssetIds({ immich, rawFilters: item.filters, max: 1000 });
+        currentAssetIds = resolved?.assetIds || [];
+      }
+
+      const survivingIds = currentAssetIds.filter((id) => id !== assetId);
+      if (survivingIds.length === 0) {
+        repo.queueRemove(queueItemId);
+        sendJson(response, 200, {
+          removed: true,
+          itemRemoved: true,
+          remaining: 0,
+          ...queuePagePayload(),
+        });
+        return true;
+      }
+
+      const updated = repo.queueUpdate(queueItemId, {
+        filters: { ...item.filters, assetIds: survivingIds },
+        estimatedCount: survivingIds.length,
+      });
+      sendJson(response, 200, {
+        removed: true,
+        itemRemoved: false,
+        remaining: survivingIds.length,
+        item: updated,
+        ...queuePagePayload(),
+      });
+      return true;
+    }
+
+    const activePhotoDeleteMatch = url.pathname.match(/^\/api\/enrich\/active\/photos\/([a-zA-Z0-9_-]+)$/);
+    if (request.method === 'DELETE' && activePhotoDeleteMatch) {
+      const assetId = activePhotoDeleteMatch[1];
+      if (!enrichRunner.isRunning()) {
+        sendError(response, 404, 'no_run_active', 'No enrichment run is currently active.');
+        return true;
+      }
+      const removed = typeof enrichRunner.removeActiveAsset === 'function'
+        ? enrichRunner.removeActiveAsset(assetId)
+        : false;
+      const queueItemId = enrichRunner.status()?.options?.queueItemId;
+      if (queueItemId) {
+        const item = repo.queueGet(queueItemId);
+        if (item && Array.isArray(item.filters?.assetIds)) {
+          const surviving = item.filters.assetIds.filter((id) => id !== assetId);
+          repo.queueUpdate(queueItemId, {
+            filters: { ...item.filters, assetIds: surviving },
+            estimatedCount: surviving.length,
+          });
+        }
+      }
+      sendJson(response, 200, {
+        removed,
+        assetId,
+        activePhotos: enrichRunner.status()?.activePhotos ?? [],
+        ...queuePagePayload(),
+      });
+      return true;
+    }
+
+    const queuePatchMatch = url.pathname.match(/^\/api\/enrich\/queue\/(\d+)$/);
+    if (request.method === 'PATCH' && queuePatchMatch) {
+      const queueItemId = Number(queuePatchMatch[1]);
+      maintainQueue();
+      const item = repo.queueGet(queueItemId);
+      if (!item) {
+        sendError(response, 404, 'queue_item_not_found', 'That queued job no longer exists.');
+        return true;
+      }
+      const body = await readJsonBody(request);
+      let filters;
+      if (body?.filters) {
+        filters = normalizeSliceFilters(body.filters);
+        if (!filters) {
+          sendError(response, 400, 'invalid_slice', 'Slice filters cannot be empty.');
+          return true;
+        }
+        for (const key of ['personIds', 'tagIds', 'cities']) {
+          if (Array.isArray(filters[key])) {
+            filters[key] = [...new Set(filters[key])].sort();
+          }
+        }
+      }
+      const updated = repo.queueUpdate(queueItemId, {
+        title: typeof body?.title === 'string' ? body.title : undefined,
+        filters,
+        estimatedCount: body?.estimatedCount !== undefined ? Number(body.estimatedCount) : undefined,
+      });
+      sendJson(response, 200, { item: updated, ...queuePagePayload() });
+      return true;
+    }
+
+    if (request.method === 'POST' && url.pathname === '/api/enrich/queue/reorder') {
+      const body = await readJsonBody(request);
+      if (!Array.isArray(body?.ids)) {
+        sendError(response, 400, 'invalid_reorder_request', 'ids must be an array of queue item IDs.');
+        return true;
+      }
+      repo.queueReorder(body.ids);
+      sendJson(response, 200, { ok: true, ...queuePagePayload() });
       return true;
     }
 

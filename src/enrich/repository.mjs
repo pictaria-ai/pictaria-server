@@ -251,12 +251,14 @@ function validateSyncJobTimestamp(value, label) {
 }
 
 function queueItemFromRow(row) {
+  const numericPos = Number(row.position);
   return {
     id: Number(row.id),
     title: row.title,
     filters: JSON.parse(row.filters_json),
     estimatedCount: row.estimated_count === null ? null : Number(row.estimated_count),
     requestedAt: row.requested_at,
+    position: Number.isSafeInteger(numericPos) ? numericPos : Number(row.id),
   };
 }
 
@@ -442,6 +444,13 @@ const ENRICH_MIGRATIONS = [
       // User-authored benchmark context is snapshotted per run so changing a
       // Settings label never rewrites the meaning of historical comparisons.
       addColumnIfMissing(db, 'job_runs', 'inference_host_label', 'TEXT');
+    },
+  },
+  {
+    version: 8,
+    up(db) {
+      addColumnIfMissing(db, 'enrich_queue', 'position', 'INTEGER DEFAULT NULL');
+      db.exec('UPDATE enrich_queue SET position = id WHERE position IS NULL');
     },
   },
 ];
@@ -1808,9 +1817,11 @@ export class Repository {
           409,
         );
       }
+      const maxPos = Number(this.db.prepare('SELECT COALESCE(MAX(COALESCE(position, id)), 0) AS maxPos FROM enrich_queue').get()?.maxPos ?? 0);
+      const nextPos = maxPos + 1;
       const result = this.db.prepare(
-        'INSERT INTO enrich_queue (title, filters_json, estimated_count, requested_at) VALUES (?, ?, ?, ?)',
-      ).run(safeTitle, filtersJson, safeEstimatedCount, new Date(now).toISOString());
+        'INSERT INTO enrich_queue (title, filters_json, estimated_count, requested_at, position) VALUES (?, ?, ?, ?, ?)',
+      ).run(safeTitle, filtersJson, safeEstimatedCount, new Date(now).toISOString(), nextPos);
       return { id: Number(result.lastInsertRowid), duplicate: false };
     });
   }
@@ -1837,8 +1848,8 @@ export class Repository {
       const count = Number(this.db.prepare('SELECT COUNT(*) AS count FROM enrich_queue').get()?.count ?? 0);
       if (count > ENRICH_QUEUE_MAX_ITEMS_GLOBAL) {
         const priority = protectedList.length > 0
-          ? `CASE WHEN id IN (${protectedList.map(() => '?').join(', ')}) THEN 0 ELSE 1 END, id ASC`
-          : 'id ASC';
+          ? `CASE WHEN id IN (${protectedList.map(() => '?').join(', ')}) THEN 0 ELSE 1 END, COALESCE(position, id) ASC, id ASC`
+          : 'COALESCE(position, id) ASC, id ASC';
         const keep = this.db.prepare(
           `SELECT id FROM enrich_queue ORDER BY ${priority} LIMIT ?`,
         ).all(...protectedList, ENRICH_QUEUE_MAX_ITEMS_GLOBAL).map((row) => Number(row.id));
@@ -1846,7 +1857,7 @@ export class Repository {
         removed += Number(this.db.prepare(`DELETE FROM enrich_queue WHERE id NOT IN (${marks})`).run(...keep).changes);
       }
 
-      const rows = this.db.prepare('SELECT id, title, filters_json, estimated_count FROM enrich_queue ORDER BY id').all();
+      const rows = this.db.prepare('SELECT id, title, filters_json, estimated_count, position FROM enrich_queue ORDER BY COALESCE(position, id) ASC, id ASC').all();
       const encodedRows = rows.map((row) => ({
         ...row,
         encodedBytes: queueItemBytes({
@@ -1874,9 +1885,23 @@ export class Repository {
   }
 
   queuePage({ afterId = 0, limit = ENRICH_QUEUE_DEFAULT_PAGE_SIZE } = {}) {
-    const rows = this.db.prepare(
-      'SELECT * FROM enrich_queue WHERE id > ? ORDER BY id ASC LIMIT ?',
-    ).all(afterId, limit + 1);
+    let rows;
+    if (afterId > 0) {
+      const cursor = this.db.prepare('SELECT COALESCE(position, id) AS pos FROM enrich_queue WHERE id = ?').get(afterId);
+      if (cursor && cursor.pos !== null && cursor.pos !== undefined) {
+        rows = this.db.prepare(
+          'SELECT * FROM enrich_queue WHERE (COALESCE(position, id) > ? OR (COALESCE(position, id) = ? AND id > ?)) ORDER BY COALESCE(position, id) ASC, id ASC LIMIT ?',
+        ).all(cursor.pos, cursor.pos, afterId, limit + 1);
+      } else {
+        rows = this.db.prepare(
+          'SELECT * FROM enrich_queue WHERE id > ? ORDER BY COALESCE(position, id) ASC, id ASC LIMIT ?',
+        ).all(afterId, limit + 1);
+      }
+    } else {
+      rows = this.db.prepare(
+        'SELECT * FROM enrich_queue ORDER BY COALESCE(position, id) ASC, id ASC LIMIT ?',
+      ).all(limit + 1);
+    }
     const items = rows.slice(0, limit).map(queueItemFromRow);
     return {
       items,
@@ -1892,6 +1917,65 @@ export class Repository {
 
   queueRemove(id) {
     return this.db.prepare('DELETE FROM enrich_queue WHERE id = ?').run(id).changes > 0;
+  }
+
+  queueReorder(orderedIds) {
+    if (!Array.isArray(orderedIds)) {
+      throw new TypeError('orderedIds must be an array');
+    }
+    const validIds = orderedIds.map(Number).filter((id) => Number.isSafeInteger(id) && id > 0);
+    return this.transaction(() => {
+      const stmt = this.db.prepare('UPDATE enrich_queue SET position = ? WHERE id = ?');
+      for (let index = 0; index < validIds.length; index += 1) {
+        stmt.run(index + 1, validIds[index]);
+      }
+      return true;
+    });
+  }
+
+  queueUpdate(id, { title, filters, estimatedCount } = {}) {
+    const numId = Number(id);
+    if (!Number.isSafeInteger(numId) || numId <= 0) return null;
+    return this.transaction(() => {
+      const existing = this.db.prepare('SELECT * FROM enrich_queue WHERE id = ?').get(numId);
+      if (!existing) return null;
+
+      let newTitle = existing.title;
+      if (typeof title === 'string') {
+        newTitle = title.trim().slice(0, 120) || 'Photo slice';
+      }
+
+      let newFiltersJson = existing.filters_json;
+      if (filters !== undefined) {
+        newFiltersJson = JSON.stringify(filters);
+      }
+
+      let newEstimated = existing.estimated_count;
+      if (estimatedCount !== undefined) {
+        newEstimated = Number.isSafeInteger(estimatedCount) && estimatedCount >= 0 ? estimatedCount : null;
+      }
+
+      this.db.prepare(
+        'UPDATE enrich_queue SET title = ?, filters_json = ?, estimated_count = ? WHERE id = ?',
+      ).run(newTitle, newFiltersJson, newEstimated, numId);
+
+      const updated = this.db.prepare('SELECT * FROM enrich_queue WHERE id = ?').get(numId);
+      return updated ? queueItemFromRow(updated) : null;
+    });
+  }
+
+  queueClear({ protectedIds = [] } = {}) {
+    const protectedSet = new Set(
+      protectedIds.filter((id) => Number.isSafeInteger(id) && id > 0),
+    );
+    return this.transaction(() => {
+      if (protectedSet.size === 0) {
+        return Number(this.db.prepare('DELETE FROM enrich_queue').run().changes);
+      }
+      const protectedList = [...protectedSet];
+      const marks = protectedList.map(() => '?').join(', ');
+      return Number(this.db.prepare(`DELETE FROM enrich_queue WHERE id NOT IN (${marks})`).run(...protectedList).changes);
+    });
   }
 
   recordJobRun({ title, provider, model, promptVersion, taxonomyVersion, inferenceHostLabel, targeted, status, error, counters, log, startedAt, finishedAt }) {

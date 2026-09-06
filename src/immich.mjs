@@ -31,18 +31,19 @@ export class ImmichApiError extends Error {
 }
 
 export class ImmichClient {
-  constructor({ baseUrl, apiKey, timeoutMs = 60000, fetchImpl = fetch } = {}) {
+  constructor({ baseUrl, apiKey, partnerApiKey = '', timeoutMs = 60000, fetchImpl = fetch } = {}) {
     this.baseUrl = normalizeBaseUrl(baseUrl ?? '');
     this.apiKey = apiKey;
+    this.partnerApiKey = partnerApiKey;
     this.timeoutMs = timeoutMs;
     this.fetchImpl = fetchImpl;
   }
 
-  async searchMetadata(body) {
-    return this.requestJson('/search/metadata', { method: 'POST', body });
+  async searchMetadata(body, { apiKey = this.apiKey } = {}) {
+    return this.requestJson('/search/metadata', { method: 'POST', body, apiKey });
   }
 
-  async listImageAssets({ limit = 25, pageSize = 100, offset = 0, shouldStop = () => false } = {}) {
+  async listImageAssets({ limit = 25, pageSize = 100, offset = 0, takenAfter = null, takenBefore = null, shouldStop = () => false } = {}) {
     assertBoundedInteger(limit, 0, MAX_LIST_ASSETS, 'limit');
     assertBoundedInteger(offset, 0, MAX_LIST_OFFSET, 'offset');
     assertBoundedInteger(pageSize, 1, MAX_SEARCH_PAGE_SIZE, 'pageSize');
@@ -76,6 +77,8 @@ export class ImmichClient {
         // stack-child assets, wasting enrichment spend on duplicates.
         visibility: 'timeline',
         withExif: true,
+        ...(takenAfter ? { takenAfter } : {}),
+        ...(takenBefore ? { takenBefore } : {}),
       });
       let pageAssets = strictSearchPageAssets(response, pageSize);
       budget.recordItems(pageAssets.length);
@@ -99,9 +102,83 @@ export class ImmichClient {
     return assets.slice(0, limit);
   }
 
-  async getAsset(assetId) {
+  async listRandomImageAssets({ limit = 25, takenAfter = null, takenBefore = null, shouldStop = () => false } = {}) {
+    assertBoundedInteger(limit, 0, MAX_LIST_ASSETS, 'limit');
+    if (limit === 0 || shouldStop()) return [];
+
+    const assets = [];
+    const seen = new Set();
+    let consecutiveDuplicates = 0;
+    const maxConsecutiveDuplicates = 3;
+
+    while (assets.length < limit) {
+      if (shouldStop()) break;
+      const count = Math.min(Math.max(1, limit - assets.length), 250);
+      const query = {
+        count,
+        ...(takenAfter ? { takenAfter } : {}),
+        ...(takenBefore ? { takenBefore } : {}),
+      };
+      const response = await this.searchRandom(query);
+      const imageAssets = extractImageAssets(response);
+      if (imageAssets.length === 0) {
+        break;
+      }
+      let addedAny = false;
+      for (const asset of imageAssets) {
+        if (!asset?.id || seen.has(asset.id)) continue;
+        seen.add(asset.id);
+        assets.push(asset);
+        addedAny = true;
+        if (assets.length >= limit) break;
+      }
+      if (!addedAny) {
+        consecutiveDuplicates += 1;
+        if (consecutiveDuplicates >= maxConsecutiveDuplicates) {
+          break;
+        }
+      } else {
+        consecutiveDuplicates = 0;
+      }
+    }
+
+    return assets.slice(0, limit);
+  }
+
+  async getAsset(assetId, { resolvePeople = false } = {}) {
     const response = await this.requestJson(`/assets/${encodeURIComponent(assetId)}`);
-    return isPlainObject(response) ? response : { id: assetId };
+    const asset = isPlainObject(response) ? response : { id: assetId };
+
+    // Immich resets people to [] for non-owner callers on GET /assets/:id.
+    // If people is empty and a partner API key is configured, re-query with the partner key.
+    if (this.partnerApiKey && (!Array.isArray(asset.people) || asset.people.length === 0)) {
+      try {
+        const partnerAsset = await this.requestJson(`/assets/${encodeURIComponent(assetId)}`, {
+          apiKey: this.partnerApiKey,
+        });
+        if (partnerAsset && Array.isArray(partnerAsset.people) && partnerAsset.people.length > 0) {
+          asset.people = partnerAsset.people;
+        }
+        if ((!Array.isArray(asset.tags) || asset.tags.length === 0) && Array.isArray(partnerAsset?.tags) && partnerAsset.tags.length > 0) {
+          asset.tags = partnerAsset.tags;
+        }
+      } catch {
+        // Keep primary response if partner request fails
+      }
+    } else if (resolvePeople && (!Array.isArray(asset.people) || asset.people.length === 0)) {
+      // Optional fallback when partner key is not configured: Immich search joins asset_face directly.
+      try {
+        const searchResult = await this.searchMetadata({ id: assetId, withPeople: true });
+        const match = searchResult?.assets?.items?.[0];
+        if (match && Array.isArray(match.people) && match.people.length > 0) {
+          asset.people = match.people;
+        }
+      } catch {
+        // Keep primary response if search fallback fails
+      }
+    }
+
+    return asset;
   }
 
   // Same endpoint the Immich web UI uses to edit an asset (e.g. its
@@ -112,7 +189,22 @@ export class ImmichClient {
   // v2.x has no PATCH route at all. PUT stays until the supported Immich
   // floor is a v3 that publishes PATCH, or Immich schedules PUT's removal.
   async updateAsset(assetId, body) {
-    return this.requestJson(`/assets/${encodeURIComponent(assetId)}`, { method: 'PUT', body });
+    try {
+      return await this.requestJson(`/assets/${encodeURIComponent(assetId)}`, { method: 'PUT', body });
+    } catch (error) {
+      if (
+        this.partnerApiKey &&
+        error instanceof ImmichApiError &&
+        (error.status === 401 || error.status === 403 || (error.status === 400 && /access/i.test(error.message)))
+      ) {
+        return this.requestJson(`/assets/${encodeURIComponent(assetId)}`, {
+          method: 'PUT',
+          body,
+          apiKey: this.partnerApiKey,
+        });
+      }
+      throw error;
+    }
   }
 
   async getAssetMetadataByKey(assetId, key) {
@@ -132,10 +224,25 @@ export class ImmichClient {
   }
 
   async upsertAssetMetadata(assetId, items) {
-    return this.requestJson(`/assets/${encodeURIComponent(assetId)}/metadata`, {
-      method: 'PUT',
-      body: { items },
-    });
+    try {
+      return await this.requestJson(`/assets/${encodeURIComponent(assetId)}/metadata`, {
+        method: 'PUT',
+        body: { items },
+      });
+    } catch (error) {
+      if (
+        this.partnerApiKey &&
+        error instanceof ImmichApiError &&
+        (error.status === 401 || error.status === 403 || (error.status === 400 && /access/i.test(error.message)))
+      ) {
+        return this.requestJson(`/assets/${encodeURIComponent(assetId)}/metadata`, {
+          method: 'PUT',
+          body: { items },
+          apiKey: this.partnerApiKey,
+        });
+      }
+      throw error;
+    }
   }
 
   async searchSmart(body) {
@@ -216,21 +323,94 @@ export class ImmichClient {
   // ResponseTooLargeError instead of buffering. Without it the default
   // response ceiling applies.
   async getAssetThumbnail(assetId, size = 'preview', { maxBytes } = {}) {
-    return this.requestBytes(
-      `/assets/${encodeURIComponent(assetId)}/thumbnail?size=${encodeURIComponent(size)}`,
-      maxBytes === undefined ? {} : { maxBytes },
-    );
+    try {
+      return await this.requestBytes(
+        `/assets/${encodeURIComponent(assetId)}/thumbnail?size=${encodeURIComponent(size)}`,
+        maxBytes === undefined ? {} : { maxBytes },
+      );
+    } catch (error) {
+      if (this.partnerApiKey && error instanceof ImmichApiError && (error.status === 401 || error.status === 403)) {
+        return this.requestBytes(
+          `/assets/${encodeURIComponent(assetId)}/thumbnail?size=${encodeURIComponent(size)}`,
+          { ...(maxBytes === undefined ? {} : { maxBytes }), apiKey: this.partnerApiKey },
+        );
+      }
+      throw error;
+    }
   }
 
   // Callers with a tighter budget than the original-class default (e.g. the
   // referee's per-image ceiling) pass their own maxBytes; past it the download
   // aborts with a ResponseTooLargeError instead of buffering.
   async getAssetOriginal(assetId, { maxBytes = ORIGINAL_MAX_RESPONSE_BYTES } = {}) {
-    return this.requestBytes(`/assets/${encodeURIComponent(assetId)}/original`, { maxBytes });
+    try {
+      return await this.requestBytes(`/assets/${encodeURIComponent(assetId)}/original`, { maxBytes });
+    } catch (error) {
+      if (this.partnerApiKey && error instanceof ImmichApiError && (error.status === 401 || error.status === 403)) {
+        return this.requestBytes(`/assets/${encodeURIComponent(assetId)}/original`, { maxBytes, apiKey: this.partnerApiKey });
+      }
+      throw error;
+    }
   }
 
-  async listTags({ strict = false } = {}) {
-    const response = await this.requestJson('/tags');
+  async getPartnerUserId() {
+    if (!this.partnerApiKey) {
+      return null;
+    }
+    if (this._partnerUserId !== undefined) {
+      return this._partnerUserId;
+    }
+    try {
+      const user = await this.requestJson('/users/me', { apiKey: this.partnerApiKey });
+      this._partnerUserId = user?.id ?? null;
+    } catch {
+      this._partnerUserId = null;
+    }
+    return this._partnerUserId;
+  }
+
+  async partitionAssetIdsByOwner(assetIds, { remoteAssets = null } = {}) {
+    if (!this.partnerApiKey || !Array.isArray(assetIds) || assetIds.length === 0) {
+      return [{ apiKey: this.apiKey, assetIds: Array.isArray(assetIds) ? [...assetIds] : [] }];
+    }
+    const partnerUserId = await this.getPartnerUserId();
+    if (!partnerUserId) {
+      return [{ apiKey: this.apiKey, assetIds: [...assetIds] }];
+    }
+    const assetMap = remoteAssets instanceof Map
+      ? remoteAssets
+      : new Map(Array.isArray(remoteAssets) ? remoteAssets.map((a) => [a.id, a]) : []);
+
+    const primaryIds = [];
+    const partnerIds = [];
+    for (const assetId of assetIds) {
+      let asset = assetMap.get(assetId);
+      if (!asset) {
+        try {
+          asset = await this.getAsset(assetId);
+          assetMap.set(assetId, asset);
+        } catch {
+          // If fetch fails, keep under primary key
+        }
+      }
+      if (asset?.ownerId === partnerUserId) {
+        partnerIds.push(assetId);
+      } else {
+        primaryIds.push(assetId);
+      }
+    }
+    const partitions = [];
+    if (primaryIds.length > 0) {
+      partitions.push({ apiKey: this.apiKey, assetIds: primaryIds, isPartner: false });
+    }
+    if (partnerIds.length > 0) {
+      partitions.push({ apiKey: this.partnerApiKey, assetIds: partnerIds, isPartner: true });
+    }
+    return partitions;
+  }
+
+  async listTags({ strict = false, apiKey = this.apiKey } = {}) {
+    const response = await this.requestJson('/tags', { apiKey });
     if (Array.isArray(response)) {
       return response;
     }
@@ -243,51 +423,53 @@ export class ImmichClient {
     return [];
   }
 
-  async upsertTags(tags) {
+  async upsertTags(tags, { apiKey = this.apiKey } = {}) {
     if (!tags.length) {
       return [];
     }
-    const response = await this.requestJson('/tags', { method: 'PUT', body: { tags } });
+    const response = await this.requestJson('/tags', { method: 'PUT', body: { tags }, apiKey });
     if (Array.isArray(response)) {
       return response;
     }
     return isPlainObject(response) && Array.isArray(response.tags) ? response.tags : [];
   }
 
-  async createTag(tag) {
-    return this.requestJson('/tags', { method: 'POST', body: { name: tag } });
+  async createTag(tag, { apiKey = this.apiKey } = {}) {
+    return this.requestJson('/tags', { method: 'POST', body: { name: tag }, apiKey });
   }
 
-  async tagAssetsBulk({ assetIds, tagIds }) {
+  async tagAssetsBulk({ assetIds, tagIds, apiKey = this.apiKey }) {
     if (!assetIds.length || !tagIds.length) {
       return { count: 0 };
     }
-    return this.requestJson('/tags/assets', { method: 'PUT', body: { assetIds, tagIds } });
+    return this.requestJson('/tags/assets', { method: 'PUT', body: { assetIds, tagIds }, apiKey });
   }
 
-  async untagAssets({ tagId, assetIds }) {
+  async untagAssets({ tagId, assetIds, apiKey = this.apiKey }) {
     if (!assetIds.length) {
       return [];
     }
     const response = await this.requestJson(`/tags/${encodeURIComponent(tagId)}/assets`, {
       method: 'DELETE',
       body: { ids: assetIds },
+      apiKey,
     });
     return Array.isArray(response) ? response : [];
   }
 
-  async requestJson(path, { method = 'GET', body = null } = {}) {
-    const { buffer } = await this.#request(path, { method, body, accept: 'application/json' });
+  async requestJson(path, { method = 'GET', body = null, apiKey = this.apiKey } = {}) {
+    const { buffer } = await this.#request(path, { method, body, accept: 'application/json', apiKey });
     const text = buffer.toString('utf8');
     return text ? JSON.parse(text) : null;
   }
 
-  async requestBytes(path, { maxBytes = DEFAULT_MAX_RESPONSE_BYTES } = {}) {
+  async requestBytes(path, { maxBytes = DEFAULT_MAX_RESPONSE_BYTES, apiKey = this.apiKey } = {}) {
     const { buffer, contentType } = await this.#request(path, {
       method: 'GET',
       body: null,
       accept: 'image/*, application/octet-stream',
       maxBytes,
+      apiKey,
     });
     return {
       data: buffer,
@@ -300,7 +482,7 @@ export class ImmichClient {
   // of hanging the caller forever. The body is consumed here, inside the
   // timer's window, bounded by maxBytes (a runaway body aborts instead of
   // exhausting process memory), and returned fully buffered.
-  async #request(path, { method, body, accept, maxBytes = DEFAULT_MAX_RESPONSE_BYTES }) {
+  async #request(path, { method, body, accept, maxBytes = DEFAULT_MAX_RESPONSE_BYTES, apiKey = this.apiKey }) {
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), this.timeoutMs);
     const url = appendHttpUrlPath(this.baseUrl, `/api/${String(path).replace(/^\/+/, '')}`);
@@ -312,12 +494,12 @@ export class ImmichClient {
         headers: {
           Accept: accept,
           'Content-Type': 'application/json',
-          'x-api-key': this.apiKey,
+          'x-api-key': apiKey,
         },
         body: body === null ? undefined : JSON.stringify(body),
       });
       if (!response.ok) {
-        throw new ImmichApiError(await readErrorMessage(response, this.apiKey), response.status);
+        throw new ImmichApiError(await readErrorMessage(response, apiKey), response.status);
       }
       // Injected fetchImpl doubles without a body stream (tests) read whole.
       const buffer = typeof response.body?.getReader === 'function'

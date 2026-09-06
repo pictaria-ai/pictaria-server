@@ -434,3 +434,172 @@ test('without listForReview an enrichment run stays out of the review list', asy
     assert.equal(repo.reviewListRows().length, 0);
   });
 });
+
+test('runBatch with random: true samples via searchRandom and respects maxAnalyzed', async () => {
+  await withRepo(async (repo) => {
+    let randomCalls = 0;
+    const immich = {
+      ...fakeImmich([]),
+      async searchRandom({ count }) {
+        randomCalls += 1;
+        return [
+          { id: 'rnd1', type: 'IMAGE' },
+          { id: 'rnd2', type: 'IMAGE' },
+          { id: 'vid1', type: 'VIDEO' },
+        ];
+      },
+    };
+    const provider = fakeProvider();
+    const result = await runBatch({
+      ...baseOptions,
+      immich,
+      repo,
+      provider,
+      random: true,
+      maxAnalyzed: 2,
+      limit: 10,
+    });
+    assert.equal(result.counters.analyzed, 2);
+    assert.equal(result.counters.succeeded, 2);
+    assert.deepEqual(provider.calls.map((c) => c.assetId), ['rnd1', 'rnd2']);
+    assert.ok(randomCalls >= 1);
+  });
+});
+
+test('runBatch with random: true passes takenAfter and takenBefore to searchRandom', async () => {
+  await withRepo(async (repo) => {
+    let capturedQuery = null;
+    const immich = {
+      ...fakeImmich([]),
+      async searchRandom(query) {
+        capturedQuery = query;
+        return [{ id: 'rnd1', type: 'IMAGE' }];
+      },
+    };
+    const provider = fakeProvider();
+    const takenAfter = '2026-07-01T00:00:00.000Z';
+    const takenBefore = '2026-08-01T00:00:00.000Z';
+    await runBatch({
+      ...baseOptions,
+      immich,
+      repo,
+      provider,
+      random: true,
+      takenAfter,
+      takenBefore,
+      maxAnalyzed: 1,
+      limit: 5,
+    });
+    assert.equal(capturedQuery.takenAfter, takenAfter);
+    assert.equal(capturedQuery.takenBefore, takenBefore);
+  });
+});
+
+test('runBatch passes enriched photo context into provider userPrompt', async () => {
+  await withRepo(async (repo) => {
+    const provider = fakeProvider();
+    const immich = {
+      ...fakeImmich([{ id: 'p1' }]),
+      async getAsset(id) {
+        return {
+          id,
+          fileCreatedAt: '2026-07-04T15:30:00.000Z',
+          people: [
+            { id: 'per-1', name: 'Alice' },
+            { id: 'per-2', name: 'Bob' },
+          ],
+          exifInfo: {
+            city: 'Paris',
+            country: 'France',
+            make: 'Sony',
+            model: 'A7IV',
+          },
+          smartInfo: {
+            tags: ['beach', 'sunset'],
+            objects: ['sunglasses'],
+          },
+        };
+      },
+    };
+
+    const userTemplateWithPlaceholder = 'Approved tags:\n{approved_tags}\n{photo_context}Classify.';
+    await runBatch({
+      ...baseOptions,
+      userTemplate: userTemplateWithPlaceholder,
+      immich,
+      repo,
+      provider,
+      limit: 1,
+    });
+
+    assert.equal(provider.calls.length, 1);
+    const call = provider.calls[0];
+    assert.equal(call.assetId, 'p1');
+    assert.ok(call.userPrompt.includes('People identified: Alice, Bob'));
+    assert.ok(call.userPrompt.includes('Location: Paris, France'));
+    assert.ok(call.userPrompt.includes('Camera: Sony A7IV'));
+    assert.ok(call.userPrompt.includes('Immich smart tags: beach, sunset'));
+    assert.ok(call.userPrompt.includes('Detected objects: sunglasses'));
+  });
+});
+
+test('runBatch reconciles people tags and incorporates ML tags from asset metadata', async () => {
+  await withRepo(async (repo) => {
+    // Model outputs 0 people, but asset has 2 named people in Immich
+    const provider = fakeProvider({
+      results: {
+        p2: {
+          ...sampleOutput(),
+          has_people: false,
+          people_count: 'none',
+        },
+      },
+    });
+
+    const immich = {
+      ...fakeImmich([{ id: 'p2' }]),
+      async getAsset(id) {
+        return {
+          id,
+          people: [
+            { id: 'per-1', name: 'Alice' },
+            { id: 'per-2', name: 'Bob' },
+          ],
+          smartInfo: {
+            tags: ['beach', 'dog'],
+          },
+        };
+      },
+    };
+
+    const result = await runBatch({
+      ...baseOptions,
+      immich,
+      repo,
+      provider,
+      limit: 1,
+    });
+
+    const decisions = result.assetDecisions.p2;
+    assert.ok(Array.isArray(decisions));
+    const tagNames = decisions.map((d) => d.tag);
+    // Should have reconciled people_count to 'couple'
+    assert.ok(tagNames.includes('ai/people/couple'));
+    // Should also incorporate smartInfo beach and dog tags mapped to taxonomy
+    assert.ok(tagNames.includes('ai/scene/beach'));
+    assert.ok(tagNames.includes('ai/subject/dog'));
+  });
+});
+
+test('runBatch with reprocess: true does not skip matching successful runs', async () => {
+  await withRepo(async (repo) => {
+    const provider = fakeProvider();
+    const immich = fakeImmich([{ id: 'a1' }]);
+    await runBatch({ ...baseOptions, immich, repo, provider, limit: 1 });
+    const { counters } = await runBatch({ ...baseOptions, immich, repo, provider, limit: 1, reprocess: true });
+
+    assert.equal(counters.analyzed, 1);
+    assert.equal(counters.skippedSuccessful, 0);
+    assert.equal(provider.calls.length, 2);
+  });
+});

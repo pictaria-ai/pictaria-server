@@ -1077,7 +1077,27 @@ function renderConstellation(graph) {
     faces.set(node.id, img);
   }
 
-  const sim = { nodes, edges, faces, canvas, width, height, dpr, alpha: 1, dragging: null, hover: null, ego: state.personCard ? sim0Ego() : null };
+  const sim = {
+    nodes,
+    edges,
+    faces,
+    canvas,
+    width,
+    height,
+    dpr,
+    alpha: 1,
+    dragging: null,
+    dragStartScreen: null,
+    dragStartGraph: null,
+    hover: null,
+    ego: state.personCard ? sim0Ego() : null,
+    zoom: 1,
+    panX: 0,
+    panY: 0,
+    panning: false,
+    panStart: null,
+    panInitial: null,
+  };
   sim.draw = () => draw();
   state.constellation = sim;
 
@@ -1134,6 +1154,11 @@ function renderConstellation(graph) {
     const ctx = canvas.getContext('2d');
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
     ctx.clearRect(0, 0, width, height);
+
+    ctx.save();
+    ctx.translate(sim.panX, sim.panY);
+    ctx.scale(sim.zoom, sim.zoom);
+
     const styles = getComputedStyle(document.documentElement);
     const accent = styles.getPropertyValue('--p-accent').trim() || '#60AAB0';
     const muted = styles.getPropertyValue('--p-muted').trim() || '#888';
@@ -1203,6 +1228,7 @@ function renderConstellation(graph) {
         ctx.globalAlpha = 1;
       }
     }
+    ctx.restore();
   }
 
   function frame() {
@@ -1216,13 +1242,22 @@ function renderConstellation(graph) {
   frame();
 
   // --- interactions ---
-  const pos = (event) => {
+  const screenPos = (event) => {
     const rect = canvas.getBoundingClientRect();
     return { x: event.clientX - rect.left, y: event.clientY - rect.top };
   };
-  const hitNode = (point) => nodes.find((node) => (node.x - point.x) ** 2 + (node.y - point.y) ** 2 <= (node.radius + 2) ** 2);
+  const toGraphPoint = (sp) => ({
+    x: (sp.x - sim.panX) / sim.zoom,
+    y: (sp.y - sim.panY) / sim.zoom,
+  });
+
+  const hitNode = (point) => {
+    const extraTolerance = 4 / sim.zoom;
+    return nodes.find((node) => (node.x - point.x) ** 2 + (node.y - point.y) ** 2 <= (node.radius + extraTolerance) ** 2);
+  };
   const hitEdge = (point) => {
     let best = null;
+    const maxDist = 6 / sim.zoom;
     for (const edge of edges) {
       const { source: a, target: b } = edge;
       const lengthSq = (b.x - a.x) ** 2 + (b.y - a.y) ** 2;
@@ -1230,23 +1265,61 @@ function renderConstellation(graph) {
       let t = ((point.x - a.x) * (b.x - a.x) + (point.y - a.y) * (b.y - a.y)) / lengthSq;
       t = Math.max(0, Math.min(1, t));
       const dist = Math.hypot(point.x - (a.x + t * (b.x - a.x)), point.y - (a.y + t * (b.y - a.y)));
-      if (dist < 5 && (!best || dist < best.dist)) best = { edge, dist };
+      if (dist < maxDist && (!best || dist < best.dist)) best = { edge, dist };
     }
     return best?.edge ?? null;
   };
 
+  function applyZoom(factor, centerX, centerY) {
+    const newZoom = Math.min(Math.max(sim.zoom * factor, 0.25), 6.0);
+    if (Math.abs(newZoom - sim.zoom) < 0.001) return;
+    sim.panX = centerX - (centerX - sim.panX) * (newZoom / sim.zoom);
+    sim.panY = centerY - (centerY - sim.panY) * (newZoom / sim.zoom);
+    sim.zoom = newZoom;
+    draw();
+  }
+
+  function resetZoom() {
+    sim.zoom = 1;
+    sim.panX = 0;
+    sim.panY = 0;
+    draw();
+  }
+
+  const zoomInBtn = el('constZoomIn');
+  const zoomOutBtn = el('constZoomOut');
+  const zoomResetBtn = el('constZoomReset');
+  if (zoomInBtn) zoomInBtn.onclick = () => applyZoom(1.3, width / 2, height / 2);
+  if (zoomOutBtn) zoomOutBtn.onclick = () => applyZoom(1 / 1.3, width / 2, height / 2);
+  if (zoomResetBtn) zoomResetBtn.onclick = () => resetZoom();
+
+  canvas.onwheel = (event) => {
+    event.preventDefault();
+    const sp = screenPos(event);
+    const factor = event.deltaY < 0 ? 1.15 : 1 / 1.15;
+    applyZoom(factor, sp.x, sp.y);
+  };
+
   canvas.onmousemove = (event) => {
-    const point = pos(event);
+    const sp = screenPos(event);
+    const gp = toGraphPoint(sp);
     if (sim.dragging) {
-      sim.dragging.x = point.x;
-      sim.dragging.y = point.y;
+      sim.dragging.x = gp.x;
+      sim.dragging.y = gp.y;
       sim.alpha = Math.max(sim.alpha, 0.25);
+      draw();
       return;
     }
-    const node = hitNode(point);
-    const edge = node ? null : hitEdge(point);
+    if (sim.panning) {
+      sim.panX = sim.panInitial.x + (sp.x - sim.panStart.x);
+      sim.panY = sim.panInitial.y + (sp.y - sim.panStart.y);
+      draw();
+      return;
+    }
+    const node = hitNode(gp);
+    const edge = node ? null : hitEdge(gp);
     sim.hover = node || edge ? { node, edge } : null;
-    canvas.style.cursor = sim.hover ? 'pointer' : 'default';
+    canvas.style.cursor = sim.hover ? 'pointer' : 'grab';
     const tip = el('constellationTip');
     if (node) {
       tip.textContent = `${node.name} · ${fmt(node.count)} photos`;
@@ -1262,47 +1335,162 @@ function renderConstellation(graph) {
     }
     draw();
   };
+
   canvas.onmouseleave = () => {
     sim.hover = null;
+    sim.panning = false;
+    canvas.classList.remove('panning');
     el('constellationTip').hidden = true;
     draw();
   };
+
   canvas.onmousedown = (event) => {
-    const node = hitNode(pos(event));
+    if (event.button !== 0) return;
+    const sp = screenPos(event);
+    const gp = toGraphPoint(sp);
+    const node = hitNode(gp);
     if (node) {
       sim.dragging = node;
-      sim.dragStart = pos(event);
+      sim.dragStartScreen = sp;
+      sim.dragStartGraph = gp;
+    } else {
+      sim.panning = true;
+      sim.panStart = sp;
+      sim.panInitial = { x: sim.panX, y: sim.panY };
+      canvas.classList.add('panning');
     }
   };
+
   canvas.onmouseup = (event) => {
-    const point = pos(event);
-    const wasDrag = sim.dragging && sim.dragStart
-      && Math.hypot(point.x - sim.dragStart.x, point.y - sim.dragStart.y) > 4;
-    const dragged = sim.dragging;
-    sim.dragging = null;
-    if (wasDrag) {
-      // A real drag pins the face where it was dropped; double-click releases.
-      dragged.pinned = true;
-      dragged.vx = 0;
-      dragged.vy = 0;
-      draw();
+    const sp = screenPos(event);
+    const gp = toGraphPoint(sp);
+    if (sim.panning) {
+      sim.panning = false;
+      canvas.classList.remove('panning');
+      if (sim.panStart && Math.hypot(sp.x - sim.panStart.x, sp.y - sim.panStart.y) <= 4) {
+        const edge = hitEdge(gp);
+        if (edge) {
+          openSlice(pairSliceFor(byId.get(edge.a), byId.get(edge.b), edge.count));
+        }
+      }
       return;
     }
-    const node = dragged || hitNode(point);
-    if (node) {
-      void openPersonCard(node.id);
-      return;
+    if (sim.dragging) {
+      const wasDrag = sim.dragStartScreen
+        && Math.hypot(sp.x - sim.dragStartScreen.x, sp.y - sim.dragStartScreen.y) > 4;
+      const dragged = sim.dragging;
+      sim.dragging = null;
+      if (wasDrag) {
+        dragged.pinned = true;
+        dragged.vx = 0;
+        dragged.vy = 0;
+        draw();
+        return;
+      }
+      const node = dragged || hitNode(gp);
+      if (node) {
+        void openPersonCard(node.id);
+        return;
+      }
     }
-    const edge = hitEdge(point);
+    const edge = hitEdge(gp);
     if (edge) {
       openSlice(pairSliceFor(byId.get(edge.a), byId.get(edge.b), edge.count));
     }
   };
+
   canvas.ondblclick = (event) => {
-    const node = hitNode(pos(event));
+    const gp = toGraphPoint(screenPos(event));
+    const node = hitNode(gp);
     if (node?.pinned) {
       node.pinned = false;
       sim.alpha = Math.max(sim.alpha, 0.3);
+    } else if (!node) {
+      resetZoom();
+    }
+  };
+
+  // Touch support (pinch to zoom and pan)
+  let initialPinchDist = null;
+  let initialPinchZoom = null;
+  let pinchCenterScreen = null;
+
+  canvas.ontouchstart = (event) => {
+    const rect = canvas.getBoundingClientRect();
+    if (event.touches.length === 1) {
+      const t = event.touches[0];
+      const sp = { x: t.clientX - rect.left, y: t.clientY - rect.top };
+      const gp = toGraphPoint(sp);
+      const node = hitNode(gp);
+      if (node) {
+        sim.dragging = node;
+        sim.dragStartScreen = sp;
+        sim.dragStartGraph = gp;
+      } else {
+        sim.panning = true;
+        sim.panStart = sp;
+        sim.panInitial = { x: sim.panX, y: sim.panY };
+      }
+    } else if (event.touches.length === 2) {
+      sim.dragging = null;
+      sim.panning = false;
+      const p1 = { x: event.touches[0].clientX - rect.left, y: event.touches[0].clientY - rect.top };
+      const p2 = { x: event.touches[1].clientX - rect.left, y: event.touches[1].clientY - rect.top };
+      initialPinchDist = Math.hypot(p2.x - p1.x, p2.y - p1.y);
+      initialPinchZoom = sim.zoom;
+      pinchCenterScreen = { x: (p1.x + p2.x) / 2, y: (p1.y + p2.y) / 2 };
+    }
+  };
+
+  canvas.ontouchmove = (event) => {
+    event.preventDefault();
+    const rect = canvas.getBoundingClientRect();
+    if (event.touches.length === 1) {
+      const t = event.touches[0];
+      const sp = { x: t.clientX - rect.left, y: t.clientY - rect.top };
+      const gp = toGraphPoint(sp);
+      if (sim.dragging) {
+        sim.dragging.x = gp.x;
+        sim.dragging.y = gp.y;
+        sim.alpha = Math.max(sim.alpha, 0.25);
+        draw();
+      } else if (sim.panning && sim.panStart) {
+        sim.panX = sim.panInitial.x + (sp.x - sim.panStart.x);
+        sim.panY = sim.panInitial.y + (sp.y - sim.panStart.y);
+        draw();
+      }
+    } else if (event.touches.length === 2 && initialPinchDist) {
+      const p1 = { x: event.touches[0].clientX - rect.left, y: event.touches[0].clientY - rect.top };
+      const p2 = { x: event.touches[1].clientX - rect.left, y: event.touches[1].clientY - rect.top };
+      const dist = Math.hypot(p2.x - p1.x, p2.y - p1.y);
+      if (dist > 5) {
+        const factor = dist / initialPinchDist;
+        const targetZoom = Math.min(Math.max(initialPinchZoom * factor, 0.25), 6.0);
+        const center = { x: (p1.x + p2.x) / 2, y: (p1.y + p2.y) / 2 };
+        sim.panX = center.x - (pinchCenterScreen.x - sim.panX) * (targetZoom / sim.zoom);
+        sim.panY = center.y - (pinchCenterScreen.y - sim.panY) * (targetZoom / sim.zoom);
+        sim.zoom = targetZoom;
+        draw();
+      }
+    }
+  };
+
+  canvas.ontouchend = (event) => {
+    if (event.touches.length === 0) {
+      if (sim.dragging && sim.dragStartGraph) {
+        const wasDrag = Math.hypot(sim.dragging.x - sim.dragStartGraph.x, sim.dragging.y - sim.dragStartGraph.y) > 4;
+        if (wasDrag) {
+          sim.dragging.pinned = true;
+          sim.dragging.vx = 0;
+          sim.dragging.vy = 0;
+        } else {
+          void openPersonCard(sim.dragging.id);
+        }
+      }
+      sim.dragging = null;
+      sim.panning = false;
+      initialPinchDist = null;
+      draw();
     }
   };
 }
@@ -2843,6 +3031,7 @@ el('modalEnrichBtn').addEventListener('click', async () => {
     toast(body.duplicate
       ? `"${slice.title}" is already queued on the Enrich page`
       : `Queued "${slice.title}" — run it from the Enrich page`);
+    window.dispatchEvent(new CustomEvent('enrich-queue-changed'));
   } catch {
     toast('Could not queue enrichment');
     el('modalEnrichBtn').disabled = false;

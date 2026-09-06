@@ -118,7 +118,8 @@ CREATE TABLE IF NOT EXISTS enrich_queue (
   title TEXT NOT NULL,
   filters_json TEXT NOT NULL,
   estimated_count INTEGER,
-  requested_at TEXT NOT NULL
+  requested_at TEXT NOT NULL,
+  position INTEGER DEFAULT NULL
 );
 
 -- Job-level run history (per-asset detail lives in processing_runs).

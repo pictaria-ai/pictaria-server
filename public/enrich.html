@@ -97,6 +97,31 @@
     .stuck-head { margin: 16px 0 0; font-size: 12px; font-weight: 800; color: var(--p-muted); text-transform: uppercase; letter-spacing: 0.7px; }
     .stuck-note { color: var(--p-muted); font-size: 12px; margin: 8px 0 0; line-height: 1.5; }
     .qitem .opts .p-input { height: 26px; padding: 2px 8px; font-size: 12px; }
+    .qitem-photos-toggle {
+      background: transparent; border: 1px solid var(--p-line); color: var(--p-muted);
+      border-radius: var(--p-radius-sm); font-size: 11.5px; padding: 2px 7px; cursor: pointer;
+      display: inline-flex; align-items: center; gap: 4px;
+    }
+    .qitem-photos-toggle:hover { color: var(--p-ink); border-color: var(--p-muted); }
+    .qitem-photos-strip {
+      display: flex; align-items: center; gap: 6px; overflow-x: auto; padding: 6px 2px;
+      scrollbar-width: thin; margin-top: 4px; border-top: 1px solid var(--p-line);
+    }
+    .qitem-photo-wrapper { position: relative; display: inline-block; flex-shrink: 0; }
+    .qitem-photo-thumb {
+      width: 52px; height: 52px; border-radius: 6px; object-fit: cover;
+      background: var(--p-bg); border: 1px solid var(--p-line); display: block;
+      transition: transform 100ms ease, border-color 100ms ease;
+    }
+    .qitem-photo-thumb:hover { transform: scale(1.06); border-color: var(--p-accent); }
+    .qitem-photo-del-btn {
+      position: absolute; top: -4px; right: -4px; width: 18px; height: 18px; border-radius: 50%;
+      background: var(--p-danger, #d32f2f); color: #fff; border: 1px solid var(--p-panel);
+      display: none; align-items: center; justify-content: center; cursor: pointer;
+      font-size: 10px; line-height: 1; padding: 0; z-index: 2;
+    }
+    .qitem-photo-wrapper:hover .qitem-photo-del-btn { display: flex; }
+    .qitem-photos-more { font-size: 11px; color: var(--p-muted); padding: 0 4px; white-space: nowrap; }
     details.panel { display: block; }
     details.panel summary {
       cursor: pointer; list-style: none; display: flex; align-items: center; gap: 8px;
@@ -205,13 +230,46 @@
       <div class="qitem">
         <div class="qline top">
           <span class="t">Library sweep</span>
-          <span class="m">newest unenriched photos first</span>
+          <span id="sweepSubtitle" class="m">newest unenriched photos first</span>
+          <button id="enrichQueueSweep" class="p-btn quiet" type="button" title="Queue this sweep without starting immediately">Queue sweep</button>
           <button id="enrichStart" class="p-btn accent">Start</button>
         </div>
         <div class="qline opts">
           <label>Photos <input id="enrichMax" class="p-input" type="number" min="1" value="100" style="width: 74px"></label>
           <label title="Checked: skips photos any model has already enriched. Unchecked: re-enriches photos your current model + prompt + taxonomy hasn't processed yet — exact-duplicate re-runs are always skipped either way."><input id="enrichSkip" type="checkbox" checked> Only unenriched</label>
+          <label title="Re-enrich photos even if already processed by the current model, updating tag decisions and writing updates to Immich if enabled."><input id="enrichReprocess" type="checkbox"> Refresh all</label>
           <label title="When the run finishes, the analyzed photos join the Curate review queue. Uncheck to enrich for tags/albums only."><input id="enrichCurate" type="checkbox" checked> Send to Curate</label>
+          <label title="Randomly sample photos across the library instead of newest first."><input id="enrichRandom" type="checkbox"> Random</label>
+          <label title="Filter photos taken within a specific timeframe.">
+            Timeframe
+            <select id="enrichTimeline" class="p-input" style="padding: 2px 6px;">
+              <option value="all">All time</option>
+              <option value="1w">Past week</option>
+              <option value="1m">Past month</option>
+              <option value="3m">Past 3 months</option>
+              <option value="6m">Past 6 months</option>
+              <option value="1y">Past year</option>
+              <option value="this_year">This year</option>
+              <option value="last_year">Last year</option>
+              <option value="custom">Custom...</option>
+            </select>
+          </label>
+          <span id="enrichCustomDates" style="display: none; gap: 4px; align-items: center;">
+            <input id="enrichDateAfter" class="p-input" type="date" title="Taken after" style="padding: 2px 4px; font-size: 12px;">
+            <span class="p-muted" style="font-size: 12px;">to</span>
+            <input id="enrichDateBefore" class="p-input" type="date" title="Taken before" style="padding: 2px 4px; font-size: 12px;">
+          </span>
+        </div>
+      </div>
+      <div class="qitem">
+        <div class="qline top">
+          <span class="t">Immich album</span>
+          <select id="enrichAlbumSelect" class="p-input" style="max-width: 320px; font-size: 13px; padding: 2px 6px;">
+            <option value="">Loading albums…</option>
+          </select>
+          <span id="enrichAlbumCount" class="m"></span>
+          <button id="enrichQueueAlbum" class="p-btn quiet" type="button" disabled title="Queue this album without starting immediately">Queue album</button>
+          <button id="enrichStartAlbum" class="p-btn accent" type="button" disabled title="Start enrichment for this album immediately">Start album</button>
         </div>
       </div>
       <!-- Photos stuck at the content-failure limit under the selected
@@ -402,6 +460,7 @@
       const busy = status.running === true || status.resolvingSlice === true;
       const providerUnavailable = state.providerSaving || !providerReady();
       el('enrichStart').disabled = off || busy || providerUnavailable;
+      if (el('enrichQueueSweep')) el('enrichQueueSweep').disabled = off || providerUnavailable;
       el('retryFailedBtn').disabled = off || busy || providerUnavailable;
       for (const button of document.querySelectorAll('#queueList .p-btn.accent')) {
         button.disabled = off || busy || providerUnavailable;
@@ -531,23 +590,258 @@
       if (!state.polling && document.visibilityState === 'visible') void refresh();
     }
 
-    el('enrichStart').addEventListener('click', async () => {
+    function resolveTimeframe() {
+      const mode = el('enrichTimeline').value;
+      const now = new Date();
+      let takenAfter = null;
+      let takenBefore = null;
+      let label = null;
+
+      if (mode === '1w') {
+        takenAfter = new Date(now.getTime() - 7 * 86400000).toISOString();
+        label = 'past week';
+      } else if (mode === '1m') {
+        takenAfter = new Date(now.getTime() - 30 * 86400000).toISOString();
+        label = 'past month';
+      } else if (mode === '3m') {
+        takenAfter = new Date(now.getTime() - 90 * 86400000).toISOString();
+        label = 'past 3 months';
+      } else if (mode === '6m') {
+        takenAfter = new Date(now.getTime() - 180 * 86400000).toISOString();
+        label = 'past 6 months';
+      } else if (mode === '1y') {
+        takenAfter = new Date(now.getTime() - 365 * 86400000).toISOString();
+        label = 'past year';
+      } else if (mode === 'this_year') {
+        const year = now.getFullYear();
+        takenAfter = new Date(Date.UTC(year, 0, 1)).toISOString();
+        label = 'this year';
+      } else if (mode === 'last_year') {
+        const year = now.getFullYear() - 1;
+        takenAfter = new Date(Date.UTC(year, 0, 1)).toISOString();
+        takenBefore = new Date(Date.UTC(year + 1, 0, 1)).toISOString();
+        label = `year ${year}`;
+      } else if (mode === 'custom') {
+        const start = el('enrichDateAfter').value;
+        const end = el('enrichDateBefore').value;
+        if (start) takenAfter = new Date(`${start}T00:00:00.000Z`).toISOString();
+        if (end) takenBefore = new Date(`${end}T23:59:59.999Z`).toISOString();
+        if (start && end) label = `${start} to ${end}`;
+        else if (start) label = `since ${start}`;
+        else if (end) label = `before ${end}`;
+        else label = 'custom range';
+      }
+      return { mode, takenAfter, takenBefore, label };
+    }
+
+    function updateSweepSubtitle() {
+      const isRandom = el('enrichRandom').checked;
+      const isReprocess = el('enrichReprocess')?.checked;
+      const { label } = resolveTimeframe();
+      const kind = isReprocess ? 'all photos' : 'unenriched photos';
+      if (isRandom) {
+        el('sweepSubtitle').textContent = label
+          ? `random ${kind} from ${label}`
+          : `random ${kind} across library`;
+      } else {
+        el('sweepSubtitle').textContent = label
+          ? `newest ${kind} from ${label}`
+          : `newest ${kind} first`;
+      }
+    }
+
+    el('enrichReprocess')?.addEventListener('change', () => {
+      const reprocess = el('enrichReprocess').checked;
+      if (reprocess) {
+        el('enrichSkip').checked = false;
+        el('enrichSkip').disabled = true;
+      } else {
+        el('enrichSkip').disabled = false;
+        el('enrichSkip').checked = true;
+      }
+      updateSweepSubtitle();
+    });
+
+    el('enrichRandom').addEventListener('change', updateSweepSubtitle);
+
+    el('enrichTimeline').addEventListener('change', () => {
+      const isCustom = el('enrichTimeline').value === 'custom';
+      el('enrichCustomDates').style.display = isCustom ? 'inline-flex' : 'none';
+      updateSweepSubtitle();
+    });
+
+    el('enrichDateAfter').addEventListener('input', updateSweepSubtitle);
+    el('enrichDateBefore').addEventListener('input', updateSweepSubtitle);
+
+    function getSweepPayload(startNow) {
+      const { mode, takenAfter, takenBefore, label } = resolveTimeframe();
+      return {
+        provider: el('enrichProvider').value,
+        maxAnalyzed: Number(el('enrichMax').value) || 100,
+        skipAnySuccessful: el('enrichSkip').checked,
+        reprocess: Boolean(el('enrichReprocess')?.checked),
+        sendToCurate: el('enrichCurate').checked,
+        random: el('enrichRandom').checked,
+        timeline: mode !== 'all' ? mode : null,
+        timelineLabel: label,
+        takenAfter,
+        takenBefore,
+        startNow,
+      };
+    }
+
+    el('enrichQueueSweep')?.addEventListener('click', async () => {
+      const btn = el('enrichQueueSweep');
+      btn.disabled = true;
       try {
-        await api('/api/enrich/run', {
+        const payload = getSweepPayload(false);
+        const res = await api('/api/enrich/queue/sweep', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload),
+        });
+        if (res.fullyCovered) {
+          toast(res.message || 'All matching photos in this timeframe are already enriched.');
+        } else {
+          toast(`Queued sweep (${res.item?.estimatedCount ?? 'photos'})`);
+        }
+        await loadQueue();
+        window.dispatchEvent(new CustomEvent('enrich-queue-changed'));
+      } catch (error) {
+        toast(error.message, true);
+      } finally {
+        btn.disabled = false;
+      }
+    });
+
+    el('enrichStart').addEventListener('click', async () => {
+      const btn = el('enrichStart');
+      btn.disabled = true;
+      try {
+        const payload = getSweepPayload(true);
+        const res = await api('/api/enrich/queue/sweep', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload),
+        });
+        if (res.fullyCovered) {
+          toast(res.message || 'All matching photos in this timeframe are already enriched.');
+        } else {
+          toast('Enrichment run started');
+        }
+        await refresh();
+        window.dispatchEvent(new CustomEvent('enrich-queue-changed'));
+      } catch (error) {
+        toast(error.message, true);
+      } finally {
+        btn.disabled = false;
+      }
+    });
+
+    async function loadAlbums() {
+      const select = el('enrichAlbumSelect');
+      if (!select) return;
+      try {
+        const albums = await api('/api/enrich/albums');
+        select.replaceChildren(
+          Object.assign(document.createElement('option'), { value: '', textContent: 'Choose an album…' }),
+          ...albums.map((album) => {
+            const opt = document.createElement('option');
+            opt.value = album.id;
+            opt.dataset.count = album.assetCount ?? 0;
+            opt.dataset.name = album.albumName;
+            opt.textContent = `${album.albumName} (${(album.assetCount ?? 0).toLocaleString()} photos${album.shared ? ', shared' : ''})`;
+            return opt;
+          })
+        );
+      } catch {
+        select.replaceChildren(
+          Object.assign(document.createElement('option'), { value: '', textContent: 'Could not load albums' })
+        );
+      }
+    }
+
+    el('enrichAlbumSelect')?.addEventListener('change', () => {
+      const select = el('enrichAlbumSelect');
+      const opt = select.selectedOptions[0];
+      const hasAlbum = Boolean(select.value);
+      if (el('enrichQueueAlbum')) el('enrichQueueAlbum').disabled = !hasAlbum;
+      if (el('enrichStartAlbum')) el('enrichStartAlbum').disabled = !hasAlbum;
+      if (el('enrichAlbumCount')) {
+        el('enrichAlbumCount').textContent = hasAlbum && opt?.dataset.count
+          ? `${Number(opt.dataset.count).toLocaleString()} photos`
+          : '';
+      }
+    });
+
+    el('enrichQueueAlbum')?.addEventListener('click', async () => {
+      const select = el('enrichAlbumSelect');
+      const albumId = select.value;
+      if (!albumId) return;
+      const opt = select.selectedOptions[0];
+      const albumName = opt?.dataset.name || 'Album';
+      const count = Number(opt?.dataset.count) || null;
+      const btn = el('enrichQueueAlbum');
+      btn.disabled = true;
+      try {
+        const res = await api('/api/enrich/queue', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
-            provider: el('enrichProvider').value,
-            maxAnalyzed: Number(el('enrichMax').value) || 100,
-            limit: Math.max((Number(el('enrichMax').value) || 100) * 20, 1000),
-            skipAnySuccessful: el('enrichSkip').checked,
-            sendToCurate: el('enrichCurate').checked,
+            title: `Album: ${albumName}`,
+            filters: { albumIds: [albumId] },
+            estimatedCount: count,
           }),
         });
-        toast('Enrichment run started');
-        await refresh();
+        toast(res.duplicate ? `"${albumName}" is already queued` : `Queued "${albumName}" (${count ? count.toLocaleString() : 'photos'})`);
+        await loadQueue();
+        window.dispatchEvent(new CustomEvent('enrich-queue-changed'));
       } catch (error) {
         toast(error.message, true);
+      } finally {
+        btn.disabled = false;
+      }
+    });
+
+    el('enrichStartAlbum')?.addEventListener('click', async () => {
+      const select = el('enrichAlbumSelect');
+      const albumId = select.value;
+      if (!albumId) return;
+      const opt = select.selectedOptions[0];
+      const albumName = opt?.dataset.name || 'Album';
+      const count = Number(opt?.dataset.count) || null;
+      const btn = el('enrichStartAlbum');
+      btn.disabled = true;
+      try {
+        const queueRes = await api('/api/enrich/queue', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            title: `Album: ${albumName}`,
+            filters: { albumIds: [albumId] },
+            estimatedCount: count,
+          }),
+        });
+        const itemId = queueRes.id;
+        if (itemId) {
+          await api(`/api/enrich/queue/${itemId}/run`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              provider: el('enrichProvider')?.value || undefined,
+              sendToCurate: el('enrichCurate')?.checked !== false,
+              skipAnySuccessful: el('enrichSkip')?.checked !== false,
+              reprocess: el('enrichReprocess')?.checked === true,
+            }),
+          });
+          toast(`Started enrichment for "${albumName}"`);
+        }
+        await refresh();
+        window.dispatchEvent(new CustomEvent('enrich-queue-changed'));
+      } catch (error) {
+        toast(error.message, true);
+      } finally {
+        btn.disabled = false;
       }
     });
 
@@ -893,6 +1187,10 @@
         const meta = document.createElement('span');
         meta.className = 'm';
         meta.textContent = `${item.estimatedCount != null ? `~${Number(item.estimatedCount).toLocaleString()} photos · ` : ''}queued ${fmtWhen(item.requestedAt)}`;
+        const photosToggle = document.createElement('button');
+        photosToggle.className = 'qitem-photos-toggle';
+        photosToggle.type = 'button';
+        photosToggle.textContent = '📷 Photos';
         const run = document.createElement('button');
         run.className = 'p-btn accent';
         run.textContent = 'Run';
@@ -902,9 +1200,12 @@
         remove.dataset.qid = String(item.id);
         remove.addEventListener('click', async () => {
           const body = await api(`/api/enrich/queue/${item.id}`, { method: 'DELETE' }).catch(() => null);
-          if (body) await loadQueue();
+          if (body) {
+            await loadQueue();
+            window.dispatchEvent(new CustomEvent('enrich-queue-changed'));
+          }
         });
-        top.append(title, meta, run, remove);
+        top.append(title, meta, photosToggle, run, remove);
 
         // Line 2: the run options.
         const opts = document.createElement('div');
@@ -927,8 +1228,75 @@
         });
         opts.append(sendWrap, reopenWrap);
 
+        // Line 3: expandable photos preview strip
+        let photosLoaded = false;
+        const photoStrip = document.createElement('div');
+        photoStrip.className = 'qitem-photos-strip';
+        photoStrip.hidden = true;
+
+        photosToggle.addEventListener('click', async () => {
+          const isOpen = !photoStrip.hidden;
+          if (isOpen) {
+            photoStrip.hidden = true;
+            photosToggle.textContent = '📷 Photos';
+            return;
+          }
+          photoStrip.hidden = false;
+          photosToggle.textContent = '▲ Hide photos';
+          if (!photosLoaded) {
+            photoStrip.innerHTML = '<span class="p-muted" style="font-size: 11.5px;">Loading photo previews…</span>';
+            try {
+              const data = await api(`/api/enrich/queue/${item.id}/photos`);
+              photosLoaded = true;
+              photoStrip.replaceChildren();
+              if (!data.assets || data.assets.length === 0) {
+                photoStrip.innerHTML = '<span class="p-muted" style="font-size: 11.5px;">No photo previews available</span>';
+                return;
+              }
+              data.assets.forEach((asset) => {
+                const wrap = document.createElement('div');
+                wrap.className = 'qitem-photo-wrapper';
+
+                const img = document.createElement('img');
+                img.className = 'qitem-photo-thumb';
+                img.src = `/api/review/thumbnail/${encodeURIComponent(asset.id)}`;
+                img.loading = 'lazy';
+                img.title = asset.originalPath || asset.id;
+
+                const delBtn = document.createElement('button');
+                delBtn.className = 'qitem-photo-del-btn';
+                delBtn.type = 'button';
+                delBtn.textContent = '✕';
+                delBtn.title = 'Remove photo from queue';
+                delBtn.addEventListener('click', async (e) => {
+                  e.stopPropagation();
+                  try {
+                    await api(`/api/enrich/queue/${item.id}/photos/${encodeURIComponent(asset.id)}`, { method: 'DELETE' });
+                    wrap.remove();
+                    await loadQueue();
+                    window.dispatchEvent(new CustomEvent('enrich-queue-changed'));
+                  } catch (err) {
+                    toast(err.message, true);
+                  }
+                });
+
+                wrap.append(img, delBtn);
+                photoStrip.appendChild(wrap);
+              });
+              if (data.total > data.assets.length) {
+                const more = document.createElement('span');
+                more.className = 'qitem-photos-more';
+                more.textContent = `+${data.total - data.assets.length} more`;
+                photoStrip.appendChild(more);
+              }
+            } catch {
+              photoStrip.innerHTML = '<span class="p-muted" style="font-size: 11.5px;">Could not load previews</span>';
+            }
+          }
+        });
+
         run.addEventListener('click', () => void runQueued(item.id, run, send.checked, reopen.checked));
-        card.append(top, opts);
+        card.append(top, opts, photoStrip);
         box.append(card);
       }
       // Fresh buttons need the current disabled rules (a run may be active).
@@ -980,6 +1348,8 @@
         renderQueue(items);
       } catch { /* gate handles auth */ }
     }
+
+    window.addEventListener('enrich-queue-changed', () => { loadQueue(); });
 
     el('runAllBtn').addEventListener('click', async () => {
       // The plan captures each item's checkboxes as currently set.
@@ -1376,6 +1746,8 @@
     loadQueue();
     loadRuns();
     loadFailureLimited();
+    loadAlbums();
   </script>
+  <script src="/queue-widget.js" defer></script>
 </body>
 </html>

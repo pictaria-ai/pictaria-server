@@ -20,7 +20,12 @@ export function thresholdsFromTaxonomy(taxonomy) {
   };
 }
 
-export function mapOutputToTags(output, taxonomy, thresholds = thresholdsFromTaxonomy(taxonomy)) {
+export function mapOutputToTags(
+  output,
+  taxonomy,
+  thresholds = thresholdsFromTaxonomy(taxonomy),
+  { asset = null, primaryPersonId = null, primaryPersonName = null, closeConnections = [] } = {},
+) {
   const decisions = new Map();
 
   const add = (tag, confidence, source, reason) => {
@@ -73,14 +78,27 @@ export function mapOutputToTags(output, taxonomy, thresholds = thresholdsFromTax
       output.has_private_info,
   );
 
-  if (frameScore >= thresholds.frameWorthy && !hasAnyExclusion && !nearExclusion && !disqualifyingQuality) {
-    add('ai/quality/frame-worthy', frameScore, 'ai', 'High display suitability score with no hard exclusions.');
+  const isPrimaryOrCompanion = checkPrimaryOrCompanion(asset, primaryPersonId, primaryPersonName, closeConnections);
+  const effectiveFrameThreshold = isPrimaryOrCompanion
+    ? Math.min(thresholds.frameWorthy, 0.70)
+    : thresholds.frameWorthy;
+
+  if (frameScore >= effectiveFrameThreshold && !hasAnyExclusion && !nearExclusion && !disqualifyingQuality) {
+    add(
+      'ai/quality/frame-worthy',
+      frameScore,
+      'ai',
+      isPrimaryOrCompanion
+        ? 'High display suitability score featuring primary user or close companion.'
+        : 'High display suitability score with no hard exclusions.',
+    );
   } else if (frameScore >= 0.6 && !hasAnyExclusion) {
     add('ai/quality/good', frameScore, 'ai', 'Usable visual quality, below frame-worthy threshold.');
   }
 
   addCandidateTags(output, thresholds, add);
-  addPeopleTags(output, add);
+  addPeopleTags(output, add, asset);
+  addSmartInfoTags(asset, taxonomy, thresholds, add);
   normalizeQualityDecisions(decisions);
 
   const privacyConfidence = maxConfidenceFor(
@@ -148,13 +166,34 @@ function addCandidateTags(output, thresholds, add) {
   }
 }
 
-function addPeopleTags(output, add) {
-  const peopleCount = output.people_count;
+function addPeopleTags(output, add, asset = null) {
+  let peopleCount = output.people_count;
+  const immichPeopleCount = Array.isArray(asset?.people) ? asset.people.length : 0;
+  if ((!peopleCount || peopleCount === 'unknown' || peopleCount === 'none') && immichPeopleCount > 0) {
+    if (immichPeopleCount === 1) peopleCount = 'one';
+    else if (immichPeopleCount === 2) peopleCount = 'couple';
+    else if (immichPeopleCount >= 3) peopleCount = 'group';
+  }
   if (['none', 'one', 'couple', 'group'].includes(peopleCount)) {
-    add(`ai/people/${peopleCount}`, 1.0, 'ai', `Model counted people as ${peopleCount}.`);
+    add(`ai/people/${peopleCount}`, 1.0, 'ai', `People counted as ${peopleCount}.`);
   }
   if (output.child_present) {
     add('ai/people/child-present', 1.0, 'ai', 'Model marked child as present.');
+  }
+}
+
+function addSmartInfoTags(asset, taxonomy, thresholds, add) {
+  const smartTags = asset?.smartInfo?.tags;
+  if (!Array.isArray(smartTags)) return;
+  for (const rawTag of smartTags) {
+    if (typeof rawTag !== 'string') continue;
+    const clean = rawTag.trim().toLowerCase().replace(/\s+/g, '-');
+    for (const prefix of ['ai/scene/', 'ai/subject/', 'ai/activity/']) {
+      const candidate = `${prefix}${clean}`;
+      if (taxonomy.approvedTags.has(candidate)) {
+        add(candidate, 0.85, 'immich_ml', 'Immich machine learning signal.');
+      }
+    }
   }
 }
 
@@ -166,4 +205,34 @@ function maxConfidenceFor(entries, tags) {
     }
   }
   return confidence;
+}
+
+function checkPrimaryOrCompanion(asset, primaryPersonId, primaryPersonName, closeConnections = []) {
+  if (!asset || !Array.isArray(asset.people) || asset.people.length === 0) return false;
+  const primaryId = primaryPersonId ? String(primaryPersonId).trim() : null;
+  const primaryName = primaryPersonName ? String(primaryPersonName).trim().toLowerCase() : null;
+  if (!primaryId && !primaryName && (!closeConnections || closeConnections.length === 0)) return false;
+
+  const closeSet = new Set(
+    (closeConnections || [])
+      .filter((c) => (c.count ?? 0) >= 2)
+      .map((c) => c.personId)
+      .filter(Boolean),
+  );
+  const closeNameSet = new Set(
+    (closeConnections || [])
+      .filter((c) => (c.count ?? 0) >= 2)
+      .map((c) => (c.name ? String(c.name).trim().toLowerCase() : ''))
+      .filter(Boolean),
+  );
+
+  for (const person of asset.people) {
+    if (!person) continue;
+    if (primaryId && person.id === primaryId) return true;
+    const name = typeof person.name === 'string' ? person.name.trim().toLowerCase() : '';
+    if (primaryName && name && name === primaryName) return true;
+    if (person.id && closeSet.has(person.id)) return true;
+    if (name && closeNameSet.has(name)) return true;
+  }
+  return false;
 }

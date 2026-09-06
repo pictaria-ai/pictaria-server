@@ -300,3 +300,244 @@ test('listTags keeps legacy tolerant reads but offers fail-closed Smart Album re
     (error) => error?.code === 'invalid_upstream_pagination' && /invalid response/.test(error.message),
   );
 });
+
+test('listRandomImageAssets filters image types and deduplicates', async () => {
+  let callCount = 0;
+  const client = new ImmichClient({
+    baseUrl: 'http://immich.test',
+    apiKey: 'test-key',
+    fetchImpl: async () => {
+      callCount += 1;
+      return new Response(
+        JSON.stringify([
+          { id: 'img1', type: 'IMAGE' },
+          { id: 'vid1', type: 'VIDEO' },
+          { id: 'img2', type: 'IMAGE' },
+        ]),
+        { status: 200, headers: { 'content-type': 'application/json' } },
+      );
+    },
+  });
+
+  const result = await client.listRandomImageAssets({ limit: 2 });
+  assert.equal(result.length, 2);
+  assert.deepEqual(result.map((a) => a.id), ['img1', 'img2']);
+  assert.equal(callCount, 1);
+});
+
+test('listRandomImageAssets forwards takenAfter and takenBefore', async () => {
+  let capturedBody = null;
+  const client = new ImmichClient({
+    baseUrl: 'http://immich.test',
+    apiKey: 'test-key',
+    fetchImpl: async (url, options) => {
+      capturedBody = JSON.parse(options.body);
+      return new Response(
+        JSON.stringify([{ id: 'img1', type: 'IMAGE' }]),
+        { status: 200, headers: { 'content-type': 'application/json' } },
+      );
+    },
+  });
+
+  const takenAfter = '2026-01-01T00:00:00.000Z';
+  const takenBefore = '2026-06-01T00:00:00.000Z';
+  const result = await client.listRandomImageAssets({ limit: 1, takenAfter, takenBefore });
+  assert.equal(result.length, 1);
+  assert.equal(capturedBody.takenAfter, takenAfter);
+  assert.equal(capturedBody.takenBefore, takenBefore);
+});
+
+test('getAsset populates people via partnerApiKey when primary returns empty people', async () => {
+  const requests = [];
+  const client = new ImmichClient({
+    baseUrl: 'http://immich.test',
+    apiKey: 'primary-key',
+    partnerApiKey: 'partner-key',
+    fetchImpl: async (url, options) => {
+      requests.push({ url, key: options.headers['x-api-key'] });
+      if (options.headers['x-api-key'] === 'primary-key') {
+        return new Response(JSON.stringify({ id: 'asset-1', ownerId: 'partner-id', people: [] }), {
+          status: 200,
+          headers: { 'content-type': 'application/json' },
+        });
+      }
+      return new Response(JSON.stringify({
+        id: 'asset-1',
+        ownerId: 'partner-id',
+        people: [{ id: 'p1', name: 'Partner Person' }],
+        tags: [{ id: 't1', name: 'vacation' }],
+      }), {
+        status: 200,
+        headers: { 'content-type': 'application/json' },
+      });
+    },
+  });
+
+  const asset = await client.getAsset('asset-1');
+  assert.equal(asset.id, 'asset-1');
+  assert.deepEqual(asset.people, [{ id: 'p1', name: 'Partner Person' }]);
+  assert.deepEqual(asset.tags, [{ id: 't1', name: 'vacation' }]);
+  assert.equal(requests.length, 2);
+  assert.equal(requests[0].key, 'primary-key');
+  assert.equal(requests[1].key, 'partner-key');
+});
+
+test('getAsset falls back to searchMetadata when people is empty and partner query is unavailable', async () => {
+  const requests = [];
+  const client = new ImmichClient({
+    baseUrl: 'http://immich.test',
+    apiKey: 'primary-key',
+    fetchImpl: async (url, options) => {
+      requests.push({ url, method: options.method });
+      if (url.includes('/api/assets/asset-2')) {
+        return new Response(JSON.stringify({ id: 'asset-2', people: [] }), {
+          status: 200,
+          headers: { 'content-type': 'application/json' },
+        });
+      }
+      if (url.includes('/api/search/metadata')) {
+        return new Response(JSON.stringify({
+          assets: { items: [{ id: 'asset-2', people: [{ id: 'p2', name: 'Discovered Person' }] }] },
+        }), {
+          status: 200,
+          headers: { 'content-type': 'application/json' },
+        });
+      }
+      return new Response('Not found', { status: 404 });
+    },
+  });
+
+  const asset = await client.getAsset('asset-2', { resolvePeople: true });
+  assert.equal(asset.id, 'asset-2');
+  assert.deepEqual(asset.people, [{ id: 'p2', name: 'Discovered Person' }]);
+  assert.equal(requests.length, 2);
+  assert.equal(requests[0].method, 'GET');
+  assert.equal(requests[1].method, 'POST');
+});
+
+test('getAssetThumbnail and getAssetOriginal retry with partnerApiKey on auth rejection', async () => {
+  const thumbnailCalls = [];
+  const originalCalls = [];
+  const client = new ImmichClient({
+    baseUrl: 'http://immich.test',
+    apiKey: 'primary-key',
+    partnerApiKey: 'partner-key',
+    fetchImpl: async (url, options) => {
+      const key = options.headers['x-api-key'];
+      if (url.includes('/thumbnail')) {
+        thumbnailCalls.push(key);
+        if (key === 'primary-key') {
+          return new Response('Forbidden', { status: 403 });
+        }
+        return new Response(Buffer.from('thumb-data'), {
+          status: 200,
+          headers: { 'content-type': 'image/jpeg' },
+        });
+      }
+      if (url.includes('/original')) {
+        originalCalls.push(key);
+        if (key === 'primary-key') {
+          return new Response('Unauthorized', { status: 401 });
+        }
+        return new Response(Buffer.from('orig-data'), {
+          status: 200,
+          headers: { 'content-type': 'image/jpeg' },
+        });
+      }
+      return new Response('Not found', { status: 404 });
+    },
+  });
+
+  const thumb = await client.getAssetThumbnail('asset-x');
+  assert.equal(thumb.data.toString(), 'thumb-data');
+  assert.deepEqual(thumbnailCalls, ['primary-key', 'partner-key']);
+
+  const orig = await client.getAssetOriginal('asset-x');
+  assert.equal(orig.data.toString(), 'orig-data');
+  assert.deepEqual(originalCalls, ['primary-key', 'partner-key']);
+});
+
+test('updateAsset and upsertAssetMetadata retry with partnerApiKey on access rejection', async () => {
+  const updateCalls = [];
+  const metadataCalls = [];
+  const client = new ImmichClient({
+    baseUrl: 'http://immich.test',
+    apiKey: 'primary-key',
+    partnerApiKey: 'partner-key',
+    fetchImpl: async (url, options) => {
+      const key = options.headers['x-api-key'];
+      if (url.endsWith('/metadata')) {
+        metadataCalls.push(key);
+        if (key === 'primary-key') {
+          return new Response(JSON.stringify({ message: 'Not found or no asset.update access' }), {
+            status: 400,
+            headers: { 'content-type': 'application/json' },
+          });
+        }
+        return new Response(JSON.stringify({ success: true }), {
+          status: 200,
+          headers: { 'content-type': 'application/json' },
+        });
+      }
+      if (url.includes('/assets/')) {
+        updateCalls.push(key);
+        if (key === 'primary-key') {
+          return new Response(JSON.stringify({ message: 'Not found or no asset.update access' }), {
+            status: 400,
+            headers: { 'content-type': 'application/json' },
+          });
+        }
+        return new Response(JSON.stringify({ id: 'asset-y', description: 'updated' }), {
+          status: 200,
+          headers: { 'content-type': 'application/json' },
+        });
+      }
+      return new Response('Not found', { status: 404 });
+    },
+  });
+
+  const updated = await client.updateAsset('asset-y', { description: 'updated' });
+  assert.equal(updated.description, 'updated');
+  assert.deepEqual(updateCalls, ['primary-key', 'partner-key']);
+
+  const meta = await client.upsertAssetMetadata('asset-y', [{ key: 'k', value: 'v' }]);
+  assert.equal(meta.success, true);
+  assert.deepEqual(metadataCalls, ['primary-key', 'partner-key']);
+});
+
+test('partitionAssetIdsByOwner splits assets by primary and partner owner', async () => {
+  const client = new ImmichClient({
+    baseUrl: 'http://immich.test',
+    apiKey: 'primary-key',
+    partnerApiKey: 'partner-key',
+    fetchImpl: async (url, options) => {
+      const key = options.headers['x-api-key'];
+      if (url.endsWith('/users/me')) {
+        return new Response(JSON.stringify({ id: key === 'partner-key' ? 'user-partner' : 'user-primary' }), {
+          status: 200,
+          headers: { 'content-type': 'application/json' },
+        });
+      }
+      if (url.includes('/assets/asset-1')) {
+        return new Response(JSON.stringify({ id: 'asset-1', ownerId: 'user-primary' }), {
+          status: 200,
+          headers: { 'content-type': 'application/json' },
+        });
+      }
+      if (url.includes('/assets/asset-2')) {
+        return new Response(JSON.stringify({ id: 'asset-2', ownerId: 'user-partner' }), {
+          status: 200,
+          headers: { 'content-type': 'application/json' },
+        });
+      }
+      return new Response('Not found', { status: 404 });
+    },
+  });
+
+  const partitions = await client.partitionAssetIdsByOwner(['asset-1', 'asset-2']);
+  assert.equal(partitions.length, 2);
+  assert.equal(partitions[0].apiKey, 'primary-key');
+  assert.deepEqual(partitions[0].assetIds, ['asset-1']);
+  assert.equal(partitions[1].apiKey, 'partner-key');
+  assert.deepEqual(partitions[1].assetIds, ['asset-2']);
+});

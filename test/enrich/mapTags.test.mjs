@@ -80,3 +80,21 @@ test('decisions keep the highest confidence per tag and sort by tag', () => {
   const tags = decisions.map((decision) => decision.tag);
   assert.deepEqual(tags, [...tags].sort());
 });
+
+test('primary person presence lowers frame-worthy threshold to 0.70', () => {
+  const output = sampleOutput();
+  output.quality.frame_worthy_score = 0.72; // normal threshold is 0.78
+  const normalTags = tagsFor(output);
+  assert.ok(!normalTags.has('ai/quality/frame-worthy'));
+
+  const assetWithPrimary = {
+    id: 'a1',
+    people: [{ id: 'p-1', name: 'Me' }],
+  };
+  const boostDecisions = mapOutputToTags(output, taxonomy, undefined, {
+    asset: assetWithPrimary,
+    primaryPersonId: 'p-1',
+  });
+  const boostTags = new Set(boostDecisions.map((d) => d.tag));
+  assert.ok(boostTags.has('ai/quality/frame-worthy'));
+});
