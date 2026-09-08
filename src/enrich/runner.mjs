@@ -1,8 +1,9 @@
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 
-import { OutputValidationError, enrichmentJsonSchema, validateAiOutput } from './schema.mjs';
-import { approvedModelTags } from './taxonomy.mjs';
+import { OutputValidationError, validateAiOutput } from './schema.mjs';
+import { captureClient, captureRunConfiguration } from './runConfiguration.mjs';
+export { buildUserPrompt } from './runConfiguration.mjs';
 import { mapOutputToTags } from './mapTags.mjs';
 import { ImmichApiError, tagId, tagValue } from '../immich.mjs';
 import { configuredSecrets, sanitizeDiagnostic } from '../diagnostics.mjs';
@@ -17,10 +18,6 @@ export function loadPrompts(promptsDir, promptVersion = 'v1') {
     systemPrompt: readFileSync(join(promptsDir, `${promptVersion}_system.txt`), 'utf8'),
     userTemplate: readFileSync(join(promptsDir, `${promptVersion}_user_template.txt`), 'utf8'),
   };
-}
-
-export function buildUserPrompt(userTemplate, taxonomy) {
-  return userTemplate.replaceAll('{approved_tags}', approvedModelTags(taxonomy).join('\n'));
 }
 
 // maxBytes tightens the download cap for original-class fetches only (the
@@ -199,7 +196,10 @@ export async function runBatch({
   now = Date.now,
   retrySleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms)),
   signal = null,
+  configuration = null,
 }) {
+  immich = captureClient(immich);
+  if (provider) provider = captureClient(provider);
   const diagnosticSecrets = configuredSecrets(immich, provider);
   if (maxAnalyzed !== null && maxAnalyzed < 1) {
     throw new Error('maxAnalyzed must be greater than 0');
@@ -219,6 +219,23 @@ export async function runBatch({
     if (assetIds.length > MAX_TARGETED_ASSETS) {
       throw new Error(`assetIds must contain ${MAX_TARGETED_ASSETS} or fewer unique entries`);
     }
+  }
+
+  // The CLI/direct path gets the same immutable contract as server runs.
+  // Queue runs arrive with the configuration used before slice resolution.
+  if (!skipAi) {
+    configuration ??= captureRunConfiguration({
+      provider, taxonomy, systemPrompt, userTemplate, promptVersion, imageSource,
+      processing: {
+        limit, offset, maxAnalyzed, reprocess,
+        skipAnySuccessful, maxFailuresPerAsset, retryFailureLimited,
+        applyTags, dryRun, listForReview, captionWriteback,
+      },
+    });
+    taxonomy = configuration.taxonomy;
+    systemPrompt = configuration.systemPrompt;
+    imageSource = configuration.snapshot.inference.image.source;
+    repo.saveRunConfiguration(configuration);
   }
 
   // Only Immich traversal time belongs to this deadline. Provider inference
@@ -287,14 +304,7 @@ export async function runBatch({
     return { counters: emptyCounters(), assetDecisions: {}, listedForReview: 0 };
   }
 
-  const userPrompt = buildUserPrompt(userTemplate, taxonomy);
-  const jsonSchema = enrichmentJsonSchema(taxonomy);
-  const runKey = {
-    provider: provider.providerName,
-    model: provider.modelName,
-    promptVersion,
-    taxonomyVersion: taxonomy.version,
-  };
+  const { userPrompt, jsonSchema, runKey } = configuration;
 
   const assetDecisions = {};
   const counters = emptyCounters();

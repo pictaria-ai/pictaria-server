@@ -8,6 +8,7 @@ import { preparePrivateDatabasePath, restrictPrivateDatabaseModes } from '../pri
 import { sanitizeDiagnostic } from '../diagnostics.mjs';
 import { validateAssetBatch } from './assetBatch.mjs';
 import { ACTION_RULES } from './reviewActions.mjs';
+import { canonicalJson, MAX_RUN_CONFIGURATION_BYTES } from './runConfiguration.mjs';
 
 const MAX_NORMALIZED_OUTPUT_BYTES = 64 * 1024;
 const MAX_JOB_RUNS = 100;
@@ -47,6 +48,11 @@ const SCHEMA_PATH = join(dirname(fileURLToPath(import.meta.url)), 'schema.sql');
 // migration-time base-schema exec fail before the rebuild can happen. Indexes
 // are backward-compatible metadata, not a persisted-data contract change.
 const ACTIVITY_HISTORY_INDEXES = [
+  {
+    table: 'processing_runs',
+    columns: ['inference_id', 'status', 'asset_id'],
+    sql: 'CREATE INDEX IF NOT EXISTS idx_processing_runs_inference ON processing_runs(inference_id, status, asset_id)',
+  },
   {
     table: 'processing_runs',
     columns: ['started_at', 'id'],
@@ -444,6 +450,22 @@ const ENRICH_MIGRATIONS = [
       addColumnIfMissing(db, 'job_runs', 'inference_host_label', 'TEXT');
     },
   },
+  {
+    version: 8,
+    up(db) {
+      // Legacy rows deliberately retain NULL identity: labels cannot prove
+      // which prompt/taxonomy content produced a historical result.
+      db.exec(`CREATE TABLE IF NOT EXISTS enrich_configurations (
+        id TEXT PRIMARY KEY, inference_id TEXT NOT NULL,
+        snapshot_json TEXT NOT NULL, created_at TEXT NOT NULL
+      )`);
+      for (const table of ['processing_runs', 'job_runs']) {
+        addColumnIfMissing(db, table, 'configuration_id', 'TEXT REFERENCES enrich_configurations(id)');
+        addColumnIfMissing(db, table, 'inference_id', 'TEXT');
+      }
+      addColumnIfMissing(db, 'job_runs', 'retry_source_run_id', 'INTEGER');
+    },
+  },
 ];
 
 // The review projection of a normalized output: exactly the fields the
@@ -697,12 +719,38 @@ export class Repository {
     return Number(row?.count ?? 0);
   }
 
+  saveRunConfiguration(configuration) {
+    const json = canonicalJson(configuration.snapshot);
+    if (Buffer.byteLength(json) > MAX_RUN_CONFIGURATION_BYTES) {
+      throw new Error('Enrich configuration exceeds the storage limit.');
+    }
+    this.db.prepare(`
+      INSERT OR IGNORE INTO enrich_configurations (id, inference_id, snapshot_json, created_at)
+      VALUES (?, ?, ?, ?)
+    `).run(configuration.id, configuration.inferenceId, json, utcNow());
+    return configuration.id;
+  }
+
+  getRunConfiguration(id) {
+    if (typeof id !== 'string' || !/^[a-f0-9]{64}$/.test(id)) return null;
+    const row = this.db.prepare(`
+      SELECT id, inference_id, snapshot_json, created_at FROM enrich_configurations
+      WHERE id = ? AND length(CAST(snapshot_json AS BLOB)) <= ?
+    `).get(id, MAX_RUN_CONFIGURATION_BYTES);
+    return row ? {
+      id: row.id, inferenceId: row.inference_id,
+      createdAt: row.created_at, snapshot: JSON.parse(row.snapshot_json),
+    } : null;
+  }
+
   recordProcessingRun({
     assetId,
     provider,
     model,
     promptVersion,
     taxonomyVersion,
+    configurationId = null,
+    inferenceId = null,
     status,
     normalizedOutput = null,
     error = null,
@@ -716,9 +764,9 @@ export class Repository {
         INSERT INTO processing_runs (
           asset_id, provider, model, model_version, prompt_version,
           taxonomy_version, status, started_at, finished_at, error,
-          raw_output_json, normalized_output_json
+          raw_output_json, normalized_output_json, configuration_id, inference_id
         )
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         `,
       )
       .run(
@@ -734,6 +782,8 @@ export class Repository {
         error === null ? null : sanitizeDiagnostic(error),
         null,
         normalizedOutput === null ? null : boundedNormalizedOutput(normalizedOutput),
+        configurationId,
+        inferenceId,
       );
     if (status === 'succeeded' && normalizedOutput !== null) {
       // The latest successful result is the product state. Preserve older
@@ -766,18 +816,12 @@ export class Repository {
     return Number(result.lastInsertRowid);
   }
 
-  hasSuccessfulRun({ assetId, provider, model, promptVersion, taxonomyVersion }) {
-    const row = this.db
-      .prepare(
-        `
-        SELECT 1 FROM processing_runs
-        WHERE asset_id = ? AND provider = ? AND model = ?
-          AND prompt_version = ? AND taxonomy_version = ? AND status = 'succeeded'
-        LIMIT 1
-        `,
-      )
-      .get(assetId, provider, model, promptVersion, taxonomyVersion);
-    return row !== undefined;
+  hasSuccessfulRun({ assetId, ...runKey }) {
+    const match = matchingRun(runKey);
+    return this.db.prepare(`
+      SELECT 1 FROM processing_runs
+      WHERE asset_id = ? AND ${match.sql} AND status = 'succeeded' LIMIT 1
+    `).get(assetId, ...match.params) !== undefined;
   }
 
   hasAnySuccessfulRun(assetId) {
@@ -787,17 +831,12 @@ export class Repository {
     return row !== undefined;
   }
 
-  failureCount({ assetId, provider, model, promptVersion, taxonomyVersion }) {
-    const row = this.db
-      .prepare(
-        `
-        SELECT COUNT(*) AS count FROM processing_runs
-        WHERE asset_id = ? AND provider = ? AND model = ?
-          AND prompt_version = ? AND taxonomy_version = ? AND status = 'failed'
-        `,
-      )
-      .get(assetId, provider, model, promptVersion, taxonomyVersion);
-    return Number(row?.count ?? 0);
+  failureCount({ assetId, ...runKey }) {
+    const match = matchingRun(runKey);
+    return Number(this.db.prepare(`
+      SELECT COUNT(*) AS count FROM processing_runs
+      WHERE asset_id = ? AND ${match.sql} AND status = 'failed'
+    `).get(assetId, ...match.params)?.count ?? 0);
   }
 
   // Which of these assets would a run actually analyze? The batched mirror
@@ -812,7 +851,7 @@ export class Repository {
   // both successful and at the failure limit (or discarded) counts as
   // successful, matching the runner's check order.
   assetIdsNeedingWork(assetIds, { runKey, skipAnySuccessful = true, maxFailuresPerAsset = 0 }) {
-    const { provider, model, promptVersion, taxonomyVersion } = runKey;
+    const match = matchingRun(runKey);
     const needy = new Set(assetIds.filter((id) => typeof id === 'string' && id));
     const successful = new Set();
     const failureLimited = new Set();
@@ -839,10 +878,9 @@ export class Repository {
         for (const row of this.db
           .prepare(
             `SELECT DISTINCT asset_id FROM processing_runs
-             WHERE status = 'succeeded' AND provider = ? AND model = ?
-               AND prompt_version = ? AND taxonomy_version = ? AND asset_id IN (${marks})`,
+             WHERE status = 'succeeded' AND ${match.sql} AND asset_id IN (${marks})`,
           )
-          .all(provider, model, promptVersion, taxonomyVersion, ...chunk)) {
+          .all(...match.params, ...chunk)) {
           needy.delete(row.asset_id);
           successful.add(row.asset_id);
         }
@@ -851,11 +889,10 @@ export class Repository {
         for (const row of this.db
           .prepare(
             `SELECT asset_id FROM processing_runs
-             WHERE status = 'failed' AND provider = ? AND model = ?
-               AND prompt_version = ? AND taxonomy_version = ? AND asset_id IN (${marks})
+             WHERE status = 'failed' AND ${match.sql} AND asset_id IN (${marks})
              GROUP BY asset_id HAVING COUNT(*) >= ?`,
           )
-          .all(provider, model, promptVersion, taxonomyVersion, ...chunk, maxFailuresPerAsset)) {
+          .all(...match.params, ...chunk, maxFailuresPerAsset)) {
           needy.delete(row.asset_id);
           if (!successful.has(row.asset_id) && !discarded.has(row.asset_id)) {
             failureLimited.add(row.asset_id);
@@ -1038,7 +1075,7 @@ export class Repository {
   // content-failure message under this run key (the message that put the
   // photo in the stuck set). Returned in the input order.
   assetFailureDetails(assetIds, { runKey }) {
-    const { provider, model, promptVersion, taxonomyVersion } = runKey;
+    const match = matchingRun(runKey);
     const byId = new Map();
     for (const chunk of idChunks(assetIds)) {
       const marks = chunk.map(() => '?').join(', ');
@@ -1051,13 +1088,12 @@ export class Repository {
           LEFT JOIN processing_runs f ON f.id = (
             SELECT MAX(id) FROM processing_runs
             WHERE asset_id = a.asset_id AND status = 'failed'
-              AND provider = ? AND model = ?
-              AND prompt_version = ? AND taxonomy_version = ?
+              AND ${match.sql}
           )
           WHERE a.asset_id IN (${marks})
           `,
         )
-        .all(provider, model, promptVersion, taxonomyVersion, ...chunk)) {
+        .all(...match.params, ...chunk)) {
         byId.set(row.asset_id, {
           assetId: row.asset_id,
           originalPath: row.original_path ?? null,
@@ -1084,23 +1120,20 @@ export class Repository {
     if (!(maxFailuresPerAsset > 0)) {
       return { count: 0, assetIds: [], truncated: false };
     }
-    const { provider, model, promptVersion, taxonomyVersion } = runKey;
+    const match = matchingRun(runKey, 'f.');
+    const successMatch = matchingRun(runKey, 's.');
     const successClause = skipAnySuccessful
       ? "SELECT 1 FROM processing_runs s WHERE s.asset_id = f.asset_id AND s.status = 'succeeded'"
       : `SELECT 1 FROM processing_runs s WHERE s.asset_id = f.asset_id AND s.status = 'succeeded'
-         AND s.provider = ? AND s.model = ? AND s.prompt_version = ? AND s.taxonomy_version = ?`;
-    const params = [provider, model, promptVersion, taxonomyVersion];
-    if (!skipAnySuccessful) {
-      params.push(provider, model, promptVersion, taxonomyVersion);
-    }
+         AND ${successMatch.sql}`;
+    const params = [...match.params, ...(skipAnySuccessful ? [] : successMatch.params)];
     const rows = this.db
       .prepare(
         `
         WITH candidates AS (
           SELECT f.asset_id, MAX(f.id) AS last_failure_id
           FROM processing_runs f
-          WHERE f.status = 'failed' AND f.provider = ? AND f.model = ?
-            AND f.prompt_version = ? AND f.taxonomy_version = ?
+          WHERE f.status = 'failed' AND ${match.sql}
             AND NOT EXISTS (${successClause})
             AND NOT EXISTS (
               SELECT 1 FROM assets a
@@ -1184,7 +1217,7 @@ export class Repository {
   latestEnrichment(assetId) {
     const row = this.db
       .prepare(
-        `SELECT pr.provider, pr.model,
+        `SELECT pr.provider, pr.model, pr.configuration_id, pr.inference_id,
                 json_extract(pr.normalized_output_json, '$.caption') AS caption
          FROM latest_success ls
          JOIN processing_runs pr ON pr.id = ls.run_id
@@ -1196,6 +1229,8 @@ export class Repository {
       caption: typeof row.caption === 'string' && row.caption ? row.caption : null,
       provider: row.provider,
       model: row.model,
+      configurationId: row.configuration_id ?? null,
+      inferenceId: row.inference_id ?? null,
     };
   }
 
@@ -1894,16 +1929,16 @@ export class Repository {
     return this.db.prepare('DELETE FROM enrich_queue WHERE id = ?').run(id).changes > 0;
   }
 
-  recordJobRun({ title, provider, model, promptVersion, taxonomyVersion, inferenceHostLabel, targeted, status, error, counters, log, startedAt, finishedAt }) {
+  recordJobRun({ title, provider, model, promptVersion, taxonomyVersion, inferenceHostLabel, configurationId = null, inferenceId = null, retrySourceRunId = null, targeted, status, error, counters, log, startedAt, finishedAt }) {
     const safeError = error === null || error === undefined ? null : sanitizeDiagnostic(error);
     const safeLog = boundedJobLog(log);
     const safeHostLabel = jobRunHostLabel(inferenceHostLabel);
     this.db.prepare(`
-      INSERT INTO job_runs (title, provider, model, prompt_version, taxonomy_version, inference_host_label, targeted, status, error, counters_json, log_json, started_at, finished_at)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      INSERT INTO job_runs (title, provider, model, prompt_version, taxonomy_version, inference_host_label, targeted, status, error, counters_json, log_json, started_at, finished_at, configuration_id, inference_id, retry_source_run_id)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `).run(title, provider, model ?? null, promptVersion ?? null, taxonomyVersion ?? null, safeHostLabel, targeted ?? null,
       status, safeError, counters ? JSON.stringify(counters) : null,
-      safeLog?.length > 0 ? JSON.stringify(safeLog) : null, startedAt, finishedAt);
+      safeLog?.length > 0 ? JSON.stringify(safeLog) : null, startedAt, finishedAt, configurationId, inferenceId, retrySourceRunId);
     this.db.prepare(`
       DELETE FROM job_runs
       WHERE id NOT IN (SELECT id FROM job_runs ORDER BY id DESC LIMIT ?)
@@ -1920,7 +1955,7 @@ export class Repository {
     const runId = Number(id);
     if (!Number.isSafeInteger(runId) || runId < 1) return null;
     const run = this.db.prepare(`
-      SELECT id, title, provider, model, prompt_version, taxonomy_version,
+      SELECT id, title, provider, model, prompt_version, taxonomy_version, configuration_id,
              started_at, finished_at
       FROM job_runs WHERE id = ?
     `).get(runId);
@@ -1936,6 +1971,7 @@ export class Repository {
         WHERE f.status IN ('failed', 'failed_infra')
           AND f.provider IS ? AND f.model IS ?
           AND f.prompt_version IS ? AND f.taxonomy_version IS ?
+          AND (? IS NULL OR f.configuration_id = ?)
           AND f.started_at >= ? AND f.started_at <= ?
           AND NOT EXISTS (
             SELECT 1 FROM processing_runs s
@@ -1957,6 +1993,8 @@ export class Repository {
       run.model,
       run.prompt_version,
       run.taxonomy_version,
+      run.configuration_id,
+      run.configuration_id,
       run.started_at,
       run.finished_at,
       boundedLimit + 1,
@@ -1989,11 +2027,11 @@ export class Repository {
     const hasCursor = Number.isSafeInteger(cursor) && cursor > 0;
     const rows = (hasCursor ? this.db.prepare(`
       SELECT id, title, provider, model, prompt_version, taxonomy_version, inference_host_label, targeted,
-             status, error, counters_json, log_json IS NOT NULL AS has_log, started_at, finished_at
+             configuration_id, inference_id, retry_source_run_id, status, error, counters_json, log_json IS NOT NULL AS has_log, started_at, finished_at
       FROM job_runs WHERE id < ? ORDER BY id DESC LIMIT ?
     `).all(cursor, boundedLimit + 1) : this.db.prepare(`
       SELECT id, title, provider, model, prompt_version, taxonomy_version, inference_host_label, targeted,
-             status, error, counters_json, log_json IS NOT NULL AS has_log, started_at, finished_at
+             configuration_id, inference_id, retry_source_run_id, status, error, counters_json, log_json IS NOT NULL AS has_log, started_at, finished_at
       FROM job_runs ORDER BY id DESC LIMIT ?
     `).all(boundedLimit + 1));
     const hasMore = rows.length > boundedLimit;
@@ -2014,6 +2052,9 @@ export class Repository {
         promptVersion: row.prompt_version,
         taxonomyVersion: row.taxonomy_version,
         inferenceHostLabel: jobRunHostLabel(row.inference_host_label),
+        configurationId: row.configuration_id ?? null,
+        inferenceId: row.inference_id ?? null,
+        retrySourceRunId: row.retry_source_run_id ?? null,
         targeted: row.targeted === null ? null : Number(row.targeted),
         status: row.status,
         error: row.error,
@@ -2540,4 +2581,17 @@ function sortKeysDeep(value) {
     );
   }
   return value;
+}
+
+// Modern executions always supply a content identity, so NULL legacy rows
+// never match them. The label path supports historical repository queries
+// and import tooling; it does not invent identity for old records.
+function matchingRun(runKey, prefix = '') {
+  if (runKey.inferenceId) {
+    return { sql: `${prefix}inference_id = ?`, params: [runKey.inferenceId] };
+  }
+  return {
+    sql: `${prefix}provider = ? AND ${prefix}model = ? AND ${prefix}prompt_version = ? AND ${prefix}taxonomy_version = ?`,
+    params: [runKey.provider, runKey.model, runKey.promptVersion, runKey.taxonomyVersion],
+  };
 }

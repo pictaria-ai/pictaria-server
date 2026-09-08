@@ -4,7 +4,7 @@ import { join } from 'node:path';
 import { writePrivateFileAtomicSync } from './atomicFile.mjs';
 import { parseBoundedJsonFileSync } from './boundedFile.mjs';
 import { normalizeBaseUrl, normalizeHttpUrl } from './config.mjs';
-import { loadTaxonomy, parseTaxonomySource } from './enrich/taxonomy.mjs';
+import { parseTaxonomySource } from './enrich/taxonomy.mjs';
 import { parseSupporterKey } from './support/supporterKey.mjs';
 
 // UI-editable settings, persisted to data/settings.json. Precedence:
@@ -295,22 +295,21 @@ const ENRICH_FIELDS = {
   },
   // Taxonomy override: the full taxonomy as strict JSON, validated with the
   // same loader as the shipped file. Empty means the built-in taxonomy.
-  // A content change must bump `version` — run history and the
-  // skip-already-enriched logic are keyed on it, so reusing a version would
-  // silently mix old and new results under one label.
+  // Version remains a readable label. Enrich snapshots identify the actual
+  // content, so editing a taxonomy no longer requires inventing a new label.
   taxonomyJson: {
     label: 'Taxonomy override',
     multiline: true,
     maxLength: 200000,
     read: () => '',
-    validate: (value, store) => validateTaxonomyOverride(value, store),
+    validate: (value) => validateTaxonomyOverride(value),
     apply: (config, value) => {
       config.taxonomyOverrideJson = value;
     },
   },
 };
 
-export function validateTaxonomyOverride(value, store) {
+export function validateTaxonomyOverride(value) {
   if (!value) {
     return; // cleared: back to the built-in taxonomy
   }
@@ -323,41 +322,6 @@ export function validateTaxonomyOverride(value, store) {
   if (!candidate.version) {
     throw new SettingsError('The taxonomy needs a non-empty "version" string.');
   }
-  if (!store) {
-    return;
-  }
-  // Compare against what is in force right now (previous override, else the
-  // shipped file). If that baseline is unreadable there is nothing to hold
-  // the candidate against — the candidate itself already validated.
-  let previous;
-  try {
-    const previousText = store.overrides?.enrich?.taxonomyJson;
-    previous = previousText ? parseTaxonomySource(previousText) : loadTaxonomy(store.config.taxonomyPath);
-  } catch {
-    return;
-  }
-  if (candidate.version === previous.version
-    && canonicalTaxonomyContent(candidate.raw) !== canonicalTaxonomyContent(previous.raw)) {
-    throw new SettingsError(
-      `The taxonomy content changed but "version" is still ${JSON.stringify(previous.version)} — bump it (for example "${previous.version}-custom1") so run history and re-enrichment can tell old results from new.`,
-    );
-  }
-}
-
-// Key-order-insensitive content fingerprint, ignoring the version field.
-function canonicalTaxonomyContent(raw) {
-  const { version, ...rest } = raw;
-  return stableStringify(rest);
-}
-
-function stableStringify(value) {
-  if (Array.isArray(value)) {
-    return `[${value.map(stableStringify).join(',')}]`;
-  }
-  if (typeof value === 'object' && value !== null) {
-    return `{${Object.keys(value).sort().map((key) => `${JSON.stringify(key)}:${stableStringify(value[key])}`).join(',')}}`;
-  }
-  return JSON.stringify(value);
 }
 
 // Weather itself needs no configuration (forecasts come from Open-Meteo,
@@ -1266,8 +1230,7 @@ function isRecord(value) {
   return prototype === Object.prototype || prototype === null;
 }
 
-// `store` gives validators context beyond the value itself (the taxonomy
-// version rule compares against the currently active taxonomy).
+// `store` gives custom validators context beyond the value itself.
 function coerce(field, key, raw, store = null) {
   if (field.json) {
     return field.json(raw);

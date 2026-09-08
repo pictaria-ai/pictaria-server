@@ -68,14 +68,26 @@ function makeHarness({
     }
     return { running: true };
   };
+  const immich = {
+      async searchMetadata({ page }) {
+        state.searches += 1;
+        const start = (page - 1) * 2;
+        const items = all.slice(start, start + 2).map((id) => ({ id, type: 'IMAGE' }));
+        return { assets: { items, nextPage: start + 2 < all.length ? page + 1 : null } };
+      },
+    };
   const enrichRunner = {
     isRunning: () => state.runnerRunning,
     isBusy: () => state.runnerRunning || state.runnerReserved,
-    reserve() {
+    reserve(options = {}) {
       if (this.isBusy()) throw new Error('An enrichment run is already in progress.');
       state.runnerReserved = true;
       let active = true;
       return {
+        immich,
+        assertActive() {},
+        needsWorkFilter: () => this.needsWorkFilter({ provider: options.provider, skipAnySuccessful: options.skipAnySuccessful }),
+        recordCoveredResolution: (entry) => this.recordCoveredResolution({ ...entry, provider: options.provider }),
         start(options) {
           if (!active || !state.runnerReserved) throw new Error('The enrichment reservation is no longer active.');
           active = false;
@@ -118,14 +130,7 @@ function makeHarness({
     referee: null,
     requireImmich: () => true,
     config: { enrichEnabled: true },
-    immich: {
-      async searchMetadata({ page }) {
-        state.searches += 1;
-        const start = (page - 1) * 2;
-        const items = all.slice(start, start + 2).map((id) => ({ id, type: 'IMAGE' }));
-        return { assets: { items, nextPage: start + 2 < all.length ? page + 1 : null } };
-      },
-    },
+    immich,
     repo: {
       queueGet: (id) => state.queue.find((item) => item.id === id) ?? null,
       queueMaintain: ({ protectedIds = [] } = {}) => {

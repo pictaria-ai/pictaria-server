@@ -31,6 +31,7 @@ function makeRepo() {
   return {
     processing,
     missingMarked,
+    saveRunConfiguration() {},
     upsertAsset() {},
     hasAnySuccessfulRun: () => false,
     hasSuccessfulRun: () => false,

@@ -7,6 +7,8 @@ import { join } from 'node:path';
 import { InsightsRepository } from '../../src/insights/repository.mjs';
 import { InsightsCollector } from '../../src/insights/collector.mjs';
 import { Repository } from '../../src/enrich/repository.mjs';
+import { captureRunConfiguration } from '../../src/enrich/runConfiguration.mjs';
+import { createProvider } from '../../src/enrich/providers.mjs';
 import { loadV1Taxonomy, sampleOutput } from '../enrich/helpers.mjs';
 import { bootServer, findChrome, launchChrome, startFakeImmich } from './harness.mjs';
 
@@ -31,6 +33,12 @@ const STACK_KEEP_ID = '00000000-0000-0000-0000-000000000010';
 const STACK_LEFT_ID = '00000000-0000-0000-0000-000000000011';
 const ARROW_A_ID = '00000000-0000-0000-0000-000000000012';
 const ARROW_B_ID = '00000000-0000-0000-0000-000000000013';
+
+const SAVED_CONFIGURATION = captureRunConfiguration({
+  provider: createProvider('local_lmstudio', { modelName: 'smoke-vision-model', apiKey: 'snapshot-secret' }),
+  taxonomy: loadV1Taxonomy(), promptVersion: 'v1-custom',
+  systemPrompt: 'Saved smoke prompt <b>literal text</b>', userTemplate: 'Tags:\n{approved_tags}',
+});
 
 const INSIGHTS_CONFIG = {
   sweepPageSize: 100,
@@ -153,7 +161,7 @@ function seedEnrichment(dbPath) {
   const repo = new Repository(dbPath);
   try {
     repo.initSchema();
-    loadV1Taxonomy();
+    repo.saveRunConfiguration(SAVED_CONFIGURATION);
     // Nine photos so the pagination subtest can cross a ?limit=3 page
     // boundary twice with photos to spare.
     for (const [index, assetId] of REVIEW_ASSET_IDS.entries()) {
@@ -280,6 +288,8 @@ function seedEnrichment(dbPath) {
     }
     repo.recordJobRun({
       title: 'Seeded successful run',
+      configurationId: SAVED_CONFIGURATION.id,
+      inferenceId: SAVED_CONFIGURATION.inferenceId,
       provider: 'local_lmstudio',
       model: 'smoke-vision-model',
       promptVersion: 'v1',
@@ -629,6 +639,21 @@ test('admin UI smoke: gate, Insights lens, Curate, Smart Albums', { timeout: 120
     })()`);
     assert.match(runComparison, /local_lmstudio · smoke-vision-model · host: Smoke inference host/);
     assert.match(runComparison, /End-to-end: 6\.00 photos\/min · 10\.0 sec\/photo · over 12 photos/);
+    // Configuration details use the same authenticated route as the UI;
+    // neither credentials nor large prompt bodies ride the history feed.
+    const unauthenticated = await fetch(`${server.base}/api/enrich/configurations/${SAVED_CONFIGURATION.id}`);
+    assert.equal(unauthenticated.status, 401);
+    const unauthenticatedBody = await unauthenticated.text();
+    assert.ok(!unauthenticatedBody.includes('Saved smoke prompt'));
+    assert.ok(await page.evaluate(`document.querySelector('#runsList').textContent.includes('Configuration unknown (legacy run)')`));
+    await page.evaluate(`document.querySelector('#runsList .run-configuration').click()`);
+    await page.waitFor(
+      'document.getElementById("logPopupBody")?.textContent.includes("Saved smoke prompt <b>literal text</b>") && !document.getElementById("logPopup")?.hidden',
+      { label: 'saved configuration opens with the session cookie' },
+    );
+    assert.equal(await page.evaluate(`document.querySelector('#logPopupBody b')`), null);
+    assert.ok(!await page.evaluate(`document.getElementById('logPopupBody').textContent.includes('snapshot-secret')`));
+    await page.evaluate('document.getElementById("logPopupClose").click()');
     const onePhotoComparison = await page.evaluate(`(() => {
       const card = [...document.querySelectorAll('#runsList .qitem')]
         .find((item) => item.textContent.includes('Seeded one-photo run'));

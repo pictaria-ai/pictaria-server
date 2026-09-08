@@ -121,6 +121,9 @@ try {
 let appliedTaxonomySource = config.taxonomyOverrideJson || '';
 let appliedLocationGroupsJson = JSON.stringify(config.insights.locationGroups ?? []);
 settingsStore.onApplied = () => {
+  if (immich.baseUrl !== config.immichBaseUrl || immich.apiKey !== config.immichApiKey) {
+    enrichRunner.sourceChanged();
+  }
   for (const client of [immich, immichPingClient]) {
     client.baseUrl = config.immichBaseUrl;
     client.apiKey = config.immichApiKey;

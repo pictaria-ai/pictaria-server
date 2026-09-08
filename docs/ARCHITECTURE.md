@@ -201,6 +201,23 @@ data/               all persistent state (gitignored): enrichment.sqlite,
 - **Ports**: Pictaria Server listens on `4080`. It must be the only writer of
   its enrichment database (see Scale: review state is cached in-process and
   projected at write time, so external writes are invisible until restart).
+- **Enrich execution configuration**: `enrich/runConfiguration.mjs` captures
+  effective inputs before the first asynchronous photo-selection call. Queue
+  reservations hold the captured provider/client and configuration through
+  selection and execution. `enrich_configurations` deduplicates immutable,
+  non-secret JSON snapshots; `processing_runs` and `job_runs` carry nullable
+  configuration and inference IDs. Legacy rows retain NULL identity.
+  Inference identity hashes effective prompts, generated schema/vocabulary,
+  rendition policy, and actual provider/generation settings. The complete
+  configuration identity also includes readable labels, taxonomy policy, and
+  processing controls. Review policy stays live in Curate; stored tags are
+  not automatically remapped. Snapshot details are fetched individually and
+  bounded to 16 MiB, never joined into status/history polling. Referenced
+  snapshots survive job-summary pruning. Bump the explicit inference or
+  provider adapter contract version when fixed validation, retry, or request
+  behavior changes enough to invalidate prior output. The Settings storage
+  shape remains v6: removing the edit-time taxonomy version comparison changes
+  neither stored values nor load-time validation.
 - **Scale**: no request path or poll loop does whole-library work. The
   enrichment DB keeps a `latest_success` projection (the few review-path
   fields of each asset's latest succeeded run, written through on
