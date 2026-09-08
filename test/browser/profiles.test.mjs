@@ -7,7 +7,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { bootServer, findChrome, launchChrome, startFakeImmich } from './harness.mjs';
 
-test('profile UI creates, validates, edits, pins queue revisions, runs, and archives without losing history', { timeout: 60000 }, async t => {
+test('Settings manages profiles; Enrich previews, preserves selection, pins queue revisions, and runs without losing history', { timeout: 60000 }, async t => {
   if (!findChrome()) return t.skip('Chrome required');
   const dir = mkdtempSync(join(tmpdir(), 'pictaria-profile-browser-'));
   let server, browser, immich, model;
@@ -39,7 +39,17 @@ test('profile UI creates, validates, edits, pins queue revisions, runs, and arch
   assert.equal(invalidProfile, 400);
   const click = id => page.evaluate(`document.getElementById(${JSON.stringify(id)}).click()`);
   const fill = (id, value) => page.evaluate(`document.getElementById(${JSON.stringify(id)}).value = ${JSON.stringify(value)}`);
-  await click('profileDuplicate'); await page.waitFor('!document.getElementById("profileEditor").hidden');
+  const follow = async id => page.navigate(await page.evaluate(`document.getElementById(${JSON.stringify(id)}).href`));
+  assert.equal(await page.evaluate('document.querySelector("#profileEditor, #profileNew, #profileArchive")'), null);
+  assert.equal(await page.evaluate('document.getElementById("taxPanel").hidden'), true);
+  await click('profileView');
+  await page.waitFor('!document.getElementById("taxPanel").hidden && document.querySelector("#taxBody pre")');
+  assert.equal(await page.evaluate('document.getElementById("profileView").getAttribute("aria-expanded")'), 'true');
+  await click('profileView');
+  assert.equal(await page.evaluate('document.getElementById("taxPanel").hidden'), true);
+  await follow('profileEdit');
+  await page.waitFor('document.getElementById("sec-enrichment-profiles")?.open && !document.getElementById("profileEditor").hidden');
+  await click('profileDuplicate'); await page.waitFor('document.getElementById("profileEditorTitle").textContent.includes("Create")');
   await fill('profileName', 'Travel <test>'); await fill('profileUser', 'Invalid template'); await click('profileSave');
   await page.waitFor('document.getElementById("profileEditorNote").textContent.includes("approved_tags")');
   assert.equal(await page.evaluate('document.querySelectorAll("#enrichProfile option").length'), 1);
@@ -51,7 +61,11 @@ test('profile UI creates, validates, edits, pins queue revisions, runs, and arch
   assert.ok(queued.id);
   await fill('profileSystem', 'New revision system prompt'); await click('profileSave');
   await page.waitFor('document.getElementById("profileEditorNote").textContent.includes("r2")');
+  await follow('profileReturn');
   await page.waitFor('document.querySelector("#queueList .queue-profile")');
+  assert.equal(await page.evaluate('document.getElementById("enrichProfile").value'), profileId);
+  await click('profileView');
+  await page.waitFor('document.getElementById("taxBody").textContent.includes("New revision system prompt")');
   assert.match(await page.evaluate('document.getElementById("queueList").textContent'), /Travel <test> · r1/);
   await page.evaluate('document.querySelector("#queueList .queue-profile").click()');
   await page.waitFor('document.getElementById("queueList").textContent.includes("Travel <test> · r2")');
@@ -62,20 +76,32 @@ test('profile UI creates, validates, edits, pins queue revisions, runs, and arch
   const runs = await page.evaluate("fetch('/api/enrich/runs').then(r=>r.json())");
   assert.equal(runs.runs[0].status, 'finished');
   assert.equal(runs.runs[0].counters.succeeded, 1);
+  await follow('profileEdit');
+  await page.waitFor('document.getElementById("profileSystem")?.value === "New revision system prompt"');
+  assert.equal(await page.evaluate('document.getElementById("enrichProfile").value'), profileId);
+  assert.match(await page.evaluate('document.getElementById("profileEditorTitle").textContent'), /Travel <test> · r2/);
   await click('profileArchive');
   await page.waitFor('document.querySelectorAll("#enrichProfile option").length === 1');
-  assert.match(await page.evaluate('document.getElementById("runsList").textContent'), /Travel <test> · r2/);
   await click('profileRestore'); await page.waitFor('document.querySelectorAll("#enrichProfile option").length === 2');
   await click('profileDefault'); await page.waitFor('document.getElementById("profileDefault").disabled');
   await click('profileNew'); await page.waitFor('document.getElementById("profileEditorTitle").textContent.includes("Create")');
   await fill('profileName', 'Built-in restored'); await click('profileSave');
   await page.waitFor('document.querySelectorAll("#enrichProfile option").length === 3');
   // Plain text rendering and a narrow viewport protect against prompt/name markup and overflow.
-  assert.equal(await page.evaluate('document.querySelectorAll("#profilePanel test, #runsList test").length'), 0);
+  assert.equal(await page.evaluate('document.querySelectorAll("#sec-enrichment-profiles test").length'), 0);
   await page.send('Emulation.setDeviceMetricsOverride', { width: 390, height: 844, deviceScaleFactor: 1, mobile: true });
   assert.equal(await page.evaluate('document.documentElement.scrollWidth <= window.innerWidth'), true);
   if (process.env.PICTARIA_PROFILE_SCREENSHOT) {
     const shot = await page.send('Page.captureScreenshot', { format: 'png', captureBeyondViewport: true });
     writeFileSync(process.env.PICTARIA_PROFILE_SCREENSHOT, Buffer.from(shot.data, 'base64'));
   }
+  await follow('profileReturn');
+  await page.waitFor('document.querySelector("#runsList .run-configuration")');
+  assert.match(await page.evaluate('document.getElementById("runsList").textContent'), /Travel <test> · r2/);
+  assert.equal(await page.evaluate('document.querySelectorAll("#profilePanel test, #runsList test").length'), 0);
+  assert.equal(await page.evaluate('document.documentElement.scrollWidth <= window.innerWidth'), true);
+  // A stale edit link must not silently open the default profile for editing.
+  await page.navigate(`${server.base}/settings.html?profile=missing#sec-enrichment-profiles`);
+  await page.waitFor('document.getElementById("profileStatus")?.textContent.includes("unavailable")');
+  assert.equal(await page.evaluate('document.getElementById("profileEditor").hidden'), true);
 });

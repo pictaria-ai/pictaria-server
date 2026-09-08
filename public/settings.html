@@ -188,6 +188,11 @@
     .loc-city.taken { opacity: 0.45; cursor: default; }
     .loc-city .c-name { white-space: nowrap; }
     .loc-hint { color: var(--p-accent); font-size: 12px; margin-top: 7px; }
+    .profile-field { display: block; margin: 14px 0; }
+    .profile-field input, .profile-field textarea { display: block; width: 100%; box-sizing: border-box; margin-top: 6px; }
+    .profile-field textarea { height: auto; min-height: 100px; font-family: monospace; resize: vertical; }
+    .profile-actions { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+    #sec-enrichment-profiles .p-select { max-width: 100%; }
   </style>
 </head>
 <body>
@@ -221,6 +226,7 @@
       <a href="#sec-providers">AI Providers</a>
       <a href="#sec-insights">Insights</a>
       <a href="#sec-enrich">Enrich</a>
+      <a href="#sec-enrichment-profiles">Enrichment profiles</a>
       <a href="#sec-discarded">Discarded Photos</a>
       <a href="#sec-curate">Curate</a>
       <a href="#sec-devices">Devices</a>
@@ -279,7 +285,7 @@
     <details id="sec-enrich" class="p-panel section">
       <summary><span class="chev">&#9654;</span><h2>Enrich</h2><span class="sec-sub" id="sub-enrich"></span></summary>
       <div class="sec-body">
-        <div class="setting-desc">Controls enrichment, the image size sent to AI, and the shared live Curate policy. Manage inference prompts and taxonomies in <a href="/enrich.html#profilePanel">Enrichment profiles</a>. Choose the provider for new runs on the Enrich page; your selection is remembered. Provider connections and model names live under AI Providers. How the pieces fit — prompts, taxonomy, and the response schema — is explained in the <a href="https://github.com/pictaria-ai/pictaria-server/blob/main/docs/ENRICH.md" target="_blank" rel="noopener" style="color: var(--p-accent)">enrichment guide</a>.</div>
+        <div class="setting-desc">Controls enrichment, the image size sent to AI, and the shared live Curate policy. Manage inference prompts and taxonomies in <a href="#sec-enrichment-profiles">Enrichment profiles</a>. Choose the provider for new runs on the Enrich page; your selection is remembered. Provider connections and model names live under AI Providers. How the pieces fit — prompts, taxonomy, and the response schema — is explained in the <a href="https://github.com/pictaria-ai/pictaria-server/blob/main/docs/ENRICH.md" target="_blank" rel="noopener" style="color: var(--p-accent)">enrichment guide</a>.</div>
         <div id="fields-enrich"></div>
         <div id="captionWbStatus" class="caption-wb-status">
           <div id="captionWbLine" class="setting-desc" role="status" aria-live="polite"></div>
@@ -292,6 +298,39 @@
         <div class="save-row">
           <button id="save-enrich" class="p-btn primary">Save Enrich settings</button>
           <span id="note-enrich" class="save-note"></span>
+        </div>
+      </div>
+    </details>
+
+    <details id="sec-enrichment-profiles" class="p-panel section">
+      <summary><span class="chev">&#9654;</span><h2>Enrichment profiles</h2></summary>
+      <div class="sec-body">
+        <p class="setting-desc">Create and manage reusable prompts and taxonomies. Choose a saved profile on Enrich when starting a run.</p>
+        <div class="profile-actions">
+          <label for="enrichProfile"><strong>Enrichment profile</strong></label>
+          <select id="enrichProfile" class="p-select" aria-label="Enrichment profile"></select>
+          <button id="profileEdit" class="p-btn">Edit</button>
+          <button id="profileDuplicate" class="p-btn quiet">Duplicate</button>
+          <button id="profileNew" class="p-btn quiet">New from built-in</button>
+          <a id="profileReturn" class="p-btn quiet" href="/enrich.html">Back to Enrich</a>
+        </div>
+        <p id="profileStatus" class="setting-desc" role="status" aria-live="polite"></p>
+        <p id="profileNote" class="setting-desc">Loading profiles…</p>
+        <div class="profile-actions">
+          <button id="profileDefault" class="p-btn quiet">Make default</button>
+          <button id="profileArchive" class="p-btn quiet">Archive</button>
+          <span id="profileArchivedRow" hidden><label for="profileArchived">Archived profiles</label>
+            <select id="profileArchived" class="p-select"></select><button id="profileRestore" class="p-btn quiet">Restore</button></span>
+        </div>
+        <div id="profileEditor" hidden style="margin-top: 16px">
+          <h3 id="profileEditorTitle">Edit profile</h3>
+          <p class="setting-desc">Profiles save prompts and the allowed taxonomy. Provider/model settings remain separate. Profile vocabulary and thresholds control new Enrich results. Curate uses <code>review</code> buckets and <code>hard_exclusion_tags</code> from the shared live policy in Settings; editing those sections here does not change Curate. To try a profile on a few photos, save it and start a small run with Only unenriched off.</p>
+          <label class="profile-field" for="profileName">Name<input id="profileName" class="p-input" maxlength="80"></label>
+          <label class="profile-field" for="profileSystem">System prompt<textarea id="profileSystem" class="p-input" rows="7" maxlength="20000" spellcheck="false"></textarea></label>
+          <label class="profile-field" for="profileUser">Per-photo prompt <span class="p-muted">— include {approved_tags}</span><textarea id="profileUser" class="p-input" rows="5" maxlength="20000" spellcheck="false"></textarea></label>
+          <label class="profile-field" for="profileTaxonomy">Taxonomy JSON<textarea id="profileTaxonomy" class="p-input" rows="14" maxlength="200000" spellcheck="false"></textarea></label>
+          <div class="profile-actions"><button id="profileValidate" class="p-btn">Validate</button><button id="profileSave" class="p-btn primary">Save profile</button><button id="profileClose" class="p-btn quiet">Close editor</button></div>
+          <p id="profileEditorNote" class="setting-desc" role="status" aria-live="polite"></p>
         </div>
       </div>
     </details>
@@ -610,6 +649,7 @@
     </details>
   </main>
 
+  <script src="/enrich-profiles.js"></script>
   <script>
     const toggle = document.getElementById('lightModeToggle');
     toggle.checked = window.pictariaTheme.get() === 'light';
@@ -683,7 +723,7 @@
         { key: 'captionWriteback', type: 'switch', desc: 'Copies each photo’s AI caption into its Immich description, making photos searchable in Immich by what’s in them. Pictaria fills an empty description or updates its own earlier text and checks immediately before writing; Immich cannot make that check and update atomic, so a narrow concurrent human-edit race remains. Runs in the background; new enrichments follow automatically.', docs: 'https://github.com/pictaria-ai/pictaria-server/blob/main/docs/ENRICH.md#writing-captions-to-immich-descriptions' },
         { key: 'imageSource', type: 'select', labels: { preview: 'Preview (recommended)', thumbnail: 'Thumbnail (fastest, least detail)', original: 'Original (largest upload)' }, desc: 'The image size sent to the model for analysis.' },
         { key: 'inferenceHostLabel', type: 'text', placeholder: 'e.g. M4 Mac mini · LM Studio', desc: 'Optional label copied into each new run’s history, useful when comparing the same model on different machines. You supply and maintain this text; Pictaria does not inspect the model host.' },
-        { group: 'Live Curate review policy', groupDesc: 'Shared policy for results from all profiles. Inference prompts and taxonomies are managed on Enrich → Enrichment profiles.' },
+        { group: 'Live Curate review policy', groupDesc: 'Shared policy for results from all profiles. Inference prompts and taxonomies are managed in Settings → Enrichment profiles.' },
         { key: 'taxonomyJson', type: 'textarea', rows: 14, taxonomyLoad: true, placeholder: 'Using the built-in taxonomy — paste an edited copy here to override.', desc: 'The shared live Curate policy as taxonomy JSON. Threshold and review-bucket changes apply to existing scores across all profiles without AI calls. This does not edit inference profiles or remap stored tags. Clear to restore the built-in review policy.', docs: 'https://github.com/pictaria-ai/pictaria-server/blob/main/docs/ENRICH.md#taxonomy-prompts-and-the-response-schema' },
         { groupEnd: true },
       ],
@@ -2160,7 +2200,18 @@
     el('supRemove').addEventListener('click', () => patchSupporterKey(null, 'note-support-active', 'note-support'));
     el('wwUpload').addEventListener('click', uploadWakeWordModel);
 
+    const profileManager = createEnrichProfileManager({
+      async api(path, options = {}) {
+        const response = await fetch(path, { ...options, headers: headers(options.headers) });
+        if (response.status === 401) { showLogin(); throw new Error('Please sign in to manage profiles.'); }
+        const body = await response.json();
+        if (!response.ok) throw new Error(body?.error?.message ?? 'Could not update enrichment profiles.');
+        return body;
+      },
+      toast(message) { el('profileStatus').textContent = message; },
+    });
     loadSettings().then(() => {
+      profileManager.load().catch(error => { el('profileStatus').textContent = error.message; });
       loadLocationGroups();
       loadDevices();
       loadDiscarded();

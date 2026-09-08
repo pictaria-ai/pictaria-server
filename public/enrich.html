@@ -25,9 +25,6 @@
     .panel { padding: 14px 16px; margin-bottom: 14px; display: grid; gap: 12px; }
     .panel.dimmed { opacity: 0.55; }
     .es-main { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; min-width: 0; }
-    .profile-field { display: block; margin: 14px 0; }
-    .profile-field input, .profile-field textarea { display: block; width: 100%; box-sizing: border-box; margin-top: 6px; }
-    .profile-field textarea { height: auto; min-height: 100px; font-family: monospace; resize: vertical; }
     #enrichProfile { max-width: 100%; }
     .provider-note { color: var(--p-muted); font-size: 12px; line-height: 1.45; }
     .provider-note.bad { color: var(--p-danger); }
@@ -182,32 +179,15 @@
       <div class="es-main">
         <label for="enrichProfile"><strong>Enrichment profile</strong></label>
         <select id="enrichProfile" class="p-select" aria-label="Enrichment profile"></select>
-        <button id="profileEdit" class="p-btn">Edit</button>
-        <button id="profileDuplicate" class="p-btn quiet">Duplicate</button>
-        <button id="profileNew" class="p-btn quiet">New from built-in</button>
+        <button id="profileView" class="p-btn quiet" aria-controls="taxPanel" aria-expanded="false" disabled>View profile</button>
+        <a id="profileEdit" class="p-btn quiet" href="/settings.html#sec-enrichment-profiles">Edit profile</a>
       </div>
       <p id="profileNote" class="provider-note">Loading profiles…</p>
-      <div class="es-main">
-        <button id="profileDefault" class="p-btn quiet">Make default</button>
-        <button id="profileArchive" class="p-btn quiet">Archive</button>
-        <span id="profileArchivedRow" hidden><label for="profileArchived">Archived profiles</label>
-          <select id="profileArchived" class="p-select"></select><button id="profileRestore" class="p-btn quiet">Restore</button></span>
-      </div>
-      <div id="profileEditor" hidden style="margin-top: 16px">
-        <h3 id="profileEditorTitle">Edit profile</h3>
-        <p class="tp-note">Profiles save prompts and the allowed taxonomy. Provider/model settings remain separate. Profile vocabulary and thresholds control new Enrich results. Curate uses <code>review</code> buckets and <code>hard_exclusion_tags</code> from the shared live policy in Settings; editing those sections here does not change Curate. To try a profile on a few photos, save it and start a small run with Only unenriched off.</p>
-        <label class="profile-field" for="profileName">Name<input id="profileName" class="p-input" maxlength="80"></label>
-        <label class="profile-field" for="profileSystem">System prompt<textarea id="profileSystem" class="p-input" rows="7" maxlength="20000" spellcheck="false"></textarea></label>
-        <label class="profile-field" for="profileUser">Per-photo prompt <span class="p-muted">— include {approved_tags}</span><textarea id="profileUser" class="p-input" rows="5" maxlength="20000" spellcheck="false"></textarea></label>
-        <label class="profile-field" for="profileTaxonomy">Taxonomy JSON<textarea id="profileTaxonomy" class="p-input" rows="14" maxlength="200000" spellcheck="false"></textarea></label>
-        <div class="es-main"><button id="profileValidate" class="p-btn">Validate</button><button id="profileSave" class="p-btn primary">Save profile</button><button id="profileClose" class="p-btn quiet">Close editor</button></div>
-        <p id="profileEditorNote" class="tp-note" role="status" aria-live="polite"></p>
-      </div>
     </section>
 
-    <details id="taxPanel" class="p-panel panel">
+    <details id="taxPanel" class="p-panel panel" hidden>
       <summary><span class="chev">&#9654;</span> Taxonomy &amp; prompt <span class="sub">— exactly what the model is told, and the tags it may use</span></summary>
-      <div class="tp-note" style="margin-top: 10px">Edit the selected setup in <a href="#profilePanel" style="color: var(--p-accent)">Enrichment profiles</a>. Learn more in the <a href="https://github.com/pictaria-ai/pictaria-server/blob/main/docs/ENRICH.md" target="_blank" rel="noopener" style="color: var(--p-accent)">enrichment guide</a>.</div>
+      <div class="tp-note" style="margin-top: 10px">Edit the selected setup in <a id="profilePreviewEdit" href="/settings.html#sec-enrichment-profiles" style="color: var(--p-accent)">Settings → Enrichment profiles</a>. Learn more in the <a href="https://github.com/pictaria-ai/pictaria-server/blob/main/docs/ENRICH.md" target="_blank" rel="noopener" style="color: var(--p-accent)">enrichment guide</a>.</div>
       <div id="taxBody" class="tp-body"><div class="tp-note">Loading…</div></div>
     </details>
 
@@ -326,7 +306,7 @@
       runsRefreshPending: false,
     };
     const el = (id) => document.getElementById(id);
-    const profileUI = createEnrichProfileUI({ api, toast, changed() {
+    const profileUI = createEnrichProfilePicker({ api, toast, changed() {
       loadTaxonomyPanel.loaded = false;
       if (el('taxPanel').open) void loadTaxonomyPanel();
       void loadFailureLimited();
@@ -1395,9 +1375,12 @@
       if (loadTaxonomyPanel.loaded) return;
       loadTaxonomyPanel.loaded = true;
       const body = el('taxBody');
+      const profileId = profileUI.id();
+      body.textContent = 'Loading…';
       try {
-        const query = `?profileId=${encodeURIComponent(profileUI.id())}`;
+        const query = `?profileId=${encodeURIComponent(profileId)}`;
         const [tax, prompts] = await Promise.all([api('/api/taxonomy' + query), api('/api/enrich/prompts' + query)]);
+        if (profileUI.id() !== profileId) return;
         body.replaceChildren();
 
         const mk = (tag, cls, text) => {
@@ -1448,7 +1431,7 @@
         const editNote = mk('div', 'tp-note');
         editNote.append('Both the prompts and the taxonomy are editable in ');
         const link = mk('a', null, 'Enrichment profiles');
-        link.href = '#profilePanel';
+        link.href = el('profileEdit').href;
         link.style.color = 'var(--p-accent)';
         editNote.append(link, ' — saved edits apply to future runs. How the pieces fit together is explained in ');
         const docsLink = mk('a', null, 'the enrichment guide');
@@ -1459,13 +1442,28 @@
         editNote.append(docsLink, '.');
         body.append(editNote);
       } catch (error) {
+        if (profileUI.id() !== profileId) return;
         loadTaxonomyPanel.loaded = false;
         body.replaceChildren();
         body.append(Object.assign(document.createElement('div'), { className: 'tp-note', textContent: `Could not load: ${error.message}` }));
       }
     }
 
-    el('taxPanel').addEventListener('toggle', () => { if (el('taxPanel').open) void loadTaxonomyPanel(); });
+    el('profileView').addEventListener('click', () => {
+      const panel = el('taxPanel');
+      panel.hidden = !panel.hidden;
+      panel.open = !panel.hidden;
+      el('profileView').setAttribute('aria-expanded', String(!panel.hidden));
+      el('profileView').textContent = panel.hidden ? 'View profile' : 'Hide profile';
+    });
+    el('taxPanel').addEventListener('toggle', () => {
+      if (el('taxPanel').open) void loadTaxonomyPanel();
+      else {
+        el('taxPanel').hidden = true;
+        el('profileView').setAttribute('aria-expanded', 'false');
+        el('profileView').textContent = 'View profile';
+      }
+    });
 
     // Library size for the "remaining" arithmetic (from the Insights snapshot).
     fetch('/api/insights', { headers: headers() }).then((r) => r.ok ? r.json() : null).then((body) => {

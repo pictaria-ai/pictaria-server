@@ -265,7 +265,7 @@ Schema 9 / persistent-state contract 10 adds profiles and queue pins. The
 first boot copies effective prompts/taxonomy into Default and pins old queue
 items to that revision; it does not launch enrichment. Verify Default contains
 your customization and the old queue still shows its expected slices. Subsequent
-inference edits belong in Enrich profiles; Settings retains the shared live
+inference edits belong in Settings → Enrichment profiles; Settings retains the shared live
 Curate policy. Changing configured files later does not rewrite saved profiles.
 See [profile behavior and migration](ENRICH.md#enrichment-profiles).
 

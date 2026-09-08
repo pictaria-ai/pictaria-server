@@ -16,7 +16,7 @@ export function createSettingsRoutes({ settingsStore, profiles = null }) {
       const patch = await readJsonBody(request);
       try {
         if (profiles && patch?.enrich && ['systemPrompt', 'userTemplate'].some(key => Object.hasOwn(patch.enrich, key))) {
-          throw new SettingsError('Enrich prompts are now managed in named profiles on the Enrich page.');
+          throw new SettingsError('Enrich prompts are now managed in named profiles in Settings → Enrichment profiles.');
         }
         sendJson(response, 200, settingsStore.update(patch));
       } catch (error) {

@@ -8,7 +8,9 @@ All notable changes to Pictaria Server are documented here. This project follows
 ### Added
 
 - Named Enrich profiles: create from built-in, duplicate, edit and validate
-  prompts/taxonomy, choose a default, and archive/restore. Queue items pin a
+  in Settings → Enrichment profiles. Enrich keeps a profile picker, an
+  on-demand View profile preview, and a direct Edit profile link.
+  Save reusable prompts/taxonomy, choose a default, and archive/restore. Queue items pin a
   revision and allow explicit replacement; run history and photo captions
   identify the saved profile. Daily Enrich uses the default profile.
   Insights explains the default-profile choice before queueing, and the

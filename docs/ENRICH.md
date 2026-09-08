@@ -302,7 +302,8 @@ earlier keep/hide decisions so everything returns for a fresh review.
 
 ## Taxonomy, prompts, and the response schema
 
-The **Taxonomy & prompt** panel on the Enrich page shows exactly what the
+Choose **View profile** on Enrich to open the **Taxonomy & prompt** preview.
+It shows exactly what the
 model is told: every approved tag by category, hard exclusions (photos with
 these are never auto-shown), confidence thresholds, the response fields the
 model must fill in, and the full prompt text.
@@ -343,7 +344,7 @@ invalid response, so the normal retry and per-photo failure handling apply
 instead of storing the label as photo metadata.
 
 **What is editable and what is not.** The taxonomy (which tags the model may
-use, thresholds, exclusions) and both prompts are editable in Enrich →
+use, thresholds, exclusions) and both prompts are editable in Settings →
 Enrichment profiles. The schema's *field list* is fixed: Curate's buckets, the star
 picks, caption search, and Best-of ranking all read these fields by name,
 so removing one would break the features downstream of it. Editing the
@@ -363,13 +364,18 @@ your approved tags on every request.
 
 ## Enrichment profiles
 
-Use **Enrich → Enrichment profile** to keep several named prompt/taxonomy
+Use **Settings → Enrichment profiles** to keep several named prompt/taxonomy
 setups. **New from built-in** starts a fresh copy of the configured template
 files; **Duplicate** starts from the selected saved profile. Edit its name,
 system prompt, per-photo prompt, and taxonomy JSON, then **Validate** or
 **Save profile**. The per-photo prompt must include `{approved_tags}`.
 Validation sends no photos to a model. Invalid edits and stale saves from
 another window leave the last usable revision intact.
+
+On Enrich, use the profile picker to choose a saved setup, **View profile**
+to inspect its taxonomy and prompts, or **Edit profile** to open that exact
+profile in Settings. **Back to Enrich** keeps the selected profile. Creation,
+validation, default selection, archiving, and restoration live in Settings.
 
 Profiles contain prompts and taxonomy only. Provider/model connections,
 image settings, and processing controls remain separate. Selecting a profile

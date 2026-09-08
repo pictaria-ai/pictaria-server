@@ -1,9 +1,8 @@
-// Bounded profile management; prompts and taxonomy load only for the editor.
-window.createEnrichProfileUI = function ({ api, toast, changed }) {
+// Settings owns profile management; Enrich only selects and previews saved profiles.
+window.createEnrichProfileManager = function ({ api, toast }) {
   const el = id => document.getElementById(id);
   let profiles = [];
   let editing = null;
-  let loaded = false;
   const select = el('enrichProfile');
   const editor = el('profileEditor');
   const label = p => `${p.name} · r${p.revision}${p.isDefault ? ' · default' : ''}`;
@@ -14,19 +13,23 @@ window.createEnrichProfileUI = function ({ api, toast, changed }) {
   const note = message => { el('profileEditorNote').textContent = message; };
   const selected = () => profiles.find(p => p.id === select.value);
 
-  async function load(preferred = select.value) {
+  async function load(preferred = select.value, remember = true) {
     const data = await api('/api/enrich/profiles');
     profiles = data.profiles;
     select.replaceChildren(...profiles.filter(p => !p.archived).map(p => new Option(label(p), p.id)));
     select.value = profiles.some(p => p.id === preferred && !p.archived) ? preferred : data.defaultProfileId;
-    loaded = true;
     el('profileDefault').disabled = Boolean(selected()?.isDefault);
     el('profileArchive').disabled = Boolean(selected()?.isDefault);
-    el('profileNote').textContent = `Selected for new manual runs. Daily Enrich and Send to Enrich use the default: ${profiles.find(p => p.isDefault)?.name}. Queued items keep their saved revision.`;
+    el('profileNote').textContent = `Daily Enrich and Send to Enrich use the default: ${profiles.find(p => p.isDefault)?.name}. Back to Enrich opens the selected profile for manual runs. Queued items keep their saved revision.`;
     const archived = profiles.filter(p => p.archived);
     el('profileArchivedRow').hidden = !archived.length;
     el('profileArchived').replaceChildren(...archived.map(p => new Option(label(p), p.id)));
-    changed();
+    el('profileReturn').href = `/enrich.html?profile=${encodeURIComponent(select.value)}`;
+    if (remember) {
+      const url = new URL(location.href);
+      url.searchParams.set('profile', select.value);
+      history.replaceState(null, '', url);
+    }
   }
 
   function show(value, existing = null) {
@@ -41,7 +44,7 @@ window.createEnrichProfileUI = function ({ api, toast, changed }) {
     el('profileName').focus();
   }
 
-  select.addEventListener('change', action(async () => { await load(select.value); }));
+  select.addEventListener('change', action(async () => { editor.hidden = true; await load(select.value); }));
   el('profileEdit').addEventListener('click', action(async () => {
     const value = await api(`/api/enrich/profiles/${select.value}`); show(value, value);
   }));
@@ -74,6 +77,49 @@ window.createEnrichProfileUI = function ({ api, toast, changed }) {
     await request(`/api/enrich/profiles/${id}/archive`, 'POST', { archived: false }); await load(id);
   }));
 
+  return { async load() {
+    const requested = new URLSearchParams(location.search).get('profile');
+    await load(requested, false);
+    if (requested) {
+      el('sec-enrichment-profiles').open = true;
+      const profile = profiles.find(p => p.id === requested && !p.archived);
+      if (!profile) { toast('That profile is unavailable or archived. Select another profile or restore it below.', true); return; }
+      const value = await api(`/api/enrich/profiles/${profile.id}`);
+      show(value, value);
+    }
+  } };
+};
+
+window.createEnrichProfilePicker = function ({ api, toast, changed }) {
+  const el = id => document.getElementById(id);
+  const select = el('enrichProfile');
+  let profiles = [];
+  let loaded = false;
+  const label = p => `${p.name} · r${p.revision}${p.isDefault ? ' · default' : ''}`;
+  const selected = () => profiles.find(p => p.id === select.value);
+  const request = (path, method, body) => api(path, { method, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+  const action = fn => async () => { try { await fn(); } catch (error) { toast(error.message, true); } };
+  function update() {
+    const href = `/settings.html?profile=${encodeURIComponent(select.value)}#sec-enrichment-profiles`;
+    el('profileEdit').href = href;
+    el('profilePreviewEdit').href = href;
+    const url = new URL(location.href);
+    url.searchParams.set('profile', select.value);
+    history.replaceState(null, '', url);
+    changed();
+  }
+  async function load(preferred = new URLSearchParams(location.search).get('profile')) {
+    const data = await api('/api/enrich/profiles');
+    profiles = data.profiles.filter(p => !p.archived);
+    select.replaceChildren(...profiles.map(p => new Option(label(p), p.id)));
+    select.value = profiles.some(p => p.id === preferred) ? preferred : data.defaultProfileId;
+    if (preferred && select.value !== preferred) toast('That profile is unavailable or archived. The default profile is selected.', true);
+    loaded = true;
+    el('profileView').disabled = false;
+    el('profileNote').textContent = `Selected for new manual runs. Daily Enrich and Send to Enrich use the default: ${profiles.find(p => p.isDefault)?.name}. Queued items keep their saved revision.`;
+    update();
+  }
+  select.addEventListener('change', update);
   return { load, id: () => select.value, ready: () => loaded && Boolean(selected()), label,
     queueControl(item) {
       const wrap = document.createElement('span');
