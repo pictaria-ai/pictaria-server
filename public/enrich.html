@@ -107,22 +107,9 @@
     details.panel summary .chev { transition: transform 0.15s; color: var(--p-muted); font-size: 11px; }
     details.panel[open] summary .chev { transform: rotate(90deg); }
     details.panel summary .sub { color: var(--p-muted); font-size: 12.5px; font-weight: 400; }
-    .tp-body { display: grid; gap: 14px; margin-top: 12px; }
-    .tp-head { font-size: 12.5px; text-transform: uppercase; letter-spacing: 0.8px; font-weight: 800; color: var(--p-muted); }
-    .tp-cat { display: flex; gap: 8px; align-items: baseline; flex-wrap: wrap; margin: 3px 0; }
-    .tp-cat .c { font-size: 12px; font-weight: 700; min-width: 90px; color: var(--p-muted); }
-    .tag-chip {
-      display: inline-block; padding: 1px 8px; border-radius: 999px; font-size: 11.5px;
-      background: var(--p-panel-2); border: 1px solid var(--p-line); margin: 1px 0;
-    }
-    .tag-chip.hard { border-color: var(--p-danger); color: var(--p-danger); }
-    .tp-note { color: var(--p-muted); font-size: 12px; line-height: 1.5; }
-    .tp-cat .rf-use { color: var(--p-muted); font-size: 12px; }
-    pre.prompt {
-      background: var(--p-panel-2); border: 1px solid var(--p-line); border-radius: 8px;
-      padding: 10px 12px; font-size: 12px; line-height: 1.55; white-space: pre-wrap;
-      overflow-wrap: anywhere; margin: 4px 0 0; max-height: 40vh; overflow-y: auto;
-    }
+    #runSettingsTechnical { padding: 8px 16px; border-top: 1px solid var(--p-line); flex-shrink: 0; font-size: 12px; }
+    #runSettingsTechnical summary { cursor: pointer; color: var(--p-muted); }
+    #runSettingsTechnical pre { padding: 8px 0 0; max-height: 16vh; }
   </style>
 </head>
 <body>
@@ -179,24 +166,18 @@
       <div class="es-main">
         <label for="enrichProfile"><strong>Enrichment profile</strong></label>
         <select id="enrichProfile" class="p-select" aria-label="Enrichment profile"></select>
-        <button id="profileView" class="p-btn quiet" aria-controls="taxPanel" aria-expanded="false" disabled>View profile</button>
-        <a id="profileEdit" class="p-btn quiet" href="/settings.html#sec-enrichment-profiles">Edit profile</a>
+        <span class="p-tab-divider"></span>
+        <a id="profileManage" class="p-muted" href="/settings.html#sec-enrichment-profiles" style="font-size: 12px">View and manage profiles</a>
       </div>
       <p id="profileNote" class="provider-note">Loading profiles…</p>
     </section>
-
-    <details id="taxPanel" class="p-panel panel" hidden>
-      <summary><span class="chev">&#9654;</span> Taxonomy &amp; prompt <span class="sub">— exactly what the model is told, and the tags it may use</span></summary>
-      <div class="tp-note" style="margin-top: 10px">Edit the selected setup in <a id="profilePreviewEdit" href="/settings.html#sec-enrichment-profiles" style="color: var(--p-accent)">Settings → Enrichment profiles</a>. Learn more in the <a href="https://github.com/pictaria-ai/pictaria-server/blob/main/docs/ENRICH.md" target="_blank" rel="noopener" style="color: var(--p-accent)">enrichment guide</a>.</div>
-      <div id="taxBody" class="tp-body"><div class="tp-note">Loading…</div></div>
-    </details>
 
     <section id="statusPanel" class="p-panel panel">
       <div class="es-main">
         <span id="enrichDot" class="p-dot"></span>
         <strong>Status</strong>
         <div class="p-grow"></div>
-        <button id="viewConfigurationBtn" class="p-btn quiet" hidden>Configuration</button>
+        <button id="viewConfigurationBtn" class="p-btn quiet" hidden>View run settings</button>
         <button id="viewLogBtn" class="p-btn quiet">Log</button>
         <button id="enrichCancel" class="p-btn danger" hidden title="Stops the active model request. An interrupted photo retries next time, and a queued job stays in the queue.">Cancel</button>
       </div>
@@ -262,6 +243,10 @@
       </div>
       <div id="logPopupMeta" class="p-muted" style="font-size: 12px; padding: 0 14px 8px"></div>
       <pre id="logPopupBody"></pre>
+      <details id="runSettingsTechnical" hidden>
+        <summary>Technical identifiers</summary>
+        <pre id="runSettingsIdentifiers"></pre>
+      </details>
     </div>
   </div>
 
@@ -307,8 +292,6 @@
     };
     const el = (id) => document.getElementById(id);
     const profileUI = createEnrichProfilePicker({ api, toast, changed() {
-      loadTaxonomyPanel.loaded = false;
-      if (el('taxPanel').open) void loadTaxonomyPanel();
       void loadFailureLimited();
       void loadQueue();
       syncRunButtons(state.lastStatus);
@@ -490,8 +473,7 @@
         el('enrichStatusLine2').textContent = statusLine2;
         el('enrichStatusLine2').hidden = !statusLine2;
         el('viewConfigurationBtn').hidden = !status.configurationId;
-        el('viewConfigurationBtn').textContent = status.configurationId
-          ? `Config ${status.configurationId.slice(0, 8)}` : 'Configuration';
+        el('viewConfigurationBtn').textContent = status.running ? 'View run settings' : 'View last run settings';
         const goal = status.options?.maxAnalyzed || status.options?.targeted || status.progress?.total || 0;
         const done = status.options?.maxAnalyzed ? analyzed : status.progress?.position || 0;
         el('enrichProgress').hidden = !status.running || goal === 0;
@@ -1120,7 +1102,7 @@
         if (run.configurationId) {
           const configBtn = document.createElement('button');
           configBtn.className = 'p-btn quiet run-configuration';
-          configBtn.textContent = `Config ${run.configurationId.slice(0, 8)}`;
+          configBtn.textContent = 'View run settings';
           configBtn.title = 'Inspect the saved prompts, taxonomy, and settings used by this run';
           configBtn.addEventListener('click', () => void openRunConfiguration(run.configurationId));
           top.append(configBtn);
@@ -1252,24 +1234,23 @@
 
     el('viewConfigurationBtn').addEventListener('click', () => {
       const id = state.lastStatus?.configurationId;
-      if (id) void openRunConfiguration(id);
+      if (id) void openRunConfiguration(id, state.lastStatus.running ? 'Current run settings' : 'Last run settings');
     });
 
-    async function openRunConfiguration(id) {
+    async function openRunConfiguration(id, title = 'Run settings') {
       try {
         const entry = await api(`/api/enrich/configurations/${encodeURIComponent(id)}`);
         const saved = entry.snapshot;
         state.liveLog = false;
-        el('logPopupTitle').textContent = `Configuration ${entry.id.slice(0, 8)}`;
+        el('logPopupTitle').textContent = title;
         el('logPopupMeta').textContent = [
           saved.profile ? profileUI.label(saved.profile) : null,
           saved.inference.provider.name, saved.inference.provider.model,
-          saved.inference.image.source, `Inference ${entry.inferenceId.slice(0, 8)}`,
+          `Image: ${saved.inference.image.source}`,
         ].filter(Boolean).join(' · ');
         el('logPopupBody').textContent = [
           'Saved inputs for this execution. Later Settings edits do not change this record.',
           'Curate continues to apply current review policy. Re-run failed photos uses settings at retry start.',
-          `Configuration: ${entry.id}\nInference: ${entry.inferenceId}`,
           `System prompt\n${saved.inference.systemPrompt}`,
           `Effective user prompt\n${saved.inference.userPrompt}`,
           `User template\n${saved.userTemplate}`,
@@ -1279,6 +1260,9 @@
           `Taxonomy at execution start\n${JSON.stringify(saved.taxonomy, null, 2)}`,
           `Output schema\n${JSON.stringify(saved.inference.jsonSchema, null, 2)}`,
         ].join('\n\n');
+        el('runSettingsTechnical').hidden = false;
+        el('runSettingsTechnical').open = false;
+        el('runSettingsIdentifiers').textContent = `Configuration: ${entry.id}\nInference: ${entry.inferenceId}`;
         el('logPopupBody').scrollTop = 0;
         el('logPopup').hidden = false;
       } catch (error) {
@@ -1297,6 +1281,7 @@
         return;
       }
       state.liveLog = false;
+      el('runSettingsTechnical').hidden = true;
       el('logPopupTitle').textContent = entry.title;
       el('logPopupMeta').textContent = [
         entry.provider,
@@ -1311,6 +1296,7 @@
     }
 
     function renderLiveLog() {
+      el('runSettingsTechnical').hidden = true;
       const body = el('logPopupBody');
       const log = state.lastStatus?.log ?? [];
       const atBottom = body.scrollHeight - body.scrollTop - body.clientHeight < 60;
@@ -1349,7 +1335,8 @@
     });
 
     el('logPopupCopy').addEventListener('click', async () => {
-      const text = el('logPopupBody').textContent;
+      const text = [el('logPopupMeta').textContent, el('logPopupBody').textContent,
+        el('runSettingsTechnical').hidden ? '' : el('runSettingsIdentifiers').textContent].filter(Boolean).join('\n\n');
       let copied = false;
       try {
         await navigator.clipboard.writeText(text);
@@ -1367,102 +1354,6 @@
       }
       el('logPopupCopy').textContent = copied ? 'Copied ✓' : 'Copy failed';
       setTimeout(() => { el('logPopupCopy').textContent = 'Copy'; }, 1600);
-    });
-
-    // --- taxonomy + prompt viewer (read-only; loaded on first open) ---
-
-    async function loadTaxonomyPanel() {
-      if (loadTaxonomyPanel.loaded) return;
-      loadTaxonomyPanel.loaded = true;
-      const body = el('taxBody');
-      const profileId = profileUI.id();
-      body.textContent = 'Loading…';
-      try {
-        const query = `?profileId=${encodeURIComponent(profileId)}`;
-        const [tax, prompts] = await Promise.all([api('/api/taxonomy' + query), api('/api/enrich/prompts' + query)]);
-        if (profileUI.id() !== profileId) return;
-        body.replaceChildren();
-
-        const mk = (tag, cls, text) => {
-          const node = document.createElement(tag);
-          if (cls) node.className = cls;
-          if (text != null) node.textContent = text;
-          return node;
-        };
-
-        body.append(mk('div', 'tp-head', `Taxonomy ${tax.version ? `· version ${tax.version}` : ''}`));
-        const hard = new Set(tax.hardExclusionTags ?? []);
-        for (const [category, tags] of Object.entries(tax.tags ?? {})) {
-          const row = mk('div', 'tp-cat');
-          row.append(mk('span', 'c', category));
-          for (const t of tags) {
-            const chip = mk('span', `tag-chip${hard.has(t) ? ' hard' : ''}`, t);
-            if (hard.has(t)) chip.title = 'Hard exclusion — a photo with this tag is never shown on the frame';
-            row.append(chip);
-          }
-          body.append(row);
-        }
-        if (hard.size) {
-          body.append(mk('div', 'tp-note', 'Red tags are hard exclusions: any photo the model marks with one is kept off the frame.'));
-        }
-        const thresholds = Object.entries(tax.thresholds ?? {});
-        if (thresholds.length) {
-          body.append(mk('div', 'tp-note', `Confidence thresholds: ${thresholds.map(([k, v]) => `${k} ${v}`).join(' · ')}`));
-        }
-
-        if (Array.isArray(tax.responseFields) && tax.responseFields.length) {
-          body.append(mk('div', 'tp-head', 'Response fields'));
-          body.append(mk('div', 'tp-note',
-            'Every reply must be JSON with exactly these fields — enforced through structured output, not the prompt text. This is why captions and quality scores appear without ever being asked for in prose. The field list is fixed (Pictaria’s features depend on it); the tags the model may use inside it come from the taxonomy above.'));
-          for (const rf of tax.responseFields) {
-            const row = mk('div', 'tp-cat');
-            row.append(mk('span', 'c', rf.field));
-            row.append(mk('span', 'tag-chip', rf.type));
-            row.append(mk('span', 'rf-use', `→ ${rf.usedFor}`));
-            body.append(row);
-          }
-        }
-
-        body.append(mk('div', 'tp-head', `Prompt · version ${prompts.version}`));
-        body.append(mk('div', 'tp-note', `System prompt — the model’s standing instructions${prompts.customized?.systemPrompt ? ' (saved in profile)' : ''}:`));
-        body.append(mk('pre', 'prompt', prompts.systemPrompt));
-        body.append(mk('div', 'tp-note', `Per-photo message — {approved_tags} is replaced with the taxonomy tags above${prompts.customized?.userTemplate ? ' (saved in profile)' : ''}:`));
-        body.append(mk('pre', 'prompt', prompts.userTemplate));
-        const editNote = mk('div', 'tp-note');
-        editNote.append('Both the prompts and the taxonomy are editable in ');
-        const link = mk('a', null, 'Enrichment profiles');
-        link.href = el('profileEdit').href;
-        link.style.color = 'var(--p-accent)';
-        editNote.append(link, ' — saved edits apply to future runs. How the pieces fit together is explained in ');
-        const docsLink = mk('a', null, 'the enrichment guide');
-        docsLink.href = 'https://github.com/pictaria-ai/pictaria-server/blob/main/docs/ENRICH.md';
-        docsLink.target = '_blank';
-        docsLink.rel = 'noopener';
-        docsLink.style.color = 'var(--p-accent)';
-        editNote.append(docsLink, '.');
-        body.append(editNote);
-      } catch (error) {
-        if (profileUI.id() !== profileId) return;
-        loadTaxonomyPanel.loaded = false;
-        body.replaceChildren();
-        body.append(Object.assign(document.createElement('div'), { className: 'tp-note', textContent: `Could not load: ${error.message}` }));
-      }
-    }
-
-    el('profileView').addEventListener('click', () => {
-      const panel = el('taxPanel');
-      panel.hidden = !panel.hidden;
-      panel.open = !panel.hidden;
-      el('profileView').setAttribute('aria-expanded', String(!panel.hidden));
-      el('profileView').textContent = panel.hidden ? 'View profile' : 'Hide profile';
-    });
-    el('taxPanel').addEventListener('toggle', () => {
-      if (el('taxPanel').open) void loadTaxonomyPanel();
-      else {
-        el('taxPanel').hidden = true;
-        el('profileView').setAttribute('aria-expanded', 'false');
-        el('profileView').textContent = 'View profile';
-      }
     });
 
     // Library size for the "remaining" arithmetic (from the Insights snapshot).

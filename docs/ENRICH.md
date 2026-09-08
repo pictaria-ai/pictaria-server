@@ -302,11 +302,10 @@ earlier keep/hide decisions so everything returns for a fresh review.
 
 ## Taxonomy, prompts, and the response schema
 
-Choose **View profile** on Enrich to open the **Taxonomy & prompt** preview.
-It shows exactly what the
-model is told: every approved tag by category, hard exclusions (photos with
-these are never auto-shown), confidence thresholds, the response fields the
-model must fill in, and the full prompt text.
+Choose **View and manage profiles** on Enrich to open the profile list in
+Settings. Each profile’s editor shows allowed tags by category, its taxonomy
+JSON, and prompt text. For the exact inputs used by an execution, including
+the output schema, open **View run settings** from Recent Runs.
 
 Every enrichment request has **two parts**, and only one of them is prose:
 
@@ -323,7 +322,7 @@ Every enrichment request has **two parts**, and only one of them is prose:
    the schema demands them, and its field names and descriptions act as the
    instruction.
 
-The schema's fields (also listed with their uses on the Enrich page):
+The schema's fields and their uses:
 
 | Field | What it feeds |
 | --- | --- |
@@ -385,9 +384,9 @@ Unsaved edits are marked, and cancelling or leaving asks before discarding
 them. Saving does not start enrichment. **Go to Enrich** appears for the saved
 profile; choose it to prepare a run with that profile selected.
 
-On Enrich, use the profile picker to choose a saved setup, **View profile**
-to inspect its taxonomy and prompts, or **Edit profile** to open that exact
-profile in Settings. **Go to Enrich** keeps the selected profile. Creation,
+On Enrich, use the profile picker to choose a saved setup and **View and
+manage profiles** to open the profile list in Settings. From a saved profile’s
+editor, **Go to Enrich** selects that profile for manual runs. Creation,
 validation, default selection, archiving, and restoration live in Settings.
 
 Profiles contain prompts and taxonomy only. Provider/model connections,
@@ -422,7 +421,7 @@ attempt leaves the previous success active. Existing writeback rules still
 protect descriptions edited by humans. Earlier processing metadata and
 configuration attribution remain; superseded normalized outputs are not
 retained as a parallel profile-results library. Profile/revision attribution
-appears in run history, the saved Config viewer, and the Curate caption
+appears in run history, the saved run settings viewer, and the Curate caption
 lightbox. Human decisions remain authoritative.
 
 **Curate policy remains shared and live**, under Settings → Enrich → Live
@@ -565,9 +564,14 @@ in the standard SQLite backup and restore.
 
 ## Run history
 
-Each modern run has a **Config** button with a short identifier. It opens
+Each modern run in Recent Runs has a **View run settings** button. It opens
 that execution’s saved prompts, effective user prompt, output schema,
-taxonomy, provider settings, and processing options. These details are read
+taxonomy, provider settings, and processing options. The Status card uses
+**View run settings** during execution and **View last run settings** afterward,
+for the latest run in the current server session. After a restart, use Recent
+Runs for historical settings. The viewer leads with profile/revision and
+provider/model; full configuration and inference IDs are available under
+collapsed **Technical identifiers**. These details are read
 on demand through the authenticated
 `GET /api/enrich/configurations/:id` endpoint; snapshots are bounded to 16 MiB,
 and ordinary run/status responses carry identifiers only. API keys and Immich

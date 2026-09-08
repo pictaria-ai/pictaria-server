@@ -8,8 +8,8 @@ All notable changes to Pictaria Server are documented here. This project follows
 ### Added
 
 - Named Enrich profiles: create from built-in, duplicate, edit and validate
-  in Settings → Enrichment profiles. Enrich keeps a profile picker, an
-  on-demand View profile preview, and a direct Edit profile link. Settings
+  in Settings → Enrichment profiles. Enrich keeps a profile picker and a
+  View and manage profiles link to the Settings profile list. Settings
   groups profiles into a list with a Default badge and focused editors,
   readable tag summaries, contextual help, and protection for unsaved edits.
   Save reusable prompts/taxonomy, choose a default, and archive/restore. Queue items pin a
@@ -20,8 +20,9 @@ All notable changes to Pictaria Server are documented here. This project follows
 - Queued runs have an independent **Only unenriched** option, allowing a new
   profile pass without reopening existing human Curate decisions.
 - Enrich runs and per-photo results now reference saved, deduplicated
-  configurations. A **Config** button shows the prompts, taxonomy, and
-  non-secret settings used by each modern run. Failed-photo retries record
+  configurations. A **View run settings** button shows the prompts, taxonomy, and
+  non-secret settings used by each modern run. The Status card distinguishes
+  current and last-run settings; technical identifiers stay collapsed in the viewer. Failed-photo retries record
   their source run and use settings at retry start.
 
 ### Fixed

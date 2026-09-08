@@ -7,11 +7,13 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { bootServer, findChrome, launchChrome, startFakeImmich } from './harness.mjs';
 
-test('Settings manages profiles; Enrich previews, preserves selection, pins queue revisions, and runs without losing history', { timeout: 60000 }, async t => {
+test('Settings manages profiles; Enrich links to profiles and saved run settings, preserves selection, pins queue revisions, and runs without losing history', { timeout: 60000 }, async t => {
   if (!findChrome()) return t.skip('Chrome required');
   const dir = mkdtempSync(join(tmpdir(), 'pictaria-profile-browser-'));
-  let server, browser, immich, model;
+  let server, browser, immich, model, finishModelRequest, signalModelRequest;
+  const modelRequestStarted = new Promise(resolve => { signalModelRequest = resolve; });
   t.after(async () => {
+    finishModelRequest?.();
     await Promise.allSettled([browser?.stop(), server?.stop(), immich?.stop()]);
     if (model) await new Promise(resolve => model.close(resolve));
     rmSync(dir, { recursive: true, force: true });
@@ -21,8 +23,12 @@ test('Settings manages profiles; Enrich previews, preserves selection, pins queu
   immich = await startFakeImmich({ assets: [asset], serveAssetDetails: true });
   model = createServer((request, response) => {
     request.resume(); request.on('end', () => {
-      response.writeHead(200, { 'Content-Type': 'application/json' });
-      response.end(JSON.stringify({ choices: [{ message: { content: JSON.stringify(sampleOutput()) } }] }));
+      finishModelRequest = () => {
+        response.writeHead(200, { 'Content-Type': 'application/json' });
+        response.end(JSON.stringify({ choices: [{ message: { content: JSON.stringify(sampleOutput()) } }] }));
+        finishModelRequest = null;
+      };
+      signalModelRequest();
     });
   });
   await new Promise(resolve => model.listen(0, '127.0.0.1', resolve));
@@ -41,14 +47,12 @@ test('Settings manages profiles; Enrich previews, preserves selection, pins queu
   const fill = (id, value) => page.evaluate(`document.getElementById(${JSON.stringify(id)}).value = ${JSON.stringify(value)}; document.getElementById(${JSON.stringify(id)}).dispatchEvent(new Event("input", {bubbles:true}))`);
   const follow = async id => page.navigate(await page.evaluate(`document.getElementById(${JSON.stringify(id)}).href`));
   assert.equal(await page.evaluate('document.querySelector("#profileEditor, #profileNew, #profileArchive")'), null);
-  assert.equal(await page.evaluate('document.getElementById("taxPanel").hidden'), true);
-  await click('profileView');
-  await page.waitFor('!document.getElementById("taxPanel").hidden && document.querySelector("#taxBody pre")');
-  assert.equal(await page.evaluate('document.getElementById("profileView").getAttribute("aria-expanded")'), 'true');
-  await click('profileView');
-  assert.equal(await page.evaluate('document.getElementById("taxPanel").hidden'), true);
-  await follow('profileEdit');
-  await page.waitFor('document.getElementById("sec-enrichment-profiles")?.open && !document.getElementById("profileEditor").hidden');
+  assert.equal(await page.evaluate('document.querySelector("#taxPanel, #profileView, #profileEdit")'), null);
+  assert.equal(await page.evaluate('document.getElementById("profileManage").textContent'), 'View and manage profiles');
+  assert.equal(await page.evaluate('document.getElementById("viewConfigurationBtn").hidden'), true);
+  await follow('profileManage');
+  await page.waitFor('document.getElementById("sec-enrichment-profiles")?.open && document.querySelector("#profileList .profile-row")');
+  assert.equal(await page.evaluate('document.getElementById("profileEditor").hidden'), true);
   const backToList = async () => {
     await click('profileBack');
     await page.waitFor('!document.getElementById("profileLibrary").hidden && !document.getElementById("profileListControls").disabled');
@@ -56,7 +60,9 @@ test('Settings manages profiles; Enrich previews, preserves selection, pins queu
   const rowAction = async (action, id) => {
     await page.evaluate(`(() => { const button = document.querySelector('[data-action="${action}"][data-profile-id="${id}"]'); const menu = button.closest('.profile-menu'); if (menu) menu.open = true; button.click(); })()`);
   };
-  const initialId = await page.evaluate('new URL(document.getElementById("profileReturn").href).searchParams.get("profile")');
+  const initialId = await page.evaluate('document.querySelector("#profileList .profile-row").dataset.profileId');
+  await rowAction('edit', initialId);
+  await page.waitFor('!document.getElementById("profileEditor").hidden && !document.getElementById("profileEditorControls").disabled');
   assert.equal(await page.evaluate('document.getElementById("profileLibrary").hidden'), true);
   assert.equal(await page.evaluate('document.getElementById("profileTaxonomyDetails").open'), false);
   assert.match(await page.evaluate('document.getElementById("profileTaxonomySummary").textContent'), /tags in .* categories/);
@@ -102,19 +108,44 @@ test('Settings manages profiles; Enrich previews, preserves selection, pins queu
   await follow('profileReturn');
   await page.waitFor('document.querySelector("#queueList .queue-profile")');
   assert.equal(await page.evaluate('document.getElementById("enrichProfile").value'), profileId);
-  await click('profileView');
-  await page.waitFor('document.getElementById("taxBody").textContent.includes("New revision system prompt")');
   assert.match(await page.evaluate('document.getElementById("queueList").textContent'), /Travel <test> · r1/);
   await page.evaluate('document.querySelector("#queueList .queue-profile").click()');
   await page.waitFor('document.getElementById("queueList").textContent.includes("Travel <test> · r2")');
   // Real browser → HTTP → Immich/provider adapters → SQLite run.
   await page.evaluate('document.querySelector("#queueList .p-btn.accent").click()');
+  await modelRequestStarted;
+  await page.waitFor('document.getElementById("viewConfigurationBtn").textContent === "View run settings" && !document.getElementById("viewConfigurationBtn").hidden');
+  await click('viewConfigurationBtn');
+  await page.waitFor('!document.getElementById("logPopup").hidden');
+  assert.equal(await page.evaluate('document.getElementById("logPopupTitle").textContent'), 'Current run settings');
+  assert.match(await page.evaluate('document.getElementById("logPopupMeta").textContent'), /Travel <test> · r2/);
+  assert.match(await page.evaluate('document.getElementById("logPopupBody").textContent'), /New revision system prompt/);
+  assert.equal(await page.evaluate('document.getElementById("runSettingsTechnical").open'), false);
+  assert.match(await page.evaluate('document.getElementById("runSettingsIdentifiers").textContent'), /Configuration: [a-f0-9]{64}/);
+  assert.doesNotMatch(await page.evaluate('document.getElementById("logPopupBody").textContent'), /Configuration: [a-f0-9]{64}/);
+  await click('logPopupClose');
+  await click('viewLogBtn');
+  assert.equal(await page.evaluate('document.getElementById("runSettingsTechnical").hidden'), true);
+  await click('logPopupClose');
+  finishModelRequest();
   await page.waitFor('document.querySelector("#runsList .run-configuration")');
   assert.match(await page.evaluate('document.getElementById("runsList").textContent'), /Travel <test> · r2/);
   const runs = await page.evaluate("fetch('/api/enrich/runs').then(r=>r.json())");
   assert.equal(runs.runs[0].status, 'finished');
   assert.equal(runs.runs[0].counters.succeeded, 1);
-  await follow('profileEdit');
+  await page.waitFor('document.getElementById("viewConfigurationBtn").textContent === "View last run settings"');
+  await click('viewConfigurationBtn'); await page.waitFor('!document.getElementById("logPopup").hidden');
+  assert.equal(await page.evaluate('document.getElementById("logPopupTitle").textContent'), 'Last run settings');
+  await click('logPopupClose');
+  assert.equal(await page.evaluate('document.querySelector("#runsList .run-configuration").textContent'), 'View run settings');
+  await page.evaluate('document.querySelector("#runsList .run-configuration").click()');
+  await page.waitFor('!document.getElementById("logPopup").hidden');
+  assert.equal(await page.evaluate('document.getElementById("logPopupTitle").textContent'), 'Run settings');
+  await click('logPopupClose');
+  await follow('profileManage');
+  await page.waitFor('document.querySelector("#profileList .profile-row")');
+  assert.equal(await page.evaluate('document.getElementById("profileEditor").hidden'), true);
+  await rowAction('edit', profileId);
   await page.waitFor('document.getElementById("profileSystem")?.value === "New revision system prompt"');
   assert.equal(await page.evaluate('new URL(location.href).searchParams.get("profile")'), profileId);
   assert.match(await page.evaluate('document.getElementById("profileEditorTitle").textContent'), /Edit Travel <test>/);
