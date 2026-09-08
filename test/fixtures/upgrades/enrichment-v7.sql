@@ -1,3 +1,6 @@
+-- Frozen released v1.1.0 schema (PRAGMA user_version = 7).
+-- Keep unchanged: this fixture tests upgrades from the pre-snapshot format.
+
 CREATE TABLE IF NOT EXISTS assets (
   asset_id TEXT PRIMARY KEY,
   original_path TEXT,
@@ -25,15 +28,6 @@ CREATE TABLE IF NOT EXISTS assets (
   last_seen_at TEXT NOT NULL
 );
 
--- Deduplicated, non-secret Enrich inputs. Kept as long as any processing
--- record or job summary refers to them; job-summary pruning never cascades.
-CREATE TABLE IF NOT EXISTS enrich_configurations (
-  id TEXT PRIMARY KEY,
-  inference_id TEXT NOT NULL,
-  snapshot_json TEXT NOT NULL,
-  created_at TEXT NOT NULL
-);
-
 CREATE TABLE IF NOT EXISTS processing_runs (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   asset_id TEXT NOT NULL,
@@ -48,8 +42,6 @@ CREATE TABLE IF NOT EXISTS processing_runs (
   error TEXT,
   raw_output_json TEXT,
   normalized_output_json TEXT,
-  configuration_id TEXT REFERENCES enrich_configurations(id),
-  inference_id TEXT,
   FOREIGN KEY(asset_id) REFERENCES assets(asset_id)
 );
 
@@ -141,9 +133,6 @@ CREATE TABLE IF NOT EXISTS job_runs (
   prompt_version TEXT,
   taxonomy_version TEXT,
   inference_host_label TEXT,
-  configuration_id TEXT REFERENCES enrich_configurations(id),
-  inference_id TEXT,
-  retry_source_run_id INTEGER,
   targeted INTEGER,
   status TEXT NOT NULL,
   error TEXT,

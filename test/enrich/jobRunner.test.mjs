@@ -30,6 +30,7 @@ function makeRepo({ alreadyEnriched = true } = {}) {
     runs,
     processingRuns,
     reviewListCalls,
+    saveRunConfiguration() {},
     upsertAsset() {},
     hasAnySuccessfulRun: () => alreadyEnriched,
     hasSuccessfulRun: () => false,
@@ -366,8 +367,12 @@ test('needsWorkFilter resolves the run key start() would use and delegates to th
   assert.equal(filter(['a1', 'a2']), verdict); // classification passes through intact
   assert.equal(delegated.length, 1);
   assert.deepEqual(delegated[0].assetIds, ['a1', 'a2']);
+  const { configurationId, inferenceId } = delegated[0].options.runKey;
+  assert.match(configurationId, /^[a-f0-9]{64}$/);
+  assert.match(inferenceId, /^[a-f0-9]{64}$/);
   assert.deepEqual(delegated[0].options, {
     runKey: {
+      configurationId, inferenceId,
       provider: 'local_lmstudio',
       model: 'test-model',
       promptVersion: 'v1',

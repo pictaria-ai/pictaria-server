@@ -30,6 +30,29 @@ import { sanitizeDiagnostic, structuredUpstreamDiagnostic } from '../diagnostics
 // budget before emitting the JSON, so keep plenty of headroom.
 const OPENAI_MAX_OUTPUT_TOKENS = 8192;
 
+// Effective Enrich settings, not the raw Settings object. Keep this allowlist
+// alongside the adapters; bump adapterContractVersion when a fixed request
+// option or prompt/schema transformation changes. Credentials never belong
+// in an inference identity or its inspectable snapshot.
+export function enrichmentProviderConfiguration(provider) {
+  return {
+    adapterContractVersion: 1,
+    name: provider.providerName,
+    model: provider.modelName,
+    endpoint: provider.baseUrl
+      ? new URL(normalizeHttpUrl(provider.baseUrl)).href.replace(/\/+$/, '')
+      : provider.providerName === 'cloud_openai' ? 'https://api.openai.com/v1' : null,
+    temperature: 'temperature' in provider ? provider.temperature : provider.providerName === 'cloud_openai' ? null : 0,
+    maxTokens: provider.providerName === 'cloud_openai' ? OPENAI_MAX_OUTPUT_TOKENS : provider.maxTokens ?? null,
+    retryValidationOnce: provider.providerName?.startsWith('local_') || provider.retryValidationOnce === true,
+    ...(provider.providerName === 'venice' ? {
+      includeVeniceSystemPrompt: false,
+      disableThinking: true,
+      stripThinkingResponse: true,
+    } : {}),
+  };
+}
+
 // Real schema/prose responses are far smaller. Keep enough room for provider
 // envelope metadata while refusing a runaway or misrouted endpoint before it
 // can become a large transient allocation.

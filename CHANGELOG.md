@@ -5,6 +5,37 @@ All notable changes to Pictaria Server are documented here. This project follows
 
 ## Unreleased
 
+### Added
+
+- Enrich runs and per-photo results now reference saved, deduplicated
+  configurations. A **Config** button shows the prompts, taxonomy, and
+  non-secret settings used by each modern run. Failed-photo retries record
+  their source run and use settings at retry start.
+
+### Fixed
+
+- Enrich captures its configuration before photo selection and keeps it fixed
+  through inference, retries, validation, tag mapping, and run history. A
+  settings edit can no longer mix taxonomies or prompts within one execution.
+- With **Only unenriched** off, skip checks and failure limits now use actual
+  inference inputs. Custom prompt/vocabulary edits work without new version
+  labels; label-only and review-policy edits do not force AI calls. Taxonomy
+  edits no longer require bumping their display version.
+- An Immich connection change cancels active enrichment and invalidates queue
+  resolution; an execution cannot switch libraries midway through its work.
+
+### Upgrade notes
+
+- Enrichment schema 8 and persistent-state contract 9 add configuration
+  snapshots without backfilling unknown historical inputs or replaying photos.
+  Legacy successes still skip with **Only unenriched** on; with it off they
+  cannot prove an input match and may be reprocessed. Startup creates the
+  normal pre-migration recovery point; rollback restores that snapshot.
+- Legacy failures no longer count toward the current configuration's failure
+  limit. Previously stuck photos leave the **Stuck photos** strip and can get
+  two fresh attempts (the default limit) on subsequent sweeps, using additional
+  provider calls.
+
 ## 1.1.0 - 2026-09-03
 
 ### Added

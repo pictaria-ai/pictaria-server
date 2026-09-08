@@ -28,8 +28,8 @@ For each photo, one *processing run*:
    taxonomy — unknown tags are rejected, and operator-hosted models get one
    automatic retry with stricter instructions.
 4. Map the validated output to `ai/*` tag decisions and store the run
-   (raw + normalized output, provider, model, prompt and taxonomy versions)
-   locally.
+   (latest normalized output, provider/model, and a reference to the saved
+   configuration) locally. Raw provider envelopes are not retained.
 
 Enrichment runs are always dry runs against Immich. Tags reach Immich only
 through Curate decisions, via a durable background sync worker that verifies
@@ -219,15 +219,31 @@ light even on remote links.
   than retrying automatically; after correcting the problem, start a manual
   run if you do not want to wait.
 
-**"Enriched" is per setup**: a photo counts as enriched for a specific
-combination of provider + model + prompt version + taxonomy version.
-Unchecking *Only unenriched* therefore means "re-enrich whatever my
-current setup hasn't processed yet" — photos enriched by an older model
-become eligible again, but exact-duplicate re-runs are always skipped
-(runs report these as "skipped N already enriched"). Arming a new model,
-or customizing the prompt (which stamps runs with the prompt version plus
-`-custom` — `v2-custom` today), is what makes re-enrichment happen; the
-latest successful run per photo is what Curate and the caption data use.
+**“Enriched” is per effective inference configuration.** With *Only
+unenriched* on, any previous success covers a photo. With it off, Pictaria
+skips a photo only when a previous success used the same effective prompts,
+provider/model and generation settings, approved vocabulary/output schema,
+and image rendition policy. Editing a custom prompt works even if its
+`v2-custom` label stays the same. Renaming a version or inference host,
+reformatting taxonomy JSON, or editing review policy does not require new AI
+calls. An identical setup still skips; this adds no force-rerun mode.
+
+Each execution captures its configuration **before selecting photos**.
+Prompts, taxonomy, provider settings, image source, and processing options stay
+fixed through photo selection, automatic retries, tag mapping, and history.
+Settings edits apply to subsequent executions, including the next pending
+queue item when it starts. Saving an edit never starts work. Cancel and
+operational pause controls remain live; changing the Immich connection cancels
+an active run and invalidates an in-progress queue resolution, keeping the
+queue item available to start again.
+
+Results from before configuration snapshots were introduced have **unknown
+configuration identity**. They still count as enriched with *Only unenriched*
+on. With it off, their inputs cannot be proven equivalent, so they are
+eligible for a later run. Upgrading neither invents their inputs nor replays
+photos. The latest successful result per photo remains active for Curate,
+captions, and search; existing human decisions remain authoritative.
+
 - **Targeted runs** — in Insights, any photo group (a person, a place, a
   year, a day, a camera…) has *Send to Enrich*. The slice waits in the
   Enrich page **queue** until you run it; the server resolves the filters to
@@ -339,12 +355,12 @@ your approved tags on every request.
   code: categories, manual tags, hard exclusions, thresholds, and the review
   bucket policy. Editable in Settings → Enrich without touching files:
   "Load current taxonomy to edit" starts from what is in force, and saving
-  applies immediately. Edits must bump the `version` string — a content
-  change that keeps the old version is rejected, because run history and
-  the skip-already-enriched logic are keyed on it. Bumping the version makes
-  every photo eligible for re-enrichment under the new taxonomy;
-  already-enriched photos keep their old tags until re-run, and threshold
-  changes re-bucket Curate immediately (decisions are never touched).
+  applies to subsequent Enrich executions. The `version` string is a
+  readable label; content edits can keep it unchanged. Approved-vocabulary
+  changes affect inference identity. Review rules apply to Curate at read
+  time, while tag-mapping thresholds govern tags written by new executions.
+  Policy edits do not force AI calls or recalculate already-stored tags.
+  Existing human decisions are never changed by a taxonomy edit.
   Clearing the override returns to the shipped file. Overrides live in the
   settings store on the data volume, so they survive image updates.
 - **Prompts** — `prompts/` (`PROMPTS_DIR`/`PROMPT_VERSION`). Both the system
@@ -352,8 +368,8 @@ your approved tags on every request.
   Enrich without touching files ("Load built-in text to edit" starts you
   from the shipped prompt). The per-photo override must contain
   `{approved_tags}`. Runs with an override record the prompt version plus
-  `-custom` (`v2-custom` on the current prompt), so every result traces
-  back to the exact prompt that produced it.
+  `-custom` (`v2-custom` on the current prompt) as a readable label. The saved
+  configuration stores the actual text and identifies content changes.
 
 ## When things go wrong
 
@@ -411,9 +427,13 @@ your approved tags on every request.
   Failures the provider pins on the request itself — most commonly a
   response the schema rejects (an unparseable answer, too many tags) —
   count against the photo, and after **two** failed runs it is skipped
-  with "reached 2 failed run(s)". The allowance is per *setup* (provider +
-  model + prompt version + taxonomy version): a photo one model can't
-  handle gets a fresh chance under any other model, prompt, or taxonomy.
+  with "reached 2 failed run(s)". The allowance is per effective inference
+  configuration: a photo gets fresh attempts when model inputs change,
+  including a custom prompt edit under an unchanged version label. Legacy
+  failures with unknown inputs do not count against a new configuration.
+  After upgrading, previously stuck legacy photos therefore leave the
+  **Stuck photos** strip and can receive two fresh attempts on subsequent
+  sweeps at the default limit, using additional provider calls.
   To re-attempt them under the *same* setup, the Enrich page shows a
   **Stuck photos** strip whenever any exist for the selected provider —
   **Retry** runs exactly those photos with the failure cap off for that
@@ -460,6 +480,29 @@ your approved tags on every request.
   Either way, running the item again continues where it left off.
 
 ## Run history
+
+Each modern run has a **Config** button with a short identifier. It opens
+that execution’s saved prompts, effective user prompt, output schema,
+taxonomy, provider settings, and processing options. These details are read
+on demand through the authenticated
+`GET /api/enrich/configurations/:id` endpoint; snapshots are bounded to 16 MiB,
+and ordinary run/status responses carry identifiers only. API keys and Immich
+credentials are excluded. Custom prompts and taxonomy are user-authored data
+stored in the local database and included in backups.
+
+Snapshots are deduplicated and referenced by job summaries and per-photo
+processing records. Pruning the newest-100 job summary history never deletes a
+snapshot referenced by a photo’s history. The per-photo caption endpoint also
+returns its latest successful configuration ID, so those inputs remain
+inspectable after their job summary is pruned. Two runs can have different complete
+configuration IDs but the same inference ID—for example, after changing only
+review thresholds or labels.
+
+**Re-run failed photos** keeps the original provider and uses settings at the
+retry’s start, with a new snapshot and a link to its source run. This lets a
+corrected prompt fix earlier failures. Automatic retries within an execution
+use its frozen configuration. Replaying historical settings exactly and named
+profile selection are separate future features.
 
 The Enrich page lists recent runs: what ran (slice title or library sweep),
 when, provider + model, taxonomy + prompt versions, counters

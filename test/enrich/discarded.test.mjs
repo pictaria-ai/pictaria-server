@@ -8,7 +8,9 @@ import { Readable } from 'node:stream';
 import { fileURLToPath } from 'node:url';
 
 import { Repository } from '../../src/enrich/repository.mjs';
-import { runBatch } from '../../src/enrich/runner.mjs';
+import { runBatch, loadPrompts } from '../../src/enrich/runner.mjs';
+import { captureRunConfiguration } from '../../src/enrich/runConfiguration.mjs';
+import { createProvider } from '../../src/enrich/providers.mjs';
 import { EnrichJobRunner } from '../../src/enrich/jobRunner.mjs';
 import { createEnrichRoutes } from '../../src/routes/enrich.mjs';
 import { loadV1Taxonomy, sampleOutput } from './helpers.mjs';
@@ -433,7 +435,12 @@ test('discardFailureLimited resolves the stuck set itself and inherits the no-su
     });
     // Two stuck under the active run key (venice/m1/v2/<taxonomy>), one
     // covered since — the covered one must survive Discard all untouched.
-    const key = { provider: 'venice', model: 'm1', promptVersion: 'v2', taxonomyVersion: taxonomy.version };
+    const configuration = captureRunConfiguration({
+      provider: createProvider('venice', runner.config.providers.venice), taxonomy,
+      ...loadPrompts(runner.config.promptsDir, 'v2'), promptVersion: 'v2',
+    });
+    repo.saveRunConfiguration(configuration);
+    const key = configuration.runKey;
     for (const id of ['da-1', 'da-2', 'da-covered']) {
       repo.upsertAsset({ id });
       repo.recordProcessingRun({ assetId: id, ...key, status: 'failed', error: 'x' });

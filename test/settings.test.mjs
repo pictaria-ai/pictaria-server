@@ -1116,32 +1116,16 @@ test('taxonomy override: rejects invalid JSON and structural errors', () => {
   });
 });
 
-test('taxonomy override: a content change must bump the version', () => {
+test('taxonomy content edits can keep their display version, including repeated edits', () => {
   withTaxonomyStore((store, config) => {
     const edited = structuredClone(BUILTIN_TAXONOMY);
     edited.categories.scene.push('ai/scene/desert');
-
-    // Same version + changed content vs the built-in file: rejected.
-    assert.throws(() => store.update({ enrich: { taxonomyJson: JSON.stringify(edited) } }), /version/);
-
-    // Bumped version: accepted and applied to live config.
-    edited.version = 'v1-custom1';
     store.update({ enrich: { taxonomyJson: JSON.stringify(edited) } });
     assert.ok(config.taxonomyOverrideJson.includes('ai/scene/desert'));
-
-    // Second edit against the previous override needs its own bump too.
-    const edited2 = structuredClone(edited);
-    edited2.categories.scene.push('ai/scene/forest');
-    assert.throws(() => store.update({ enrich: { taxonomyJson: JSON.stringify(edited2) } }), /version/);
-    edited2.version = 'v1-custom2';
-    store.update({ enrich: { taxonomyJson: JSON.stringify(edited2) } });
-    assert.ok(config.taxonomyOverrideJson.includes('v1-custom2'));
-
-    // Re-saving identical content (reformatted, keys reordered) is fine.
-    const reordered = { thresholds: edited2.thresholds, version: edited2.version, categories: edited2.categories, hard_exclusion_tags: [] };
-    store.update({ enrich: { taxonomyJson: JSON.stringify(reordered, null, 2) } });
-
-    // Clearing returns to the built-in taxonomy.
+    edited.categories.scene.push('ai/scene/forest');
+    store.update({ enrich: { taxonomyJson: JSON.stringify(edited, null, 2) } });
+    assert.equal(JSON.parse(config.taxonomyOverrideJson).version, BUILTIN_TAXONOMY.version);
+    assert.ok(config.taxonomyOverrideJson.includes('ai/scene/forest'));
     store.update({ enrich: { taxonomyJson: null } });
     assert.equal(config.taxonomyOverrideJson, '');
   });

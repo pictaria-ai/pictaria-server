@@ -185,6 +185,7 @@
         <span id="enrichDot" class="p-dot"></span>
         <strong>Status</strong>
         <div class="p-grow"></div>
+        <button id="viewConfigurationBtn" class="p-btn quiet" hidden>Configuration</button>
         <button id="viewLogBtn" class="p-btn quiet">Log</button>
         <button id="enrichCancel" class="p-btn danger" hidden title="Stops the active model request. An interrupted photo retries next time, and a queued job stays in the queue.">Cancel</button>
       </div>
@@ -245,7 +246,7 @@
       <div class="head">
         <strong id="logPopupTitle"></strong>
         <div class="p-grow"></div>
-        <button id="logPopupCopy" class="p-btn quiet" title="Copy the full log to the clipboard">Copy</button>
+        <button id="logPopupCopy" class="p-btn quiet" title="Copy contents to the clipboard">Copy</button>
         <button id="logPopupClose" class="p-btn quiet">Close</button>
       </div>
       <div id="logPopupMeta" class="p-muted" style="font-size: 12px; padding: 0 14px 8px"></div>
@@ -468,6 +469,9 @@
           : '';
         el('enrichStatusLine2').textContent = statusLine2;
         el('enrichStatusLine2').hidden = !statusLine2;
+        el('viewConfigurationBtn').hidden = !status.configurationId;
+        el('viewConfigurationBtn').textContent = status.configurationId
+          ? `Config ${status.configurationId.slice(0, 8)}` : 'Configuration';
         const goal = status.options?.maxAnalyzed || status.options?.targeted || status.progress?.total || 0;
         const done = status.options?.maxAnalyzed ? analyzed : status.progress?.position || 0;
         el('enrichProgress').hidden = !status.running || goal === 0;
@@ -1082,6 +1086,14 @@
           retryBtn.textContent = `Re-run ${run.retryableFailures.toLocaleString()} failed photo${run.retryableFailures === 1 ? '' : 's'}`;
           retryBtn.addEventListener('click', () => void retryRunFailures(run, retryBtn));
         }
+        if (run.configurationId) {
+          const configBtn = document.createElement('button');
+          configBtn.className = 'p-btn quiet run-configuration';
+          configBtn.textContent = `Config ${run.configurationId.slice(0, 8)}`;
+          configBtn.title = 'Inspect the saved prompts, taxonomy, and settings used by this run';
+          configBtn.addEventListener('click', () => void openRunConfiguration(run.configurationId));
+          top.append(configBtn);
+        }
         if (run.hasLog) {
           const logBtn = document.createElement('button');
           logBtn.className = 'p-btn quiet';
@@ -1108,6 +1120,8 @@
           run.provider,
           run.model,
           run.inferenceHostLabel ? `host: ${run.inferenceHostLabel}` : null,
+          run.configurationId ? null : 'Configuration unknown (legacy run)',
+          run.retrySourceRunId ? `Retry of run #${run.retrySourceRunId} with settings at retry start` : null,
           run.status === 'finished' ? null : run.status + (run.error ? `: ${String(run.error).slice(0, 80)}` : ''),
           counts,
         ].filter(Boolean).join(' · ');
@@ -1201,6 +1215,41 @@
         toast(error.message, true);
       } finally {
         syncRunButtons(state.lastStatus);
+      }
+    }
+
+    el('viewConfigurationBtn').addEventListener('click', () => {
+      const id = state.lastStatus?.configurationId;
+      if (id) void openRunConfiguration(id);
+    });
+
+    async function openRunConfiguration(id) {
+      try {
+        const entry = await api(`/api/enrich/configurations/${encodeURIComponent(id)}`);
+        const saved = entry.snapshot;
+        state.liveLog = false;
+        el('logPopupTitle').textContent = `Configuration ${entry.id.slice(0, 8)}`;
+        el('logPopupMeta').textContent = [
+          saved.inference.provider.name, saved.inference.provider.model,
+          saved.inference.image.source, `Inference ${entry.inferenceId.slice(0, 8)}`,
+        ].join(' · ');
+        el('logPopupBody').textContent = [
+          'Saved inputs for this execution. Later Settings edits do not change this record.',
+          'Curate continues to apply current review policy. Re-run failed photos uses settings at retry start.',
+          `Configuration: ${entry.id}\nInference: ${entry.inferenceId}`,
+          `System prompt\n${saved.inference.systemPrompt}`,
+          `Effective user prompt\n${saved.inference.userPrompt}`,
+          `User template\n${saved.userTemplate}`,
+          `Provider settings\n${JSON.stringify(saved.inference.provider, null, 2)}`,
+          `Processing settings\n${JSON.stringify(saved.processing, null, 2)}`,
+          `Labels\n${JSON.stringify(saved.labels, null, 2)}`,
+          `Taxonomy at execution start\n${JSON.stringify(saved.taxonomy, null, 2)}`,
+          `Output schema\n${JSON.stringify(saved.inference.jsonSchema, null, 2)}`,
+        ].join('\n\n');
+        el('logPopupBody').scrollTop = 0;
+        el('logPopup').hidden = false;
+      } catch (error) {
+        toast(error.message, true);
       }
     }
 

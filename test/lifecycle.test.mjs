@@ -240,6 +240,7 @@ function runnerFixture({ getAsset }) {
   const runs = [];
   const repo = {
     runs,
+    saveRunConfiguration() {},
     upsertAsset() {},
     hasAnySuccessfulRun: () => true,
     hasSuccessfulRun: () => false,

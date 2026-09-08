@@ -1,6 +1,7 @@
 import { awaitDrain } from '../lifecycle.mjs';
 import { runBatch, loadPrompts, emptyCounters } from './runner.mjs';
 import { createProvider } from './providers.mjs';
+import { captureClient, captureRunConfiguration } from './runConfiguration.mjs';
 import { configuredSecrets, sanitizeDiagnostic } from '../diagnostics.mjs';
 
 // Single-flight enrichment job runner for the server: one run at a time,
@@ -22,6 +23,7 @@ export class EnrichJobRunner {
     // single-flight slot across that await so schedulers and other callers
     // cannot claim the model in the gap.
     this.reserved = false;
+    this.sourceGeneration = 0;
     // One-way shutdown latch: a request landing during the drain window
     // must not start a run nobody will drain or record.
     this.stopped = false;
@@ -44,23 +46,35 @@ export class EnrichJobRunner {
     return this.state.running || this.reserved;
   }
 
-  reserve() {
+  reserve(options = {}) {
     if (this.stopped) {
       throw new Error('The server is shutting down.');
     }
     if (this.isBusy()) {
       throw new Error('An enrichment run is already in progress.');
     }
+    const execution = this.#prepare(options);
+    const generation = this.sourceGeneration;
     this.reserved = true;
     let active = true;
+    const assertActive = () => {
+      if (!active || !this.reserved || this.stopped || generation !== this.sourceGeneration) {
+        throw new Error('The enrichment reservation ended or the Immich connection changed; start the job again.');
+      }
+    };
     return {
+      immich: execution.immich,
+      assertActive,
+      needsWorkFilter: () => this.#filterFor(execution),
+      recordCoveredResolution: (result) => {
+        assertActive();
+        return this.#recordCoveredResolution(result, execution);
+      },
       start: (options = {}) => {
-        if (!active || !this.reserved) {
-          throw new Error('The enrichment reservation is no longer active.');
-        }
+        assertActive();
         active = false;
         this.reserved = false;
-        return this.start(options);
+        return this.#start(options, execution);
       },
       release: () => {
         if (!active) return false;
@@ -69,6 +83,14 @@ export class EnrichJobRunner {
         return true;
       },
     };
+  }
+
+  // Settings calls this before re-pointing the shared Immich clients. Active
+  // requests retain their old client; reservations cannot publish old-library
+  // selection results after the switch.
+  sourceChanged() {
+    this.sourceGeneration += 1;
+    this.cancel();
   }
 
   cancel() {
@@ -140,7 +162,10 @@ export class EnrichJobRunner {
       provider: this.state.provider,
       model: this.state.model,
       promptVersion: this.state.promptVersion,
-      taxonomyVersion: this.taxonomy.version,
+      taxonomyVersion: lifecycle.configuration.runKey.taxonomyVersion,
+      configurationId: lifecycle.configuration.id,
+      inferenceId: lifecycle.configuration.inferenceId,
+      retrySourceRunId: this.state.options.retrySourceRunId,
       inferenceHostLabel: this.state.inferenceHostLabel,
       targeted: this.state.options.targeted,
       status,
@@ -171,6 +196,48 @@ export class EnrichJobRunner {
       : this.config.promptVersion;
   }
 
+  #prepare(options = {}) {
+    const { providerName, provider } = this.#resolveProvider(options.provider);
+    const prompts = loadPrompts(this.config.promptsDir, this.config.promptVersion);
+    const overrides = this.config.promptOverrides ?? {};
+    if (overrides.systemPrompt) prompts.systemPrompt = overrides.systemPrompt;
+    if (overrides.userTemplate) prompts.userTemplate = overrides.userTemplate;
+    const fixedOptions = {
+      provider: providerName,
+      limit: clampInt(options.limit, 1, 100000, 100),
+      offset: clampInt(options.offset, 0, 10000000, 0),
+      maxAnalyzed: options.maxAnalyzed ? clampInt(options.maxAnalyzed, 1, 100000, null) : null,
+      imageSource: ['preview', 'thumbnail', 'original'].includes(options.imageSource)
+        ? options.imageSource : this.config.imageSource,
+      skipAnySuccessful: options.skipAnySuccessful !== false,
+      retryFailureLimited: Boolean(options.retryFailureLimited),
+      sendToCurate: options.sendToCurate !== false,
+      reopenDecided: Boolean(options.reopenDecided),
+    };
+    const configuration = captureRunConfiguration({
+      provider, taxonomy: this.taxonomy, ...prompts,
+      promptVersion: this.#promptVersion(),
+      imageSource: fixedOptions.imageSource,
+      inferenceHostLabel: this.config.inferenceHostLabel || null,
+      processing: {
+        ...fixedOptions,
+        maxFailuresPerAsset: fixedOptions.retryFailureLimited ? 0 : this.config.maxFailuresPerAsset,
+        listForReview: fixedOptions.sendToCurate,
+        captionWriteback: Boolean(this.config.captionWriteback),
+      },
+    });
+    return { provider, configuration, options: fixedOptions, immich: captureClient(this.immich) };
+  }
+
+  #filterFor(execution) {
+    const { configuration, options } = execution;
+    return (assetIds) => this.repo.assetIdsNeedingWork(assetIds, {
+      runKey: configuration.runKey,
+      skipAnySuccessful: options.skipAnySuccessful,
+      maxFailuresPerAsset: configuration.snapshot.processing.maxFailuresPerAsset,
+    });
+  }
+
   // Batch filter for skip-aware slice resolution: given asset ids, returns
   // { needy, successful, failureLimited } — the subset a run with these
   // options would actually analyze, plus the dropped ids classified so the
@@ -178,19 +245,8 @@ export class EnrichJobRunner {
   // failures honestly. Uses the same run key start() would resolve, so it
   // never drops a photo the run would process; the runner's own per-photo
   // checks stay as the race-safety second layer.
-  needsWorkFilter({ provider, skipAnySuccessful = true } = {}) {
-    const { providerName, provider: resolved } = this.#resolveProvider(provider);
-    const runKey = {
-      provider: providerName,
-      model: resolved.modelName,
-      promptVersion: this.#promptVersion(),
-      taxonomyVersion: this.taxonomy.version,
-    };
-    return (assetIds) => this.repo.assetIdsNeedingWork(assetIds, {
-      runKey,
-      skipAnySuccessful: skipAnySuccessful !== false,
-      maxFailuresPerAsset: this.config.maxFailuresPerAsset,
-    });
+  needsWorkFilter(options = {}) {
+    return this.#filterFor(this.#prepare(options));
   }
 
   // The library-wide stuck set for the Enrich page's retry affordance:
@@ -202,16 +258,12 @@ export class EnrichJobRunner {
   // model is the compare workflow (uncheck "Only unenriched"), not this
   // affordance's job.
   failureLimitedSummary({ provider } = {}) {
-    const { providerName, provider: resolved } = this.#resolveProvider(provider);
-    const runKey = {
-      provider: providerName,
-      model: resolved.modelName,
-      promptVersion: this.#promptVersion(),
-      taxonomyVersion: this.taxonomy.version,
-    };
+    const { configuration } = this.#prepare({ provider });
+    const runKey = configuration.runKey;
+    const providerName = runKey.provider;
     return {
       provider: providerName,
-      model: resolved.modelName,
+      model: runKey.model,
       maxFailuresPerAsset: this.config.maxFailuresPerAsset,
       // Cap matches start()'s assetIds cap so one retry can take the lot.
       ...this.repo.failureLimitedAssetIds({
@@ -228,13 +280,9 @@ export class EnrichJobRunner {
   // put each photo here. It is capped well below the retry cap; a popup past
   // 500 rows is a scrolling exercise, and truncation keeps the count honest.
   failureLimitedDetails({ provider } = {}) {
-    const { providerName, provider: resolved } = this.#resolveProvider(provider);
-    const runKey = {
-      provider: providerName,
-      model: resolved.modelName,
-      promptVersion: this.#promptVersion(),
-      taxonomyVersion: this.taxonomy.version,
-    };
+    const { configuration } = this.#prepare({ provider });
+    const runKey = configuration.runKey;
+    const providerName = runKey.provider;
     const summary = this.repo.failureLimitedAssetIds({
       runKey,
       maxFailuresPerAsset: this.config.maxFailuresPerAsset,
@@ -243,7 +291,7 @@ export class EnrichJobRunner {
     });
     return {
       provider: providerName,
-      model: resolved.modelName,
+      model: runKey.model,
       count: summary.count,
       truncated: summary.truncated,
       rows: this.repo.assetFailureDetails(summary.assetIds, { runKey }),
@@ -257,13 +305,9 @@ export class EnrichJobRunner {
   // 10,000 cap as retry; larger sets take a second click, and `truncated`
   // reports that limit.
   discardFailureLimited({ provider } = {}) {
-    const { providerName, provider: resolved } = this.#resolveProvider(provider);
-    const runKey = {
-      provider: providerName,
-      model: resolved.modelName,
-      promptVersion: this.#promptVersion(),
-      taxonomyVersion: this.taxonomy.version,
-    };
+    const { configuration } = this.#prepare({ provider });
+    const runKey = configuration.runKey;
+    const providerName = runKey.provider;
     const summary = this.repo.failureLimitedAssetIds({
       runKey,
       maxFailuresPerAsset: this.config.maxFailuresPerAsset,
@@ -272,7 +316,7 @@ export class EnrichJobRunner {
     });
     return {
       provider: providerName,
-      model: resolved.modelName,
+      model: runKey.model,
       count: summary.count,
       truncated: summary.truncated,
       ...this.repo.discardAssets(summary.assetIds),
@@ -284,16 +328,23 @@ export class EnrichJobRunner {
   // removal happens mid Run-all chain, after the HTTP response is gone.
   // Recorded like the zero-analysis run the pre-skip-aware code would have
   // produced: 0 analyzed, with the skip counters carrying the story.
-  recordCoveredResolution({ title, provider, covered = 0, failureLimited = 0, discarded = 0 }) {
-    const { providerName, provider: resolved } = this.#resolveProvider(provider);
+  recordCoveredResolution(result) {
+    return this.#recordCoveredResolution(result, this.#prepare({ provider: result.provider }));
+  }
+
+  #recordCoveredResolution({ title, covered = 0, failureLimited = 0, discarded = 0 }, { configuration }) {
+    const { runKey } = configuration;
+    this.repo.saveRunConfiguration(configuration);
     const now = new Date().toISOString();
     this.repo.recordJobRun({
       title: String(title || 'Photo slice'),
-      provider: providerName,
-      model: resolved.modelName,
-      promptVersion: this.#promptVersion(),
-      taxonomyVersion: this.taxonomy.version,
-      inferenceHostLabel: this.config.inferenceHostLabel,
+      provider: runKey.provider,
+      model: runKey.model,
+      promptVersion: runKey.promptVersion,
+      taxonomyVersion: runKey.taxonomyVersion,
+      configurationId: configuration.id,
+      inferenceId: configuration.inferenceId,
+      inferenceHostLabel: configuration.snapshot.labels.inferenceHostLabel,
       targeted: 0,
       status: 'finished',
       error: null,
@@ -321,12 +372,14 @@ export class EnrichJobRunner {
     if (this.isBusy()) {
       throw new Error('An enrichment run is already in progress.');
     }
-    const { providerName, provider } = this.#resolveProvider(options.provider);
-    const prompts = loadPrompts(this.config.promptsDir, this.config.promptVersion);
-    const overrides = this.config.promptOverrides ?? {};
-    if (overrides.systemPrompt) prompts.systemPrompt = overrides.systemPrompt;
-    if (overrides.userTemplate) prompts.userTemplate = overrides.userTemplate;
-    const promptVersion = this.#promptVersion();
+    return this.#start(options, this.#prepare(options));
+  }
+
+  #start(options, execution) {
+    if (this.stopped || this.isBusy()) throw new Error('An enrichment run cannot start while busy or shutting down.');
+    options = { ...options, ...execution.options };
+    const { provider, configuration } = execution;
+    const { provider: providerName, promptVersion } = configuration.runKey;
     // Targeted mode ("Send to Enrich"): analyze exactly these assets instead
     // of paging the library newest-first.
     const assetIds = Array.isArray(options.assetIds)
@@ -348,7 +401,9 @@ export class EnrichJobRunner {
       startedAt: new Date().toISOString(),
       provider: providerName,
       model: provider.modelName,
-      inferenceHostLabel: this.config.inferenceHostLabel || null,
+      inferenceHostLabel: configuration.snapshot.labels.inferenceHostLabel,
+      configurationId: configuration.id,
+      inferenceId: configuration.inferenceId,
       promptVersion,
       title: String(
         options.title || (assetIds ? (retryFailureLimited ? 'Retry failed photos' : 'Targeted run') : 'Library sweep'),
@@ -393,6 +448,7 @@ export class EnrichJobRunner {
     // later settles. Kept separate from UI state so queue completion cannot
     // accidentally reset it while the old promise unwinds.
     const lifecycle = {
+      configuration,
       interrupted: false,
       interruptedAt: null,
       terminalRecorded: false,
@@ -401,26 +457,28 @@ export class EnrichJobRunner {
     };
     this.runLifecycle = lifecycle;
     // Stored so stop() can drain the in-flight run; #run never rejects.
-    this.runPromise = this.#run(provider, prompts, assetIds, lifecycle);
+    this.runPromise = this.#run(execution, assetIds, lifecycle);
     return this.status();
   }
 
-  async #run(provider, prompts, assetIds, lifecycle) {
+  async #run(execution, assetIds, lifecycle) {
+    const { provider, configuration } = execution;
     let listed = 0;
     try {
       const { counters, listedForReview } = await runBatch({
-        immich: this.immich,
+        immich: execution.immich,
         repo: this.repo,
         provider,
-        taxonomy: this.taxonomy,
-        systemPrompt: prompts.systemPrompt,
-        userTemplate: prompts.userTemplate,
+        configuration,
+        taxonomy: configuration.taxonomy,
+        systemPrompt: configuration.systemPrompt,
+        userTemplate: configuration.userTemplate,
         assetIds,
         limit: this.state.options.limit,
         offset: this.state.options.offset,
         skipAnySuccessful: this.state.options.skipAnySuccessful,
         maxAnalyzed: this.state.options.maxAnalyzed,
-        maxFailuresPerAsset: this.state.options.retryFailureLimited ? 0 : this.config.maxFailuresPerAsset,
+        maxFailuresPerAsset: configuration.snapshot.processing.maxFailuresPerAsset,
         retryFailureLimited: this.state.options.retryFailureLimited,
         imageSource: this.state.options.imageSource,
         promptVersion: this.state.promptVersion,
@@ -429,7 +487,7 @@ export class EnrichJobRunner {
         listForReview: this.state.options.sendToCurate,
         // Read at run start; the background worker also checks the live
         // setting, so a mid-run toggle just pauses the queue, not the run.
-        captionWriteback: Boolean(this.config.captionWriteback),
+        captionWriteback: configuration.snapshot.processing.captionWriteback,
         shouldStop: () => this.state.cancelRequested,
         signal: lifecycle.providerAbortController.signal,
         log: (message) => this.#onProgress(message),

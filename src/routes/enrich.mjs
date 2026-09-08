@@ -114,7 +114,13 @@ export function createEnrichRoutes({ review, enrichRunner, taxonomy, repo, requi
     // Claim the shared runner synchronously, before slice resolution awaits
     // Immich. Daily Enrich and other starts now see the same ownership state
     // as the queue routes, including between Run-all items.
-    const reservation = enrichRunner.reserve();
+    const reopen = reopenDecided === true;
+    const reservation = enrichRunner.reserve({
+      provider,
+      skipAnySuccessful: skipAnySuccessful === undefined ? !reopen : skipAnySuccessful !== false,
+      sendToCurate: sendToCurate !== false || reopen,
+      reopenDecided: reopen,
+    });
     sliceResolutions += 1;
     resolvingQueueItemIds.add(item.id);
     try {
@@ -178,8 +184,9 @@ export function createEnrichRoutes({ review, enrichRunner, taxonomy, repo, requi
     // window forever. Re-open runs
     // stay unfiltered: their finish clears decisions on the whole resolved
     // set, which must include already-enriched photos.
-    const filterNeedsWork = reopen ? null : enrichRunner.needsWorkFilter({ provider, skipAnySuccessful: skip });
-    const resolved = await resolveSliceAssetIds({ immich, rawFilters: item.filters, filterNeedsWork });
+    const filterNeedsWork = reopen ? null : reservation.needsWorkFilter();
+    const resolved = await resolveSliceAssetIds({ immich: reservation.immich, rawFilters: item.filters, filterNeedsWork });
+    reservation.assertActive();
     // Resolution can take a while on a big slice; if the user removed the
     // item in the meantime, that intent wins — no listing, no retirement
     // record, no run.
@@ -206,7 +213,7 @@ export function createEnrichRoutes({ review, enrichRunner, taxonomy, repo, requi
         const covered = resolved.coveredAssetIds.length;
         const stuck = resolved.failureLimitedCount;
         const discarded = resolved.discardedCount ?? 0;
-        enrichRunner.recordCoveredResolution({ title: item.title, provider, covered, failureLimited: stuck, discarded });
+        reservation.recordCoveredResolution({ title: item.title, covered, failureLimited: stuck, discarded });
         const leftBehind = [
           stuck > 0 ? `${stuck} at the failure limit` : null,
           discarded > 0 ? `${discarded} discarded` : null,
@@ -858,6 +865,20 @@ export function createEnrichRoutes({ review, enrichRunner, taxonomy, repo, requi
         return true;
       }
       sendJson(response, 200, { removed: repo.queueRemove(queueItemId), ...queuePagePayload() });
+      return true;
+    }
+
+    const configurationMatch = url.pathname.match(/^\/api\/enrich\/configurations\/([^/]+)$/);
+    if (request.method === 'GET' && configurationMatch) {
+      // This route is behind the server's normal session/API authentication.
+      // Fetch one size-bounded snapshot explicitly; never embed prompts or
+      // taxonomy blobs in polling responses or paginated run history.
+      const configuration = repo.getRunConfiguration(configurationMatch[1]);
+      if (!configuration) {
+        sendError(response, 404, 'configuration_not_found', 'No saved Enrich configuration with that id.');
+        return true;
+      }
+      sendJson(response, 200, configuration);
       return true;
     }
 
