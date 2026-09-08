@@ -205,7 +205,9 @@ data/               all persistent state (gitignored): enrichment.sqlite,
   revisions in enrichment.sqlite (schema 9, persistent-state contract 10).
   `routes/enrichProfiles.mjs` exposes bounded management APIs;
   `public/enrich-profiles.js` owns the Settings profile manager and the Enrich
-  profile picker. Edit/return links preserve the selected profile. Profiles contain explicit prompt
+  profile picker. Settings uses a profile list and focused editor with draft
+  protection and validation before saving. Edit/return links preserve the
+  selected profile. Profiles contain explicit prompt
   text and taxonomy, with an installation default; provider/model selection
   stays separate. Queue rows pin revisions at insertion and expose an explicit
   guarded replacement action. Profile metadata in configurations lets history

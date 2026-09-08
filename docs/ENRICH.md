@@ -353,7 +353,7 @@ lists inside `candidate_tags` and `exclusion_reasons` are generated from
 your approved tags on every request.
 
 - **Taxonomy** — `taxonomy/v1.json` (`TAXONOMY_PATH`) seeds the initial
-  profile and New from built-in. Edit saved inference taxonomies in profiles.
+  profile and New profile → Built-in setup. Edit saved inference taxonomies in profiles.
   The version is a readable label; actual vocabulary determines inference
   identity. Shared live Curate policy remains a separate Settings value.
 - **Prompts** — `prompts/` (`PROMPTS_DIR`/`PROMPT_VERSION`) supplies the
@@ -365,16 +365,29 @@ your approved tags on every request.
 ## Enrichment profiles
 
 Use **Settings → Enrichment profiles** to keep several named prompt/taxonomy
-setups. **New from built-in** starts a fresh copy of the configured template
-files; **Duplicate** starts from the selected saved profile. Edit its name,
-system prompt, per-photo prompt, and taxonomy JSON, then **Validate** or
-**Save profile**. The per-photo prompt must include `{approved_tags}`.
-Validation sends no photos to a model. Invalid edits and stale saves from
-another window leave the last usable revision intact.
+setups. The profile list shows the default used by Daily Enrich and Send to
+Enrich. Choose **New profile**, enter a name, and start from the **Built-in
+setup** (the configured template files) or a copy of an existing profile.
+Each row’s **⋯** menu offers **Duplicate**, **Make default**, and **Archive**
+where applicable. Restore profiles from the collapsed **Archived profiles** list.
+
+**Edit** opens one profile at a time: name, **Tags & categories**, then
+**AI instructions**. Expand categories to inspect allowed tags; expand
+**Edit taxonomy JSON** to change their definitions and thresholds. **General
+instructions** is the system prompt; **Photo request template** is the
+per-photo prompt and must include `{approved_tags}`.
+
+**Save changes** (or **Create profile**) validates before saving. Optional
+**Check configuration** checks format and required fields without sending
+photos to a model. Field errors reveal the relevant editor; invalid edits
+and stale saves from another window leave the last usable revision intact.
+Unsaved edits are marked, and cancelling or leaving asks before discarding
+them. Saving does not start enrichment. **Go to Enrich** appears for the saved
+profile; choose it to prepare a run with that profile selected.
 
 On Enrich, use the profile picker to choose a saved setup, **View profile**
 to inspect its taxonomy and prompts, or **Edit profile** to open that exact
-profile in Settings. **Back to Enrich** keeps the selected profile. Creation,
+profile in Settings. **Go to Enrich** keeps the selected profile. Creation,
 validation, default selection, archiving, and restoration live in Settings.
 
 Profiles contain prompts and taxonomy only. Provider/model connections,
@@ -435,7 +448,7 @@ overrides, with their existing precedence over configured files) are copied
 into **Default**. Old pending queue items pin that migrated revision once.
 The old settings values remain on disk for provenance/rollback, but saved
 inference profiles then own their content: later environment/file changes do
-not overwrite them. **New from built-in** explicitly imports the current
+not overwrite them. **New profile → Built-in setup** explicitly imports the current
 configured files. Legacy prompt writes through Settings are rejected with a
 pointer to profiles; `taxonomyJson` continues to own the shared live Curate
 policy. Existing human decisions and old unknown configuration identities

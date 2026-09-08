@@ -192,7 +192,29 @@
     .profile-field input, .profile-field textarea { display: block; width: 100%; box-sizing: border-box; margin-top: 6px; }
     .profile-field textarea { height: auto; min-height: 100px; font-family: monospace; resize: vertical; }
     .profile-actions { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
-    #sec-enrichment-profiles .p-select { max-width: 100%; }
+    #sec-enrichment-profiles .p-select { max-width: 100%; display: block; margin-top: 6px; }
+    .profile-controls { border: 0; padding: 0; margin: 0; min-width: 0; }
+    .profile-list-heading { justify-content: space-between; }
+    .profile-row { display: flex; gap: 10px; align-items: center; padding: 14px 0; border-bottom: 1px solid var(--p-line); }
+    .profile-row-name { flex: 1; min-width: 0; overflow-wrap: anywhere; }
+    .profile-menu { position: relative; }
+    .profile-menu > summary { list-style: none; cursor: pointer; }
+    .profile-menu > summary::-webkit-details-marker { display: none; }
+    .profile-menu-actions { position: absolute; z-index: 5; right: 0; min-width: 150px; padding: 8px; display: grid; gap: 4px; background: var(--p-bg); border: 1px solid var(--p-line); border-radius: 8px; box-shadow: 0 6px 20px #0002; }
+    .profile-menu-actions .p-btn { text-align: left; }
+    .profile-editor-section { border-top: 1px solid var(--p-line); margin-top: 24px; padding-top: 16px; }
+    .profile-editor-section h4 { font-size: 15px; margin: 0 0 8px; }
+    .profile-category { margin: 6px 0; }
+    #profileTaxonomyDetails { margin-top: 16px; }
+    #sec-enrichment-profiles summary { cursor: pointer; }
+    .profile-tags { display: flex; flex-wrap: wrap; gap: 6px; margin: 8px 0 12px; }
+    .profile-tag { font-size: 12px; padding: 4px 7px; background: var(--p-raised, var(--p-bg)); border: 1px solid var(--p-line); border-radius: 5px; overflow-wrap: anywhere; max-width: 100%; }
+    .profile-save-area { margin-top: 24px; padding-top: 12px; border-top: 1px solid var(--p-line); }
+    .profile-error { color: var(--p-danger); font-size: 13px; }
+    .profile-error:empty, #profileStatus:empty { display: none; }
+    [aria-invalid="true"] { border-color: var(--p-danger); }
+    .profile-discard { max-width: min(420px, calc(100vw - 64px)); padding: 24px; color: var(--p-text); background: var(--p-bg); border: 1px solid var(--p-line); border-radius: 12px; }
+    .profile-discard::backdrop { background: #0007; }
   </style>
 </head>
 <body>
@@ -305,35 +327,79 @@
     <details id="sec-enrichment-profiles" class="p-panel section">
       <summary><span class="chev">&#9654;</span><h2>Enrichment profiles</h2></summary>
       <div class="sec-body">
-        <p class="setting-desc">Create and manage reusable prompts and taxonomies. Choose a saved profile on Enrich when starting a run.</p>
-        <div class="profile-actions">
-          <label for="enrichProfile"><strong>Enrichment profile</strong></label>
-          <select id="enrichProfile" class="p-select" aria-label="Enrichment profile"></select>
-          <button id="profileEdit" class="p-btn">Edit</button>
-          <button id="profileDuplicate" class="p-btn quiet">Duplicate</button>
-          <button id="profileNew" class="p-btn quiet">New from built-in</button>
-          <a id="profileReturn" class="p-btn quiet" href="/enrich.html">Back to Enrich</a>
-        </div>
         <p id="profileStatus" class="setting-desc" role="status" aria-live="polite"></p>
-        <p id="profileNote" class="setting-desc">Loading profiles…</p>
-        <div class="profile-actions">
-          <button id="profileDefault" class="p-btn quiet">Make default</button>
-          <button id="profileArchive" class="p-btn quiet">Archive</button>
-          <span id="profileArchivedRow" hidden><label for="profileArchived">Archived profiles</label>
-            <select id="profileArchived" class="p-select"></select><button id="profileRestore" class="p-btn quiet">Restore</button></span>
+        <div id="profileLibrary">
+          <p class="setting-desc">A profile tells the AI how to describe your photos and which tags it can assign. Keep different profiles for different kinds of photos.</p>
+          <fieldset id="profileListControls" class="profile-controls">
+            <div class="profile-actions profile-list-heading"><h3>Your profiles</h3><button id="profileNew" type="button" class="p-btn primary">+ New profile</button></div>
+            <div id="profileList">Loading profiles…</div>
+            <p id="profileNote" class="setting-desc"></p>
+            <details id="profileArchivedSection" hidden>
+              <summary id="profileArchivedSummary">Archived profiles</summary>
+              <p class="setting-desc">Archived profiles are hidden from new runs. Their saved settings remain available to queued runs and history.</p>
+              <div id="profileArchivedList"></div>
+            </details>
+          </fieldset>
         </div>
-        <div id="profileEditor" hidden style="margin-top: 16px">
-          <h3 id="profileEditorTitle">Edit profile</h3>
-          <p class="setting-desc">Profiles save prompts and the allowed taxonomy. Provider/model settings remain separate. Profile vocabulary and thresholds control new Enrich results. Curate uses <code>review</code> buckets and <code>hard_exclusion_tags</code> from the shared live policy in Settings; editing those sections here does not change Curate. To try a profile on a few photos, save it and start a small run with Only unenriched off.</p>
-          <label class="profile-field" for="profileName">Name<input id="profileName" class="p-input" maxlength="80"></label>
-          <label class="profile-field" for="profileSystem">System prompt<textarea id="profileSystem" class="p-input" rows="7" maxlength="20000" spellcheck="false"></textarea></label>
-          <label class="profile-field" for="profileUser">Per-photo prompt <span class="p-muted">— include {approved_tags}</span><textarea id="profileUser" class="p-input" rows="5" maxlength="20000" spellcheck="false"></textarea></label>
-          <label class="profile-field" for="profileTaxonomy">Taxonomy JSON<textarea id="profileTaxonomy" class="p-input" rows="14" maxlength="200000" spellcheck="false"></textarea></label>
-          <div class="profile-actions"><button id="profileValidate" class="p-btn">Validate</button><button id="profileSave" class="p-btn primary">Save profile</button><button id="profileClose" class="p-btn quiet">Close editor</button></div>
+        <div id="profileCreate" hidden>
+          <h3>New profile</h3>
+          <p class="setting-desc">Choose a starting point, then customize the tags and instructions.</p>
+          <form id="profileCreateForm" novalidate>
+            <fieldset id="profileCreateControls" class="profile-controls">
+              <label class="profile-field" for="profileCreateName">Profile name<input id="profileCreateName" class="p-input" maxlength="80" placeholder="e.g. Travel" aria-describedby="profileCreateError"></label>
+              <p id="profileCreateError" class="profile-error" role="alert"></p>
+              <label class="profile-field" for="profileSource">Start with<select id="profileSource" class="p-select" aria-describedby="profileSourceHelp"></select></label>
+              <p id="profileSourceHelp" class="setting-desc">The built-in setup uses this server’s configured templates. Choosing an existing profile copies its saved tags and instructions. Your starting profile stays unchanged.</p>
+              <div class="profile-actions"><button id="profileCreateContinue" type="submit" class="p-btn primary">Continue</button><button id="profileCreateCancel" type="button" class="p-btn quiet">Cancel</button></div>
+            </fieldset>
+          </form>
+        </div>
+        <div id="profileEditor" hidden>
+          <button id="profileBack" type="button" class="p-btn quiet">← All profiles</button>
+          <div class="profile-actions"><h3 id="profileEditorTitle">Edit profile</h3><span id="profileDirty" class="setting-desc" role="status" aria-live="polite"></span></div>
+          <form id="profileEditorForm" novalidate>
+            <fieldset id="profileEditorControls" class="profile-controls">
+              <label class="profile-field" for="profileName">Profile name<input id="profileName" class="p-input" maxlength="80" aria-describedby="profileNameHelp profileNameError"></label>
+              <p id="profileNameHelp" class="setting-desc">Choose a name you’ll recognize when starting a run.</p>
+              <p id="profileNameError" class="profile-error" role="alert"></p>
+              <section class="profile-editor-section" aria-labelledby="profileTagsTitle">
+                <h4 id="profileTagsTitle">Tags &amp; categories</h4>
+                <p class="setting-desc">Which tags can the AI assign? Expand a category to see its allowed tags.</p>
+                <div id="profileTaxonomySummary"></div>
+                <details id="profileTaxonomyDetails">
+                  <summary>Edit taxonomy JSON</summary>
+                  <p id="profileTaxonomyHelp" class="setting-desc">Edit the allowed tags and confidence thresholds. Curate’s shared <code>review</code> buckets and <code>hard_exclusion_tags</code> are managed in <a href="#sec-enrich">Enrich settings</a>; changing those sections here does not change Curate’s live policy.</p>
+                  <label class="profile-field" for="profileTaxonomy">Taxonomy JSON<textarea id="profileTaxonomy" class="p-input" rows="14" maxlength="200000" spellcheck="false" aria-describedby="profileTaxonomyHelp profileTaxonomyError"></textarea></label>
+                  <p id="profileTaxonomyError" class="profile-error" role="alert"></p>
+                </details>
+              </section>
+              <section class="profile-editor-section" aria-labelledby="profileInstructionsTitle">
+                <h4 id="profileInstructionsTitle">AI instructions</h4>
+                <p class="setting-desc">How should the AI interpret and describe your photos? Provider and model choices remain separate on Enrich.</p>
+                <label class="profile-field" for="profileSystem">General instructions<textarea id="profileSystem" class="p-input" rows="7" maxlength="20000" spellcheck="false" aria-describedby="profileSystemHelp profileSystemError"></textarea></label>
+                <p id="profileSystemHelp" class="setting-desc">The system prompt: standing guidance the AI follows for every photo, such as what makes a useful caption.</p>
+                <p id="profileSystemError" class="profile-error" role="alert"></p>
+                <label class="profile-field" for="profileUser">Photo request template<textarea id="profileUser" class="p-input" rows="5" maxlength="20000" spellcheck="false" aria-describedby="profileUserHelp profileUserError"></textarea></label>
+                <p id="profileUserHelp" class="setting-desc">The per-photo prompt. Include <code>{approved_tags}</code>; Pictaria replaces this with your profile’s allowed tags.</p>
+                <p id="profileUserError" class="profile-error" role="alert"></p>
+              </section>
+              <div class="profile-save-area">
+                <p class="setting-desc">Changes apply to future runs. Photos already queued or processing keep their saved settings. Saving does not start enrichment.</p>
+                <div class="profile-actions"><button id="profileSave" type="submit" class="p-btn primary">Save changes</button><button id="profileClose" type="button" class="p-btn quiet">Cancel</button><button id="profileValidate" type="button" class="p-btn quiet">Check configuration</button></div>
+                <p class="setting-desc">Check configuration checks format and required fields without sending photos to a model.</p>
+              </div>
+            </fieldset>
+          </form>
           <p id="profileEditorNote" class="setting-desc" role="status" aria-live="polite"></p>
+          <a id="profileReturn" class="p-btn" href="/enrich.html" hidden>Go to Enrich</a>
         </div>
       </div>
     </details>
+    <dialog id="profileDiscardDialog" class="profile-discard" aria-labelledby="profileDiscardTitle" aria-describedby="profileDiscardHelp">
+      <h3 id="profileDiscardTitle">Discard unsaved changes?</h3>
+      <p id="profileDiscardHelp">Your edits haven’t been saved. Keep editing to save them, or discard them to leave.</p>
+      <div class="profile-actions"><button id="profileKeepEditing" type="button" class="p-btn primary" autofocus>Keep editing</button><button id="profileDiscard" type="button" class="p-btn danger">Discard changes</button></div>
+    </dialog>
 
     <details id="sec-discarded" class="p-panel section">
       <summary><span class="chev">&#9654;</span><h2>Discarded Photos</h2><span class="sec-sub" id="sub-discarded"></span></summary>
@@ -2205,7 +2271,7 @@
         const response = await fetch(path, { ...options, headers: headers(options.headers) });
         if (response.status === 401) { showLogin(); throw new Error('Please sign in to manage profiles.'); }
         const body = await response.json();
-        if (!response.ok) throw new Error(body?.error?.message ?? 'Could not update enrichment profiles.');
+        if (!response.ok) throw Object.assign(new Error(body?.error?.message ?? 'Could not update enrichment profiles.'), { status: response.status });
         return body;
       },
       toast(message) { el('profileStatus').textContent = message; },
