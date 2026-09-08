@@ -11,6 +11,8 @@ All notable changes to Pictaria Server are documented here. This project follows
   prompts/taxonomy, choose a default, and archive/restore. Queue items pin a
   revision and allow explicit replacement; run history and photo captions
   identify the saved profile. Daily Enrich uses the default profile.
+  Insights explains the default-profile choice before queueing, and the
+  profile editor distinguishes inference taxonomy from shared Curate policy.
 - Queued runs have an independent **Only unenriched** option, allowing a new
   profile pass without reopening existing human Curate decisions.
 - Enrich runs and per-photo results now reference saved, deduplicated

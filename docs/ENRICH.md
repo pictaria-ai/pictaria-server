@@ -376,6 +376,8 @@ image settings, and processing controls remain separate. Selecting a profile
 on Enrich applies to new manual runs and explicit failed-photo retries in
 that tab. **Make default** chooses the durable default for Daily Enrich,
 Send to Enrich from Insights, and API requests that omit `profileId`.
+The Insights photo dialog explains that Send to Enrich pins the default
+profile's current revision and that the queued profile can be changed on Enrich.
 Changing the default never starts work or changes an existing queue item.
 
 Every saved edit, including a rename, creates an immutable numbered revision.
@@ -410,6 +412,9 @@ inference profile does not replace this global policy. Profile taxonomy
 thresholds control tag mapping for new executions, while the shared policy
 controls Curate's interpretation of existing scores. Policy-only changes do
 not cause AI calls or automatically remap stored tags.
+In particular, Curate reads `review` buckets and `hard_exclusion_tags` from
+the shared policy in Settings; editing those sections inside an inference
+profile does not change Curate.
 
 **Archive** removes a profile from new selections, preserving its queued
 revisions and historical attribution. Restore it through **Archived profiles**.

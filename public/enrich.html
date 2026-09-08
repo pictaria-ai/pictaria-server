@@ -195,7 +195,7 @@
       </div>
       <div id="profileEditor" hidden style="margin-top: 16px">
         <h3 id="profileEditorTitle">Edit profile</h3>
-        <p class="tp-note">Profiles save prompts and the allowed taxonomy. Provider/model settings remain separate. Curate uses the shared live review policy in Settings. To try a profile on a few photos, save it and start a small run with Only unenriched off.</p>
+        <p class="tp-note">Profiles save prompts and the allowed taxonomy. Provider/model settings remain separate. Profile vocabulary and thresholds control new Enrich results. Curate uses <code>review</code> buckets and <code>hard_exclusion_tags</code> from the shared live policy in Settings; editing those sections here does not change Curate. To try a profile on a few photos, save it and start a small run with Only unenriched off.</p>
         <label class="profile-field" for="profileName">Name<input id="profileName" class="p-input" maxlength="80"></label>
         <label class="profile-field" for="profileSystem">System prompt<textarea id="profileSystem" class="p-input" rows="7" maxlength="20000" spellcheck="false"></textarea></label>
         <label class="profile-field" for="profileUser">Per-photo prompt <span class="p-muted">— include {approved_tags}</span><textarea id="profileUser" class="p-input" rows="5" maxlength="20000" spellcheck="false"></textarea></label>
