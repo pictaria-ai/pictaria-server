@@ -41,6 +41,7 @@ test('latestEnrichment serves the latest run caption with provider and model', (
       normalizedOutput: { caption: 'First pass caption.', short_caption: 'First' },
     });
     assert.deepEqual(repo.latestEnrichment('asset-1'), {
+      profile: null,
       configurationId: null, inferenceId: null,
       caption: 'First pass caption.',
       provider: 'venice',
@@ -57,6 +58,7 @@ test('latestEnrichment serves the latest run caption with provider and model', (
       normalizedOutput: { caption: 'A newer, fuller caption spanning several sentences.', short_caption: 'Newer' },
     });
     assert.deepEqual(repo.latestEnrichment('asset-1'), {
+      profile: null,
       configurationId: null, inferenceId: null,
       caption: 'A newer, fuller caption spanning several sentences.',
       provider: 'venice',
@@ -74,6 +76,7 @@ test('latestEnrichment serves the latest run caption with provider and model', (
       normalizedOutput: { caption: '', short_caption: '' },
     });
     assert.deepEqual(repo.latestEnrichment('asset-1'), {
+      profile: null,
       configurationId: null, inferenceId: null,
       caption: null,
       provider: 'cloud_openai',

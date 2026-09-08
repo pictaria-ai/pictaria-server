@@ -51,7 +51,7 @@ export function buildUserPrompt(userTemplate, taxonomy) {
 // and Immich client (including their credentials) remain execution-local.
 export function captureRunConfiguration({
   provider, taxonomy, systemPrompt, userTemplate, promptVersion = 'v1',
-  imageSource = 'preview', processing = {}, inferenceHostLabel = null,
+  imageSource = 'preview', processing = {}, inferenceHostLabel = null, profile = null,
 }) {
   const capturedTaxonomy = parseTaxonomySource(JSON.stringify(taxonomy.raw));
   const userPrompt = buildUserPrompt(userTemplate, capturedTaxonomy);
@@ -69,6 +69,7 @@ export function captureRunConfiguration({
   const inferenceId = digest(inference);
   const snapshot = freezeJson(JSON.parse(JSON.stringify({
     formatVersion: 1,
+    ...(profile ? { profile } : {}),
     inferenceId,
     inference,
     labels: { promptVersion, taxonomyVersion: capturedTaxonomy.version, inferenceHostLabel },

@@ -239,7 +239,7 @@ export async function launchChrome() {
 // same ones seeded into insights.sqlite, so a boot-time resweep republishes
 // identical data); filtered searches return nothing, keeping album creation
 // from adding assets. Album creation answers with a fresh id.
-export async function startFakeImmich({ assets = [] } = {}) {
+export async function startFakeImmich({ assets = [], serveAssetDetails = false } = {}) {
   let albumCounter = 0;
   const server = createServer((request, response) => {
     let raw = '';
@@ -256,6 +256,16 @@ export async function startFakeImmich({ assets = [] } = {}) {
         response.writeHead(200, { 'Content-Type': 'application/json' });
         response.end(JSON.stringify(payload));
       };
+      if (serveAssetDetails && pathname.startsWith('/api/assets/')) {
+        const id = pathname.split('/')[3];
+        const asset = assets.find(item => item.id === id);
+        if (asset && pathname.endsWith('/thumbnail')) {
+          response.writeHead(200, { 'Content-Type': 'image/png' });
+          response.end(Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVQIHWP4z8DwHwAFgAI/ScLbtAAAAABJRU5ErkJggg==', 'base64'));
+        } else if (asset) { reply(asset); }
+        else { response.writeHead(404); response.end(); }
+        return;
+      }
       if (pathname === '/api/search/metadata') {
         const filtered = Boolean(body.country || body.city || body.state || body.make || body.model);
         const items = filtered ? [] : assets;

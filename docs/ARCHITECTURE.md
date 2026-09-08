@@ -201,10 +201,21 @@ data/               all persistent state (gitignored): enrichment.sqlite,
 - **Ports**: Pictaria Server listens on `4080`. It must be the only writer of
   its enrichment database (see Scale: review state is cached in-process and
   projected at write time, so external writes are invisible until restart).
+- **Enrich profiles**: `enrich/profiles.mjs` owns named profiles and immutable
+  revisions in enrichment.sqlite (schema 9, persistent-state contract 10).
+  `routes/enrichProfiles.mjs` exposes bounded management APIs;
+  `public/enrich-profiles.js` owns the editor. Profiles contain explicit prompt
+  text and taxonomy, with an installation default; provider/model selection
+  stays separate. Queue rows pin revisions at insertion and expose an explicit
+  guarded replacement action. Profile metadata in configurations lets history
+  and photo attribution use indexed joins without loading snapshot blobs.
+  Legacy effective settings seed Default once; shared Curate policy stays
+  live and independent. Revisions survive archive and job-summary pruning.
 - **Enrich execution configuration**: `enrich/runConfiguration.mjs` captures
   effective inputs before the first asynchronous photo-selection call. Queue
   reservations hold the captured provider/client and configuration through
-  selection and execution. `enrich_configurations` deduplicates immutable,
+  selection and execution; profile inputs were already pinned at queue insertion.
+  `enrich_configurations` deduplicates immutable,
   non-secret JSON snapshots; `processing_runs` and `job_runs` carry nullable
   configuration and inference IDs. Legacy rows retain NULL identity.
   Inference identity hashes effective prompts, generated schema/vocabulary,

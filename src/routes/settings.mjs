@@ -1,7 +1,7 @@
 import { readJsonBody, sendError, sendJson } from '../http.mjs';
 import { SettingsError } from '../settings.mjs';
 
-export function createSettingsRoutes({ settingsStore }) {
+export function createSettingsRoutes({ settingsStore, profiles = null }) {
   return async function handleSettingsRoute(request, response, url) {
     if (url.pathname !== '/api/settings') {
       return false;
@@ -15,6 +15,9 @@ export function createSettingsRoutes({ settingsStore }) {
     if (request.method === 'PATCH') {
       const patch = await readJsonBody(request);
       try {
+        if (profiles && patch?.enrich && ['systemPrompt', 'userTemplate'].some(key => Object.hasOwn(patch.enrich, key))) {
+          throw new SettingsError('Enrich prompts are now managed in named profiles on the Enrich page.');
+        }
         sendJson(response, 200, settingsStore.update(patch));
       } catch (error) {
         if (error instanceof SettingsError) {

@@ -15,6 +15,7 @@ import { DatabaseSync } from 'node:sqlite';
 import { SmartAlbumStore } from '../../src/albums/store.mjs';
 import { backupTargets, runBackup } from '../../src/backup.mjs';
 import { loadConfig } from '../../src/config.mjs';
+import { EnrichmentProfiles } from '../../src/enrich/profiles.mjs';
 import { Repository } from '../../src/enrich/repository.mjs';
 import { createFrameLedger } from '../../src/frame/ledger.mjs';
 import { getUserVersion } from '../../src/migrations.mjs';
@@ -41,8 +42,15 @@ test('a complete legacy installation upgrades, restarts, backs up, and restores 
     const sourceConfig = fixtureConfig(sourceRoot);
 
     const first = await openInstallation(sourceConfig, 'initialize');
-    assert.deepEqual(first.enrichmentMigration.applied, [1, 2, 3, 4, 5, 6, 7, 8]);
+    assert.deepEqual(first.enrichmentMigration.applied, [1, 2, 3, 4, 5, 6, 7, 8, 9]);
     await assertRepresentativeState(first, sourceConfig);
+
+    const migratedDefault = first.profiles.defaultProfile();
+    assert.equal(migratedDefault.systemPrompt, sourceConfig.promptOverrides?.systemPrompt || first.profiles.builtin().systemPrompt);
+    const travel = first.profiles.create({ ...migratedDefault, name: 'Fixture travel', systemPrompt: 'Travel fixture prompt' });
+    first.enrichment.queueAdd({ title: 'Pinned profile fixture', filters: { city: 'Fixture City' }, profileRevisionId: travel.revisionId });
+    first.profiles.update(travel.id, { ...travel, name: 'Renamed travel', expectedRevisionId: travel.revisionId });
+    first.profiles.archive(travel.id, true);
 
     const migratedSettings = readFileSync(sourceConfig.settingsPath, 'utf8');
     const firstSnapshot = semanticSnapshot(first);
@@ -138,6 +146,8 @@ async function openInstallation(config, expectedMode) {
   const settings = new SettingsStore({ filePath: config.settingsPath, config, env: {} }).load();
   const enrichment = new Repository(config.databasePath);
   const enrichmentMigration = enrichment.initSchema();
+  const profiles = new EnrichmentProfiles({ repo: enrichment, config });
+  profiles.initialize();
   const albums = new SmartAlbumStore(config.albums.dataFile, {
     installationSecret: loadOrCreateSessionSecret(config.sessionSecretPath),
   });
@@ -156,6 +166,7 @@ async function openInstallation(config, expectedMode) {
     settings,
     enrichment,
     enrichmentMigration,
+    profiles,
     albums,
     frameLedger,
     voiceMetrics,
@@ -184,6 +195,9 @@ function semanticSnapshot(installation) {
     .get();
 
   return {
+    profiles: installation.profiles.list(),
+    profileRevisions: installation.enrichment.db.prepare('SELECT * FROM enrich_profile_revisions ORDER BY id').all(),
+    pinnedQueue: installation.enrichment.queuePage().items,
     settingsVersion: JSON.parse(readFileSync(installation.settings.filePath, 'utf8')).version,
     enrichmentVersion: getUserVersion(installation.enrichment.db),
     assetCount: installation.enrichment.db.prepare('SELECT COUNT(*) AS n FROM assets').get().n,

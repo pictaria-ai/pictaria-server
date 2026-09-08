@@ -7,6 +7,12 @@ All notable changes to Pictaria Server are documented here. This project follows
 
 ### Added
 
+- Named Enrich profiles: create from built-in, duplicate, edit and validate
+  prompts/taxonomy, choose a default, and archive/restore. Queue items pin a
+  revision and allow explicit replacement; run history and photo captions
+  identify the saved profile. Daily Enrich uses the default profile.
+- Queued runs have an independent **Only unenriched** option, allowing a new
+  profile pass without reopening existing human Curate decisions.
 - Enrich runs and per-photo results now reference saved, deduplicated
   configurations. A **Config** button shows the prompts, taxonomy, and
   non-secret settings used by each modern run. Failed-photo retries record
@@ -26,7 +32,13 @@ All notable changes to Pictaria Server are documented here. This project follows
 
 ### Upgrade notes
 
-- Enrichment schema 8 and persistent-state contract 9 add configuration
+- Enrichment schema 9 and persistent-state contract 10 add named profiles
+  and pinned queue revisions. Existing effective overrides seed Default once;
+  queued legacy slices pin that revision. Saved profiles then own inference
+  content, while Settings taxonomy JSON remains the shared live Curate policy.
+  Old prompt settings remain preserved but are no longer edited through the
+  Settings API. Normal pre-migration backup and snapshot-restore rollback apply.
+- Enrichment schema 8 (included in this upgrade) adds configuration
   snapshots without backfilling unknown historical inputs or replaying photos.
   Legacy successes still skip with **Only unenriched** on; with it off they
   cannot prove an input match and may be reprocessed. Startup creates the

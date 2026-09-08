@@ -279,7 +279,7 @@
     <details id="sec-enrich" class="p-panel section">
       <summary><span class="chev">&#9654;</span><h2>Enrich</h2><span class="sec-sub" id="sub-enrich"></span></summary>
       <div class="sec-body">
-        <div class="setting-desc">Controls enrichment, the image size sent to AI, and the prompts and taxonomy that govern what the model may say. Choose the provider for new runs on the Enrich page; your selection is remembered. Provider connections and model names live under AI Providers. How the pieces fit — prompts, taxonomy, and the response schema — is explained in the <a href="https://github.com/pictaria-ai/pictaria-server/blob/main/docs/ENRICH.md" target="_blank" rel="noopener" style="color: var(--p-accent)">enrichment guide</a>.</div>
+        <div class="setting-desc">Controls enrichment, the image size sent to AI, and the shared live Curate policy. Manage inference prompts and taxonomies in <a href="/enrich.html#profilePanel">Enrichment profiles</a>. Choose the provider for new runs on the Enrich page; your selection is remembered. Provider connections and model names live under AI Providers. How the pieces fit — prompts, taxonomy, and the response schema — is explained in the <a href="https://github.com/pictaria-ai/pictaria-server/blob/main/docs/ENRICH.md" target="_blank" rel="noopener" style="color: var(--p-accent)">enrichment guide</a>.</div>
         <div id="fields-enrich"></div>
         <div id="captionWbStatus" class="caption-wb-status">
           <div id="captionWbLine" class="setting-desc" role="status" aria-live="polite"></div>
@@ -677,16 +677,14 @@
       enrich: [
         { key: 'enabled', type: 'switch', desc: 'Lets a model you choose analyze your photos. Off by default. Local providers keep requests within infrastructure you operate; cloud providers receive them through your account.', docs: 'https://github.com/pictaria-ai/pictaria-server/blob/main/docs/ENRICH.md' },
         { head: 'Daily Enrich' },
-        { key: 'scheduledEnabled', type: 'switch', desc: 'Enrich photos, once a day, that haven\'t been previously enriched. Uses the provider last selected and sends successful results to Curate. If today\'s time has passed, enabling starts today\'s catch-up promptly. Runs only once per day. Requires Enable AI enrichment above.' },
+        { key: 'scheduledEnabled', type: 'switch', desc: 'Enrich photos, once a day, that haven\'t been previously enriched. Uses the provider last selected and the default enrichment profile, and sends successful results to Curate. If today\'s time has passed, enabling starts today\'s catch-up promptly. Runs only once per day. Requires Enable AI enrichment above.' },
         { key: 'scheduledTime', type: 'time', width: 150, desc: 'Your browser’s local time. Pictaria remembers this browser’s time zone when you save.' },
         { key: 'scheduledPhotoBudget', type: 'number', width: 110, desc: 'The most new photos to analyze each day. Photos already enriched do not use the budget.' },
         { key: 'captionWriteback', type: 'switch', desc: 'Copies each photo’s AI caption into its Immich description, making photos searchable in Immich by what’s in them. Pictaria fills an empty description or updates its own earlier text and checks immediately before writing; Immich cannot make that check and update atomic, so a narrow concurrent human-edit race remains. Runs in the background; new enrichments follow automatically.', docs: 'https://github.com/pictaria-ai/pictaria-server/blob/main/docs/ENRICH.md#writing-captions-to-immich-descriptions' },
         { key: 'imageSource', type: 'select', labels: { preview: 'Preview (recommended)', thumbnail: 'Thumbnail (fastest, least detail)', original: 'Original (largest upload)' }, desc: 'The image size sent to the model for analysis.' },
         { key: 'inferenceHostLabel', type: 'text', placeholder: 'e.g. M4 Mac mini · LM Studio', desc: 'Optional label copied into each new run’s history, useful when comparing the same model on different machines. You supply and maintain this text; Pictaria does not inspect the model host.' },
-        { group: 'Prompt & taxonomy', groupDesc: 'Advanced — override the built-in prompts or the tag taxonomy. Empty fields keep the built-ins (viewable on the Enrich page).' },
-        { key: 'systemPrompt', type: 'textarea', builtinPrompt: true, placeholder: 'Using the built-in prompt — paste your own here to override.', desc: 'The model’s standing instructions. Leave empty to use the built-in prompt (viewable on the Enrich page). Runs with a custom prompt are marked "-custom" in the run history. Note: captions and quality scores are demanded by the response schema, not the prompt — see the Response fields list on the Enrich page.', docs: 'https://github.com/pictaria-ai/pictaria-server/blob/main/docs/ENRICH.md#taxonomy-prompts-and-the-response-schema' },
-        { key: 'userTemplate', type: 'textarea', rows: 5, builtinPrompt: true, placeholder: 'Using the built-in prompt — paste your own here to override.', desc: 'The per-photo message. Must include {approved_tags}, which is replaced with the taxonomy tag list.', docs: 'https://github.com/pictaria-ai/pictaria-server/blob/main/docs/ENRICH.md#taxonomy-prompts-and-the-response-schema' },
-        { key: 'taxonomyJson', type: 'textarea', rows: 14, taxonomyLoad: true, placeholder: 'Using the built-in taxonomy — paste an edited copy here to override.', desc: 'The tag vocabulary, thresholds, and exclusions as strict JSON — what the model may say about your photos. Load the current taxonomy and edit it; "version" is a display label and can stay the same. Vocabulary changes can make photos eligible for a later Enrich run; review-policy changes do not require AI calls. Already-enriched photos keep their old tags until re-run. Clear the box to return to the built-in taxonomy.', docs: 'https://github.com/pictaria-ai/pictaria-server/blob/main/docs/ENRICH.md#taxonomy-prompts-and-the-response-schema' },
+        { group: 'Live Curate review policy', groupDesc: 'Shared policy for results from all profiles. Inference prompts and taxonomies are managed on Enrich → Enrichment profiles.' },
+        { key: 'taxonomyJson', type: 'textarea', rows: 14, taxonomyLoad: true, placeholder: 'Using the built-in taxonomy — paste an edited copy here to override.', desc: 'The shared live Curate policy as taxonomy JSON. Threshold and review-bucket changes apply to existing scores across all profiles without AI calls. This does not edit inference profiles or remap stored tags. Clear to restore the built-in review policy.', docs: 'https://github.com/pictaria-ai/pictaria-server/blob/main/docs/ENRICH.md#taxonomy-prompts-and-the-response-schema' },
         { groupEnd: true },
       ],
       curate: [
@@ -1236,10 +1234,9 @@
           : 'none configured';
       }
       if (settings.enrich) {
-        const custom = settings.enrich.systemPrompt?.value || settings.enrich.userTemplate?.value;
         el('sub-enrich').textContent = settings.enrich.enabled && !settings.enrich.enabled.value
           ? 'off'
-          : `on${settings.enrich.scheduledEnabled?.value ? ' · daily' : ''}${custom ? ' · custom prompt' : ''}`;
+          : `on${settings.enrich.scheduledEnabled?.value ? ' · daily' : ''}`;
       }
       if (settings.curate?.burstGrouping) {
         el('sub-curate').textContent = [

@@ -1,3 +1,4 @@
+import { createEnrichProfileRoutes } from './enrichProfiles.mjs';
 import { HttpBodyError, readJsonBody, sendError, sendImage, sendJson } from '../http.mjs';
 import { describeResponseFields } from '../enrich/schema.mjs';
 import { reviewConfig } from '../enrich/reviewBuckets.mjs';
@@ -86,7 +87,7 @@ function runPageLimit(value) {
   return limit;
 }
 
-export function createEnrichRoutes({ review, enrichRunner, taxonomy, repo, requireImmich, config, immich, captionWriteback, referee, activityLog = null }) {
+export function createEnrichRoutes({ review, enrichRunner, taxonomy, profiles = null, repo, requireImmich, config, immich, captionWriteback, referee, activityLog = null }) {
   const diagnostic = (value) => sanitizeDiagnostic(value instanceof Error ? value.message : value, {
     secrets: configuredSecrets(config, immich),
   });
@@ -116,6 +117,7 @@ export function createEnrichRoutes({ review, enrichRunner, taxonomy, repo, requi
     // as the queue routes, including between Run-all items.
     const reopen = reopenDecided === true;
     const reservation = enrichRunner.reserve({
+      profileRevisionId: item.profileRevisionId,
       provider,
       skipAnySuccessful: skipAnySuccessful === undefined ? !reopen : skipAnySuccessful !== false,
       sendToCurate: sendToCurate !== false || reopen,
@@ -163,7 +165,7 @@ export function createEnrichRoutes({ review, enrichRunner, taxonomy, repo, requi
     const limit = queuePageLimit(searchParams?.get('limit'));
     const page = repo.queuePage({ afterId, limit });
     return {
-      items: page.items,
+      items: profiles ? page.items.map(item => ({ ...item, profile: profiles.attribution(item.profileRevisionId) })) : page.items,
       nextCursor: page.nextAfterId === null ? null : encodeQueueCursor(page.nextAfterId),
       total: page.total,
     };
@@ -269,7 +271,10 @@ export function createEnrichRoutes({ review, enrichRunner, taxonomy, repo, requi
     };
   }
 
+  const profileRoutes = profiles ? createEnrichProfileRoutes({ profiles, repo, protectedQueueIds, queuePagePayload }) : null;
+
   return async function handleEnrichRoute(request, response, url) {
+    if (profileRoutes && await profileRoutes(request, response, url)) return true;
     if (request.method === 'GET' && url.pathname === '/api/review/assets') {
       if (!requireImmich(response)) {
         return true;
@@ -472,9 +477,13 @@ export function createEnrichRoutes({ review, enrichRunner, taxonomy, repo, requi
         return true;
       }
       try {
+        if (body?.profileRevisionId) {
+          sendError(response, 400, 'invalid_enrich_profile', 'Select a current profile for a new run; pinned revisions belong to queued work.');
+          return true;
+        }
         sendJson(response, 202, enrichRunner.start(body ?? {}));
       } catch (error) {
-        sendError(response, 409, 'enrich_run_conflict', diagnostic(error));
+        sendError(response, error?.code === 'invalid_enrich_profile' ? error.status : 409, error?.code === 'invalid_enrich_profile' ? error.code : 'enrich_run_conflict', diagnostic(error));
       }
       return true;
     }
@@ -484,7 +493,7 @@ export function createEnrichRoutes({ review, enrichRunner, taxonomy, repo, requi
     if (request.method === 'GET' && url.pathname === '/api/enrich/failure-limited') {
       const provider = String(url.searchParams.get('provider') || '').trim() || undefined;
       try {
-        sendJson(response, 200, enrichRunner.failureLimitedSummary({ provider }));
+        sendJson(response, 200, enrichRunner.failureLimitedSummary({ provider, profileId: url.searchParams.get('profileId') || undefined }));
       } catch (error) {
         sendError(response, 400, 'invalid_provider', diagnostic(error));
       }
@@ -506,7 +515,7 @@ export function createEnrichRoutes({ review, enrichRunner, taxonomy, repo, requi
       const provider = String(url.searchParams.get('provider') || '').trim() || undefined;
       try {
         sendJson(response, 200, {
-          ...enrichRunner.failureLimitedDetails({ provider }),
+          ...enrichRunner.failureLimitedDetails({ provider, profileId: url.searchParams.get('profileId') || undefined }),
           discarded: discardedListing(),
           // For the rows' "Open in Immich" links — same source as Curate's.
           immichUrl: config.immichPublicUrl || null,
@@ -542,7 +551,7 @@ export function createEnrichRoutes({ review, enrichRunner, taxonomy, repo, requi
           // the operation ("run Discard all again for the rest"), while
           // top-level `truncated` stays the listing's, consistent with
           // the other discarded endpoints.
-          const { truncated: discardTruncated, ...operation } = enrichRunner.discardFailureLimited({ provider: body?.provider });
+          const { truncated: discardTruncated, ...operation } = enrichRunner.discardFailureLimited({ provider: body?.provider, profileId: body?.profileId });
           activityLog?.assetsDiscarded({
             count: operation.discarded,
             mode: 'all',
@@ -621,6 +630,7 @@ export function createEnrichRoutes({ review, enrichRunner, taxonomy, repo, requi
       }
       try {
         const result = repo.queueAdd({
+          profileRevisionId: profiles?.resolve({ profileId: body.profileId }).revisionId ?? null,
           title: String(body.title || 'Photo slice').slice(0, 120),
           filters,
           estimatedCount: Number(body.estimatedCount),
@@ -632,7 +642,7 @@ export function createEnrichRoutes({ review, enrichRunner, taxonomy, repo, requi
           ...queuePagePayload(),
         });
       } catch (error) {
-        if (error?.code === 'enrich_queue_full' || error?.code === 'enrich_queue_item_too_large') {
+        if (error?.code === 'invalid_enrich_profile' || error?.code === 'enrich_queue_full' || error?.code === 'enrich_queue_item_too_large') {
           sendError(response, error.status, error.code, diagnostic(error));
           return true;
         }
@@ -688,7 +698,7 @@ export function createEnrichRoutes({ review, enrichRunner, taxonomy, repo, requi
         } else if (error?.code === 'queue_item_removed') {
           sendError(response, 409, 'queue_item_removed', diagnostic(error));
         } else {
-          sendError(response, 409, 'enrich_run_conflict', diagnostic(error));
+          sendError(response, error?.code === 'invalid_enrich_profile' ? error.status : 409, error?.code === 'invalid_enrich_profile' ? error.code : 'enrich_run_conflict', diagnostic(error));
         }
       }
       return true;
@@ -729,6 +739,7 @@ export function createEnrichRoutes({ review, enrichRunner, taxonomy, repo, requi
           id,
           sendToCurate: entry?.sendToCurate !== false,
           reopenDecided: entry?.reopenDecided === true,
+          skipAnySuccessful: entry?.skipAnySuccessful,
         });
       }
       // No await between this check and startFromPlan → startQueuedItem
@@ -784,6 +795,7 @@ export function createEnrichRoutes({ review, enrichRunner, taxonomy, repo, requi
               provider,
               sendToCurate: entry.sendToCurate,
               reopenDecided: entry.reopenDecided,
+              skipAnySuccessful: entry.skipAnySuccessful,
               chainNext: () => {
                 runAllPlanIds.delete(entry.id);
                 void startFromPlan(i + 1).catch(recordChainStop);
@@ -846,7 +858,7 @@ export function createEnrichRoutes({ review, enrichRunner, taxonomy, repo, requi
         });
       } catch (error) {
         if (!enrichRunner.isRunning() && sliceResolutions === 0) runAllPlanIds.clear();
-        sendError(response, 409, 'enrich_run_conflict', diagnostic(error));
+        sendError(response, error?.code === 'invalid_enrich_profile' ? error.status : 409, error?.code === 'invalid_enrich_profile' ? error.code : 'enrich_run_conflict', diagnostic(error));
       }
       return true;
     }
@@ -923,6 +935,7 @@ export function createEnrichRoutes({ review, enrichRunner, taxonomy, repo, requi
       try {
         const status = enrichRunner.start({
           provider: failures.provider,
+          ...(body?.profileId ? { profileId: body.profileId } : {}),
           assetIds: failures.assetIds,
           skipAnySuccessful: true,
           retryFailureLimited: true,
@@ -937,7 +950,7 @@ export function createEnrichRoutes({ review, enrichRunner, taxonomy, repo, requi
           retryTruncated: failures.truncated,
         });
       } catch (error) {
-        sendError(response, 409, 'enrich_run_conflict', diagnostic(error));
+        sendError(response, error?.code === 'invalid_enrich_profile' ? error.status : 409, error?.code === 'invalid_enrich_profile' ? error.code : 'enrich_run_conflict', diagnostic(error));
       }
       return true;
     }
@@ -996,17 +1009,19 @@ export function createEnrichRoutes({ review, enrichRunner, taxonomy, repo, requi
     }
 
     if (request.method === 'GET' && url.pathname === '/api/taxonomy') {
+      const selectedTaxonomy = profiles && url.searchParams.get('profileId')
+        ? profiles.resolve({ profileId: url.searchParams.get('profileId') }).taxonomy : taxonomy;
       sendJson(response, 200, {
-        version: taxonomy.version,
-        buckets: reviewConfig(taxonomy).buckets.map(({ id, label, description }) => ({ id, label, description })),
-        thresholds: taxonomy.thresholds,
+        version: selectedTaxonomy.version,
+        buckets: reviewConfig(selectedTaxonomy).buckets.map(({ id, label, description }) => ({ id, label, description })),
+        thresholds: selectedTaxonomy.thresholds,
         categories: Object.fromEntries(
-          Object.entries(taxonomy.tagsByCategory).map(([category, tags]) => [category, tags.length]),
+          Object.entries(selectedTaxonomy.tagsByCategory).map(([category, tags]) => [category, tags.length]),
         ),
-        tags: taxonomy.tagsByCategory,
-        hardExclusionTags: [...taxonomy.hardExclusionTags].sort(),
+        tags: selectedTaxonomy.tagsByCategory,
+        hardExclusionTags: [...selectedTaxonomy.hardExclusionTags].sort(),
         // The full source document, for the Settings taxonomy editor.
-        raw: taxonomy.raw,
+        raw: selectedTaxonomy.raw,
         // The response contract: fields every reply must contain (enforced
         // via structured output), with what each one feeds.
         responseFields: describeResponseFields(),
@@ -1029,19 +1044,21 @@ export function createEnrichRoutes({ review, enrichRunner, taxonomy, repo, requi
     }
 
     if (request.method === 'GET' && url.pathname === '/api/enrich/prompts') {
-      // Read from disk on each request so edits to the prompt files show up
-      // without a restart. Settings overrides win when set.
+      // Saved profiles own inference text; configured files remain available
+      // explicitly as the built-in starting point.
       const builtin = loadPrompts(config.promptsDir, config.promptVersion);
-      const overrides = config.promptOverrides ?? {};
+      const selected = profiles?.resolve({ profileId: url.searchParams.get('profileId') || undefined });
+      const overrides = selected ?? config.promptOverrides ?? {};
       sendJson(response, 200, {
-        version: overrides.systemPrompt || overrides.userTemplate
+        version: selected ? `${config.promptVersion}-profile` : overrides.systemPrompt || overrides.userTemplate
           ? `${config.promptVersion}-custom`
           : config.promptVersion,
+        profile: selected?.attribution ?? null,
         systemPrompt: overrides.systemPrompt || builtin.systemPrompt,
         userTemplate: overrides.userTemplate || builtin.userTemplate,
         customized: {
-          systemPrompt: Boolean(overrides.systemPrompt),
-          userTemplate: Boolean(overrides.userTemplate),
+          systemPrompt: selected ? selected.systemPrompt !== builtin.systemPrompt : Boolean(overrides.systemPrompt),
+          userTemplate: selected ? selected.userTemplate !== builtin.userTemplate : Boolean(overrides.userTemplate),
         },
         builtin,
       });

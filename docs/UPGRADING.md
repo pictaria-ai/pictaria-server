@@ -258,3 +258,19 @@ pre-flight checklist — see
 
 Do not upgrade both on the same day. If something breaks afterwards, you want
 to know which upgrade caused it.
+
+## Named Enrich profiles (unreleased v1.2 work)
+
+Schema 9 / persistent-state contract 10 adds profiles and queue pins. The
+first boot copies effective prompts/taxonomy into Default and pins old queue
+items to that revision; it does not launch enrichment. Verify Default contains
+your customization and the old queue still shows its expected slices. Subsequent
+inference edits belong in Enrich profiles; Settings retains the shared live
+Curate policy. Changing configured files later does not rewrite saved profiles.
+See [profile behavior and migration](ENRICH.md#enrichment-profiles).
+
+Startup takes the usual complete pre-migration snapshot before mutation.
+Rollback requires restoring that snapshot into a clean volume with the older
+image; do not run an older server directly against the new database. Profile
+revisions and default/queue references live in enrichment.sqlite and are included
+in standard backups.

@@ -25,6 +25,10 @@
     .panel { padding: 14px 16px; margin-bottom: 14px; display: grid; gap: 12px; }
     .panel.dimmed { opacity: 0.55; }
     .es-main { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; min-width: 0; }
+    .profile-field { display: block; margin: 14px 0; }
+    .profile-field input, .profile-field textarea { display: block; width: 100%; box-sizing: border-box; margin-top: 6px; }
+    .profile-field textarea { height: auto; min-height: 100px; font-family: monospace; resize: vertical; }
+    #enrichProfile { max-width: 100%; }
     .provider-note { color: var(--p-muted); font-size: 12px; line-height: 1.45; }
     .provider-note.bad { color: var(--p-danger); }
     /* The status detail sits on its own line under the title and wraps as
@@ -174,9 +178,36 @@
       <div id="providerNote" class="provider-note">Used for new runs. Your selection is remembered.</div>
     </section>
 
+    <section id="profilePanel" class="p-panel panel">
+      <div class="es-main">
+        <label for="enrichProfile"><strong>Enrichment profile</strong></label>
+        <select id="enrichProfile" class="p-select" aria-label="Enrichment profile"></select>
+        <button id="profileEdit" class="p-btn">Edit</button>
+        <button id="profileDuplicate" class="p-btn quiet">Duplicate</button>
+        <button id="profileNew" class="p-btn quiet">New from built-in</button>
+      </div>
+      <p id="profileNote" class="provider-note">Loading profiles…</p>
+      <div class="es-main">
+        <button id="profileDefault" class="p-btn quiet">Make default</button>
+        <button id="profileArchive" class="p-btn quiet">Archive</button>
+        <span id="profileArchivedRow" hidden><label for="profileArchived">Archived profiles</label>
+          <select id="profileArchived" class="p-select"></select><button id="profileRestore" class="p-btn quiet">Restore</button></span>
+      </div>
+      <div id="profileEditor" hidden style="margin-top: 16px">
+        <h3 id="profileEditorTitle">Edit profile</h3>
+        <p class="tp-note">Profiles save prompts and the allowed taxonomy. Provider/model settings remain separate. Curate uses the shared live review policy in Settings. To try a profile on a few photos, save it and start a small run with Only unenriched off.</p>
+        <label class="profile-field" for="profileName">Name<input id="profileName" class="p-input" maxlength="80"></label>
+        <label class="profile-field" for="profileSystem">System prompt<textarea id="profileSystem" class="p-input" rows="7" maxlength="20000" spellcheck="false"></textarea></label>
+        <label class="profile-field" for="profileUser">Per-photo prompt <span class="p-muted">— include {approved_tags}</span><textarea id="profileUser" class="p-input" rows="5" maxlength="20000" spellcheck="false"></textarea></label>
+        <label class="profile-field" for="profileTaxonomy">Taxonomy JSON<textarea id="profileTaxonomy" class="p-input" rows="14" maxlength="200000" spellcheck="false"></textarea></label>
+        <div class="es-main"><button id="profileValidate" class="p-btn">Validate</button><button id="profileSave" class="p-btn primary">Save profile</button><button id="profileClose" class="p-btn quiet">Close editor</button></div>
+        <p id="profileEditorNote" class="tp-note" role="status" aria-live="polite"></p>
+      </div>
+    </section>
+
     <details id="taxPanel" class="p-panel panel">
       <summary><span class="chev">&#9654;</span> Taxonomy &amp; prompt <span class="sub">— exactly what the model is told, and the tags it may use</span></summary>
-      <div class="tp-note" style="margin-top: 10px">Editable in <a href="/settings.html#sec-enrich" style="color: var(--p-accent)">Settings &rarr; Enrich</a>. Learn more in the <a href="https://github.com/pictaria-ai/pictaria-server/blob/main/docs/ENRICH.md" target="_blank" rel="noopener" style="color: var(--p-accent)">enrichment guide</a>.</div>
+      <div class="tp-note" style="margin-top: 10px">Edit the selected setup in <a href="#profilePanel" style="color: var(--p-accent)">Enrichment profiles</a>. Learn more in the <a href="https://github.com/pictaria-ai/pictaria-server/blob/main/docs/ENRICH.md" target="_blank" rel="noopener" style="color: var(--p-accent)">enrichment guide</a>.</div>
       <div id="taxBody" class="tp-body"><div class="tp-note">Loading…</div></div>
     </details>
 
@@ -274,6 +305,7 @@
 
   <div id="toast" class="p-toast"></div>
 
+  <script src="/enrich-profiles.js"></script>
   <script>
     const IDLE_STATUS_POLL_MS = 15_000;
     const state = {
@@ -294,6 +326,13 @@
       runsRefreshPending: false,
     };
     const el = (id) => document.getElementById(id);
+    const profileUI = createEnrichProfileUI({ api, toast, changed() {
+      loadTaxonomyPanel.loaded = false;
+      if (el('taxPanel').open) void loadTaxonomyPanel();
+      void loadFailureLimited();
+      void loadQueue();
+      syncRunButtons(state.lastStatus);
+    } });
 
     function headers(extra = {}) {
       return { ...extra };
@@ -401,7 +440,7 @@
       if (!status) return;
       const off = status.enabled === false;
       const busy = status.running === true || status.resolvingSlice === true;
-      const providerUnavailable = state.providerSaving || !providerReady();
+      const providerUnavailable = state.providerSaving || !providerReady() || !profileUI.ready();
       el('enrichStart').disabled = off || busy || providerUnavailable;
       el('retryFailedBtn').disabled = off || busy || providerUnavailable;
       for (const button of document.querySelectorAll('#queueList .p-btn.accent')) {
@@ -411,7 +450,7 @@
         const retryProviderReady = state.providerConfigured.get(button.dataset.provider) === true;
         button.disabled = off || busy || !retryProviderReady;
         button.title = retryProviderReady
-          ? 'Start a new run for the failures from this run that still need enrichment.'
+          ? 'Retry with this run’s original provider and the currently selected profile’s latest revision.'
           : 'This run’s provider is no longer configured. Add its connection details in AI Providers to retry.';
       }
       const activeId = busy ? status.options?.queueItemId : null;
@@ -445,6 +484,7 @@
           statusLine1 = [
             status.cancelRequested ? 'Cancelling…' : 'Running',
             status.title,
+            status.profile ? profileUI.label(status.profile) : null,
             `${status.provider}${status.model ? ` · ${status.model}` : ''}`,
           ].filter(Boolean).join(' · ');
           statusLine2 = [
@@ -542,6 +582,7 @@
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
             provider: el('enrichProvider').value,
+            profileId: profileUI.id(),
             maxAnalyzed: Number(el('enrichMax').value) || 100,
             limit: Math.max((Number(el('enrichMax').value) || 100) * 20, 1000),
             skipAnySuccessful: el('enrichSkip').checked,
@@ -567,7 +608,9 @@
       el('retryStrip').hidden = true;
       try {
         const provider = el('enrichProvider').value;
-        const body = await api(`/api/enrich/failure-limited${provider ? `?provider=${encodeURIComponent(provider)}` : ''}`);
+        const profileId = profileUI.id();
+        const body = await api(`/api/enrich/failure-limited?provider=${encodeURIComponent(provider)}&profileId=${encodeURIComponent(profileId)}`);
+        body.profileId = profileId;
         if (seq !== state.failureLimitedSeq) return; // superseded by a newer load
         state.failureLimited = body;
         const show = (body.count ?? 0) > 0;
@@ -595,6 +638,7 @@
             // The provider that produced these ids — not the picker, which
             // may have changed since the strip loaded.
             provider: stuck.provider,
+            profileId: stuck.profileId,
             assetIds: stuck.assetIds,
             retryFailureLimited: true,
             sendToCurate: el('enrichCurate').checked,
@@ -616,7 +660,9 @@
 
     async function loadStuckDetails() {
       const provider = el('enrichProvider').value;
-      return api(`/api/enrich/failure-limited/details${provider ? `?provider=${encodeURIComponent(provider)}` : ''}`);
+      const profileId = profileUI.id();
+      const details = await api(`/api/enrich/failure-limited/details?provider=${encodeURIComponent(provider)}&profileId=${encodeURIComponent(profileId)}`);
+      return { ...details, profileId };
     }
 
     function stuckThumb(assetId) {
@@ -701,11 +747,11 @@
     // Discard all resolves the CURRENT stuck set on the server — never the
     // popup's snapshot — so it can't act on stale rows and isn't limited
     // by the popup's 500-row display cap.
-    async function discardAllStuck(provider) {
+    async function discardAllStuck(provider, profileId) {
       const body = await api('/api/enrich/discarded', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ all: true, provider }),
+        body: JSON.stringify({ all: true, provider, profileId }),
       });
       discardToast(body);
       // The operation's own truncation flag — NOT `body.truncated`, which
@@ -832,7 +878,7 @@
       try {
         // The provider that produced the popup's stuck set — not the
         // picker, which may have changed since (same rule as Retry).
-        await discardAllStuck(details.provider);
+        await discardAllStuck(details.provider, details.profileId);
       } catch (error) {
         toast(error.message, true);
       }
@@ -929,17 +975,22 @@
           if (!send.checked) reopen.checked = false;
           reopenWrap.style.opacity = send.checked ? '' : '0.45';
         });
-        opts.append(sendWrap, reopenWrap);
+        const skipWrap = document.createElement('label');
+        skipWrap.title = 'Off: analyze photos whose saved inference inputs differ, preserving existing Curate decisions.';
+        const skip = document.createElement('input');
+        skip.type = 'checkbox'; skip.checked = true;
+        skipWrap.append(skip, 'Only unenriched');
+        opts.append(sendWrap, reopenWrap, skipWrap);
 
-        run.addEventListener('click', () => void runQueued(item.id, run, send.checked, reopen.checked));
-        card.append(top, opts);
+        run.addEventListener('click', () => void runQueued(item.id, run, send.checked, reopen.checked, skip.checked));
+        card.append(top, opts, profileUI.queueControl(item));
         box.append(card);
       }
       // Fresh buttons need the current disabled rules (a run may be active).
       syncRunButtons(state.lastStatus);
     }
 
-    async function runQueued(id, button, sendToCurate = true, reopenDecided = false) {
+    async function runQueued(id, button, sendToCurate = true, reopenDecided = false, skipAnySuccessful = true) {
       button.disabled = true;
       try {
         const body = await api(`/api/enrich/queue/${id}/run`, {
@@ -950,7 +1001,7 @@
             sendToCurate,
             reopenDecided,
             // Re-opening implies a fresh look: re-analyze even the enriched.
-            skipAnySuccessful: !reopenDecided,
+            skipAnySuccessful: !reopenDecided && skipAnySuccessful,
           }),
         });
         await loadQueue();
@@ -989,7 +1040,7 @@
       // The plan captures each item's checkboxes as currently set.
       const plan = [...document.querySelectorAll('#queueList .qitem[data-qid]')].map((card) => {
         const boxes = card.querySelectorAll('.opts input');
-        return { id: Number(card.dataset.qid), sendToCurate: boxes[0].checked, reopenDecided: boxes[1].checked };
+        return { id: Number(card.dataset.qid), sendToCurate: boxes[0].checked, reopenDecided: boxes[1].checked, skipAnySuccessful: !boxes[1].checked && boxes[2].checked };
       });
       if (plan.length === 0) return;
       el('runAllBtn').disabled = true;
@@ -1117,6 +1168,7 @@
         const detail = document.createElement('div');
         detail.className = 'detail';
         detail.textContent = [
+          run.profile ? profileUI.label(run.profile) : null,
           run.provider,
           run.model,
           run.inferenceHostLabel ? `host: ${run.inferenceHostLabel}` : null,
@@ -1198,7 +1250,7 @@
         const body = await api(`/api/enrich/runs/${run.id}/retry`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ sendToCurate: el('enrichCurate').checked }),
+          body: JSON.stringify({ sendToCurate: el('enrichCurate').checked, profileId: profileUI.id() }),
         });
         if (body.started === false) {
           toast('Those photos no longer need enrichment.');
@@ -1230,9 +1282,10 @@
         state.liveLog = false;
         el('logPopupTitle').textContent = `Configuration ${entry.id.slice(0, 8)}`;
         el('logPopupMeta').textContent = [
+          saved.profile ? profileUI.label(saved.profile) : null,
           saved.inference.provider.name, saved.inference.provider.model,
           saved.inference.image.source, `Inference ${entry.inferenceId.slice(0, 8)}`,
-        ].join(' · ');
+        ].filter(Boolean).join(' · ');
         el('logPopupBody').textContent = [
           'Saved inputs for this execution. Later Settings edits do not change this record.',
           'Curate continues to apply current review policy. Re-run failed photos uses settings at retry start.',
@@ -1343,7 +1396,8 @@
       loadTaxonomyPanel.loaded = true;
       const body = el('taxBody');
       try {
-        const [tax, prompts] = await Promise.all([api('/api/taxonomy'), api('/api/enrich/prompts')]);
+        const query = `?profileId=${encodeURIComponent(profileUI.id())}`;
+        const [tax, prompts] = await Promise.all([api('/api/taxonomy' + query), api('/api/enrich/prompts' + query)]);
         body.replaceChildren();
 
         const mk = (tag, cls, text) => {
@@ -1387,16 +1441,16 @@
         }
 
         body.append(mk('div', 'tp-head', `Prompt · version ${prompts.version}`));
-        body.append(mk('div', 'tp-note', `System prompt — the model’s standing instructions${prompts.customized?.systemPrompt ? ' (customized in Settings)' : ''}:`));
+        body.append(mk('div', 'tp-note', `System prompt — the model’s standing instructions${prompts.customized?.systemPrompt ? ' (saved in profile)' : ''}:`));
         body.append(mk('pre', 'prompt', prompts.systemPrompt));
-        body.append(mk('div', 'tp-note', `Per-photo message — {approved_tags} is replaced with the taxonomy tags above${prompts.customized?.userTemplate ? ' (customized in Settings)' : ''}:`));
+        body.append(mk('div', 'tp-note', `Per-photo message — {approved_tags} is replaced with the taxonomy tags above${prompts.customized?.userTemplate ? ' (saved in profile)' : ''}:`));
         body.append(mk('pre', 'prompt', prompts.userTemplate));
         const editNote = mk('div', 'tp-note');
         editNote.append('Both the prompts and the taxonomy are editable in ');
-        const link = mk('a', null, 'Settings → Enrich');
-        link.href = '/settings.html#sec-enrich';
+        const link = mk('a', null, 'Enrichment profiles');
+        link.href = '#profilePanel';
         link.style.color = 'var(--p-accent)';
-        editNote.append(link, ' — changes apply immediately. How the pieces fit together is explained in ');
+        editNote.append(link, ' — saved edits apply to future runs. How the pieces fit together is explained in ');
         const docsLink = mk('a', null, 'the enrichment guide');
         docsLink.href = 'https://github.com/pictaria-ai/pictaria-server/blob/main/docs/ENRICH.md';
         docsLink.target = '_blank';
@@ -1421,10 +1475,10 @@
 
     state.idlePolling = setInterval(refreshIfIdle, IDLE_STATUS_POLL_MS);
     document.addEventListener('visibilitychange', refreshIfIdle);
+    profileUI.load().catch(error => toast(error.message, true));
     refresh();
     loadQueue();
     loadRuns();
-    loadFailureLimited();
   </script>
 </body>
 </html>

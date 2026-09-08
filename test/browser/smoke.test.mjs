@@ -693,7 +693,7 @@ test('admin UI smoke: gate, Insights lens, Curate, Smart Albums', { timeout: 120
     );
     assert.deepEqual(await page.evaluate('window.__historyRetry'), {
       path: '/api/enrich/runs/1/retry',
-      body: { sendToCurate: true },
+      body: { sendToCurate: true, profileId: await page.evaluate('document.getElementById("enrichProfile").value') },
     });
 
     await page.navigate(`${server.base}/remote.html`);
@@ -1585,15 +1585,15 @@ test('admin UI smoke: gate, Insights lens, Curate, Smart Albums', { timeout: 120
       'the Cloud Models division carries the visual separator',
     );
     const promptGroup = 'document.querySelector("#fields-enrich details.sub-details")';
-    assert.equal(await page.evaluate(`${promptGroup}.open`), false, 'prompt group starts collapsed');
+    assert.equal(await page.evaluate(`${promptGroup}.open`), false, 'live policy group starts collapsed');
     assert.ok(
-      await page.evaluate(`!!${promptGroup}.querySelector("#f2-enrich-systemPrompt")`),
-      'prompt overrides remain under Enrich',
+      await page.evaluate(`!!${promptGroup}.querySelector("#f2-enrich-taxonomyJson")`),
+      'live Curate policy remains editable',
     );
     assert.equal(
       await page.evaluate(`${promptGroup}.querySelectorAll(".field").length`),
-      3,
-      'system prompt, per-photo prompt, and taxonomy overrides fill the prompt group',
+      1,
+      'inference prompts moved to profiles; shared Curate policy remains',
     );
     // render() reads the original backend sections through the presentation
     // mapping; no key is configured, so the secret placeholder is honest.
@@ -1671,7 +1671,7 @@ test('admin UI smoke: gate, Insights lens, Curate, Smart Albums', { timeout: 120
     );
     assert.equal(
       await page.evaluate('document.getElementById("f2-enrich-scheduledEnabled").closest(".field").querySelector(".setting-desc").textContent'),
-      'Enrich photos, once a day, that haven\'t been previously enriched. Uses the provider last selected and sends successful results to Curate. If today\'s time has passed, enabling starts today\'s catch-up promptly. Runs only once per day. Requires Enable AI enrichment above.',
+      'Enrich photos, once a day, that haven\'t been previously enriched. Uses the provider last selected and the default enrichment profile, and sends successful results to Curate. If today\'s time has passed, enabling starts today\'s catch-up promptly. Runs only once per day. Requires Enable AI enrichment above.',
     );
     const browserTimeZone = await page.evaluate('Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC"');
     await page.evaluate(`
