@@ -38,6 +38,18 @@ export class ImmichClient {
     this.fetchImpl = fetchImpl;
   }
 
+  // Captured executions need their own connection settings and the private
+  // method brand installed by the constructor. A prototype-only copy cannot
+  // call #request, even though it passes instanceof ImmichClient.
+  clone() {
+    return new ImmichClient({
+      baseUrl: this.baseUrl,
+      apiKey: this.apiKey,
+      timeoutMs: this.timeoutMs,
+      fetchImpl: this.fetchImpl,
+    });
+  }
+
   async searchMetadata(body) {
     return this.requestJson('/search/metadata', { method: 'POST', body });
   }

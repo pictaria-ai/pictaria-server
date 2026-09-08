@@ -31,6 +31,10 @@ All notable changes to Pictaria Server are documented here. This project follows
   Legacy successes still skip with **Only unenriched** on; with it off they
   cannot prove an input match and may be reprocessed. Startup creates the
   normal pre-migration recovery point; rollback restores that snapshot.
+- Legacy failures no longer count toward the current configuration's failure
+  limit. Previously stuck photos leave the **Stuck photos** strip and can get
+  two fresh attempts (the default limit) on subsequent sweeps, using additional
+  provider calls.
 
 ## 1.1.0 - 2026-09-03
 

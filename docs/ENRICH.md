@@ -431,6 +431,9 @@ your approved tags on every request.
   configuration: a photo gets fresh attempts when model inputs change,
   including a custom prompt edit under an unchanged version label. Legacy
   failures with unknown inputs do not count against a new configuration.
+  After upgrading, previously stuck legacy photos therefore leave the
+  **Stuck photos** strip and can receive two fresh attempts on subsequent
+  sweeps at the default limit, using additional provider calls.
   To re-attempt them under the *same* setup, the Enrich page shows a
   **Stuck photos** strip whenever any exist for the selected provider —
   **Retry** runs exactly those photos with the failure cap off for that

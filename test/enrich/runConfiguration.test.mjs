@@ -4,12 +4,15 @@ import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { Readable } from 'node:stream';
+import { createServer } from 'node:http';
 import { DatabaseSync } from 'node:sqlite';
+
+import { ImmichClient } from '../../src/immich.mjs';
 
 import { Repository } from '../../src/enrich/repository.mjs';
 import { EnrichJobRunner } from '../../src/enrich/jobRunner.mjs';
 import { createProvider } from '../../src/enrich/providers.mjs';
-import { buildUserPrompt, captureRunConfiguration, MAX_RUN_CONFIGURATION_BYTES } from '../../src/enrich/runConfiguration.mjs';
+import { buildUserPrompt, captureClient, captureRunConfiguration, MAX_RUN_CONFIGURATION_BYTES } from '../../src/enrich/runConfiguration.mjs';
 import { parseTaxonomySource, replaceTaxonomy } from '../../src/enrich/taxonomy.mjs';
 import { deriveReview } from '../../src/enrich/reviewBuckets.mjs';
 import { createEnrichRoutes } from '../../src/routes/enrich.mjs';
@@ -410,4 +413,76 @@ test('expanded prompts and stored details have explicit size ceilings', (t) => {
   repo.saveRunConfiguration(config);
   repo.db.prepare('UPDATE enrich_configurations SET snapshot_json = zeroblob(?) WHERE id = ?').run(MAX_RUN_CONFIGURATION_BYTES + 1, config.id);
   assert.equal(repo.getRunConfiguration(config.id), null, 'oversize persisted data is rejected before materializing it in JavaScript');
+});
+
+test('a captured real ImmichClient preserves private methods and connection settings across repeated capture', async () => {
+  const calls = [];
+  const fetchImpl = async (url, options) => {
+    calls.push({ url, apiKey: options.headers['x-api-key'] });
+    return Response.json({ id: 'a1' });
+  };
+  const original = new ImmichClient({ baseUrl: 'http://original.test', apiKey: 'original-key', timeoutMs: 12345, fetchImpl });
+  const captured = captureClient(captureClient(original));
+  original.baseUrl = 'http://changed.test';
+  original.apiKey = 'changed-key';
+  original.timeoutMs = 1;
+  original.fetchImpl = () => { throw new Error('must use the captured transport'); };
+  assert.notEqual(captured, original);
+  assert.ok(captured instanceof ImmichClient);
+  assert.equal(captured.timeoutMs, 12345);
+  assert.equal(captured.fetchImpl, fetchImpl);
+  assert.deepEqual(await captured.getAsset('a1'), { id: 'a1' });
+  assert.deepEqual(calls, [{ url: 'http://original.test/api/assets/a1', apiKey: 'original-key' }]);
+});
+
+test('real Immich HTTP requests reach successful enrichment through sweeps, targeted runs, and queue resolution', async (t) => {
+  for (const mode of ['sweep', 'targeted', 'queue']) {
+    await t.test(mode, async (t) => {
+      const { repo } = fixture(t);
+      const h = makeRunner(repo);
+      const requests = [];
+      const asset = { id: 'a1', type: 'IMAGE', fileCreatedAt: '2026-01-01T00:00:00Z' };
+      const server = createServer((req, res) => {
+        req.resume();
+        req.on('end', () => {
+          requests.push({ path: req.url, apiKey: req.headers['x-api-key'] });
+          // This mutation happens after the run/reservation captured the
+          // client but before its first metadata response arrives.
+          h.immich.baseUrl = 'http://127.0.0.1:9';
+          h.immich.apiKey = 'changed-key';
+          const path = new URL(req.url, 'http://stub.test').pathname;
+          if (path === '/api/assets/a1/thumbnail') {
+            res.writeHead(200, { 'Content-Type': 'image/jpeg' });
+            res.end(Buffer.from('synthetic-image'));
+          } else if (path === '/api/assets/a1' || path === '/api/search/metadata') {
+            res.writeHead(200, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify(path === '/api/assets/a1' ? asset : { assets: { items: [asset], nextPage: null } }));
+          } else {
+            res.writeHead(404); res.end();
+          }
+        });
+      });
+      await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
+      t.after(() => new Promise((resolve) => server.close(resolve)));
+      h.immich = new ImmichClient({ baseUrl: `http://127.0.0.1:${server.address().port}`, apiKey: 'captured-key' });
+      h.runner = new EnrichJobRunner({ repo, immich: h.immich, taxonomy: h.taxonomy, config: h.config });
+      let queueId;
+      if (mode === 'queue') {
+        queueId = repo.queueAdd({ title: 'Real client queue', filters: { city: 'Paris' } }).id;
+        const result = await request(route(h, repo), `/api/enrich/queue/${queueId}/run`);
+        assert.equal(result.status, 202, JSON.stringify(result.body));
+      } else {
+        h.runner.start(mode === 'targeted' ? { assetIds: ['a1'] } : { limit: 1 });
+      }
+      await h.runner.runPromise;
+      assert.equal(h.runner.status().error, null);
+      assert.equal(h.runner.status().counters.succeeded, 1);
+      assert.equal(h.calls.length, 1, 'the provider received the photo through the real client');
+      assert.ok(requests.some(({ path }) => path.startsWith('/api/assets/a1/thumbnail')));
+      assert.ok(requests.every(({ apiKey }) => apiKey === 'captured-key'));
+      assert.equal(repo.listJobRuns()[0].status, 'finished');
+      assert.equal(repo.latestEnrichment('a1').caption, sampleOutput().caption);
+      if (queueId) assert.equal(repo.queueGet(queueId), null);
+    });
+  }
 });

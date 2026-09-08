@@ -1,4 +1,5 @@
 import { createHash } from 'node:crypto';
+import { ImmichClient } from '../immich.mjs';
 
 import { enrichmentJsonSchema } from './schema.mjs';
 import { approvedModelTags, parseTaxonomySource } from './taxonomy.mjs';
@@ -107,9 +108,10 @@ export function captureRunConfiguration({
   };
 }
 
-// Real clients/providers contain scalar settings and a fetch function. Copy
-// those settings without sharing the mutable connection object. Keeping the
-// prototype also supports the CLI and small in-memory test adapters.
+// ImmichClient uses private methods, so its copy must go through the real
+// constructor. Current provider adapters and plain in-memory clients have no
+// private members; their scalar settings and transport can be copied directly.
 export function captureClient(client) {
+  if (client instanceof ImmichClient) return client.clone();
   return Object.assign(Object.create(Object.getPrototypeOf(client)), client);
 }
