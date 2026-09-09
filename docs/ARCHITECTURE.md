@@ -212,7 +212,7 @@ data/               all persistent state (gitignored): enrichment.sqlite,
   one server-saved active choice; provider/model selection stays separate.
   Queue rows store selections only; execution captures the active revision.
   Profile metadata in configurations lets history and photo attribution use indexed joins without loading snapshot blobs.
-  Legacy effective settings seed Default once; shared Curate policy stays
+  Legacy effective settings seed My profile once; shared Curate policy stays
   live and independent. Revisions survive archive and job-summary pruning.
 - **Enrich execution configuration**: `enrich/runConfiguration.mjs` captures
   effective inputs before the first asynchronous photo-selection call. Queue

@@ -352,7 +352,7 @@ lists inside `candidate_tags` and `exclusion_reasons` are generated from
 your approved tags on every request.
 
 - **Taxonomy** — `taxonomy/v1.json` (`TAXONOMY_PATH`) seeds the initial
-  profile and New profile → Built-in setup. Edit saved inference taxonomies in profiles.
+  profile and New profile → Pictaria templates. Edit saved inference taxonomies in profiles.
   The version is a readable label; actual vocabulary determines inference
   identity. Shared live Curate policy remains a separate Settings value.
 - **Prompts** — `prompts/` (`PROMPTS_DIR`/`PROMPT_VERSION`) supplies the
@@ -365,9 +365,10 @@ your approved tags on every request.
 
 Use **Settings → Enrichment profiles** to keep several named prompt/taxonomy
 setups. The profile list marks the active profile used by new Enrich work.
-Choose **New profile**, enter a name, and start from the **Built-in setup** (the configured template files) or a copy of an existing profile.
+Choose **New profile**, enter a name, and start from the **Pictaria templates** (the configured template files) or a copy of an existing profile.
 Creation and editing open a dialog above the profile list. On narrow screens,
-the editor fills the screen. Each row’s **⋯** menu offers **Duplicate** and **Archive**
+the editor fills the screen. The **Starting point** dropdown labels saved profiles as **Copy of [name]**.
+Each row’s **⋯** menu offers **Duplicate** and **Archive**
 where applicable. Restore profiles from the collapsed **Archived profiles** list.
 
 **Edit** opens one profile at a time: name, **Tags & categories**, then
@@ -447,12 +448,15 @@ small metadata only; editor/detail requests load the content separately.
 
 On first upgrade, the effective prompt text and taxonomy (including saved
 overrides, with their existing precedence over configured files) are copied
-into **Default**, the initial active profile. When upgrading an earlier v1.2
+into **My profile**, the initial active profile. When upgrading an earlier v1.2
 preview, its saved default becomes the active profile, and pending queue pins
 are cleared. Existing queued selections and saved run configurations remain.
+An untouched original profile named Default is renamed to My profile using a
+new revision; old attribution is retained. Edited, renamed, or archived profiles
+keep their names, as does the starter if another My profile already exists.
 The old settings values remain on disk for provenance/rollback, but saved
 inference profiles then own their content: later environment/file changes do
-not overwrite them. **New profile → Built-in setup** explicitly imports the current
+not overwrite them. **New profile → Pictaria templates** explicitly imports the current
 configured files. Legacy prompt writes through Settings are rejected with a
 pointer to profiles; `taxonomyJson` continues to own the shared live Curate
 policy. Existing human decisions and old unknown configuration identities

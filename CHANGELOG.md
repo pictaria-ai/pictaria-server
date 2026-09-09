@@ -25,6 +25,11 @@ All notable changes to Pictaria Server are documented here. This project follows
 
 ### Fixed
 
+- Profile creation distinguishes **Pictaria templates** from **Copy of [name]**
+  under **Starting point**. The initial profile is named **My profile**; untouched
+  preview starters named Default receive that name once, preserving history.
+  Edited/user-named profiles keep their names.
+
 - The Enrich master switch also pauses caption writeback, preserving pending
   captions and saved preferences. Daily Enrich and caption controls show their
   paused state while Enrich is off. The Enrich page combines provider/profile
@@ -43,7 +48,7 @@ All notable changes to Pictaria Server are documented here. This project follows
 ### Upgrade notes
 
 - Enrichment schema 9 and persistent-state contract 11 add named profiles
-  and one saved active profile. Existing effective overrides seed Default once;
+  and one saved active profile. Existing effective overrides seed My profile once;
   that profile becomes the initial active choice. Earlier preview queue pins
   are cleared while queued selections and historical snapshots are preserved.
   Saved profiles then own inference content, while Settings taxonomy JSON remains the shared live Curate policy.

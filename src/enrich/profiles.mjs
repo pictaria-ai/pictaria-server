@@ -25,11 +25,24 @@ export class EnrichmentProfiles {
     this.repo.transaction(() => {
       if (!this.db.prepare('SELECT 1 FROM enrich_profiles LIMIT 1').get()) {
         const prompts = loadPrompts(this.config.promptsDir, this.config.promptVersion);
-        const profile = this.create({ name: 'Default', ...prompts,
+        const profile = this.create({ name: 'My profile', ...prompts,
           systemPrompt: this.config.promptOverrides?.systemPrompt || prompts.systemPrompt,
           userTemplate: this.config.promptOverrides?.userTemplate || prompts.userTemplate,
           taxonomy: loadActiveTaxonomy(this.config).raw });
         this.db.prepare('UPDATE enrich_profiles SET is_default = 1 WHERE id = ?').run(profile.id);
+      }
+      // Rename only the untouched starter from earlier previews. A normal
+      // revision preserves its old attribution; edited/user-named profiles
+      // and an existing "My profile" are left alone.
+      const starter = this.db.prepare(`SELECT p.id FROM enrich_profiles p
+        JOIN enrich_profile_revisions r ON r.id = p.current_revision_id
+        WHERE p.rowid = (SELECT MIN(rowid) FROM enrich_profiles)
+          AND p.name = 'Default' AND r.name = 'Default' AND r.revision = 1
+          AND p.archived = 0
+          AND NOT EXISTS (SELECT 1 FROM enrich_profiles WHERE name = 'My profile')`).get();
+      if (starter) {
+        const current = this.get(starter.id);
+        this.update(current.id, { ...current, name: 'My profile', expectedRevisionId: current.revisionId });
       }
       // Earlier v1.2 previews pinned queued profiles. Pending work now resolves
       // the active profile at execution; immutable run history remains intact.

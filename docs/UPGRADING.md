@@ -269,7 +269,7 @@ The physical `is_default` column stores the active choice, and the nullable
 queue pin column is retained for compatibility but is no longer used.
 Contract 11 ensures a recovery point before this behavior/state conversion.
 For installations without profiles, first boot copies effective prompts/taxonomy
-into the initial active profile, Default; it does not launch enrichment. Verify
+into the initial active profile, My profile; it does not launch enrichment. Verify
 the active profile contains your customization and the queue still shows its
 expected slices. Subsequent inference edits belong in Settings → Enrichment
 profiles; Settings retains the shared live Curate policy. Changing configured files later does not rewrite saved profiles.

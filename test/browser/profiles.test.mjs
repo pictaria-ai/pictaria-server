@@ -106,6 +106,7 @@ test('Settings manages profiles; Enrich links to profiles and saved run settings
   await rowAction('duplicate', initialId);
   await page.waitFor('!document.getElementById("profileCreate").hidden');
   assert.equal(await page.evaluate('document.getElementById("profileSource").value'), initialId);
+  assert.deepEqual(await page.evaluate('Array.from(document.getElementById("profileSource").options, o => o.textContent)'), ['Pictaria templates', 'Copy of My profile']);
   await click('profileCreateContinue');
   await page.waitFor('!document.getElementById("profileEditor").hidden && !document.getElementById("profileEditorControls").disabled');
   await fill('profileName', 'Travel <test>'); await fill('profileUser', 'Invalid template'); await click('profileSave');

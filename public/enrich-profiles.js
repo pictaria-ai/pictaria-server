@@ -105,7 +105,7 @@ window.createEnrichProfileManager = function ({ api, toast }) {
   }
   function startCreate(source = '') {
     const active = profiles.filter(p => !p.archived);
-    el('profileSource').replaceChildren(new Option('Built-in setup', ''), ...active.map(p => new Option(p.name, p.id)));
+    el('profileSource').replaceChildren(new Option('Pictaria templates', ''), ...active.map(p => new Option(`Copy of ${p.name}`, p.id)));
     el('profileSource').value = source;
     el('profileCreateName').value = source ? `${active.find(p => p.id === source).name} copy`.slice(0, 80) : '';
     el('profileCreateError').textContent = '';

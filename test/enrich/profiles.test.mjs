@@ -64,13 +64,13 @@ test('validation and optimistic edits preserve usable revisions; rename/archive 
   }
   const next = profiles.update(initial.id, { ...initial, name: 'Renamed', expectedRevisionId: initial.revisionId });
   assert.equal(next.revision, 2);
-  assert.equal(profiles.revision(initial.revisionId).name, 'Default');
+  assert.equal(profiles.revision(initial.revisionId).name, 'My profile');
   assert.throws(() => profiles.update(initial.id, { ...initial, expectedRevisionId: initial.revisionId }), /another window/);
   assert.throws(() => profiles.archive(initial.id, true), /another active/);
   const second = profiles.create({ ...initial, name: 'Second' }); profiles.setActive(second.id);
   profiles.archive(initial.id, true);
   assert.throws(() => profiles.resolve({ profileId: initial.id }), /archived/);
-  assert.equal(profiles.resolve({ profileRevisionId: initial.revisionId }).name, 'Default');
+  assert.equal(profiles.resolve({ profileRevisionId: initial.revisionId }).name, 'My profile');
   profiles.archive(initial.id, false); assert.equal(profiles.get(initial.id).name, 'Renamed');
 });
 
@@ -234,4 +234,34 @@ test('stale active selections and stale start requests cannot run another profil
   }
   assert.equal(h.calls.length,0); assert.equal(h.runner.isBusy(),false);
   assert.equal((await request(h.route,'/api/enrich/run',{profileId:first.id})).status,400);
+});
+
+
+test('an untouched preview starter is renamed once without rewriting old attribution or copying content', t => {
+  const { profiles, repo } = setup(t); const initial = profiles.activeProfile();
+  // Simulate the earlier preview's initial record, before the starter rename.
+  repo.db.prepare("UPDATE enrich_profiles SET name = 'Default' WHERE id = ?").run(initial.id);
+  repo.db.prepare("UPDATE enrich_profile_revisions SET name = 'Default' WHERE id = ?").run(initial.revisionId);
+  const other = profiles.create({ ...initial, name: 'Default' });
+  profiles.initialize();
+  const renamed = profiles.activeProfile();
+  assert.equal(renamed.id, initial.id); assert.equal(renamed.name, 'My profile');
+  assert.equal(renamed.revision, 2);
+  assert.equal(renamed.systemPrompt, initial.systemPrompt);
+  assert.equal(renamed.userTemplate, initial.userTemplate);
+  assert.deepEqual(renamed.taxonomy, initial.taxonomy);
+  assert.equal(profiles.revision(initial.revisionId).name, 'Default');
+  assert.equal(profiles.get(other.id).name, 'Default');
+  profiles.initialize(); assert.equal(profiles.activeProfile().revisionId, renamed.revisionId);
+});
+
+test('startup preserves edited starter names and avoids creating duplicate My profile names', t => {
+  const { profiles, repo } = setup(t); const initial = profiles.activeProfile();
+  const edited = profiles.update(initial.id, { ...initial, name: 'Default', systemPrompt: 'Custom instructions', expectedRevisionId: initial.revisionId });
+  profiles.initialize(); assert.equal(profiles.activeProfile().revisionId, edited.revisionId);
+  assert.equal(profiles.activeProfile().name, 'Default');
+  repo.db.prepare('UPDATE enrich_profiles SET current_revision_id = ? WHERE id = ?').run(initial.revisionId, initial.id);
+  repo.db.prepare("UPDATE enrich_profile_revisions SET name = 'Default' WHERE id = ?").run(initial.revisionId);
+  profiles.create({ ...initial, name: 'My profile' });
+  profiles.initialize(); assert.equal(profiles.activeProfile().name, 'Default');
 });
