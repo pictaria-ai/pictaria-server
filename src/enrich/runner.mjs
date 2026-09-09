@@ -1,3 +1,4 @@
+import { timingErrorKind } from './timing.mjs';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 
@@ -117,6 +118,7 @@ export async function analyzeWithValidationRetry(provider, image, {
   overloadRetryLimit = PROVIDER_OVERLOAD_RETRY_LIMIT,
   onProviderResponse = () => {},
   signal = null,
+  photoTiming = null,
 }) {
   const prompts = [userPrompt];
   // Every local provider (local_*), plus generic endpoints that explicitly
@@ -132,18 +134,21 @@ export async function analyzeWithValidationRetry(provider, image, {
   for (let attemptIndex = 0; attemptIndex < prompts.length; attemptIndex += 1) {
     while (true) {
       try {
-        const result = await provider.analyzeImage(image, {
-          systemPrompt,
-          userPrompt: prompts[attemptIndex],
-          jsonSchema,
-          signal,
-        });
-        // A completed provider response proves a persistent 429/503 wave has
-        // ended even if local schema validation later rejects its content.
-        onProviderResponse();
-        const normalized = validateAiOutput(result.normalizedOutput, taxonomy);
-        const decisions = mapOutputToTags(normalized, taxonomy);
-        return { result, normalized, decisions, retryCount: attemptIndex + overloadRetryCount };
+        const analyze = async () => {
+          const result = await provider.analyzeImage(image, {
+            systemPrompt,
+            userPrompt: prompts[attemptIndex],
+            jsonSchema,
+            signal,
+          });
+          // A completed provider response proves a persistent 429/503 wave has
+          // ended even if local schema validation later rejects its content.
+          onProviderResponse();
+          const normalized = validateAiOutput(result.normalizedOutput, taxonomy);
+          const decisions = mapOutputToTags(normalized, taxonomy);
+          return { result, normalized, decisions, retryCount: attemptIndex + overloadRetryCount };
+        };
+        return await (photoTiming ? photoTiming.analyze(analyze) : analyze());
       } catch (error) {
         if (isRetryableProviderOverload(error) && overloadRetryCount < overloadRetryLimit) {
           const retryIndex = overloadRetryCount;
@@ -169,7 +174,21 @@ export async function analyzeWithValidationRetry(provider, image, {
   throw lastError ?? new Error('model analysis did not run');
 }
 
-export async function runBatch({
+export async function runBatch(options) {
+  const timingSession = { id: options.timingRunId ?? null };
+  let outcome = 'failed';
+  try {
+    const result = await executeBatch({ ...options, timingSession });
+    outcome = options.shouldStop?.() || options.signal?.aborted ? 'cancelled' : 'finished';
+    return result;
+  } finally {
+    if (timingSession.id !== null && options.timingRunId == null) {
+      options.repo.timings.finishRun(timingSession.id, outcome);
+    }
+  }
+}
+
+async function executeBatch({
   immich,
   repo,
   provider,
@@ -197,6 +216,7 @@ export async function runBatch({
   retrySleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms)),
   signal = null,
   configuration = null,
+  timingSession,
 }) {
   immich = captureClient(immich);
   if (provider) provider = captureClient(provider);
@@ -236,6 +256,7 @@ export async function runBatch({
     systemPrompt = configuration.systemPrompt;
     imageSource = configuration.snapshot.inference.image.source;
     repo.saveRunConfiguration(configuration);
+    timingSession.id ??= repo.timings?.startRun(configuration) ?? null;
   }
 
   // Only Immich traversal time belongs to this deadline. Provider inference
@@ -307,6 +328,7 @@ export async function runBatch({
   const { userPrompt, jsonSchema, runKey } = configuration;
 
   const assetDecisions = {};
+  const recordSkip = reason => repo.timings?.skip(timingSession.id, reason);
   const counters = emptyCounters();
   let analyzed = 0;
   let scanned = 0;
@@ -341,6 +363,7 @@ export async function runBatch({
 
       if (skipAnySuccessful && repo.hasAnySuccessfulRun(assetId)) {
         counters.skippedSuccessful += 1;
+        recordSkip('already_succeeded');
         // Already enriched, so it belongs in Curate just like a fresh success.
         if (listForReview) listedForReview += repo.reviewListAdd([assetId], 'enrich');
         log(`${position} skipping ${assetId}; successful run already exists`);
@@ -348,6 +371,7 @@ export async function runBatch({
       }
       if (!reprocess && repo.hasSuccessfulRun({ assetId, ...runKey })) {
         counters.skippedSuccessful += 1;
+        recordSkip('already_succeeded');
         if (listForReview) listedForReview += repo.reviewListAdd([assetId], 'enrich');
         log(`${position} skipping ${assetId}; matching successful run already exists`);
         continue;
@@ -356,6 +380,7 @@ export async function runBatch({
       // and reprocessing; Restore is the one door back in.
       if (repo.isAssetDiscarded(assetId)) {
         counters.skippedDiscarded += 1;
+        recordSkip('human_discard');
         log(`${position} skipping ${assetId}; discarded from enrichment`);
         continue;
       }
@@ -365,6 +390,7 @@ export async function runBatch({
         repo.failureCount({ assetId, ...runKey }) >= maxFailuresPerAsset
       ) {
         counters.skippedFailureLimit += 1;
+        recordSkip('failure_limit');
         log(`${position} skipping ${assetId}; reached ${maxFailuresPerAsset} failed run(s)`);
         continue;
       }
@@ -374,6 +400,11 @@ export async function runBatch({
         break;
       }
 
+      const photoTiming = repo.timings?.startPhoto(timingSession.id, assetId);
+      let photoOutcome = 'failed';
+      let photoErrorKind = null;
+      let processingRunId = null;
+      let stage = 'download';
       analyzed += 1;
       counters.analyzed += 1;
       log(`${position} analyzing ${assetId}`);
@@ -397,10 +428,12 @@ export async function runBatch({
         // arrived while the image was downloading, stop here rather than
         // manufacturing a provider cancellation for a request never sent.
         if (shouldStop()) {
+          photoOutcome = 'cancelled';
           log('stopping early: cancellation requested after image download');
           stopped = true;
           break;
         }
+        stage = 'provider';
         const { normalized, decisions, retryCount } = await analyzeWithValidationRetry(
           provider,
           { data: image.data, mimeType: image.contentType, assetId },
@@ -415,13 +448,15 @@ export async function runBatch({
             overloadRetryLimit,
             onProviderResponse: noteProviderResponse,
             signal,
+            photoTiming,
           },
         );
         // One transaction: a run may never read as 'succeeded' without its
         // tags, caption index, review listing, and caption-writeback marker.
         // A failure at any write rolls the whole asset back to unprocessed.
+        stage = 'persistence';
         listedForReview += repo.transaction(() => {
-          repo.recordProcessingRun({
+          processingRunId = repo.recordProcessingRun({
             assetId,
             ...runKey,
             status: 'succeeded',
@@ -446,12 +481,15 @@ export async function runBatch({
           }
           return listed;
         });
+        photoOutcome = 'succeeded';
         assetDecisions[assetId] = decisions;
         counters.succeeded += 1;
         counters.retried += retryCount;
         log(`  tags: ${decisions.map((decision) => decision.tag).join(', ') || '(none)'}`);
         log(`  caption: ${typeof normalized.caption === 'string' && normalized.caption ? normalized.caption : '(none)'}`);
       } catch (error) {
+        photoErrorKind = stage === 'provider' ? timingErrorKind(error) : `${stage}_error`;
+        if (error?.cancelled || error instanceof RetryWaitCancelledError) photoOutcome = 'cancelled';
         if (error instanceof RetryWaitCancelledError) {
           log('stopping early: cancellation requested during provider retry wait');
           stopped = true;
@@ -472,7 +510,7 @@ export async function runBatch({
         const diagnostic = sanitizeDiagnostic(error instanceof Error ? error.message : error, {
           secrets: diagnosticSecrets,
         });
-        repo.recordProcessingRun({
+        processingRunId = repo.recordProcessingRun({
           assetId,
           ...runKey,
           status: infrastructure ? 'failed_infra' : 'failed',
@@ -503,6 +541,8 @@ export async function runBatch({
             + 'Nothing succeeded, so the job can simply be run again once the provider is back.',
           );
         }
+      } finally {
+        photoTiming?.finish(photoOutcome, photoErrorKind, processingRunId ?? null);
       }
     }
     scanned += assets.length;

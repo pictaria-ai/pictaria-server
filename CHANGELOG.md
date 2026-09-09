@@ -7,6 +7,12 @@ All notable changes to Pictaria Server are documented here. This project follows
 
 ### Added
 
+- Enrich records per-photo processing time and each actual provider request's
+  duration and outcome, including retries, timeouts, invalid responses, and
+  cancellation. Completed requests survive interrupted runs; incomplete and
+  historical measurements remain explicitly unknown. Bounded timing APIs
+  provide the foundation for the upcoming native performance view.
+
 - Named Enrich profiles: manage reusable prompts and taxonomy in Settings.
   One server-saved **Active profile** on Enrich controls new sweeps, queued
   groups, retries, and Daily Enrich. Queueing saves photos only; execution

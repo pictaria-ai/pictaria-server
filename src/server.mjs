@@ -163,6 +163,8 @@ const publicDir = join(config.rootDir, 'public');
 const taxonomy = loadActiveTaxonomy(config);
 const repo = new Repository(config.databasePath);
 repo.initSchema();
+// Reconcile only at process startup, never when another reader opens the DB.
+repo.timings.interrupt();
 const profiles = new EnrichmentProfiles({ repo, config });
 profiles.initialize();
 const activityLog = createActivityLog({ repo, setIntervalFn: lifecycle.setInterval });

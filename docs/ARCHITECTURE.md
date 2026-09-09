@@ -201,8 +201,20 @@ data/               all persistent state (gitignored): enrichment.sqlite,
 - **Ports**: Pictaria Server listens on `4080`. It must be the only writer of
   its enrichment database (see Scale: review state is cached in-process and
   projected at write time, so external writes are invisible until restart).
+- **Enrich timing**: `enrich/timing.mjs` owns compact execution/request records
+  and their schema, appended to the base enrichment schema by the repository.
+  Schema 10 / persistent-state contract 12 adds timing tables and a nullable
+  job-summary link. The job runner starts a timing run before asynchronous
+  processing; the batch runner measures photo execution through persistence.
+  An AsyncLocalStorage context scoped to each Enrich analysis instruments the
+  providers' common HTTP boundary without changing or sharing provider state
+  with voice or the referee. HTTP completion and local result acceptance are
+  separate outcomes. Server startup reconciles unfinished records; opening
+  a repository read handle does not interrupt another process's work.
+  Retention deletes only telemetry, with bounded pages and explicit coverage
+  gaps. See [the timing contract](ENRICH.md#photo-and-provider-request-timing).
 - **Enrich profiles**: `enrich/profiles.mjs` owns named profiles and immutable
-  revisions in enrichment.sqlite (schema 9, persistent-state contract 11).
+  revisions in enrichment.sqlite (introduced in schema 9 / state contract 11).
   `routes/enrichProfiles.mjs` exposes bounded management APIs;
   `public/enrich-profiles.js` owns the Settings profile manager and the Enrich
   profile picker. Settings uses a profile list and focused editor with draft

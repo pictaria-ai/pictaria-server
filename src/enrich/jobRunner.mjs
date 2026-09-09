@@ -159,7 +159,9 @@ export class EnrichJobRunner {
 
   #recordTerminal(lifecycle, { status, error, finishedAt }) {
     if (lifecycle.terminalRecorded) return false;
+    this.repo.timings?.finishRun(lifecycle.timingRunId, status);
     this.repo.recordJobRun({
+      timingRunId: lifecycle.timingRunId,
       title: this.state.title,
       provider: this.state.provider,
       model: this.state.model,
@@ -400,8 +402,11 @@ export class EnrichJobRunner {
       throw new Error('Retrying failure-limited photos needs an explicit asset list.');
     }
 
+    // Fail before claiming the runner if durable timing cannot be started.
+    const timingRunId = this.repo.timings?.startRun(configuration) ?? null;
     this.state = {
       ...idleState(),
+      timingRunId,
       running: true,
       startedAt: new Date().toISOString(),
       provider: providerName,
@@ -454,6 +459,7 @@ export class EnrichJobRunner {
     // later settles. Kept separate from UI state so queue completion cannot
     // accidentally reset it while the old promise unwinds.
     const lifecycle = {
+      timingRunId,
       configuration,
       interrupted: false,
       interruptedAt: null,
@@ -476,6 +482,7 @@ export class EnrichJobRunner {
         repo: this.repo,
         provider,
         configuration,
+        timingRunId: lifecycle.timingRunId,
         taxonomy: configuration.taxonomy,
         systemPrompt: configuration.systemPrompt,
         userTemplate: configuration.userTemplate,

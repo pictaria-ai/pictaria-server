@@ -16,6 +16,10 @@ import { DatabaseSync } from 'node:sqlite';
 import { SmartAlbumStore } from '../../src/albums/store.mjs';
 import { backupTargets, runBackup } from '../../src/backup.mjs';
 import { loadConfig } from '../../src/config.mjs';
+import { runBatch } from '../../src/enrich/runner.mjs';
+import { createProvider } from '../../src/enrich/providers.mjs';
+import { captureRunConfiguration } from '../../src/enrich/runConfiguration.mjs';
+import { sampleOutput } from '../enrich/helpers.mjs';
 import { EnrichmentProfiles } from '../../src/enrich/profiles.mjs';
 import { Repository } from '../../src/enrich/repository.mjs';
 import { createFrameLedger } from '../../src/frame/ledger.mjs';
@@ -43,7 +47,7 @@ test('a complete legacy installation upgrades, restarts, backs up, and restores 
     const sourceConfig = fixtureConfig(sourceRoot);
 
     const first = await openInstallation(sourceConfig, 'initialize');
-    assert.deepEqual(first.enrichmentMigration.applied, [1, 2, 3, 4, 5, 6, 7, 8, 9]);
+    assert.deepEqual(first.enrichmentMigration.applied, [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]);
     await assertRepresentativeState(first, sourceConfig);
 
     const migratedDefault = first.profiles.activeProfile();
@@ -52,6 +56,19 @@ test('a complete legacy installation upgrades, restarts, backs up, and restores 
     first.enrichment.queueAdd({ title: 'Active profile fixture', filters: { city: 'Fixture City' } });
     first.profiles.update(travel.id, { ...travel, name: 'Renamed travel', expectedRevisionId: travel.revisionId });
     first.profiles.setActive(travel.id);
+    const selected = first.profiles.resolve();
+    const provider = createProvider('local_lmstudio', { modelName: 'fixture-model', fetchImpl: async () =>
+      Response.json({ choices: [{ message: { content: JSON.stringify(sampleOutput()) } }] }) });
+    const configuration = captureRunConfiguration({ provider, taxonomy: selected.taxonomy,
+      systemPrompt: selected.systemPrompt, userTemplate: selected.userTemplate, profile: selected.attribution });
+    await runBatch({ repo: first.enrichment, provider, configuration, assetIds: ['timing-fixture'],
+      immich: { getAsset: async id => ({ id }), getAssetThumbnail: async () => ({ data: Buffer.from('fixture'), contentType: 'image/jpeg' }) } });
+    const timingRun = first.enrichment.timings.runs().items[0];
+    assert.equal(timingRun.configuration_id, configuration.id);
+    assert.equal(first.enrichment.configurationProfile(configuration.id).revisionId, selected.revisionId);
+    const photo = first.enrichment.timings.photos(timingRun.id).items[0];
+    assert.equal(first.enrichment.timings.attempts(photo.id).items[0].outcome, 'accepted');
+
 
     const migratedSettings = readFileSync(sourceConfig.settingsPath, 'utf8');
     const firstSnapshot = semanticSnapshot(first);
@@ -117,7 +134,7 @@ test('contract 10 upgrade snapshots queue pins before clearing them and retains 
     writeFileSync(config.persistentState.inventoryPath, JSON.stringify(inventory));
 
     const upgraded = await openInstallation(config, 'verify');
-    assert.equal(upgraded.inventory.upgrade.stateVersion, 11);
+    assert.equal(upgraded.inventory.upgrade.stateVersion, 12);
     assert.deepEqual(semanticSnapshot(upgraded), before);
     assert.equal(upgraded.profiles.activeProfile().id, travel.id);
     assert.equal(upgraded.enrichment.db.prepare('SELECT COUNT(*) AS n FROM enrich_queue WHERE profile_revision_id IS NOT NULL').get().n, 0);
@@ -174,6 +191,36 @@ function createDatabaseFromSql(databasePath, fixturePath) {
   }
 }
 
+test('contract 11 upgrade saves a schema-9 recovery point before introducing timings', async () => {
+  const workspace = mkdtempSync(join(tmpdir(), 'pictaria-timing-recovery-'));
+  try {
+    const sourceRoot = join(workspace, 'source'); materializeLegacyInstallation(sourceRoot);
+    const config = fixtureConfig(sourceRoot);
+    const installed = await openInstallation(config, 'initialize'); closeInstallation(installed);
+    // The fixture is the exact schema from the approved PIC-340 merge.
+    rmSync(config.databasePath);
+    const old = new DatabaseSync(config.databasePath);
+    old.exec(readFileSync(join(FIXTURES, 'enrichment-v9.sql'), 'utf8'));
+    old.exec("PRAGMA user_version = 9; INSERT INTO job_runs(title, provider, status, started_at, finished_at) VALUES ('Before timing', 'venice', 'finished', '2026-09-01', '2026-09-01');");
+    old.close();
+    const inventory = JSON.parse(readFileSync(config.persistentState.inventoryPath, 'utf8'));
+    inventory.upgrade.stateVersion = 11; writeFileSync(config.persistentState.inventoryPath, JSON.stringify(inventory));
+    const upgraded = await openInstallation(config, 'verify');
+    assert.deepEqual(upgraded.enrichmentMigration.applied, [10]);
+    assert.equal(upgraded.enrichment.listJobRuns()[0].timingRunId, null);
+    const snapshotDir = join(config.backup.dir, upgraded.inventory.upgrade.recoveryPoint.snapshotName);
+    closeInstallation(upgraded);
+    const restoredConfig = fixtureConfig(join(workspace, 'restored')); restoreSnapshot(snapshotDir, restoredConfig);
+    assert.equal(JSON.parse(readFileSync(restoredConfig.persistentState.inventoryPath, 'utf8')).upgrade.stateVersion, 11);
+    const restored = new DatabaseSync(restoredConfig.databasePath);
+    try {
+      assert.equal(getUserVersion(restored), 9);
+      assert.equal(restored.prepare("SELECT COUNT(*) AS n FROM sqlite_master WHERE name = 'enrich_timing_runs'").get().n, 0);
+      assert.equal(restored.prepare('SELECT title FROM job_runs').get().title, 'Before timing');
+    } finally { restored.close(); }
+  } finally { rmSync(workspace, { recursive: true, force: true }); }
+});
+
 async function openInstallation(config, expectedMode) {
   const guard = new PersistentStateGuard({
     inventoryPath: config.persistentState.inventoryPath,
@@ -192,6 +239,7 @@ async function openInstallation(config, expectedMode) {
   const settings = new SettingsStore({ filePath: config.settingsPath, config, env: {} }).load();
   const enrichment = new Repository(config.databasePath);
   const enrichmentMigration = enrichment.initSchema();
+  enrichment.timings.interrupt();
   const profiles = new EnrichmentProfiles({ repo: enrichment, config });
   profiles.initialize();
   const albums = new SmartAlbumStore(config.albums.dataFile, {
@@ -241,6 +289,9 @@ function semanticSnapshot(installation) {
     .get();
 
   return {
+    timingRuns: installation.enrichment.db.prepare('SELECT * FROM enrich_timing_runs ORDER BY id').all(),
+    photoTimings: installation.enrichment.db.prepare('SELECT * FROM enrich_photo_executions ORDER BY id').all(),
+    providerAttempts: installation.enrichment.db.prepare('SELECT * FROM enrich_provider_attempts ORDER BY id').all(),
     profiles: installation.profiles.list(),
     profileRevisions: installation.enrichment.db.prepare('SELECT * FROM enrich_profile_revisions ORDER BY id').all(),
     queue: installation.enrichment.queuePage().items,

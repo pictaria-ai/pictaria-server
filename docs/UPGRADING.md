@@ -280,3 +280,27 @@ Rollback requires restoring that snapshot into a clean volume with the older
 image; do not run an older server directly against the new database. Profile
 revisions and the active choice live in enrichment.sqlite and are included
 in standard backups.
+
+
+## Enrich timing (unreleased v1.2 work)
+
+Schema 10 / persistent-state contract 12 adds timing runs, photo executions,
+and provider attempts, plus a nullable `job_runs.timing_run_id` link. No
+historical measurements are reconstructed from logs or processing-row
+creation timestamps. Older job summaries have no timing link. Enrichment
+results, active profiles and immutable revisions, queue selections, and
+human decisions keep their existing meaning.
+
+The automatic pre-migration recovery point precedes this change. Timing
+records live in enrichment.sqlite and are covered by the existing complete
+backup/restore path. Tests cover upgrading the schema-9 profile release,
+restoring its pre-upgrade snapshot with contract 11 and no timing tables,
+and round-tripping new measurements and profile attribution through backup.
+Rollback requires that snapshot and the corresponding older server; never
+open contract-12 state with an older build.
+
+On startup, unfinished photo executions and requests become **interrupted**,
+with unknown finish times/durations left null. Completed requests retain
+their measurements, even when the enclosing run never wrote a job summary.
+Repeated startup does not replace completed measurements or invent elapsed
+wall time. See [timing and retention](ENRICH.md#photo-and-provider-request-timing).

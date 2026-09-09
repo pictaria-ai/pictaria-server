@@ -924,6 +924,25 @@ export function createEnrichRoutes({ review, enrichRunner, taxonomy, profiles = 
       return true;
     }
 
+    // Timing history is separate from results: legacy summaries have no
+    // timingRunId, and crash-interrupted runs remain discoverable here.
+    const timingMatch = url.pathname.match(/^\/api\/enrich\/timings(?:\/(\d+)\/photos|\/photos\/(\d+)\/attempts)?$/);
+    if (request.method === 'GET' && timingMatch) {
+      const options = {
+        afterId: decodeRunCursor(url.searchParams.get('cursor')) ?? 0,
+        limit: runPageLimit(url.searchParams.get('limit')),
+      };
+      const result = timingMatch[1] ? repo.timings.photos(Number(timingMatch[1]), options)
+        : timingMatch[2] ? repo.timings.attempts(Number(timingMatch[2]), options)
+          : repo.timings.runs(options);
+      if (!result) sendError(response, 404, 'timing_not_found', 'Timing history is unavailable or has expired.');
+      else {
+        const { nextAfterId, ...data } = result;
+        sendJson(response, 200, { ...data, nextCursor: nextAfterId === null ? null : encodeRunCursor(nextAfterId) });
+      }
+      return true;
+    }
+
     const runRetryMatch = url.pathname.match(/^\/api\/enrich\/runs\/(\d+)\/retry$/);
     if (request.method === 'POST' && runRetryMatch) {
       if (!requireImmich(response)) {
