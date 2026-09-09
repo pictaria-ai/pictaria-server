@@ -7,6 +7,12 @@ All notable changes to Pictaria Server are documented here. This project follows
 
 ### Added
 
+- Enrich now compares the three most recently used setups by successful-request
+  speed, request outcomes, and overall throughput, with expandable metrics and
+  a Show all option. Recent runs include timing summaries and a photo-details
+  dialog with total processing time, paginated requests/retries, and clear
+  incomplete or expired timing states. The dialog fills the screen on phones.
+
 - Enrich records per-photo processing time and each actual provider request's
   duration and outcome, including retries, timeouts, invalid responses, and
   cancellation. Completed requests survive interrupted runs; incomplete and

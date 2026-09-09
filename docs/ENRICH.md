@@ -734,9 +734,72 @@ means no trustworthy timing was recorded, not zero-duration work. Increasing
 future retention cannot recover records already expired. Views must account
 for `truncated` when interpreting samples or reliability totals.
 
-PIC-343 supplies this data contract; PIC-332 owns the native comparison and
-per-photo display. The current dashboard continues showing whole-run
-throughput until that work is implemented.
+### Performance comparison and photo details
+
+Enrich shows a compact **Performance comparison** panel above Recent runs.
+It starts with the three most recently used setups; **Show all comparisons**
+includes every setup within the retained timing window (at most 100 runs).
+Ordering follows recent use, not speed. Each setup shows typical successful
+request time (median), successful requests and timeout counts, and overall
+successful photos/minute. **More metrics** includes the arithmetic mean,
+request outcomes and retry counts, contributing photo/run counts, total
+throughput time and successes, and timing coverage. No external metrics
+service is needed.
+
+A setup groups the same provider/model, effective inference inputs, profile,
+and recorded host label. Changed prompts, vocabulary, model options, or image
+settings form a different group. Same-profile revisions with identical
+inference inputs can share a group even if their name or review policy changed;
+the label/revision shown is from the most recent run. Run size and processing
+options do not fragment the comparison. They can affect real-world throughput
+and reliability, so use each run's saved settings when investigating a change.
+Unknown inference identity or missing job/host attribution stays isolated by
+run rather than implying equivalent setups.
+
+Median and mean pool valid, measured `accepted` requests directly, including
+those from failed, cancelled, and interrupted runs. They are not averages of
+per-run medians or means. Request outcomes and retries describe the same
+retained request population; a retry means ordinal greater than one. These
+are requests, not unique photos. Sample counts may differ if an accepted
+request has no usable duration. Negative, nonfinite, and durations exceeding
+JavaScript's safe integer range are excluded; actual measured zero remains a
+valid sample and displays as less than 0.01 seconds.
+
+Overall comparison throughput pools successful photo counts and full elapsed
+time from completed jobs that actually processed photos. Completed jobs with
+zero successes still contribute their time; all-skipped jobs do not. Failed,
+cancelled, active, and interrupted jobs do not enter that completed-job cohort,
+although their accepted requests still contribute to latency. Throughput is
+`total successes / total elapsed time`, never an average of individual run
+rates. No completed processing jobs means unavailable throughput; a measured
+zero-success cohort shows zero photos/min and unavailable seconds/success.
+The existing individual-run end-to-end rates remain on Recent runs cards.
+
+**View photo details** opens a dialog with filenames/thumbnails, outcomes,
+total photo durations, and expandable individual requests. Both photo and
+request lists fetch 20 records at a time with Load more controls. The dialog
+fills the phone screen; Escape or Close returns focus to the invoking action.
+Switching runs cancels the old view's requests so a late response cannot replace
+the newly selected run.
+
+A saved enrichment result and an execution's timing completeness are separate.
+An interrupted execution with a saved result shows that enrichment is available
+while timing is incomplete; it does not claim the result belongs to that
+execution if the exact processing-row link was never written. Expired detail
+answers **Timing expired**, while older runs without a timing link say timing
+was not recorded. Partial samples show retained counts and explicit warnings.
+Successful timing samples never hide recorded timeout/failure counts.
+
+`GET /api/enrich/performance?limit=3` supplies this view. Comparison limits are
+1–100. Its `comparisons` contain setup context and metrics; `runs` contains
+summaries for at most the latest 100 timing runs; `window` describes the cohort.
+Aggregation reads at most 10,100 photo rows and 60,100 requests, accounting for
+the timing store's pruning slack. It loads neither logs nor configuration
+snapshot blobs. The existing photo detail endpoint additionally returns a
+basename-only filename, exact linked result status when available, and whether
+the photo has a saved enrichment result. Everything is read-only, computed
+from retained SQLite data, and survives process restart without a new schema
+or settings migration.
 
 ## Writing captions to Immich descriptions
 

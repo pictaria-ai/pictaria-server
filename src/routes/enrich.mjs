@@ -1,3 +1,4 @@
+import { enrichPerformance, enrichPhotoDetails } from '../enrich/performance.mjs';
 import { createEnrichProfileRoutes } from './enrichProfiles.mjs';
 import { HttpBodyError, readJsonBody, sendError, sendImage, sendJson } from '../http.mjs';
 import { describeResponseFields } from '../enrich/schema.mjs';
@@ -924,6 +925,15 @@ export function createEnrichRoutes({ review, enrichRunner, taxonomy, profiles = 
       return true;
     }
 
+    if (request.method === 'GET' && url.pathname === '/api/enrich/performance') {
+      const raw = url.searchParams.get('limit') ?? '3';
+      if (!/^\d+$/.test(raw) || Number(raw) < 1 || Number(raw) > 100) {
+        throw new HttpBodyError('Performance comparisons must contain 1–100 setups.', 400, 'invalid_performance_limit');
+      }
+      sendJson(response, 200, enrichPerformance(repo, { limit: Number(raw) }));
+      return true;
+    }
+
     // Timing history is separate from results: legacy summaries have no
     // timingRunId, and crash-interrupted runs remain discoverable here.
     const timingMatch = url.pathname.match(/^\/api\/enrich\/timings(?:\/(\d+)\/photos|\/photos\/(\d+)\/attempts)?$/);
@@ -932,7 +942,7 @@ export function createEnrichRoutes({ review, enrichRunner, taxonomy, profiles = 
         afterId: decodeRunCursor(url.searchParams.get('cursor')) ?? 0,
         limit: runPageLimit(url.searchParams.get('limit')),
       };
-      const result = timingMatch[1] ? repo.timings.photos(Number(timingMatch[1]), options)
+      const result = timingMatch[1] ? enrichPhotoDetails(repo, Number(timingMatch[1]), options)
         : timingMatch[2] ? repo.timings.attempts(Number(timingMatch[2]), options)
           : repo.timings.runs(options);
       if (!result) sendError(response, 404, 'timing_not_found', 'Timing history is unavailable or has expired.');

@@ -1,0 +1,44 @@
+.performance-heading { display: flex; gap: 12px; align-items: center; flex-wrap: wrap; }
+.performance-heading h2 { margin: 0; font-size: 15px; }
+.performance-list { display: grid; gap: 10px; }
+.performance-card { background: var(--p-panel-2); border: 1px solid var(--p-line); border-radius: 8px; padding: 12px 14px; min-width: 0; }
+.performance-card h3 { margin: 0 0 4px; font-size: 14px; overflow-wrap: anywhere; }
+.performance-context, .performance-label { font-size: 12px; color: var(--p-muted); overflow-wrap: anywhere; line-height: 1.5; }
+.performance-values { display: grid; grid-template-columns: 1.15fr 1fr 1fr; gap: 16px; margin: 12px 0 8px; }
+.performance-values > div { display: grid; gap: 3px; min-width: 0; }
+.performance-values strong { font-size: 18px; font-weight: 700; font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
+.performance-more { font-size: 12px; color: var(--p-muted); }
+.performance-more > summary { cursor: pointer; padding: 5px 0; }
+.performance-explanation p { margin: 6px 0; line-height: 1.5; overflow-wrap: anywhere; }
+.performance-warning { color: var(--p-muted); font-size: 12px; font-style: italic; }
+.performance-run-summary { color: var(--p-ink); }
+#runsList .run-actions { justify-content: flex-start; }
+.timing-dialog { width: min(840px, calc(100vw - 48px)); max-height: 85dvh; padding: 0; border: 1px solid var(--p-line); border-radius: var(--p-radius); background: var(--p-bg); color: var(--p-ink); }
+.timing-dialog::backdrop { background: rgb(0 0 0 / 55%); }
+.timing-dialog[open] { display: flex; flex-direction: column; }
+.timing-dialog-header { display: flex; align-items: center; gap: 12px; padding: 14px 18px; border-bottom: 1px solid var(--p-line); }
+.timing-dialog-header h2 { font-size: 16px; margin: 0; flex: 1; min-width: 0; overflow-wrap: anywhere; }
+.timing-dialog-note { padding: 12px 18px 0; margin: 0; }
+.timing-dialog-body { padding: 12px 18px 18px; overflow-y: auto; min-height: 0; }
+.timing-photo-list { margin: 8px 0 12px; }
+.timing-photo { border-bottom: 1px solid var(--p-line); padding: 4px 0; }
+.timing-photo > summary { display: flex; align-items: center; gap: 10px; padding: 8px 0; cursor: pointer; list-style: none; }
+.timing-photo > summary::-webkit-details-marker { display: none; }
+.timing-photo > summary::before { content: '▸'; color: var(--p-muted); }
+.timing-photo[open] > summary::before { content: '▾'; }
+.timing-photo img { width: 48px; height: 48px; object-fit: cover; border-radius: 6px; flex: none; }
+.timing-photo-info { display: grid; min-width: 0; flex: 1; gap: 3px; }
+.timing-photo-info strong { font-size: 13px; overflow-wrap: anywhere; }
+.timing-photo-duration { font-size: 13px; font-variant-numeric: tabular-nums; text-align: right; max-width: 100px; }
+.timing-attempts { margin: 2px 0 12px 24px; font-size: 12px; }
+.timing-attempts ol { padding-left: 20px; list-style: none; padding-inline-start: 0; }
+.timing-attempts li { padding: 5px 0; line-height: 1.5; overflow-wrap: anywhere; }
+@media (max-width: 600px) {
+  .performance-values { grid-template-columns: 1fr; gap: 10px; }
+  .performance-values > div { grid-template-columns: 1fr auto; column-gap: 12px; }
+  .performance-values .performance-label:last-child { grid-column: 1 / -1; }
+  .performance-values strong { font-size: 16px; text-align: right; }
+  .timing-dialog { width: 100%; max-width: 100%; height: 100dvh; max-height: 100dvh; margin: 0; border: 0; border-radius: 0; }
+  .timing-dialog-header, .timing-dialog-body { padding: 12px 14px; }
+  .timing-dialog-note { padding: 12px 14px 0; }
+}

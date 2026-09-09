@@ -201,6 +201,14 @@ data/               all persistent state (gitignored): enrichment.sqlite,
 - **Ports**: Pictaria Server listens on `4080`. It must be the only writer of
   its enrichment database (see Scale: review state is cached in-process and
   projected at write time, so external writes are invisible until restart).
+- **Enrich performance UI**: `enrich/performance.mjs` computes bounded read-only
+  summaries over retained timing runs, photo executions, and provider attempts.
+  It groups effective inference identity with profile and host context, pools
+  valid accepted-request samples, and separately weights completed-run
+  throughput by total elapsed time. `public/enrich-performance.js` and its
+  stylesheet own the comparison panel and native photo-details dialog; the
+  existing Enrich page delegates run-summary decoration and refreshes to that
+  module. No persistent schema or settings contract changes are needed.
 - **Enrich timing**: `enrich/timing.mjs` owns compact execution/request records
   and their schema, appended to the base enrichment schema by the repository.
   Schema 10 / persistent-state contract 12 adds timing tables and a nullable
