@@ -47,7 +47,7 @@ test('Enrich compares setups and opens paginated photo/request details with hone
   await page.navigate(`${server.base}/enrich.html`);
   await page.waitFor('document.querySelectorAll("#runsList .qitem").length === 20');
   await page.evaluate('document.getElementById("runsPanel").open = true; document.querySelector("#runsList .qitem a").click()');
-  await page.waitFor('document.getElementById("photoTimingBody").textContent.includes("Detailed timing was not recorded")');
+  await page.waitFor('document.getElementById("photoTimingBody")?.textContent.includes("Detailed timing was not recorded")');
   await page.evaluate('document.getElementById("photoTimingClose").click()');
   await page.waitFor('location.hash === "#runs"');
   assert.equal(await page.evaluate('document.getElementById("compareView").hidden'), true);
