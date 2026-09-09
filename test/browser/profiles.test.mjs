@@ -13,10 +13,12 @@ test('Settings manages profiles; Enrich links to profiles and saved run settings
   let server, browser, immich, model, finishModelRequest, signalModelRequest;
   const modelRequestStarted = new Promise(resolve => { signalModelRequest = resolve; });
   t.after(async () => {
+    t.diagnostic("Cleaning up profile browser services");
     finishModelRequest?.();
     await Promise.allSettled([browser?.stop(), server?.stop(), immich?.stop()]);
     if (model) await new Promise(resolve => model.close(resolve));
     rmSync(dir, { recursive: true, force: true });
+    t.diagnostic("Profile browser services stopped");
   });
   const asset = { id: '00000000-0000-0000-0000-000000000001', type: 'IMAGE', originalFileName: 'test.jpg',
     localDateTime: '2026-01-01T12:00:00Z', exifInfo: { city: 'Paris' } };
@@ -123,9 +125,17 @@ test('Settings manages profiles; Enrich links to profiles and saved run settings
     const shot = await page.send('Page.captureScreenshot', { format: 'png', captureBeyondViewport: true });
     writeFileSync(`${process.env.PICTARIA_PROFILE_SCREENSHOT}.enrich.png`, Buffer.from(shot.data, 'base64'));
   }
+  t.diagnostic("Profiles created, edited, and activated across tabs");
   // Real browser → HTTP → Immich/provider adapters → SQLite run.
+  await page.waitFor('document.querySelector("#queueList .p-btn.accent")?.disabled === false', { label: 'queued run ready after activation' });
   await page.evaluate('document.querySelector("#queueList .p-btn.accent").click()');
-  await modelRequestStarted;
+  let modelTimer;
+  try {
+    await Promise.race([modelRequestStarted, new Promise((_, reject) => {
+      modelTimer = setTimeout(() => reject(new Error('Queued run did not reach the synthetic provider')), 15000);
+    })]);
+  } finally { clearTimeout(modelTimer); }
+  t.diagnostic("Queued run reached the provider");
   await page.waitFor('document.getElementById("viewConfigurationBtn").textContent === "View run settings" && !document.getElementById("viewConfigurationBtn").hidden');
   await click('viewConfigurationBtn');
   await page.waitFor('!document.getElementById("logPopup").hidden');
@@ -156,6 +166,7 @@ test('Settings manages profiles; Enrich links to profiles and saved run settings
   await page.waitFor('!document.getElementById("logPopup").hidden');
   assert.equal(await page.evaluate('document.getElementById("logPopupTitle").textContent'), 'Run settings');
   await click('logPopupClose');
+  t.diagnostic("Run completed and immutable history verified");
   await follow('profileManage');
   await page.waitFor('document.querySelector("#profileList .profile-row")');
   assert.equal(await page.evaluate('document.getElementById("profileEditor").hidden'), true);
