@@ -13,8 +13,8 @@ All notable changes to Pictaria Server are documented here. This project follows
   captures the active revision. Run all captures one revision for the batch.
   Active selection synchronizes across tabs; stale start requests are rejected.
   Settings provides a profile list, focused editors, readable tag summaries,
-  contextual help, and unsaved-edit protection. **Use this profile** explicitly
-  activates a saved profile. Running work and history retain their saved inputs.
+  contextual help, and unsaved-edit protection. Create/edit dialogs save back
+  to the profile list; active selection belongs to Enrich. Running work and history retain their saved inputs.
 - Queued runs have an independent **Only unenriched** option, allowing a new
   profile pass without reopening existing human Curate decisions.
 - Enrich runs and per-photo results now reference saved, deduplicated
@@ -24,6 +24,11 @@ All notable changes to Pictaria Server are documented here. This project follows
   their source run and use settings at retry start.
 
 ### Fixed
+
+- The Enrich master switch also pauses caption writeback, preserving pending
+  captions and saved preferences. Daily Enrich and caption controls show their
+  paused state while Enrich is off. The Enrich page combines provider/profile
+  controls and removes redundant run-profile text.
 
 - Enrich captures its configuration before photo selection and keeps it fixed
   through inference, retries, validation, tag mapping, and run history. A

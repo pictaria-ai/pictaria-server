@@ -55,6 +55,22 @@ test('Settings manages profiles; Enrich links to profiles and saved run settings
   await follow('profileManage');
   await page.waitFor('document.getElementById("sec-enrichment-profiles")?.open && document.querySelector("#profileList .profile-row")');
   assert.equal(await page.evaluate('document.getElementById("profileEditor").hidden'), true);
+  // Master-off pauses dependent features without rewriting saved choices.
+  await page.evaluate(`fetch('/api/settings', {method:'PATCH', headers:{'Content-Type':'application/json'}, body:JSON.stringify({enrich:{enabled:false, scheduledEnabled:true, captionWriteback:true}})}).then(r=>r.json())`);
+  await page.navigate(`${server.base}/settings.html?test=master-off#sec-enrich`);
+  await page.waitFor('document.getElementById("f2-enrich-captionWriteback")?.disabled && document.getElementById("f2-enrich-captionWriteback").checked');
+  assert.equal(await page.evaluate('document.getElementById("f2-enrich-scheduledEnabled").disabled && document.getElementById("f2-enrich-scheduledEnabled").checked'), true);
+  assert.match(await page.evaluate('document.getElementById("fields-enrich").textContent'), /Paused while Enrich is off/);
+  assert.equal(await page.evaluate(`fetch('/api/enrich/captions/writeback/backfill', {method:'POST'}).then(r=>r.status)`), 409);
+  const saved = await page.evaluate(`fetch('/api/settings').then(r=>r.json())`);
+  assert.equal(saved.enrich.scheduledEnabled.value, true); assert.equal(saved.enrich.captionWriteback.value, true);
+  await page.evaluate('document.getElementById("f2-enrich-enabled").checked = true; document.getElementById("f2-enrich-enabled").dispatchEvent(new Event("change"))');
+  assert.equal(await page.evaluate('document.getElementById("f2-enrich-captionWriteback").disabled'), false);
+  assert.equal(await page.evaluate('document.getElementById("f2-enrich-scheduledEnabled").checked'), true);
+  // Restore this fixture's manual-only setup before its provider test.
+  await page.evaluate(`fetch('/api/settings', {method:'PATCH', headers:{'Content-Type':'application/json'}, body:JSON.stringify({enrich:{enabled:true, scheduledEnabled:false, captionWriteback:false}})}).then(r=>r.json())`);
+  await page.navigate(`${server.base}/settings.html#sec-enrichment-profiles`);
+  await page.waitFor('document.querySelector("#profileList .profile-row")');
   const backToList = async () => {
     await click('profileBack');
     await page.waitFor('!document.getElementById("profileLibrary").hidden && !document.getElementById("profileListControls").disabled');
@@ -65,24 +81,26 @@ test('Settings manages profiles; Enrich links to profiles and saved run settings
   const initialId = await page.evaluate('document.querySelector("#profileList .profile-row").dataset.profileId');
   await rowAction('edit', initialId);
   await page.waitFor('!document.getElementById("profileEditor").hidden && !document.getElementById("profileEditorControls").disabled');
-  assert.equal(await page.evaluate('document.getElementById("profileLibrary").hidden'), true);
+  assert.equal(await page.evaluate('document.getElementById("profileLibrary").hidden'), false);
+  assert.equal(await page.evaluate('document.getElementById("profileDialog").open'), true);
   assert.equal(await page.evaluate('document.getElementById("profileTaxonomyDetails").open'), false);
   assert.match(await page.evaluate('document.getElementById("profileTaxonomySummary").textContent'), /tags in .* categories/);
+  assert.equal(await page.evaluate('document.querySelectorAll("dialog:modal").length'), 1);
   // Cancel preserves a draft unless the user explicitly discards it.
   await fill('profileName', 'Unsaved name'); await click('profileClose');
-  await page.waitFor('document.getElementById("profileDiscardDialog").open');
+  await page.waitFor('!document.getElementById("profileDiscardDialog").hidden');
   await click('profileKeepEditing');
   await page.waitFor('!document.getElementById("profileEditorControls").disabled');
   assert.equal(await page.evaluate('document.getElementById("profileName").value'), 'Unsaved name');
   assert.match(await page.evaluate('document.getElementById("profileDirty").textContent'), /Unsaved/);
   // Leaving through navigation asks too; keeping the draft stays on Settings.
   await page.evaluate('Array.from(document.querySelectorAll(".p-nav a")).find(a => a.pathname === "/enrich.html").click()');
-  await page.waitFor('document.getElementById("profileDiscardDialog").open');
+  await page.waitFor('!document.getElementById("profileDiscardDialog").hidden');
   await click('profileKeepEditing');
   assert.equal(await page.evaluate('location.pathname'), '/settings.html');
   assert.equal(await page.evaluate('(() => { const event = new Event("beforeunload", {cancelable:true}); window.dispatchEvent(event); return event.defaultPrevented; })()'), true);
 
-  await click('profileClose'); await page.waitFor('document.getElementById("profileDiscardDialog").open');
+  await click('profileClose'); await page.waitFor('!document.getElementById("profileDiscardDialog").hidden');
   await click('profileDiscard');
   await page.waitFor('!document.getElementById("profileLibrary").hidden && !document.getElementById("profileListControls").disabled');
   await rowAction('duplicate', initialId);
@@ -101,17 +119,24 @@ test('Settings manages profiles; Enrich links to profiles and saved run settings
   assert.equal(await page.evaluate('document.activeElement.id'), 'profileTaxonomy');
   await fill('profileTaxonomy', taxonomy); await click('profileValidate');
   await page.waitFor('document.getElementById("profileEditorNote").textContent.includes("valid.")');
-  await click('profileSave'); await page.waitFor('document.getElementById("profileEditorNote").textContent.includes("Saved Travel") && !document.getElementById("profileEditorControls").disabled');
-  const profileId = await page.evaluate('new URL(location.href).searchParams.get("profile")');
+  await click('profileSave'); await page.waitFor('document.getElementById("profileStatus").textContent.includes("Saved Travel") && !document.getElementById("profileEditorControls").disabled');
+  assert.equal(await page.evaluate('document.getElementById("profileDialog").open'), false);
+  assert.equal(await page.evaluate('location.pathname'), '/settings.html');
+  assert.equal(await page.evaluate('document.getElementById("profileReturn")'), null);
+  const profileId = await page.evaluate('Array.from(document.querySelectorAll("#profileList .profile-row")).find(r => r.textContent.includes("Travel <test>")).dataset.profileId');
   const queued = await page.evaluate(`fetch('/api/enrich/queue', { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({title:'Travel queue', filters:{day:'2026-01-01'}, })}).then(r=>r.json())`);
   assert.ok(queued.id);
   assert.equal(await page.evaluate("fetch('/api/enrich/profiles').then(r=>r.json()).then(d=>d.activeProfileId)"), initialId);
+  await rowAction('edit', profileId);
+  await page.waitFor('document.getElementById("profileDialog").open && !document.getElementById("profileEditorControls").disabled');
   await fill('profileSystem', 'New revision system prompt'); await click('profileSave');
-  await page.waitFor('document.getElementById("profileDirty").textContent.includes("revision 2") && !document.getElementById("profileEditorControls").disabled');
-  await click('profileReturn');
+  await page.waitFor('!document.getElementById("profileDialog").open && !document.getElementById("profileEditorControls").disabled');
+  await page.navigate(`${server.base}/enrich.html`);
   await page.waitFor('location.pathname === "/enrich.html" && document.getElementById("enrichProfile")?.value');
   await page.waitFor('document.querySelector("#queueList .qitem")');
-  assert.equal(await page.evaluate('document.getElementById("enrichProfile").value'), profileId);
+  assert.equal(await page.evaluate('document.getElementById("enrichProfile").value'), initialId);
+  await page.evaluate(`document.getElementById("enrichProfile").value=${JSON.stringify(profileId)}; document.getElementById("enrichProfile").dispatchEvent(new Event('change'));`);
+  await page.waitFor('!document.getElementById("enrichProfile").disabled && document.getElementById("profileNote").textContent === "Used for all new enrichment runs."');
   assert.equal(await page.evaluate('document.querySelector(".queue-profile")'), null);
   assert.doesNotMatch(await page.evaluate('document.getElementById("queueList").textContent'), /Travel <test>/);
   await page.evaluate('document.querySelector("#queueList input[type=checkbox]").checked = false');
@@ -119,7 +144,7 @@ test('Settings manages profiles; Enrich links to profiles and saved run settings
   await page.evaluate(`fetch('/api/enrich/profiles/active', {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({profileId:${JSON.stringify(initialId)}})}).then(r=>r.json())`);
   await page.waitFor(`document.getElementById("enrichProfile").value === ${JSON.stringify(initialId)}`);
   await page.evaluate(`document.getElementById("enrichProfile").value=${JSON.stringify(profileId)}; document.getElementById("enrichProfile").dispatchEvent(new Event('change'));`);
-  await page.waitFor(`document.getElementById("enrichProfile").value === ${JSON.stringify(profileId)} && !document.getElementById("enrichProfile").disabled && document.getElementById("profileNote").textContent.startsWith("Active for")`);
+  await page.waitFor(`document.getElementById("enrichProfile").value === ${JSON.stringify(profileId)} && !document.getElementById("enrichProfile").disabled && document.getElementById("profileNote").textContent.startsWith("Used for")`);
   assert.equal(await page.evaluate('document.querySelector("#queueList input[type=checkbox]").checked'), false, 'profile changes retain queue options');
   if (process.env.PICTARIA_PROFILE_SCREENSHOT) {
     const shot = await page.send('Page.captureScreenshot', { format: 'png', captureBeyondViewport: true });
@@ -187,9 +212,11 @@ test('Settings manages profiles; Enrich links to profiles and saved run settings
   await click('profileCreateContinue');
   await page.waitFor('!document.getElementById("profileEditor").hidden && !document.getElementById("profileEditorControls").disabled');
   await click('profileSave');
-  await page.waitFor('document.getElementById("profileEditorNote").textContent.includes("Saved Built-in") && !document.getElementById("profileEditorControls").disabled');
+  await page.waitFor('document.getElementById("profileStatus").textContent.includes("Saved Built-in") && !document.getElementById("profileEditorControls").disabled');
   // A save from another tab must not overwrite this draft or be overwritten by it.
-  const builtinId = await page.evaluate('new URL(location.href).searchParams.get("profile")');
+  const builtinId = await page.evaluate('Array.from(document.querySelectorAll("#profileList .profile-row")).find(r => r.textContent.includes("Built-in restored")).dataset.profileId');
+  await rowAction('edit', builtinId);
+  await page.waitFor('document.getElementById("profileDialog").open && !document.getElementById("profileEditorControls").disabled');
   await page.evaluate(`(async () => {
     const profile = await fetch('/api/enrich/profiles/${builtinId}').then(r => r.json());
     const response = await fetch('/api/enrich/profiles/${builtinId}', {method:'PATCH', headers:{'Content-Type':'application/json'}, body:JSON.stringify({...profile, systemPrompt:'Saved in another tab', expectedRevisionId:profile.revisionId})});
@@ -199,21 +226,29 @@ test('Settings manages profiles; Enrich links to profiles and saved run settings
   await page.waitFor('document.getElementById("profileEditorNote").textContent.includes("another window") && !document.getElementById("profileEditorControls").disabled');
   assert.equal(await page.evaluate('document.getElementById("profileSystem").value'), 'My unsaved draft');
   assert.match(await page.evaluate('document.getElementById("profileDirty").textContent'), /Unsaved/);
-  await click('profileClose'); await page.waitFor('document.getElementById("profileDiscardDialog").open');
+  await click('profileClose'); await page.waitFor('!document.getElementById("profileDiscardDialog").hidden');
   await click('profileDiscard');
   await page.waitFor('!document.getElementById("profileLibrary").hidden && !document.getElementById("profileListControls").disabled');
   await rowAction('edit', builtinId);
   await page.waitFor('!document.getElementById("profileEditor").hidden && !document.getElementById("profileEditorControls").disabled');
   assert.equal(await page.evaluate('document.getElementById("profileSystem").value'), 'Saved in another tab');
+  // The editor is a single modal, with the profile list retained underneath.
+  assert.equal(await page.evaluate('document.querySelectorAll("dialog:modal").length'), 1);
+  if (process.env.PICTARIA_PROFILE_SCREENSHOT) {
+    const shot = await page.send('Page.captureScreenshot', { format: 'png', captureBeyondViewport: false });
+    writeFileSync(`${process.env.PICTARIA_PROFILE_SCREENSHOT}.desktop.png`, Buffer.from(shot.data, 'base64'));
+  }
   // Plain text rendering and a narrow viewport protect against prompt/name markup and overflow.
   assert.equal(await page.evaluate('document.querySelectorAll("#sec-enrichment-profiles test").length'), 0);
   await page.send('Emulation.setDeviceMetricsOverride', { width: 390, height: 844, deviceScaleFactor: 1, mobile: true });
   assert.equal(await page.evaluate('document.documentElement.scrollWidth <= window.innerWidth'), true);
   if (process.env.PICTARIA_PROFILE_SCREENSHOT) {
-    const shot = await page.send('Page.captureScreenshot', { format: 'png', captureBeyondViewport: true });
+    const shot = await page.send('Page.captureScreenshot', { format: 'png', captureBeyondViewport: false });
     writeFileSync(process.env.PICTARIA_PROFILE_SCREENSHOT, Buffer.from(shot.data, 'base64'));
   }
-  await click('profileReturn');
+  await click('profileClose');
+  await page.waitFor('!document.getElementById("profileDialog").open');
+  await page.navigate(`${server.base}/enrich.html`);
   await page.waitFor('location.pathname === "/enrich.html" && document.getElementById("enrichProfile")?.value');
   await page.waitFor('document.querySelector("#runsList .run-configuration")');
   assert.match(await page.evaluate('document.getElementById("runsList").textContent'), /Travel <test> · r2/);

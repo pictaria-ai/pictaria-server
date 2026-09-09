@@ -25,7 +25,9 @@
     .panel { padding: 14px 16px; margin-bottom: 14px; display: grid; gap: 12px; }
     .panel.dimmed { opacity: 0.55; }
     .es-main { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; min-width: 0; }
-    #enrichProfile { max-width: 100%; }
+    #enrichProfile, #enrichProvider { max-width: 100%; }
+    .profile-options { border-top: 1px solid var(--p-line); padding-top: 12px; }
+    .profile-options .provider-note { margin-bottom: 0; }
     .provider-note { color: var(--p-muted); font-size: 12px; line-height: 1.45; }
     .provider-note.bad { color: var(--p-danger); }
     /* The status detail sits on its own line under the title and wraps as
@@ -154,15 +156,13 @@
 
     <section id="modelPanel" class="p-panel panel">
       <div class="es-main">
-        <strong>AI provider</strong>
+        <label for="enrichProvider"><strong>AI provider</strong></label>
         <select id="enrichProvider" class="p-select"></select>
         <span class="p-tab-divider"></span>
         <a href="/settings.html#sec-providers" class="p-muted" style="font-size: 12px">provider &amp; model settings</a>
       </div>
       <div id="providerNote" class="provider-note">Used for new runs. Your selection is remembered.</div>
-    </section>
-
-    <section id="profilePanel" class="p-panel panel">
+      <div id="profilePanel" class="profile-options">
       <div class="es-main">
         <label for="enrichProfile"><strong>Active profile</strong></label>
         <select id="enrichProfile" class="p-select" aria-label="Active enrichment profile"></select>
@@ -170,6 +170,7 @@
         <a id="profileManage" class="p-muted" href="/settings.html#sec-enrichment-profiles" style="font-size: 12px">View and manage profiles</a>
       </div>
       <p id="profileNote" class="provider-note">Loading profiles…</p>
+      </div>
     </section>
 
     <section id="statusPanel" class="p-panel panel">
@@ -195,7 +196,6 @@
         <div class="p-grow"></div>
         <button id="runAllBtn" class="p-btn accent" hidden title="Runs every queued job below, one after another, using each item's current checkboxes. A failure or cancel stops the chain — whatever remains stays queued.">Run all</button>
       </div>
-      <p id="activeRunProfile" class="provider-note"></p>
       <div class="qitem">
         <div class="qline top">
           <span class="t">Library sweep</span>

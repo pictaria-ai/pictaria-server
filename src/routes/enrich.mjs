@@ -1013,6 +1013,10 @@ export function createEnrichRoutes({ review, enrichRunner, taxonomy, profiles = 
     }
 
     if (request.method === 'POST' && url.pathname === '/api/enrich/captions/writeback/backfill') {
+      if (!config.enrichEnabled) {
+        sendError(response, 409, 'enrich_disabled', 'Caption writeback is paused while Enrich is off.');
+        return true;
+      }
       if (!config.captionWriteback) {
         sendError(response, 409, 'writeback_disabled', 'Turn on "Write captions to Immich descriptions" in Settings first.');
         return true;

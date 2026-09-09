@@ -131,6 +131,7 @@ settingsStore.onApplied = () => {
   }
   immichPing = emptyImmichStatus();
   enrichScheduler.settingsChanged();
+  captionWriteback.wake();
   // First-time setup: the moment Immich becomes reachable, populate
   // Insights instead of waiting for the hourly staleness check. A no-op
   // whenever the snapshot is fresh or Immich is still unconfigured.

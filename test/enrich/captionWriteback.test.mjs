@@ -55,7 +55,7 @@ function fakeImmich({ descriptions = {}, missing = [] } = {}) {
 }
 
 function service(repo, immich, { enabled = true } = {}) {
-  return new CaptionWritebackService({ repo, immich, config: { captionWriteback: enabled } });
+  return new CaptionWritebackService({ repo, immich, config: { enrichEnabled: true, captionWriteback: enabled } });
 }
 
 // --- repository queue ---
@@ -242,5 +242,44 @@ test('status reports the live toggle and queue counts', async () => {
     assert.equal(worker.status().enabled, false);
     assert.equal(worker.backfill(), 1);
     assert.equal(worker.status().pending, 1);
+  });
+});
+
+
+test('Enrich master switch pauses pending captions, preserves preferences, and resumes safely', async () => {
+  await withRepo(async repo => {
+    enrich(repo, 'a1', 'A lake.'); enrich(repo, 'a2', 'A mountain.');
+    repo.captionWritebackEnqueue(['a1', 'a2']);
+    const immich = fakeImmich(); const worker = service(repo, immich);
+    worker.config.enrichEnabled = false;
+    worker.start();
+    try {
+      await new Promise(resolve => setTimeout(resolve, 20));
+      assert.equal(immich.reads.length, 0);
+      assert.equal(worker.status().paused, true);
+      assert.equal(worker.status().enabled, false);
+      assert.equal(worker.config.captionWriteback, true);
+      assert.equal(worker.status().pending, 2);
+      worker.config.enrichEnabled = true;
+      const update = immich.updateAsset;
+      immich.updateAsset = async (...args) => { await update(...args); worker.config.enrichEnabled = false; };
+      worker.wake();
+      for (let i = 0; i < 100 && !immich.updates.length; i++) await new Promise(resolve => setTimeout(resolve, 5));
+      assert.equal(immich.updates.length, 1);
+      assert.equal(worker.status().pending, 1, 'remaining batch pauses after the in-flight write');
+      immich.updateAsset = update; worker.config.enrichEnabled = true; worker.wake();
+      for (let i = 0; i < 100 && worker.status().pending; i++) await new Promise(resolve => setTimeout(resolve, 5));
+      assert.equal(worker.status().written, 2);
+    } finally { await worker.stop(); }
+  });
+});
+
+test('disabling Enrich during the description read leaves the caption pending without writing', async () => {
+  await withRepo(async repo => {
+    enrich(repo, 'a1', 'A lake.'); repo.captionWritebackEnqueue(['a1']);
+    const immich = fakeImmich(); const worker = service(repo, immich);
+    immich.getAsset = async () => { worker.config.enrichEnabled = false; return { exifInfo: { description: '' } }; };
+    await worker.pushOne(repo.captionWritebackNext(1)[0]);
+    assert.equal(immich.updates.length, 0); assert.equal(worker.status().pending, 1);
   });
 });

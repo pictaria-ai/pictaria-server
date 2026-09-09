@@ -206,9 +206,9 @@ data/               all persistent state (gitignored): enrichment.sqlite,
   `routes/enrichProfiles.mjs` exposes bounded management APIs;
   `public/enrich-profiles.js` owns the Settings profile manager and the Enrich
   profile picker. Settings uses a profile list and focused editor with draft
-  protection and validation before saving. Enrich links to the Settings profile
-  list; the editor’s Use this profile action activates its saved profile before
-  returning to Enrich. Profiles contain explicit prompt text and taxonomy, with
+  protection and validation before saving. Create/edit use one modal dialog
+  over the retained list; saving closes it without activation or navigation.
+  Enrich owns active selection alongside the provider in one card. Profiles contain explicit prompt text and taxonomy, with
   one server-saved active choice; provider/model selection stays separate.
   Queue rows store selections only; execution captures the active revision.
   Profile metadata in configurations lets history and photo attribution use indexed joins without loading snapshot blobs.

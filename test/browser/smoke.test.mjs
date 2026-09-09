@@ -1671,7 +1671,7 @@ test('admin UI smoke: gate, Insights lens, Curate, Smart Albums', { timeout: 120
     );
     assert.equal(
       await page.evaluate('document.getElementById("f2-enrich-scheduledEnabled").closest(".field").querySelector(".setting-desc").textContent'),
-      'Enrich photos, once a day, that haven\'t been previously enriched. Uses the provider last selected and the default enrichment profile, and sends successful results to Curate. If today\'s time has passed, enabling starts today\'s catch-up promptly. Runs only once per day. Requires Enable AI enrichment above.',
+      'Enrich photos, once a day, that haven\'t been previously enriched. Uses the provider last selected and the active enrichment profile, and sends successful results to Curate. If today\'s time has passed, enabling starts today\'s catch-up promptly. Runs only once per day. Requires Enable AI enrichment above.',
     );
     const browserTimeZone = await page.evaluate('Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC"');
     await page.evaluate(`

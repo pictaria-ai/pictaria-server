@@ -1,4 +1,4 @@
-// Settings owns profile management; Enrich only selects and previews saved profiles.
+// Settings manages profiles in a dialog; Enrich owns the active selection.
 window.createEnrichProfileManager = function ({ api, toast }) {
   const el = id => document.getElementById(id);
   const fieldIds = ['profileName', 'profileSystem', 'profileUser', 'profileTaxonomy'];
@@ -24,7 +24,9 @@ window.createEnrichProfileManager = function ({ api, toast }) {
     }
   };
   function view(id) {
-    for (const name of ['profileLibrary', 'profileEditor', 'profileCreate']) el(name).hidden = name !== id;
+    for (const name of ['profileEditor', 'profileCreate']) el(name).hidden = name !== id;
+    if (id === 'profileLibrary') el('profileDialog').close();
+    else if (!el('profileDialog').open) el('profileDialog').showModal();
     el('profileStatus').textContent = '';
   }
   function remember(id) {
@@ -37,18 +39,21 @@ window.createEnrichProfileManager = function ({ api, toast }) {
     if (!dirty()) return true;
     return new Promise(resolve => {
       discardResolve = resolve;
-      el('profileDiscardDialog').showModal();
+      el('profileDiscardDialog').hidden = false;
+      el('profileEditor').inert = el('profileCreate').inert = true;
+      el('profileKeepEditing').focus();
     });
   }
   function finishDiscard(confirmed) {
     const resolve = discardResolve; discardResolve = null;
-    el('profileDiscardDialog').close();
+    el('profileDiscardDialog').hidden = true;
+    el('profileEditor').inert = el('profileCreate').inert = false;
+    if (!confirmed) focus(el('profileEditor').hidden ? 'profileCreateName' : 'profileName');
     resolve?.(confirmed);
   }
   function updateDirty() {
     el('profileDirty').textContent = dirty() ? 'Unsaved changes' : `Saved · revision ${editing?.revision ?? 1}`;
-    el('profileReturn').hidden = dirty();
-    el('profileClose').textContent = dirty() ? 'Cancel' : 'Back to profiles';
+    el('profileClose').textContent = 'Cancel';
   }
   function clearErrors() {
     for (const id of fieldIds) { el(id + 'Error').textContent = ''; el(id).removeAttribute('aria-invalid'); }
@@ -90,7 +95,6 @@ window.createEnrichProfileManager = function ({ api, toast }) {
     clearErrors(); note(''); taxonomySummary(); view('profileEditor'); updateDirty();
     if (existing) {
       remember(existing.id);
-      el('profileReturn').href = '/enrich.html';
     }
     if (!afterSave) focus('profileName');
   }
@@ -105,6 +109,7 @@ window.createEnrichProfileManager = function ({ api, toast }) {
     el('profileSource').value = source;
     el('profileCreateName').value = source ? `${active.find(p => p.id === source).name} copy`.slice(0, 80) : '';
     el('profileCreateError').textContent = '';
+    el('profileEditorTitle').textContent = 'New profile'; el('profileDirty').textContent = '';
     createBaseline = createFields(); view('profileCreate'); remember(null); focus('profileCreateName');
   }
   function button(text, kind, profile, fn) {
@@ -159,15 +164,6 @@ window.createEnrichProfileManager = function ({ api, toast }) {
     }
     return true;
   }
-  el('profileReturn').addEventListener('click', event => {
-    event.preventDefault();
-    void action(async () => {
-      if (dirty() || !editing) return;
-      const current = await api('/api/enrich/profiles');
-      await request('/api/enrich/profiles/active', 'POST', { profileId: editing.id, expectedActiveRevisionId: current.activeProfile.revisionId });
-      location.assign('/enrich.html');
-    })();
-  });
   el('profileNew').addEventListener('click', action(() => startCreate()));
   el('profileClose').addEventListener('click', action(back));
   el('profileBack').addEventListener('click', action(back));
@@ -187,7 +183,9 @@ window.createEnrichProfileManager = function ({ api, toast }) {
     try {
       const value = await request(editing ? `/api/enrich/profiles/${editing.id}` : '/api/enrich/profiles', editing ? 'PATCH' : 'POST',
         { ...fields(), expectedRevisionId: editing?.revisionId });
-      show(value, value, true); note(`Saved ${value.name}. No enrichment was started.`);
+      editing = value; baseline = JSON.stringify(fields());
+      view('profileLibrary'); remember(null); await loadList();
+      el('profileStatus').textContent = `Saved ${value.name}.`; focus('profileNew');
     } catch (error) { note(error.message); }
   })(); });
   for (const id of fieldIds) el(id).addEventListener('input', () => {
@@ -196,7 +194,10 @@ window.createEnrichProfileManager = function ({ api, toast }) {
   });
   el('profileKeepEditing').addEventListener('click', () => finishDiscard(false));
   el('profileDiscard').addEventListener('click', () => finishDiscard(true));
-  el('profileDiscardDialog').addEventListener('cancel', event => { event.preventDefault(); finishDiscard(false); });
+  el('profileDialog').addEventListener('cancel', event => {
+    event.preventDefault();
+    if (discardResolve) finishDiscard(false); else void action(back)();
+  });
   el('profileList').addEventListener('click', event => {
     for (const menu of el('profileList').querySelectorAll('.profile-menu[open]')) {
       if (!menu.contains(event.target)) menu.open = false;
@@ -218,7 +219,8 @@ window.createEnrichProfileManager = function ({ api, toast }) {
     const link = event.target.closest('a[href]');
     if (!link || event.defaultPrevented || event.button !== 0 || event.ctrlKey || event.metaKey || event.shiftKey || event.altKey || link.target === '_blank' || link.hasAttribute('download')) return;
     const url = new URL(link.href); const current = new URL(location.href);
-    if (url.origin === current.origin && url.pathname === current.pathname && url.search === current.search) return;
+    if (url.origin === current.origin && url.pathname === current.pathname && url.search === current.search && url.hash === current.hash) return;
+    if (el('profileDialog').open && !dirty() && !busy) { view('profileLibrary'); remember(null); }
     if (busy) { event.preventDefault(); toast('Please wait for the profile operation to finish.'); return; }
     if (!dirty()) return;
     event.preventDefault();
@@ -248,8 +250,7 @@ window.createEnrichProfilePicker = function ({ api, toast, changed }) {
     if (!option) { option = new Option('', profile.id); select.add(option); }
     option.textContent = label(profile); select.value = profile.id;
     loaded = true;
-    el('profileNote').textContent = `Active for new sweeps, queued jobs, retries, and Daily Enrich. Run all uses one saved revision for the batch. Running work keeps its settings.`;
-    el('activeRunProfile').textContent = `Run with ${profile.name}`;
+    el('profileNote').textContent = `Used for all new enrichment runs.`;
     if (previous !== active.revisionId) changed();
   }
   async function load() {

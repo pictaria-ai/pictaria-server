@@ -366,7 +366,8 @@ your approved tags on every request.
 Use **Settings → Enrichment profiles** to keep several named prompt/taxonomy
 setups. The profile list marks the active profile used by new Enrich work.
 Choose **New profile**, enter a name, and start from the **Built-in setup** (the configured template files) or a copy of an existing profile.
-Each row’s **⋯** menu offers **Duplicate** and **Archive**
+Creation and editing open a dialog above the profile list. On narrow screens,
+the editor fills the screen. Each row’s **⋯** menu offers **Duplicate** and **Archive**
 where applicable. Restore profiles from the collapsed **Archived profiles** list.
 
 **Edit** opens one profile at a time: name, **Tags & categories**, then
@@ -380,13 +381,15 @@ per-photo prompt and must include `{approved_tags}`.
 photos to a model. Field errors reveal the relevant editor; invalid edits
 and stale saves from another window leave the last usable revision intact.
 Unsaved edits are marked, and cancelling or leaving asks before discarding
-them. Saving does not activate the profile or start enrichment. **Use this profile**
-activates the saved profile on the server and returns to Enrich.
+them. Saving closes the dialog and updates the profile list, without changing
+the active selection or starting enrichment. Saving edits to the already-active
+profile changes the revision used by future runs. Choose the active profile on
+Enrich.
 
 On Enrich, use the profile picker to choose a saved setup and **View and
-manage profiles** to open the profile list in Settings. From a saved profile’s
-editor, **Use this profile** activates it and returns to Enrich. Creation,
-validation, archiving, and restoration live in Settings.
+manage profiles** to open the profile list in Settings. Provider and profile
+choices share one card. Creation, validation, archiving, and restoration live
+in Settings; saving does not navigate to Enrich.
 
 Profiles contain prompts and taxonomy only. Provider/model connections,
 image settings, and processing controls remain separate. **Active profile**
@@ -1046,3 +1049,17 @@ and expect the queue to breathe a little while enrichment is running.
 - `POST /api/review/referee/pause` — body `{"paused": true|false}`; pause
   is cooperative (the in-flight group finishes) and not persisted across
   restarts.
+
+
+### Enrich master switch and dependent features
+
+Turning off **Enable AI enrichment** prevents new manual and Daily Enrich runs
+and pauses caption writeback. Settings disables Daily Enrich and caption controls
+with “Paused while Enrich is off,” preserving their saved preferences. Turning
+Enrich back on restores those preferences; the normal Daily Enrich catch-up
+rules still apply. An enrichment execution already started keeps its run settings.
+
+Pending caption writes remain queued. A description update already sent to Immich
+can finish, but further writes pause, including when Enrich is disabled while
+reading a photo's existing description. **Write existing captions now** is also
+unavailable while Enrich is off. Existing Immich descriptions are not removed.
