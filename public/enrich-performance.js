@@ -4,17 +4,10 @@ function createEnrichPerformance({ api, changed = () => {}, closed = () => {} })
   const el = id => document.getElementById(id);
   const node = (tag, text, cls) => { const n = document.createElement(tag); if (text != null) n.textContent = text; if (cls) n.className = cls; return n; };
   const number = n => Number(n ?? 0).toLocaleString();
-  const duration = ms => {
-    if (!Number.isFinite(ms) || ms < 0) return 'Unavailable';
-    if (ms === 0) return '<0.01 s';
-    if (ms < 1000) return `${Math.max(1, Math.round(ms))} ms`;
-    return `${(ms / 1000).toLocaleString(undefined, { maximumFractionDigits: 1 })} s`;
-  };
-  const rate = n => Number.isFinite(n) ? n.toLocaleString(undefined, { maximumFractionDigits: 2 }) : '—';
+  const { duration, rate, when, status, elapsed: runElapsed, provider: providerName } = enrichFormat;
   const plural = (n, singular, multiple = `${singular}s`) => `${number(n)} ${n === 1 ? singular : multiple}`;
   const button = (text, action) => { const b = node('button', text, 'p-btn quiet'); b.type = 'button'; b.addEventListener('click', action); return b; };
-  const date = value => { const d = new Date(value); return Number.isFinite(d.getTime()) ? d.toLocaleDateString() : 'unknown date'; };
-  const providerName = value => ({ local_lmstudio: 'LM Studio', local_ollama: 'Ollama (local)', cloud_ollama: 'Ollama (cloud)', venice: 'Venice', cloud_openai: 'OpenAI', openai: 'OpenAI', openrouter: 'OpenRouter', openai_compatible: 'OpenAI-compatible' }[value] ?? value);
+  const date = value => when(value, true);
   let returnFocus = null; let returnRunId = null; let returnJobId = null;
   let snapshot = null; let showAll = false; let loading = false; let generation = 0; let controller = null;
   const dialog = el('photoTimingDialog');
@@ -33,7 +26,7 @@ function createEnrichPerformance({ api, changed = () => {}, closed = () => {} })
   el('performanceRetry').addEventListener('click', () => void refresh());
 
   function requestSummary(m) {
-    return [plural(m.accepted, 'successful request'), m.timeouts ? plural(m.timeouts, 'timeout') : null,
+    return [m.requests ? `${number(m.accepted)} of ${number(m.requests)} requests succeeded` : 'No requests recorded', m.timeouts ? `${number(m.timeouts)} timed out` : null,
       m.failures ? plural(m.failures, 'other failure') : null, m.cancelled ? `${number(m.cancelled)} cancelled` : null,
       m.interrupted ? `${number(m.interrupted)} interrupted` : null, m.unvalidated ? `${number(m.unvalidated)} not validated` : null,
       m.running ? `${number(m.running)} in progress` : null].filter(Boolean).join(' · ');
@@ -47,7 +40,7 @@ function createEnrichPerformance({ api, changed = () => {}, closed = () => {} })
     content.append(node('p', m.throughputRuns
       ? `Overall throughput: ${rate(m.photosPerMinute)} successful photos/min; ${m.secondsPerPhoto === null ? 'seconds per successful photo unavailable (no successes)' : `${rate(m.secondsPerPhoto)} seconds per successful photo`}. ${plural(m.successfulPhotos, 'successful photo')} over ${duration(m.elapsedMs)} in ${plural(m.throughputRuns, 'completed run')}. Includes download, preparation, failures, and retry waits.`
       : 'Overall throughput is unavailable until a completed run has processed photos. Failed, cancelled, and interrupted runs can still contribute accepted request timings.'));
-    if (m.truncated) content.append(node('p', `Partial timing history: ${number(m.requests)} of ${number(m.recordedRequests)} recorded requests and ${number(m.retainedPhotos)} of ${number(m.photoCount)} processed photos remain. Request metrics describe the retained sample.`, 'performance-warning'));
+    if (m.truncated) content.append(node('p', `Some older timing details have expired. ${number(m.requests)} of ${number(m.recordedRequests)} recorded requests and ${number(m.retainedPhotos)} of ${number(m.photoCount)} processed photos remain. Request metrics use these remaining records.`, 'performance-warning'));
     details.append(content); return details;
   }
   function renderComparisons() {
@@ -59,16 +52,20 @@ function createEnrichPerformance({ api, changed = () => {}, closed = () => {} })
     for (const group of groups) {
       const card = node('article', null, 'performance-card');
       card.append(node('h3', [providerName(group.provider), group.model].filter(Boolean).join(' · ')));
-      card.append(node('div', [group.profileName ? `${group.profileName} · revision ${group.profileRevision}` : 'Saved setup', group.host,
-        !group.hostKnown ? 'Host label unavailable' : null].filter(Boolean).join(' · '), 'performance-context'));
+      const setup = node('div', null, 'performance-setup');
+      setup.append(node('span', group.profileName ? `Profile: ${group.profileName} · revision ${group.profileRevision}` : 'Profile unavailable'));
+      if (group.host) setup.append(node('span', `Host: ${group.host}`));
+      else if (!group.hostKnown) setup.append(node('span', 'Host label unavailable'));
+      card.append(setup, node('div', `Last used ${when(group.lastUsedAt)}`, 'performance-context'));
+
       const m = group.metrics; const grid = node('div', null, 'performance-values');
       const value = (label, text, note) => { const n = node('div'); n.append(node('span', label, 'performance-label'), node('strong', text), node('span', note, 'performance-label')); return n; };
       grid.append(value('Typical successful request', m.latency.sampleCount ? duration(m.latency.medianMs) : 'No timing yet', `${plural(m.latency.sampleCount, 'request')} · median`),
-        value('Request outcomes', `${number(m.accepted)} successful / ${number(m.requests)}`, m.timeouts ? plural(m.timeouts, 'timeout') : 'No timeouts recorded'),
+        value('Requests', `${number(m.accepted)} of ${number(m.requests)} requests succeeded`, m.timeouts ? `${number(m.timeouts)} timed out` : 'No timeouts recorded'),
         value('Overall throughput', m.photosPerMinute === null ? 'Not available' : `${rate(m.photosPerMinute)} photos/min`, `${plural(m.throughputRuns, 'completed run')}`));
       card.append(grid);
       if (m.failures || m.cancelled || m.interrupted || m.unvalidated || m.running) card.append(node('div', requestSummary(m), 'performance-context'));
-      if (m.truncated) card.append(node('div', 'Partial timing history', 'performance-warning'));
+      if (m.truncated) card.append(node('div', 'Some older timing details have expired. Request metrics use the remaining records.', 'performance-warning'));
       card.append(metricDetails(m)); list.append(card);
     }
     const w = snapshot?.window;
@@ -92,11 +89,10 @@ function createEnrichPerformance({ api, changed = () => {}, closed = () => {} })
     const summary = node('section', null, 'run-detail-summary');
     summary.append(node('p', [providerName(run.provider), run.model, run.profile?.name,
       run.inferenceHostLabel].filter(Boolean).join(' · '), 'performance-context'));
-    const started = new Date(run.startedAt);
-    if (run.startedAt && Number.isFinite(started.getTime())) summary.append(node('p', started.toLocaleString(), 'performance-context'));
+    summary.append(node('p', when(run.startedAt), 'performance-context'));
     const c = run.counters;
-    const elapsed = run.startedAt && run.finishedAt ? new Date(run.finishedAt) - new Date(run.startedAt) : null;
-    summary.append(node('p', [run.status === 'finished' ? 'Completed' : outcomeLabel(run.status),
+    const elapsed = runElapsed(run);
+    summary.append(node('p', [status(run.status),
       c ? `${plural(c.succeeded ?? 0, 'successful photo')} · ${plural(c.failed ?? 0, 'failed photo')}` : 'Photo counts unavailable',
       Number.isFinite(elapsed) && elapsed >= 0 ? `${duration(elapsed)} total` : 'Duration unavailable'].join(' · ')));
     const data = snapshot?.runs.find(r => r.timingRunId === run.timingRunId);

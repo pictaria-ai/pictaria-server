@@ -15,8 +15,8 @@ test('Enrich compares setups and opens paginated photo/request details with hone
   const repo = new Repository(join(dir, 'enrichment.sqlite')); repo.initSchema();
   for (let i = 0; i < 21; i++) repo.recordJobRun({ title: `Older run ${i}`, provider: 'venice', status: 'finished', counters: { succeeded: 0, analyzed: 0, failed: 0 }, startedAt: '2026-08-01T12:00:00Z', finishedAt: '2026-08-01T12:00:01Z' });
   seedPerformanceRun(repo, { model: 'Earlier setup', photos: [{ outcome: 'failed', requests: [{ outcome: 'timeout', ms: 60000 }] }] });
-  seedPerformanceRun(repo, { model: 'Second setup' }); seedPerformanceRun(repo, { model: 'Third setup', photos: [], skipped: 25 });
-  const latest = seedPerformanceRun(repo, { title: 'Travel photos', model: 'Vision-model-with-a-long-name-that-stays-readable-on-a-narrow-phone-screen', provider: 'venice',
+  seedPerformanceRun(repo, { model: 'Second setup', status: 'cancelled' }); seedPerformanceRun(repo, { model: 'Third setup', photos: [], skipped: 25 });
+  const latest = seedPerformanceRun(repo, { title: 'Travel photos', elapsedMs: 1800000, model: 'Vision-model-with-a-long-name-that-stays-readable-on-a-narrow-phone-screen', provider: 'venice',
     photos: [
       { filename: '<img src=x onerror=alert(1)>.jpg', ms: 73000, requests: [{ outcome: 'timeout', ms: 60000 }, { outcome: 'accepted', ms: 8000 }] },
       { outcome: 'interrupted', savedResult: true, ms: null, requests: [{ outcome: 'accepted', ms: 5000 }] },
@@ -66,12 +66,17 @@ test('Enrich compares setups and opens paginated photo/request details with hone
   await page.evaluate('document.getElementById("photoTimingClose").click()');
   await page.waitFor('location.hash === "#runs"');
   await openRun('Travel photos'); await page.waitFor('document.querySelectorAll(".timing-photo").length===20');
+  assert.match(await page.evaluate('document.querySelector(".run-detail-summary").textContent'), /30 min total/);
+  assert.match(await page.evaluate('[...document.querySelectorAll("#performanceRuns tr")].find(r=>r.textContent.includes("Travel photos")).lastChild.textContent'), /30 min.*photos\/min/);
+  assert.ok(await page.evaluate('[...document.querySelectorAll(".run-status")].some(s=>s.textContent === "Cancelled")'));
+  assert.equal(await page.evaluate('document.querySelector(".run-detail-summary p:nth-child(2)").textContent'), await page.evaluate('[...document.querySelectorAll("#performanceRuns tr")].find(r=>r.textContent.includes("Travel photos")).firstChild.querySelector(".performance-context").textContent'));
+
   assert.equal(await page.evaluate('document.querySelector(".timing-photo-info strong").textContent'), '<img src=x onerror=alert(1)>.jpg');
   assert.equal(await page.evaluate('document.querySelector(".timing-photo-info strong img")'), null);
   assert.match(await page.evaluate('document.querySelectorAll(".timing-photo")[1].textContent'), /Saved enrichment available.*timing interrupted/);
   await page.evaluate('document.querySelector(".timing-photo").open=true');
   await page.waitFor('document.querySelector(".timing-photo ol").children.length===2');
-  assert.match(await page.evaluate('document.querySelector(".timing-photo ol").textContent'), /Request 1.*Timed out.*60 s.*Request 2.*Successful response.*8 s/);
+  assert.match(await page.evaluate('document.querySelector(".timing-photo ol").textContent'), /Request 1.*Timed out.*1 min.*Request 2.*Successful response.*8 s/);
   await page.evaluate('document.querySelectorAll(".timing-photo")[3].open=true');
   await page.waitFor('document.querySelectorAll(".timing-photo")[3].querySelectorAll("li").length===20');
   await page.evaluate('document.querySelectorAll(".timing-photo")[3].querySelector("button").click()');
@@ -111,12 +116,18 @@ test('Enrich compares setups and opens paginated photo/request details with hone
   assert.equal(await page.evaluate('document.getElementById("performanceAll").hidden'), true);
   await page.evaluate(`(async () => {
     const group=structuredClone(window.originalPerformance.comparisons[0]);
+    group.profileName='Travel <b>profile</b>'; group.profileRevision=2; group.host='Desktop'; group.lastUsedAt='2026-09-01T12:00:00Z';
+    group.metrics.truncated=true;
     Object.assign(group.metrics,{accepted:0,requests:1,timeouts:1,failures:0,photosPerMinute:0,secondsPerPhoto:null,successfulPhotos:0,throughputRuns:1,latency:{sampleCount:0,medianMs:null,meanMs:null}});
     window.performanceFixture={comparisons:[group],runs:[],totalComparisons:1,window:{runCount:1,oldestAt:'2026-09-01',newestAt:'2026-09-01'}};
     await performancePage.metrics.refresh();
   })()`);
   assert.equal(await page.evaluate('document.querySelectorAll(".performance-card").length'), 1);
-  assert.match(await page.evaluate('document.querySelector(".performance-card").textContent'), /No timing yet.*0 successful \/ 1.*1 timeout.*0 photos\/min/);
+  assert.match(await page.evaluate('document.querySelector(".performance-setup").textContent'), /Profile: Travel <b>profile<\/b>.*revision 2.*Host: Desktop/);
+  assert.equal(await page.evaluate('document.querySelector(".performance-setup b")'), null);
+  assert.match(await page.evaluate('document.querySelector(".performance-card > .performance-context").textContent'), /Last used/);
+  assert.match(await page.evaluate('document.querySelector(".performance-card > .performance-warning").textContent'), /Request metrics use the remaining records/);
+  assert.match(await page.evaluate('document.querySelector(".performance-card").textContent'), /No timing yet.*0 of 1 requests succeeded.*1 timed out.*0 photos\/min/);
   await page.evaluate('window.fetch=window.realFetch; performancePage.metrics.refresh()');
   await page.evaluate('document.getElementById("runsMore").click()');
   await page.waitFor('document.querySelectorAll("#performanceRuns tr").length === 27');

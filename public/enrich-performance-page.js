@@ -2,15 +2,8 @@
 const performancePage = (() => {
   const el = id => document.getElementById(id);
   const node = (tag, text, cls) => { const n = document.createElement(tag); if (text != null) n.textContent = text; if (cls) n.className = cls; return n; };
-  const providers = { local_lmstudio: 'LM Studio', local_ollama: 'Ollama (local)', cloud_ollama: 'Ollama (cloud)', cloud_openai: 'OpenAI', openrouter: 'OpenRouter', venice: 'Venice', openai_compatible: 'OpenAI-compatible' };
+  const { provider, status, when, duration, elapsed, rate } = enrichFormat;
   const count = n => Number(n ?? 0).toLocaleString();
-  const when = value => { if (!value) return 'Date unavailable'; const d = new Date(value); return Number.isFinite(d.getTime()) ? d.toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' }) : 'Date unavailable'; };
-  const elapsed = run => {
-    const ms = run.startedAt && run.finishedAt ? new Date(run.finishedAt) - new Date(run.startedAt) : NaN;
-    if (!Number.isFinite(ms) || ms < 0) return 'Unavailable';
-    if (ms < 1000) return `${ms} ms`;
-    return ms < 60000 ? `${(ms / 1000).toLocaleString(undefined, { maximumFractionDigits: 1 })} s` : `${Math.floor(ms / 60000)}m ${Math.floor(ms % 60000 / 1000)}s`;
-  };
   let runs = []; let cursor = null; let total = 0; let loading = false; let ready = false; let selection = 0;
   async function api(path, options = {}) {
     const response = await fetch(path, options);
@@ -30,15 +23,21 @@ const performancePage = (() => {
       const title = cell('Run'); const link = node('a', run.title || `Run ${run.id}`, 'run-detail-link');
       link.href = `#run=${run.id}`; link.dataset.timingRunId = String(run.timingRunId); link.classList.add('run-photo-details');
       title.append(link, node('div', when(run.startedAt), 'performance-context'));
-      const setup = cell('Setup'); setup.append(node('div', [providers[run.provider] ?? run.provider, run.model].filter(Boolean).join(' · ')),
+      const setup = cell('Setup'); setup.append(node('div', [provider(run.provider), run.model].filter(Boolean).join(' · ')),
         node('div', run.profile?.name || 'Profile unavailable', 'performance-context'));
       if (run.inferenceHostLabel) setup.append(node('div', run.inferenceHostLabel, 'performance-context'));
       const outcomes = cell('Photo outcomes'); const c = run.counters;
-      outcomes.append(node('div', run.status === 'finished' ? 'Completed' : run.status, 'run-status'),
+      outcomes.append(node('div', status(run.status), 'run-status'),
         node('div', c ? `${count(c.succeeded)} successful · ${count(c.failed)} failed` : 'Counts unavailable', 'performance-context'));
       const skipped = (c?.skippedSuccessful ?? 0) + (c?.skippedFailureLimit ?? 0) + (c?.skippedDiscarded ?? 0);
       if (skipped) outcomes.append(node('div', `${count(skipped)} skipped`, 'performance-context'));
-      cell('Total time').textContent = elapsed(run); list.append(row);
+      const time = cell('Total time'); time.append(node('div', duration(elapsed(run))));
+      if (Number.isFinite(run.throughput?.photosPerMinute)) {
+        const throughput = node('div', `${rate(run.throughput.photosPerMinute)} photos/min`, 'performance-context run-throughput');
+        throughput.title = 'Successful photos per minute, including downloads, failures, and retry waits.';
+        time.append(throughput);
+      }
+      list.append(row);
     }
     el('runsCount').textContent = total ? `Showing ${count(runs.length)} of ${count(total)} retained runs` : 'No runs yet. Start enrichment from the Enrich page.';
     el('runsMore').hidden = !cursor;

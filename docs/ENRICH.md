@@ -739,6 +739,9 @@ for `truncated` when interpreting samples or reliability totals.
 **Enrich performance** is a dedicated page linked from Recent runs on Enrich
 and from the Enrich section in Settings. **Runs** is the default view: a paged
 history of run dates, provider/model/profile, photo outcomes, and total time.
+Successful photos/minute appears beneath total time when available. Run dates,
+status labels, provider names, and duration formats match across views; long
+durations use minutes/hours while short requests retain precise seconds.
 Enrich keeps compact outcome summaries and existing settings/log/retry actions;
 **View details** links directly to the selected run on the performance page.
 
@@ -746,7 +749,9 @@ The **Compare setups** view starts with the three most recently used setups; **S
 includes every setup within the retained timing window (at most 100 runs).
 Ordering follows recent use, not speed. Each setup shows typical successful
 request time (median), successful requests and timeout counts, and overall
-successful photos/minute. **More metrics** includes the arithmetic mean,
+successful photos/minute. Request counts read “3 of 5 requests succeeded”
+with timeouts separately identified. Profile/revision and host labels are
+prominent, with a last-used date on each setup. **More metrics** includes the arithmetic mean,
 request outcomes and retry counts, contributing photo/run counts, total
 throughput time and successes, and timing coverage. No external metrics
 service is needed.

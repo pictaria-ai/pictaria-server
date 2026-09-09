@@ -10,7 +10,7 @@
 .performance-more { font-size: 12px; color: var(--p-muted); }
 .performance-more > summary { cursor: pointer; padding: 5px 0; }
 .performance-explanation p { margin: 6px 0; line-height: 1.5; overflow-wrap: anywhere; }
-.performance-warning { color: var(--p-muted); font-size: 12px; font-style: italic; }
+.performance-warning { color: var(--p-muted); font-size: 12px; line-height: 1.5; }
 .performance-run-summary { color: var(--p-ink); }
 .timing-dialog { width: min(840px, calc(100vw - 48px)); max-height: 85dvh; padding: 0; border: 1px solid var(--p-line); border-radius: var(--p-radius); background: var(--p-bg); color: var(--p-ink); }
 .timing-dialog::backdrop { background: rgb(0 0 0 / 55%); }
@@ -43,7 +43,7 @@
 }
 
 .performance-page { max-width: 1120px; margin: 0 auto; padding: 26px 24px 60px; }
-.performance-back { font-size: 13px; color: var(--p-accent-deep); }
+.performance-back { font-size: 13px; color: var(--p-ink); }
 .performance-page-heading { display: flex; align-items: center; justify-content: space-between; gap: 16px; margin-top: 10px; }
 .performance-page h1 { font-size: 24px; margin: 8px 0; }
 .performance-intro { font-size: 14px; color: var(--p-muted); margin: 4px 0 24px; }
@@ -59,7 +59,7 @@
 .performance-runs th:nth-child(2) { width: 32%; }
 .performance-runs th:nth-child(3) { width: 25%; }
 .performance-runs th:nth-child(4) { width: 14%; }
-.run-detail-link { font-weight: 650; color: var(--p-accent-deep); }
+.run-detail-link { font-weight: 650; color: var(--p-ink); }
 .performance-paging { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-top: 16px; }
 .run-detail-summary { padding-bottom: 16px; border-bottom: 1px solid var(--p-line); font-size: 13px; line-height: 1.5; overflow-wrap: anywhere; }
 .run-detail-summary p:first-child { margin-top: 0; }
@@ -76,3 +76,7 @@
   .performance-runs td:last-child::before { content: 'Total time'; display: block; font-size: 12px; color: var(--p-muted); }
   .performance-paging { flex-wrap: wrap; }
 }
+
+.performance-setup { display: flex; flex-wrap: wrap; gap: 4px 18px; font-size: 13px; font-weight: 600; margin: 8px 0 4px; line-height: 1.5; overflow-wrap: anywhere; }
+.performance-setup > span { min-width: 0; }
+.performance-values > div:nth-child(2) strong { font-size: 16px; }

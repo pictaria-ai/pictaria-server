@@ -12,7 +12,9 @@ All notable changes to Pictaria Server are documented here. This project follows
   speed, outcomes, and throughput. Enrich keeps compact Recent runs with direct
   View details links. Run details include summaries, photo processing times,
   paginated requests/retries, and clear incomplete or expired timing states;
-  the dialog fills the screen on phones.
+  the dialog fills the screen on phones. Shared formatting, plain-language
+  request counts, prominent profile/host labels and last-used dates, and
+  throughput beneath run duration make comparisons easier to read.
 
 - Enrich records per-photo processing time and each actual provider request's
   duration and outcome, including retries, timeouts, invalid responses, and

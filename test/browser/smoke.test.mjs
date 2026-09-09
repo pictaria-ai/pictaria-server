@@ -637,7 +637,7 @@ test('admin UI smoke: gate, Insights lens, Curate, Smart Albums', { timeout: 120
         .find((item) => item.textContent.includes('Seeded successful run'));
       return card?.textContent ?? '';
     })()`);
-    assert.match(runComparison, /local_lmstudio · smoke-vision-model · host: Smoke inference host/);
+    assert.match(runComparison, /LM Studio · smoke-vision-model · host: Smoke inference host/);
     assert.doesNotMatch(runComparison, /End-to-end:|Typical successful request:/);
     assert.match(runComparison, /View details/);
     // Configuration details use the same authenticated route as the UI;

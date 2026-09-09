@@ -12,7 +12,7 @@
   <link rel="stylesheet" href="/pictaria.css">
   <style>
     .runs-navigation { margin-left: auto; flex: none; font-size: 13px; font-weight: 400; }
-    .runs-navigation a { color: var(--p-accent-deep); }
+    .runs-navigation a { color: var(--p-ink); }
     .run-actions { justify-content: flex-start; }
     .run-actions a { text-decoration: none; }
     main { max-width: var(--p-page-w-narrow); margin: 0 auto; padding: 26px 18px 60px; }
@@ -275,6 +275,7 @@
 
   <div id="toast" class="p-toast"></div>
 
+  <script src="/enrich-format.js"></script>
   <script src="/enrich-profiles.js"></script>
   <script>
     const IDLE_STATUS_POLL_MS = 15_000;
@@ -875,12 +876,7 @@
 
     // --- queue (photo groups sent from Insights) ---
 
-    function fmtWhen(iso) {
-      if (!iso) return '';
-      const d = new Date(iso);
-      return d.toLocaleDateString(undefined, { month: 'short', day: 'numeric' })
-        + ' ' + d.toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' });
-    }
+    const fmtWhen = enrichFormat.when;
 
     function renderQueue(items) {
       const box = el('queueList');
@@ -1082,13 +1078,8 @@
         title.title = run.title;
         const when = document.createElement('span');
         when.className = 'm';
-        const durationMs = run.startedAt && run.finishedAt
-          ? new Date(run.finishedAt) - new Date(run.startedAt)
-          : null;
-        const duration = Number.isFinite(durationMs) && durationMs > 0
-          ? durationMs < 60_000 ? `${Math.max(1, Math.round(durationMs / 1000))}s` : `${Math.round(durationMs / 60_000)}m`
-          : null;
-        when.textContent = `${fmtWhen(run.startedAt)}${duration ? ` · ${duration}` : ''}`;
+        const durationMs = enrichFormat.elapsed(run);
+        when.textContent = `${fmtWhen(run.startedAt)}${durationMs !== null ? ` · ${enrichFormat.duration(durationMs)}` : ''}`;
         top.append(title, when);
         const actions = document.createElement('div'); actions.className = 'qline run-actions';
         let retryBtn = null;
@@ -1133,12 +1124,12 @@
         detail.className = 'detail';
         detail.textContent = [
           run.profile ? profileUI.label(run.profile) : null,
-          run.provider,
+          enrichFormat.provider(run.provider),
           run.model,
           run.inferenceHostLabel ? `host: ${run.inferenceHostLabel}` : null,
           run.configurationId ? null : 'Configuration unknown (legacy run)',
           run.retrySourceRunId ? `Retry of run #${run.retrySourceRunId} with settings at retry start` : null,
-          run.status === 'finished' ? 'Completed' : run.status + (run.error ? `: ${String(run.error).slice(0, 80)}` : ''),
+          enrichFormat.status(run.status) + (run.error ? `: ${String(run.error).slice(0, 80)}` : ''),
           counts,
         ].filter(Boolean).join(' · ');
         if (run.status === 'failed') detail.classList.add('bad');
