@@ -266,6 +266,7 @@ function openSlice(slice) {
   // Visible whenever the slice can be enriched; inactive (not hidden) when
   // enrichment is off, so the capability stays discoverable.
   el('modalEnrichBtn').hidden = !slice.filters;
+  el('modalEnrichProfileNote').hidden = !slice.filters;
   el('modalEnrichBtn').disabled = state.enrichEnabled !== true;
   el('modalEnrichBtn').textContent = 'Send to Enrich';
   el('modalEnrichBtn').title = state.enrichEnabled === true ? '' : 'Enrichment is off — enable it in Settings → Enrich';

@@ -11,11 +11,12 @@ import { configuredSecrets, sanitizeDiagnostic } from '../diagnostics.mjs';
 const LOG_TAIL_LIMIT = 500;
 
 export class EnrichJobRunner {
-  constructor({ repo, immich, taxonomy, config }) {
+  constructor({ repo, immich, taxonomy, config, profiles = null }) {
     this.repo = repo;
     this.immich = immich;
     this.taxonomy = taxonomy;
     this.config = config;
+    this.profiles = profiles;
     this.state = idleState();
     this.runPromise = null;
     this.runLifecycle = null;
@@ -32,8 +33,9 @@ export class EnrichJobRunner {
   status() {
     return {
       ...this.state,
+      activeProfile: this.profiles?.list().find(p => p.isActive) ?? null,
       log: [...this.state.log],
-      defaults: { provider: this.config.defaultProvider, imageSource: this.config.imageSource },
+      defaults: { provider: this.config.defaultProvider, imageSource: this.config.imageSource, profileId: this.profiles?.list().find(p => p.isActive)?.id ?? null },
       available: availableProviders(this.config),
     };
   }
@@ -198,10 +200,11 @@ export class EnrichJobRunner {
 
   #prepare(options = {}) {
     const { providerName, provider } = this.#resolveProvider(options.provider);
-    const prompts = loadPrompts(this.config.promptsDir, this.config.promptVersion);
+    const selected = this.profiles?.resolve(options);
+    const prompts = selected ?? loadPrompts(this.config.promptsDir, this.config.promptVersion);
     const overrides = this.config.promptOverrides ?? {};
-    if (overrides.systemPrompt) prompts.systemPrompt = overrides.systemPrompt;
-    if (overrides.userTemplate) prompts.userTemplate = overrides.userTemplate;
+    if (!selected && overrides.systemPrompt) prompts.systemPrompt = overrides.systemPrompt;
+    if (!selected && overrides.userTemplate) prompts.userTemplate = overrides.userTemplate;
     const fixedOptions = {
       provider: providerName,
       limit: clampInt(options.limit, 1, 100000, 100),
@@ -215,8 +218,10 @@ export class EnrichJobRunner {
       reopenDecided: Boolean(options.reopenDecided),
     };
     const configuration = captureRunConfiguration({
-      provider, taxonomy: this.taxonomy, ...prompts,
-      promptVersion: this.#promptVersion(),
+      provider, taxonomy: selected?.taxonomy ?? this.taxonomy,
+      ...(selected ? { systemPrompt: selected.systemPrompt, userTemplate: selected.userTemplate } : prompts),
+      profile: selected?.attribution ?? null,
+      promptVersion: selected ? `${this.config.promptVersion}-profile` : this.#promptVersion(),
       imageSource: fixedOptions.imageSource,
       inferenceHostLabel: this.config.inferenceHostLabel || null,
       processing: {
@@ -257,8 +262,8 @@ export class EnrichJobRunner {
   // setup has data and isn't "stuck" — re-running it under the current
   // model is the compare workflow (uncheck "Only unenriched"), not this
   // affordance's job.
-  failureLimitedSummary({ provider } = {}) {
-    const { configuration } = this.#prepare({ provider });
+  failureLimitedSummary({ provider, profileId } = {}) {
+    const { configuration } = this.#prepare({ provider, profileId });
     const runKey = configuration.runKey;
     const providerName = runKey.provider;
     return {
@@ -279,8 +284,8 @@ export class EnrichJobRunner {
   // human-readable rows: filename, capture date, and the failure message that
   // put each photo here. It is capped well below the retry cap; a popup past
   // 500 rows is a scrolling exercise, and truncation keeps the count honest.
-  failureLimitedDetails({ provider } = {}) {
-    const { configuration } = this.#prepare({ provider });
+  failureLimitedDetails({ provider, profileId } = {}) {
+    const { configuration } = this.#prepare({ provider, profileId });
     const runKey = configuration.runKey;
     const providerName = runKey.provider;
     const summary = this.repo.failureLimitedAssetIds({
@@ -304,8 +309,8 @@ export class EnrichJobRunner {
   // popup's 500-row display cap never limits the operation. It uses the same
   // 10,000 cap as retry; larger sets take a second click, and `truncated`
   // reports that limit.
-  discardFailureLimited({ provider } = {}) {
-    const { configuration } = this.#prepare({ provider });
+  discardFailureLimited({ provider, profileId } = {}) {
+    const { configuration } = this.#prepare({ provider, profileId });
     const runKey = configuration.runKey;
     const providerName = runKey.provider;
     const summary = this.repo.failureLimitedAssetIds({
@@ -402,6 +407,7 @@ export class EnrichJobRunner {
       provider: providerName,
       model: provider.modelName,
       inferenceHostLabel: configuration.snapshot.labels.inferenceHostLabel,
+      profile: configuration.snapshot.profile ?? null,
       configurationId: configuration.id,
       inferenceId: configuration.inferenceId,
       promptVersion,

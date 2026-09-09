@@ -631,7 +631,7 @@ async function showFullCaption(asset) {
     el('lbCaption').textContent = info.caption;
   }
   const note = info?.model
-    ? `enriched by ${String(info.provider ?? '').replace('cloud_', '').replace('local_', '')} · ${info.model}`
+    ? `enriched by ${String(info.provider ?? '').replace('cloud_', '').replace('local_', '')} · ${info.model}${info.profile ? ` · ${info.profile.name} · r${info.profile.revision}` : ''}`
     : '';
   el('lbModel').textContent = note;
   el('lbModel').hidden = !note;

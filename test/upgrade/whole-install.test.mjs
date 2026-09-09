@@ -6,6 +6,7 @@ import {
   mkdtempSync,
   readFileSync,
   rmSync,
+  writeFileSync,
 } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
@@ -15,6 +16,7 @@ import { DatabaseSync } from 'node:sqlite';
 import { SmartAlbumStore } from '../../src/albums/store.mjs';
 import { backupTargets, runBackup } from '../../src/backup.mjs';
 import { loadConfig } from '../../src/config.mjs';
+import { EnrichmentProfiles } from '../../src/enrich/profiles.mjs';
 import { Repository } from '../../src/enrich/repository.mjs';
 import { createFrameLedger } from '../../src/frame/ledger.mjs';
 import { getUserVersion } from '../../src/migrations.mjs';
@@ -41,8 +43,15 @@ test('a complete legacy installation upgrades, restarts, backs up, and restores 
     const sourceConfig = fixtureConfig(sourceRoot);
 
     const first = await openInstallation(sourceConfig, 'initialize');
-    assert.deepEqual(first.enrichmentMigration.applied, [1, 2, 3, 4, 5, 6, 7, 8]);
+    assert.deepEqual(first.enrichmentMigration.applied, [1, 2, 3, 4, 5, 6, 7, 8, 9]);
     await assertRepresentativeState(first, sourceConfig);
+
+    const migratedDefault = first.profiles.activeProfile();
+    assert.equal(migratedDefault.systemPrompt, sourceConfig.promptOverrides?.systemPrompt || first.profiles.builtin().systemPrompt);
+    const travel = first.profiles.create({ ...migratedDefault, name: 'Fixture travel', systemPrompt: 'Travel fixture prompt' });
+    first.enrichment.queueAdd({ title: 'Active profile fixture', filters: { city: 'Fixture City' } });
+    first.profiles.update(travel.id, { ...travel, name: 'Renamed travel', expectedRevisionId: travel.revisionId });
+    first.profiles.setActive(travel.id);
 
     const migratedSettings = readFileSync(sourceConfig.settingsPath, 'utf8');
     const firstSnapshot = semanticSnapshot(first);
@@ -83,6 +92,51 @@ test('a complete legacy installation upgrades, restarts, backs up, and restores 
     assert.deepEqual(semanticSnapshot(restored), firstSnapshot);
     await assertRepresentativeState(restored, restoredConfig);
     closeInstallation(restored);
+  } finally {
+    rmSync(workspace, { recursive: true, force: true });
+  }
+});
+
+
+test('contract 10 upgrade snapshots queue pins before clearing them and retains the active choice', async () => {
+  const workspace = mkdtempSync(join(tmpdir(), 'pictaria-profile-upgrade-'));
+  try {
+    const config = fixtureConfig(join(workspace, 'source'));
+    materializeLegacyInstallation(join(workspace, 'source'));
+    const preview = await openInstallation(config, 'initialize');
+    const initial = preview.profiles.activeProfile();
+    const travel = preview.profiles.create({ ...initial, name: 'Travel preview' });
+    preview.profiles.setActive(travel.id);
+    preview.enrichment.queueAdd({ title: 'Preview photos', filters: { city: 'Fixture City' } });
+    preview.enrichment.db.prepare('UPDATE enrich_queue SET profile_revision_id = ?').run(initial.revisionId);
+    const before = semanticSnapshot(preview);
+    closeInstallation(preview);
+    // Contract 10 used the same schema, but persisted a separate default and queue pins.
+    const inventory = JSON.parse(readFileSync(config.persistentState.inventoryPath, 'utf8'));
+    inventory.upgrade.stateVersion = 10;
+    writeFileSync(config.persistentState.inventoryPath, JSON.stringify(inventory));
+
+    const upgraded = await openInstallation(config, 'verify');
+    assert.equal(upgraded.inventory.upgrade.stateVersion, 11);
+    assert.deepEqual(semanticSnapshot(upgraded), before);
+    assert.equal(upgraded.profiles.activeProfile().id, travel.id);
+    assert.equal(upgraded.enrichment.db.prepare('SELECT COUNT(*) AS n FROM enrich_queue WHERE profile_revision_id IS NOT NULL').get().n, 0);
+    const snapshotDir = join(config.backup.dir, upgraded.inventory.upgrade.recoveryPoint.snapshotName);
+    closeInstallation(upgraded);
+
+    // Restoring the pre-upgrade snapshot recovers the exact old queue references
+    // and version metadata, so rollback can use the matching older server.
+    const restoredConfig = fixtureConfig(join(workspace, 'restored'));
+    restoreSnapshot(snapshotDir, restoredConfig);
+    const restoredInventory = JSON.parse(readFileSync(restoredConfig.persistentState.inventoryPath, 'utf8'));
+    assert.equal(restoredInventory.upgrade.stateVersion, 10);
+    const restoredDb = new DatabaseSync(restoredConfig.databasePath);
+    try {
+      const pins = restoredDb.prepare('SELECT profile_revision_id FROM enrich_queue').all();
+      assert.ok(pins.length > 0);
+      assert.ok(pins.every(row => row.profile_revision_id === initial.revisionId));
+      assert.equal(restoredDb.prepare('SELECT id FROM enrich_profiles WHERE is_default = 1').get().id, travel.id);
+    } finally { restoredDb.close(); }
   } finally {
     rmSync(workspace, { recursive: true, force: true });
   }
@@ -138,6 +192,8 @@ async function openInstallation(config, expectedMode) {
   const settings = new SettingsStore({ filePath: config.settingsPath, config, env: {} }).load();
   const enrichment = new Repository(config.databasePath);
   const enrichmentMigration = enrichment.initSchema();
+  const profiles = new EnrichmentProfiles({ repo: enrichment, config });
+  profiles.initialize();
   const albums = new SmartAlbumStore(config.albums.dataFile, {
     installationSecret: loadOrCreateSessionSecret(config.sessionSecretPath),
   });
@@ -156,6 +212,7 @@ async function openInstallation(config, expectedMode) {
     settings,
     enrichment,
     enrichmentMigration,
+    profiles,
     albums,
     frameLedger,
     voiceMetrics,
@@ -184,6 +241,9 @@ function semanticSnapshot(installation) {
     .get();
 
   return {
+    profiles: installation.profiles.list(),
+    profileRevisions: installation.enrichment.db.prepare('SELECT * FROM enrich_profile_revisions ORDER BY id').all(),
+    queue: installation.enrichment.queuePage().items,
     settingsVersion: JSON.parse(readFileSync(installation.settings.filePath, 'utf8')).version,
     enrichmentVersion: getUserVersion(installation.enrichment.db),
     assetCount: installation.enrichment.db.prepare('SELECT COUNT(*) AS n FROM assets').get().n,

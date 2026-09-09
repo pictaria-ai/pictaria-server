@@ -38,7 +38,8 @@ export class CaptionWritebackService {
 
   status() {
     return {
-      enabled: Boolean(this.config.captionWriteback),
+      enabled: Boolean(this.config.enrichEnabled && this.config.captionWriteback),
+      paused: !this.config.enrichEnabled,
       ...this.repo.captionWritebackCounts(),
       lastError: this._lastError,
     };
@@ -99,7 +100,7 @@ export class CaptionWritebackService {
         this._running = false;
         return;
       }
-      if (!this.config.captionWriteback) {
+      if (!this.config.enrichEnabled || !this.config.captionWriteback) {
         await this.#sleep(IDLE_POLL_MS);
         continue;
       }
@@ -110,7 +111,7 @@ export class CaptionWritebackService {
       }
       let hadError = false;
       for (const item of batch) {
-        if (this._stopRequested || !this.config.captionWriteback) {
+        if (this._stopRequested || !this.config.enrichEnabled || !this.config.captionWriteback) {
           break;
         }
         try {
@@ -131,6 +132,7 @@ export class CaptionWritebackService {
   }
 
   async pushOne(item) {
+    if (!this.config.enrichEnabled || !this.config.captionWriteback) return;
     const caption = typeof item.caption === 'string' ? item.caption.trim() : '';
     if (!caption) {
       this.repo.captionWritebackMark(item.assetId, { status: 'skipped', note: 'no caption' });
@@ -157,6 +159,7 @@ export class CaptionWritebackService {
       return;
     }
 
+    if (!this.config.enrichEnabled || !this.config.captionWriteback) return;
     await this.immich.updateAsset(item.assetId, { description: caption });
     this.repo.captionWritebackMark(item.assetId, { status: 'written', writtenDescription: caption });
     this._sessionWritten += 1;

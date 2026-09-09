@@ -188,6 +188,46 @@
     .loc-city.taken { opacity: 0.45; cursor: default; }
     .loc-city .c-name { white-space: nowrap; }
     .loc-hint { color: var(--p-accent); font-size: 12px; margin-top: 7px; }
+    .profile-field { display: block; margin: 14px 0; }
+    .profile-field input, .profile-field textarea { display: block; width: 100%; box-sizing: border-box; margin-top: 6px; }
+    .profile-field textarea { height: auto; min-height: 100px; font-family: monospace; resize: vertical; }
+    .profile-actions { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+    .profile-dialog .p-select { max-width: 100%; display: block; margin-top: 6px; }
+    .profile-controls { border: 0; padding: 0; margin: 0; min-width: 0; }
+    .profile-list-heading { justify-content: space-between; }
+    .profile-row { display: flex; gap: 10px; align-items: center; padding: 14px 0; border-bottom: 1px solid var(--p-line); }
+    .profile-row-name { flex: 1; min-width: 0; overflow-wrap: anywhere; }
+    .profile-menu { position: relative; }
+    .profile-menu > summary { list-style: none; cursor: pointer; }
+    .profile-menu > summary::-webkit-details-marker { display: none; }
+    .profile-menu-actions { position: absolute; z-index: 5; right: 0; min-width: 150px; padding: 8px; display: grid; gap: 4px; background: var(--p-bg); border: 1px solid var(--p-line); border-radius: 8px; box-shadow: 0 6px 20px #0002; }
+    .profile-menu-actions .p-btn { text-align: left; }
+    .profile-editor-section { border-top: 1px solid var(--p-line); margin-top: 24px; padding-top: 16px; }
+    .profile-editor-section h4 { font-size: 15px; margin: 0 0 8px; }
+    .profile-category { margin: 6px 0; }
+    #profileTaxonomyDetails { margin-top: 16px; }
+    #sec-enrichment-profiles summary { cursor: pointer; }
+    .profile-tags { display: flex; flex-wrap: wrap; gap: 6px; margin: 8px 0 12px; }
+    .profile-tag { font-size: 12px; padding: 4px 7px; background: var(--p-raised, var(--p-bg)); border: 1px solid var(--p-line); border-radius: 5px; overflow-wrap: anywhere; max-width: 100%; }
+    .profile-save-area { margin-top: 24px; padding-top: 12px; border-top: 1px solid var(--p-line); }
+    .profile-error { color: var(--p-danger); font-size: 13px; }
+    .profile-error:empty, #profileStatus:empty { display: none; }
+    [aria-invalid="true"] { border-color: var(--p-danger); }
+    .profile-discard { max-width: min(420px, calc(100vw - 64px)); padding: 24px; color: var(--p-text); background: var(--p-bg); border: 1px solid var(--p-line); border-radius: 12px; }
+    .profile-dialog { box-sizing: border-box; width: min(800px, calc(100vw - 40px)); max-width: none; max-height: calc(100dvh - 48px); padding: 0 24px; border: 1px solid var(--p-line); border-radius: 12px; color: var(--p-text); background: var(--p-bg); overflow: auto; scroll-padding: 100px 0 180px; }
+    #profileCreate { padding-bottom: 20px; }
+    .profile-dialog::backdrop { background: #0007; }
+    body:has(.profile-dialog[open]) { overflow: hidden; }
+    .profile-dialog-header { position: sticky; top: 0; z-index: 2; display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 18px 0; background: var(--p-bg); border-bottom: 1px solid var(--p-line); }
+    .profile-dialog-header h3 { margin: 0 0 4px; overflow-wrap: anywhere; }
+    .profile-dialog .profile-save-area { position: sticky; bottom: 0; padding: 12px 0; background: var(--p-bg); z-index: 1; }
+    .profile-dialog .profile-discard { margin: 16px 0; max-width: none; }
+    .profile-dialog #profileEditorNote { position: sticky; bottom: 0; background: var(--p-bg); margin: 0; padding: 8px 0; }
+    .profile-dialog #profileEditorNote:empty { display: none; }
+    .field.enrich-paused { opacity: .55; }
+    @media (max-width: 600px) {
+      .profile-dialog { width: 100vw; height: 100dvh; max-height: 100dvh; margin: 0; border: 0; border-radius: 0; padding: 0 16px; }
+    }
   </style>
 </head>
 <body>
@@ -221,6 +261,7 @@
       <a href="#sec-providers">AI Providers</a>
       <a href="#sec-insights">Insights</a>
       <a href="#sec-enrich">Enrich</a>
+      <a href="#sec-enrichment-profiles">Enrichment profiles</a>
       <a href="#sec-discarded">Discarded Photos</a>
       <a href="#sec-curate">Curate</a>
       <a href="#sec-devices">Devices</a>
@@ -279,7 +320,7 @@
     <details id="sec-enrich" class="p-panel section">
       <summary><span class="chev">&#9654;</span><h2>Enrich</h2><span class="sec-sub" id="sub-enrich"></span></summary>
       <div class="sec-body">
-        <div class="setting-desc">Controls enrichment, the image size sent to AI, and the prompts and taxonomy that govern what the model may say. Choose the provider for new runs on the Enrich page; your selection is remembered. Provider connections and model names live under AI Providers. How the pieces fit — prompts, taxonomy, and the response schema — is explained in the <a href="https://github.com/pictaria-ai/pictaria-server/blob/main/docs/ENRICH.md" target="_blank" rel="noopener" style="color: var(--p-accent)">enrichment guide</a>.</div>
+        <div class="setting-desc">Controls enrichment, the image size sent to AI, and the shared live Curate policy. Manage inference prompts and taxonomies in <a href="#sec-enrichment-profiles">Enrichment profiles</a>. Choose the provider for new runs on the Enrich page; your selection is remembered. Provider connections and model names live under AI Providers. How the pieces fit — prompts, taxonomy, and the response schema — is explained in the <a href="https://github.com/pictaria-ai/pictaria-server/blob/main/docs/ENRICH.md" target="_blank" rel="noopener" style="color: var(--p-accent)">enrichment guide</a>.</div>
         <div id="fields-enrich"></div>
         <div id="captionWbStatus" class="caption-wb-status">
           <div id="captionWbLine" class="setting-desc" role="status" aria-live="polite"></div>
@@ -295,6 +336,84 @@
         </div>
       </div>
     </details>
+
+    <details id="sec-enrichment-profiles" class="p-panel section">
+      <summary><span class="chev">&#9654;</span><h2>Enrichment profiles</h2></summary>
+      <div class="sec-body">
+        <p id="profileStatus" class="setting-desc" role="status" aria-live="polite"></p>
+        <div id="profileLibrary">
+          <p class="setting-desc">A profile tells the AI how to describe your photos and which tags it can assign. Keep different profiles for different kinds of photos.</p>
+          <fieldset id="profileListControls" class="profile-controls">
+            <div class="profile-actions profile-list-heading"><h3>Your profiles</h3><button id="profileNew" type="button" class="p-btn primary">+ New profile</button></div>
+            <div id="profileList">Loading profiles…</div>
+            <p id="profileNote" class="setting-desc"></p>
+            <details id="profileArchivedSection" hidden>
+              <summary id="profileArchivedSummary">Archived profiles</summary>
+              <p class="setting-desc">Archived profiles are hidden from new runs. Their saved settings remain available in run history.</p>
+              <div id="profileArchivedList"></div>
+            </details>
+          </fieldset>
+        </div>
+      </div>
+    </details>
+    <dialog id="profileDialog" class="profile-dialog" aria-labelledby="profileEditorTitle">
+      <div class="profile-dialog-header">
+        <div><h3 id="profileEditorTitle">Edit profile</h3><span id="profileDirty" class="setting-desc" role="status" aria-live="polite"></span></div>
+        <button id="profileBack" type="button" class="p-btn quiet" aria-label="Close profile editor">✕</button>
+      </div>
+    <div id="profileDiscardDialog" class="profile-discard" role="alert" hidden aria-labelledby="profileDiscardTitle" aria-describedby="profileDiscardHelp">
+      <h3 id="profileDiscardTitle">Discard unsaved changes?</h3>
+      <p id="profileDiscardHelp">Your edits haven’t been saved. Keep editing to save them, or discard them to leave.</p>
+      <div class="profile-actions"><button id="profileKeepEditing" type="button" class="p-btn primary" autofocus>Keep editing</button><button id="profileDiscard" type="button" class="p-btn danger">Discard changes</button></div>
+    </div>
+        <div id="profileCreate" hidden>
+          <p class="setting-desc">Choose a starting point, then customize the tags and instructions.</p>
+          <form id="profileCreateForm" novalidate>
+            <fieldset id="profileCreateControls" class="profile-controls">
+              <label class="profile-field" for="profileCreateName">Profile name<input id="profileCreateName" class="p-input" maxlength="80" placeholder="e.g. Travel" aria-describedby="profileCreateError"></label>
+              <p id="profileCreateError" class="profile-error" role="alert"></p>
+              <label class="profile-field" for="profileSource">Starting point<select id="profileSource" class="p-select" aria-describedby="profileSourceHelp"></select></label>
+              <p id="profileSourceHelp" class="setting-desc">Start with Pictaria’s templates or copy a saved profile. Changes won’t affect the original.</p>
+              <div class="profile-actions"><button id="profileCreateContinue" type="submit" class="p-btn primary">Continue</button><button id="profileCreateCancel" type="button" class="p-btn quiet">Cancel</button></div>
+            </fieldset>
+          </form>
+        </div>
+        <div id="profileEditor" hidden>
+          <form id="profileEditorForm" novalidate>
+            <fieldset id="profileEditorControls" class="profile-controls">
+              <label class="profile-field" for="profileName">Profile name<input id="profileName" class="p-input" maxlength="80" aria-describedby="profileNameHelp profileNameError"></label>
+              <p id="profileNameHelp" class="setting-desc">Choose a name you’ll recognize when starting a run.</p>
+              <p id="profileNameError" class="profile-error" role="alert"></p>
+              <section class="profile-editor-section" aria-labelledby="profileTagsTitle">
+                <h4 id="profileTagsTitle">Tags &amp; categories</h4>
+                <p class="setting-desc">Which tags can the AI assign? Expand a category to see its allowed tags.</p>
+                <div id="profileTaxonomySummary"></div>
+                <details id="profileTaxonomyDetails">
+                  <summary>Edit taxonomy JSON</summary>
+                  <p id="profileTaxonomyHelp" class="setting-desc">Edit the allowed tags and confidence thresholds. Curate’s shared <code>review</code> buckets and <code>hard_exclusion_tags</code> are managed in <a href="#sec-enrich">Enrich settings</a>; changing those sections here does not change Curate’s live policy.</p>
+                  <label class="profile-field" for="profileTaxonomy">Taxonomy JSON<textarea id="profileTaxonomy" class="p-input" rows="14" maxlength="200000" spellcheck="false" aria-describedby="profileTaxonomyHelp profileTaxonomyError"></textarea></label>
+                  <p id="profileTaxonomyError" class="profile-error" role="alert"></p>
+                </details>
+              </section>
+              <section class="profile-editor-section" aria-labelledby="profileInstructionsTitle">
+                <h4 id="profileInstructionsTitle">AI instructions</h4>
+                <p class="setting-desc">How should the AI interpret and describe your photos? Provider and model choices remain separate on Enrich.</p>
+                <label class="profile-field" for="profileSystem">General instructions<textarea id="profileSystem" class="p-input" rows="7" maxlength="20000" spellcheck="false" aria-describedby="profileSystemHelp profileSystemError"></textarea></label>
+                <p id="profileSystemHelp" class="setting-desc">The system prompt: standing guidance the AI follows for every photo, such as what makes a useful caption.</p>
+                <p id="profileSystemError" class="profile-error" role="alert"></p>
+                <label class="profile-field" for="profileUser">Photo request template<textarea id="profileUser" class="p-input" rows="5" maxlength="20000" spellcheck="false" aria-describedby="profileUserHelp profileUserError"></textarea></label>
+                <p id="profileUserHelp" class="setting-desc">The per-photo prompt. Include <code>{approved_tags}</code>; Pictaria replaces this with your profile’s allowed tags.</p>
+                <p id="profileUserError" class="profile-error" role="alert"></p>
+              </section>
+              <p class="setting-desc">Saving updates this profile for future runs. It does not change the active profile or start enrichment.</p>
+              <div class="profile-save-area">
+                <div class="profile-actions"><button id="profileSave" type="submit" class="p-btn primary">Save changes</button><button id="profileClose" type="button" class="p-btn quiet">Cancel</button><button id="profileValidate" title="Check format and required fields without sending photos to a model" type="button" class="p-btn quiet">Check configuration</button></div>
+              </div>
+            </fieldset>
+          </form>
+          <p id="profileEditorNote" class="setting-desc" role="status" aria-live="polite"></p>
+        </div>
+    </dialog>
 
     <details id="sec-discarded" class="p-panel section">
       <summary><span class="chev">&#9654;</span><h2>Discarded Photos</h2><span class="sec-sub" id="sub-discarded"></span></summary>
@@ -610,6 +729,7 @@
     </details>
   </main>
 
+  <script src="/enrich-profiles.js"></script>
   <script>
     const toggle = document.getElementById('lightModeToggle');
     toggle.checked = window.pictariaTheme.get() === 'light';
@@ -677,16 +797,14 @@
       enrich: [
         { key: 'enabled', type: 'switch', desc: 'Lets a model you choose analyze your photos. Off by default. Local providers keep requests within infrastructure you operate; cloud providers receive them through your account.', docs: 'https://github.com/pictaria-ai/pictaria-server/blob/main/docs/ENRICH.md' },
         { head: 'Daily Enrich' },
-        { key: 'scheduledEnabled', type: 'switch', desc: 'Enrich photos, once a day, that haven\'t been previously enriched. Uses the provider last selected and sends successful results to Curate. If today\'s time has passed, enabling starts today\'s catch-up promptly. Runs only once per day. Requires Enable AI enrichment above.' },
+        { key: 'scheduledEnabled', type: 'switch', desc: 'Enrich photos, once a day, that haven\'t been previously enriched. Uses the provider last selected and the active enrichment profile, and sends successful results to Curate. If today\'s time has passed, enabling starts today\'s catch-up promptly. Runs only once per day. Requires Enable AI enrichment above.' },
         { key: 'scheduledTime', type: 'time', width: 150, desc: 'Your browser’s local time. Pictaria remembers this browser’s time zone when you save.' },
         { key: 'scheduledPhotoBudget', type: 'number', width: 110, desc: 'The most new photos to analyze each day. Photos already enriched do not use the budget.' },
         { key: 'captionWriteback', type: 'switch', desc: 'Copies each photo’s AI caption into its Immich description, making photos searchable in Immich by what’s in them. Pictaria fills an empty description or updates its own earlier text and checks immediately before writing; Immich cannot make that check and update atomic, so a narrow concurrent human-edit race remains. Runs in the background; new enrichments follow automatically.', docs: 'https://github.com/pictaria-ai/pictaria-server/blob/main/docs/ENRICH.md#writing-captions-to-immich-descriptions' },
         { key: 'imageSource', type: 'select', labels: { preview: 'Preview (recommended)', thumbnail: 'Thumbnail (fastest, least detail)', original: 'Original (largest upload)' }, desc: 'The image size sent to the model for analysis.' },
         { key: 'inferenceHostLabel', type: 'text', placeholder: 'e.g. M4 Mac mini · LM Studio', desc: 'Optional label copied into each new run’s history, useful when comparing the same model on different machines. You supply and maintain this text; Pictaria does not inspect the model host.' },
-        { group: 'Prompt & taxonomy', groupDesc: 'Advanced — override the built-in prompts or the tag taxonomy. Empty fields keep the built-ins (viewable on the Enrich page).' },
-        { key: 'systemPrompt', type: 'textarea', builtinPrompt: true, placeholder: 'Using the built-in prompt — paste your own here to override.', desc: 'The model’s standing instructions. Leave empty to use the built-in prompt (viewable on the Enrich page). Runs with a custom prompt are marked "-custom" in the run history. Note: captions and quality scores are demanded by the response schema, not the prompt — see the Response fields list on the Enrich page.', docs: 'https://github.com/pictaria-ai/pictaria-server/blob/main/docs/ENRICH.md#taxonomy-prompts-and-the-response-schema' },
-        { key: 'userTemplate', type: 'textarea', rows: 5, builtinPrompt: true, placeholder: 'Using the built-in prompt — paste your own here to override.', desc: 'The per-photo message. Must include {approved_tags}, which is replaced with the taxonomy tag list.', docs: 'https://github.com/pictaria-ai/pictaria-server/blob/main/docs/ENRICH.md#taxonomy-prompts-and-the-response-schema' },
-        { key: 'taxonomyJson', type: 'textarea', rows: 14, taxonomyLoad: true, placeholder: 'Using the built-in taxonomy — paste an edited copy here to override.', desc: 'The tag vocabulary, thresholds, and exclusions as strict JSON — what the model may say about your photos. Load the current taxonomy and edit it; "version" is a display label and can stay the same. Vocabulary changes can make photos eligible for a later Enrich run; review-policy changes do not require AI calls. Already-enriched photos keep their old tags until re-run. Clear the box to return to the built-in taxonomy.', docs: 'https://github.com/pictaria-ai/pictaria-server/blob/main/docs/ENRICH.md#taxonomy-prompts-and-the-response-schema' },
+        { group: 'Live Curate review policy', groupDesc: 'Shared policy for results from all profiles. Inference prompts and taxonomies are managed in Settings → Enrichment profiles.' },
+        { key: 'taxonomyJson', type: 'textarea', rows: 14, taxonomyLoad: true, placeholder: 'Using the built-in taxonomy — paste an edited copy here to override.', desc: 'The shared live Curate policy as taxonomy JSON. Threshold and review-bucket changes apply to existing scores across all profiles without AI calls. This does not edit inference profiles or remap stored tags. Clear to restore the built-in review policy.', docs: 'https://github.com/pictaria-ai/pictaria-server/blob/main/docs/ENRICH.md#taxonomy-prompts-and-the-response-schema' },
         { groupEnd: true },
       ],
       curate: [
@@ -920,6 +1038,7 @@
           input.dataset.type = row.type;
           input.addEventListener('input', () => updateDirty(section));
           input.addEventListener('change', () => updateDirty(section));
+          if (section === 'enrich' && row.key === 'enabled') input.addEventListener('change', syncEnrichDependents);
           if (row.type === 'secret') {
             // Eye toggle so a key can be checked as it's typed.
             const EYE = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>';
@@ -1073,6 +1192,7 @@
           ? `Follow Enrich provider (${currentName})`
           : 'Follow Enrich provider';
       }
+      syncEnrichDependents();
       renderSubs(settings);
       void loadBackupStatus();
       void loadCaptionWbStatus();
@@ -1134,6 +1254,22 @@
       ].filter(Boolean).join(' · ');
     }
 
+    function syncEnrichDependents() {
+      const paused = !el('f2-enrich-enabled')?.checked;
+      for (const key of ['scheduledEnabled', 'scheduledTime', 'scheduledPhotoBudget', 'captionWriteback']) {
+        const input = el(`f2-enrich-${key}`);
+        if (!input) continue;
+        input.disabled = paused;
+        const field = input.closest('.field');
+        field.classList.toggle('enrich-paused', paused);
+        let note = field.querySelector('.enrich-pause-note');
+        if (!note) { note = document.createElement('p'); note.className = 'setting-desc enrich-pause-note'; field.append(note); }
+        note.textContent = paused ? 'Paused while Enrich is off.' : '';
+        note.hidden = !paused;
+      }
+      el('captionWbNow').disabled = paused;
+    }
+
     async function loadCaptionWbStatus() {
       let status;
       try {
@@ -1144,8 +1280,9 @@
         return;
       }
       el('captionWbNow').hidden = !status.enabled;
+      syncEnrichDependents();
       const summary = formatCaptionWbStatus(status);
-      el('captionWbLine').textContent = summary ? `Immich description sync: ${summary}` : '';
+      el('captionWbLine').textContent = [status.paused ? 'Paused while Enrich is off.' : '', summary ? `Immich description sync: ${summary}` : ''].filter(Boolean).join(' ');
     }
 
     el('captionWbNow').addEventListener('click', async () => {
@@ -1161,7 +1298,7 @@
       } catch (error) {
         el('captionWbNote').textContent = error.message;
       } finally {
-        el('captionWbNow').disabled = false;
+        syncEnrichDependents();
         setTimeout(() => { el('captionWbNote').textContent = ''; }, 8000);
       }
     });
@@ -1236,10 +1373,9 @@
           : 'none configured';
       }
       if (settings.enrich) {
-        const custom = settings.enrich.systemPrompt?.value || settings.enrich.userTemplate?.value;
         el('sub-enrich').textContent = settings.enrich.enabled && !settings.enrich.enabled.value
           ? 'off'
-          : `on${settings.enrich.scheduledEnabled?.value ? ' · daily' : ''}${custom ? ' · custom prompt' : ''}`;
+          : `on${settings.enrich.scheduledEnabled?.value ? ' · daily' : ''}`;
       }
       if (settings.curate?.burstGrouping) {
         el('sub-curate').textContent = [
@@ -2163,7 +2299,18 @@
     el('supRemove').addEventListener('click', () => patchSupporterKey(null, 'note-support-active', 'note-support'));
     el('wwUpload').addEventListener('click', uploadWakeWordModel);
 
+    const profileManager = createEnrichProfileManager({
+      async api(path, options = {}) {
+        const response = await fetch(path, { ...options, headers: headers(options.headers) });
+        if (response.status === 401) { showLogin(); throw new Error('Please sign in to manage profiles.'); }
+        const body = await response.json();
+        if (!response.ok) throw Object.assign(new Error(body?.error?.message ?? 'Could not update enrichment profiles.'), { status: response.status });
+        return body;
+      },
+      toast(message) { el('profileStatus').textContent = message; },
+    });
     loadSettings().then(() => {
+      profileManager.load().catch(error => { el('profileStatus').textContent = error.message; });
       loadLocationGroups();
       loadDevices();
       loadDiscarded();

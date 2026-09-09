@@ -231,8 +231,8 @@ calls. An identical setup still skips; this adds no force-rerun mode.
 Each execution captures its configuration **before selecting photos**.
 Prompts, taxonomy, provider settings, image source, and processing options stay
 fixed through photo selection, automatic retries, tag mapping, and history.
-Settings edits apply to subsequent executions, including the next pending
-queue item when it starts. Saving an edit never starts work. Cancel and
+Provider/model and operational settings apply at execution start. Queued
+profile inputs are captured from the active profile when execution starts. Run all captures one profile revision for the entire batch. Saving an edit never starts work. Cancel and
 operational pause controls remain live; changing the Immich connection cancels
 an active run and invalidates an in-progress queue resolution, keeping the
 queue item available to start again.
@@ -302,10 +302,10 @@ earlier keep/hide decisions so everything returns for a fresh review.
 
 ## Taxonomy, prompts, and the response schema
 
-The **Taxonomy & prompt** panel on the Enrich page shows exactly what the
-model is told: every approved tag by category, hard exclusions (photos with
-these are never auto-shown), confidence thresholds, the response fields the
-model must fill in, and the full prompt text.
+Choose **View and manage profiles** on Enrich to open the profile list in
+Settings. Each profile’s editor shows allowed tags by category, its taxonomy
+JSON, and prompt text. For the exact inputs used by an execution, including
+the output schema, open **View run settings** from Recent Runs.
 
 Every enrichment request has **two parts**, and only one of them is prose:
 
@@ -322,7 +322,7 @@ Every enrichment request has **two parts**, and only one of them is prose:
    the schema demands them, and its field names and descriptions act as the
    instruction.
 
-The schema's fields (also listed with their uses on the Enrich page):
+The schema's fields and their uses:
 
 | Field | What it feeds |
 | --- | --- |
@@ -344,32 +344,124 @@ instead of storing the label as photo metadata.
 
 **What is editable and what is not.** The taxonomy (which tags the model may
 use, thresholds, exclusions) and both prompts are editable in Settings →
-Enrich. The schema's *field list* is fixed: Curate's buckets, the star
+Enrichment profiles. The schema's *field list* is fixed: Curate's buckets, the star
 picks, caption search, and Best-of ranking all read these fields by name,
 so removing one would break the features downstream of it. Editing the
 taxonomy already reshapes the schema where it is meant to flex — the tag
 lists inside `candidate_tags` and `exclusion_reasons` are generated from
 your approved tags on every request.
 
-- **Taxonomy** — `taxonomy/v1.json` (`TAXONOMY_PATH`). Configuration, not
-  code: categories, manual tags, hard exclusions, thresholds, and the review
-  bucket policy. Editable in Settings → Enrich without touching files:
-  "Load current taxonomy to edit" starts from what is in force, and saving
-  applies to subsequent Enrich executions. The `version` string is a
-  readable label; content edits can keep it unchanged. Approved-vocabulary
-  changes affect inference identity. Review rules apply to Curate at read
-  time, while tag-mapping thresholds govern tags written by new executions.
-  Policy edits do not force AI calls or recalculate already-stored tags.
-  Existing human decisions are never changed by a taxonomy edit.
-  Clearing the override returns to the shipped file. Overrides live in the
-  settings store on the data volume, so they survive image updates.
-- **Prompts** — `prompts/` (`PROMPTS_DIR`/`PROMPT_VERSION`). Both the system
-  prompt and the per-photo template can be overridden in Settings →
-  Enrich without touching files ("Load built-in text to edit" starts you
-  from the shipped prompt). The per-photo override must contain
-  `{approved_tags}`. Runs with an override record the prompt version plus
-  `-custom` (`v2-custom` on the current prompt) as a readable label. The saved
-  configuration stores the actual text and identifies content changes.
+- **Taxonomy** — `taxonomy/v1.json` (`TAXONOMY_PATH`) seeds the initial
+  profile and New profile → Pictaria templates. Edit saved inference taxonomies in profiles.
+  The version is a readable label; actual vocabulary determines inference
+  identity. Shared live Curate policy remains a separate Settings value.
+- **Prompts** — `prompts/` (`PROMPTS_DIR`/`PROMPT_VERSION`) supplies the
+  initial and built-in templates. Saved profiles own their explicit text;
+  the per-photo template must include `{approved_tags}`. Profile runs use
+  a `-profile` prompt label plus durable profile/revision attribution and
+  content identity.
+
+## Enrichment profiles
+
+Use **Settings → Enrichment profiles** to keep several named prompt/taxonomy
+setups. The profile list marks the active profile used by new Enrich work.
+Choose **New profile**, enter a name, and start from the **Pictaria templates** (the configured template files) or a copy of an existing profile.
+Creation and editing open a dialog above the profile list. On narrow screens,
+the editor fills the screen. The **Starting point** dropdown labels saved profiles as **Copy of [name]**.
+Each row’s **⋯** menu offers **Duplicate** and **Archive**
+where applicable. Restore profiles from the collapsed **Archived profiles** list.
+
+**Edit** opens one profile at a time: name, **Tags & categories**, then
+**AI instructions**. Expand categories to inspect allowed tags; expand
+**Edit taxonomy JSON** to change their definitions and thresholds. **General
+instructions** is the system prompt; **Photo request template** is the
+per-photo prompt and must include `{approved_tags}`.
+
+**Save changes** (or **Create profile**) validates before saving. Optional
+**Check configuration** checks format and required fields without sending
+photos to a model. Field errors reveal the relevant editor; invalid edits
+and stale saves from another window leave the last usable revision intact.
+Unsaved edits are marked, and cancelling or leaving asks before discarding
+them. Saving closes the dialog and updates the profile list, without changing
+the active selection or starting enrichment. Saving edits to the already-active
+profile changes the revision used by future runs. Choose the active profile on
+Enrich.
+
+On Enrich, use the profile picker to choose a saved setup and **View and
+manage profiles** to open the profile list in Settings. Provider and profile
+choices share one card. Creation, validation, archiving, and restoration live
+in Settings; saving does not navigate to Enrich.
+
+Profiles contain prompts and taxonomy only. Provider/model connections,
+image settings, and processing controls remain separate. **Active profile**
+on Enrich is saved on the server and shared by browser tabs and sessions.
+The picker refreshes from server status and on returning to the page. A stale
+start or activation request is rejected so a different profile cannot run
+silently. Changing the active profile does not start work.
+
+Library sweeps, individual queued groups, manual retries, and Daily Enrich
+capture the active profile’s current revision when execution starts, before
+photo selection. **Run all** captures one revision for the entire batch.
+Every started execution and its automatic retries keep their captured inputs,
+even if the active profile changes, is edited, or is later archived.
+
+Queueing saves only the photo selection. Pending groups use the active profile
+when started; they have no profile picker or saved profile pin. Identical
+photo selections deduplicate regardless of the active profile. A cancelled
+or failed job retains its history; starting it again captures the then-active
+profile. Explicit per-job profile overrides are not supported.
+
+To try a different profile on already-enriched photos, turn **Only unenriched**
+off for a small manual run or a queued slice. Identical inference inputs still
+skip, even if the profile name/revision differs. Keep **incl. previously
+curated** off to preserve prior human decisions. The existing optional
+reopen action remains the deliberate way to clear decisions for re-review.
+There is no automatic routing, quality-comparison dashboard, or force-identical
+rerun mode in this workflow.
+
+A photo has one active result: its latest successful enrichment supplies
+Curate, caption search, Smart Album ranking, and optional writeback. A failed
+attempt leaves the previous success active. Existing writeback rules still
+protect descriptions edited by humans. Earlier processing metadata and
+configuration attribution remain; superseded normalized outputs are not
+retained as a parallel profile-results library. Profile/revision attribution
+appears in run history, the saved run settings viewer, and the Curate caption
+lightbox. Human decisions remain authoritative.
+
+**Curate policy remains shared and live**, under Settings → Enrich → Live
+Curate review policy. It applies to results from every profile. Editing an
+inference profile does not replace this global policy. Profile taxonomy
+thresholds control tag mapping for new executions, while the shared policy
+controls Curate's interpretation of existing scores. Policy-only changes do
+not cause AI calls or automatically remap stored tags.
+In particular, Curate reads `review` buckets and `hard_exclusion_tags` from
+the shared policy in Settings; editing those sections inside an inference
+profile does not change Curate.
+
+**Archive** removes a profile from new selections, preserving running jobs
+and historical attribution. Restore it through **Archived profiles**.
+Activate another profile before archiving the active one. There is no hard delete;
+up to 100 profiles, including archived ones, are supported. Revisions are
+retained with the enrichment database and can grow as profiles are edited;
+each revision has bounded prompt/taxonomy fields. List/status requests return
+small metadata only; editor/detail requests load the content separately.
+
+On first upgrade, the effective prompt text and taxonomy (including saved
+overrides, with their existing precedence over configured files) are copied
+into **My profile**, the initial active profile. When upgrading an earlier v1.2
+preview, its saved default becomes the active profile, and pending queue pins
+are cleared. Existing queued selections and saved run configurations remain.
+An untouched original profile named Default is renamed to My profile using a
+new revision; old attribution is retained. Edited, renamed, or archived profiles
+keep their names, as does the starter if another My profile already exists.
+The old settings values remain on disk for provenance/rollback, but saved
+inference profiles then own their content: later environment/file changes do
+not overwrite them. **New profile → Pictaria templates** explicitly imports the current
+configured files. Legacy prompt writes through Settings are rejected with a
+pointer to profiles; `taxonomyJson` continues to own the shared live Curate
+policy. Existing human decisions and old unknown configuration identities
+are preserved. Profiles, revisions, active choice, and queued selections participate
+in the standard SQLite backup and restore.
 
 ## When things go wrong
 
@@ -481,9 +573,14 @@ your approved tags on every request.
 
 ## Run history
 
-Each modern run has a **Config** button with a short identifier. It opens
+Each modern run in Recent Runs has a **View run settings** button. It opens
 that execution’s saved prompts, effective user prompt, output schema,
-taxonomy, provider settings, and processing options. These details are read
+taxonomy, provider settings, and processing options. The Status card uses
+**View run settings** during execution and **View last run settings** afterward,
+for the latest run in the current server session. After a restart, use Recent
+Runs for historical settings. The viewer leads with profile/revision and
+provider/model; full configuration and inference IDs are available under
+collapsed **Technical identifiers**. These details are read
 on demand through the authenticated
 `GET /api/enrich/configurations/:id` endpoint; snapshots are bounded to 16 MiB,
 and ordinary run/status responses carry identifiers only. API keys and Immich
@@ -533,7 +630,8 @@ retry on the next run — see "When things go wrong" above for the split.
 
 A card with failures that still need work offers **Re-run N failed photos**.
 This starts a normal targeted run through the original provider (using that
-provider's current connection and model settings), including both content and
+provider's current connection and model settings) with the selected profile's
+current revision at execution start, including both content and
 infrastructure failures. The server recalculates the set when you click: a
 photo that has since succeeded under any setup, disappeared from Immich, or
 been deliberately discarded is left out. The content-failure cap is disabled
@@ -815,6 +913,26 @@ and expect the queue to breathe a little while enrichment is running.
 
 ## Endpoints
 
+- `GET|POST /api/enrich/profiles` — bounded metadata list or create a profile
+  with `{ name, systemPrompt, userTemplate, taxonomy }`.
+- `GET /api/enrich/profiles/builtin` — current configured template files.
+- `POST /api/enrich/profiles/validate` — validate the same create/edit fields
+  without saving or dispatching model work.
+- `GET|PATCH /api/enrich/profiles/:id` — full current profile or save an edit;
+  PATCH also requires `expectedRevisionId` for optimistic concurrency.
+- `POST /api/enrich/profiles/active` — activate `{ profileId, expectedActiveRevisionId? }`.
+  List responses include `activeProfileId` and active-profile metadata. The
+  optional expected revision rejects stale activation requests with 409.
+- `POST /api/enrich/profiles/:id/archive` — `{ archived: true|false }`.
+- Start routes (manual, queue run, Run all, history retry) accept optional
+  `expectedActiveRevisionId` for stale-client protection. They always use the
+  active profile and reject `profileId`/`profileRevisionId` overrides. Queue
+  insertion also rejects profile overrides. Run-all entries accept `skipAnySuccessful`.
+- Failure-limited reads/discard may specify `profileId` for diagnostics; omission
+  uses the active profile. This does not activate it or override execution.
+- The old per-profile `/default` and per-queue `/profile` mutation endpoints
+  return 410 with guidance to use the active-profile workflow.
+
 - `GET /api/enrich/status` — runner state, live counters, log tail, provider
   availability, library stats, `enabled`.
 - `GET /api/enrich/runs` — newest-first, stable cursor pages of retained run
@@ -899,10 +1017,11 @@ and expect the queue to breathe a little while enrichment is running.
 - `GET /api/enrich/runs/:id/log` — one run's full log.
 - `GET /api/enrich/caption?assetId=…` — one photo's full stored caption
   (the Curate lightbox uses it).
-- `GET /api/enrich/prompts` — effective + built-in prompt text, customized
-  flags.
+- `GET /api/enrich/prompts` — selected/active profile prompt text plus
+  built-in text; optional `?profileId=`.
 - `GET /api/taxonomy` — version, buckets, thresholds, raw source, response-field contract, full tags per
-  category, hard exclusions.
+  category, hard exclusions. Optional `?profileId=` selects an inference
+  taxonomy; omission returns the shared live Curate policy.
 - `GET /api/review/assets`, `POST /api/review/decision`,
   `GET /api/review/sync-status` — the Curate review API. A decision accepts at
   most 1,000 canonical lowercase Immich UUIDs, all still present in the live
@@ -934,3 +1053,17 @@ and expect the queue to breathe a little while enrichment is running.
 - `POST /api/review/referee/pause` — body `{"paused": true|false}`; pause
   is cooperative (the in-flight group finishes) and not persisted across
   restarts.
+
+
+### Enrich master switch and dependent features
+
+Turning off **Enable AI enrichment** prevents new manual and Daily Enrich runs
+and pauses caption writeback. Settings disables Daily Enrich and caption controls
+with “Paused while Enrich is off,” preserving their saved preferences. Turning
+Enrich back on restores those preferences; the normal Daily Enrich catch-up
+rules still apply. An enrichment execution already started keeps its run settings.
+
+Pending caption writes remain queued. A description update already sent to Immich
+can finish, but further writes pause, including when Enrich is disabled while
+reading a photo's existing description. **Write existing captions now** is also
+unavailable while Enrich is off. Existing Immich descriptions are not removed.

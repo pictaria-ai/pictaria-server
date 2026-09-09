@@ -201,10 +201,25 @@ data/               all persistent state (gitignored): enrichment.sqlite,
 - **Ports**: Pictaria Server listens on `4080`. It must be the only writer of
   its enrichment database (see Scale: review state is cached in-process and
   projected at write time, so external writes are invisible until restart).
+- **Enrich profiles**: `enrich/profiles.mjs` owns named profiles and immutable
+  revisions in enrichment.sqlite (schema 9, persistent-state contract 11).
+  `routes/enrichProfiles.mjs` exposes bounded management APIs;
+  `public/enrich-profiles.js` owns the Settings profile manager and the Enrich
+  profile picker. Settings uses a profile list and focused editor with draft
+  protection and validation before saving. Create/edit use one modal dialog
+  over the retained list; saving closes it without activation or navigation.
+  Enrich owns active selection alongside the provider in one card. Profiles contain explicit prompt text and taxonomy, with
+  one server-saved active choice; provider/model selection stays separate.
+  Queue rows store selections only; execution captures the active revision.
+  Profile metadata in configurations lets history and photo attribution use indexed joins without loading snapshot blobs.
+  Legacy effective settings seed My profile once; shared Curate policy stays
+  live and independent. Revisions survive archive and job-summary pruning.
 - **Enrich execution configuration**: `enrich/runConfiguration.mjs` captures
   effective inputs before the first asynchronous photo-selection call. Queue
   reservations hold the captured provider/client and configuration through
-  selection and execution. `enrich_configurations` deduplicates immutable,
+  selection and execution. Run all captures one active profile revision for
+  the entire chain, including items that start after a profile edit or switch.
+  `enrich_configurations` deduplicates immutable,
   non-secret JSON snapshots; `processing_runs` and `job_runs` carry nullable
   configuration and inference IDs. Legacy rows retain NULL identity.
   Inference identity hashes effective prompts, generated schema/vocabulary,

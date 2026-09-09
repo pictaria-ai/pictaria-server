@@ -25,6 +25,9 @@
     .panel { padding: 14px 16px; margin-bottom: 14px; display: grid; gap: 12px; }
     .panel.dimmed { opacity: 0.55; }
     .es-main { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; min-width: 0; }
+    #enrichProfile, #enrichProvider { max-width: 100%; }
+    .profile-options { border-top: 1px solid var(--p-line); padding-top: 12px; }
+    .profile-options .provider-note { margin-bottom: 0; }
     .provider-note { color: var(--p-muted); font-size: 12px; line-height: 1.45; }
     .provider-note.bad { color: var(--p-danger); }
     /* The status detail sits on its own line under the title and wraps as
@@ -106,22 +109,9 @@
     details.panel summary .chev { transition: transform 0.15s; color: var(--p-muted); font-size: 11px; }
     details.panel[open] summary .chev { transform: rotate(90deg); }
     details.panel summary .sub { color: var(--p-muted); font-size: 12.5px; font-weight: 400; }
-    .tp-body { display: grid; gap: 14px; margin-top: 12px; }
-    .tp-head { font-size: 12.5px; text-transform: uppercase; letter-spacing: 0.8px; font-weight: 800; color: var(--p-muted); }
-    .tp-cat { display: flex; gap: 8px; align-items: baseline; flex-wrap: wrap; margin: 3px 0; }
-    .tp-cat .c { font-size: 12px; font-weight: 700; min-width: 90px; color: var(--p-muted); }
-    .tag-chip {
-      display: inline-block; padding: 1px 8px; border-radius: 999px; font-size: 11.5px;
-      background: var(--p-panel-2); border: 1px solid var(--p-line); margin: 1px 0;
-    }
-    .tag-chip.hard { border-color: var(--p-danger); color: var(--p-danger); }
-    .tp-note { color: var(--p-muted); font-size: 12px; line-height: 1.5; }
-    .tp-cat .rf-use { color: var(--p-muted); font-size: 12px; }
-    pre.prompt {
-      background: var(--p-panel-2); border: 1px solid var(--p-line); border-radius: 8px;
-      padding: 10px 12px; font-size: 12px; line-height: 1.55; white-space: pre-wrap;
-      overflow-wrap: anywhere; margin: 4px 0 0; max-height: 40vh; overflow-y: auto;
-    }
+    #runSettingsTechnical { padding: 8px 16px; border-top: 1px solid var(--p-line); flex-shrink: 0; font-size: 12px; }
+    #runSettingsTechnical summary { cursor: pointer; color: var(--p-muted); }
+    #runSettingsTechnical pre { padding: 8px 0 0; max-height: 16vh; }
   </style>
 </head>
 <body>
@@ -166,26 +156,29 @@
 
     <section id="modelPanel" class="p-panel panel">
       <div class="es-main">
-        <strong>AI provider</strong>
+        <label for="enrichProvider"><strong>AI provider</strong></label>
         <select id="enrichProvider" class="p-select"></select>
         <span class="p-tab-divider"></span>
         <a href="/settings.html#sec-providers" class="p-muted" style="font-size: 12px">provider &amp; model settings</a>
       </div>
       <div id="providerNote" class="provider-note">Used for new runs. Your selection is remembered.</div>
+      <div id="profilePanel" class="profile-options">
+      <div class="es-main">
+        <label for="enrichProfile"><strong>Active profile</strong></label>
+        <select id="enrichProfile" class="p-select" aria-label="Active enrichment profile"></select>
+        <span class="p-tab-divider"></span>
+        <a id="profileManage" class="p-muted" href="/settings.html#sec-enrichment-profiles" style="font-size: 12px">View and manage profiles</a>
+      </div>
+      <p id="profileNote" class="provider-note">Loading profiles…</p>
+      </div>
     </section>
-
-    <details id="taxPanel" class="p-panel panel">
-      <summary><span class="chev">&#9654;</span> Taxonomy &amp; prompt <span class="sub">— exactly what the model is told, and the tags it may use</span></summary>
-      <div class="tp-note" style="margin-top: 10px">Editable in <a href="/settings.html#sec-enrich" style="color: var(--p-accent)">Settings &rarr; Enrich</a>. Learn more in the <a href="https://github.com/pictaria-ai/pictaria-server/blob/main/docs/ENRICH.md" target="_blank" rel="noopener" style="color: var(--p-accent)">enrichment guide</a>.</div>
-      <div id="taxBody" class="tp-body"><div class="tp-note">Loading…</div></div>
-    </details>
 
     <section id="statusPanel" class="p-panel panel">
       <div class="es-main">
         <span id="enrichDot" class="p-dot"></span>
         <strong>Status</strong>
         <div class="p-grow"></div>
-        <button id="viewConfigurationBtn" class="p-btn quiet" hidden>Configuration</button>
+        <button id="viewConfigurationBtn" class="p-btn quiet" hidden>View run settings</button>
         <button id="viewLogBtn" class="p-btn quiet">Log</button>
         <button id="enrichCancel" class="p-btn danger" hidden title="Stops the active model request. An interrupted photo retries next time, and a queued job stays in the queue.">Cancel</button>
       </div>
@@ -251,6 +244,10 @@
       </div>
       <div id="logPopupMeta" class="p-muted" style="font-size: 12px; padding: 0 14px 8px"></div>
       <pre id="logPopupBody"></pre>
+      <details id="runSettingsTechnical" hidden>
+        <summary>Technical identifiers</summary>
+        <pre id="runSettingsIdentifiers"></pre>
+      </details>
     </div>
   </div>
 
@@ -274,6 +271,7 @@
 
   <div id="toast" class="p-toast"></div>
 
+  <script src="/enrich-profiles.js"></script>
   <script>
     const IDLE_STATUS_POLL_MS = 15_000;
     const state = {
@@ -294,6 +292,10 @@
       runsRefreshPending: false,
     };
     const el = (id) => document.getElementById(id);
+    const profileUI = createEnrichProfilePicker({ api, toast, changed() {
+      void loadFailureLimited();
+      syncRunButtons(state.lastStatus);
+    } });
 
     function headers(extra = {}) {
       return { ...extra };
@@ -401,7 +403,7 @@
       if (!status) return;
       const off = status.enabled === false;
       const busy = status.running === true || status.resolvingSlice === true;
-      const providerUnavailable = state.providerSaving || !providerReady();
+      const providerUnavailable = state.providerSaving || !providerReady() || !profileUI.ready();
       el('enrichStart').disabled = off || busy || providerUnavailable;
       el('retryFailedBtn').disabled = off || busy || providerUnavailable;
       for (const button of document.querySelectorAll('#queueList .p-btn.accent')) {
@@ -409,9 +411,9 @@
       }
       for (const button of document.querySelectorAll('#runsList .run-retry')) {
         const retryProviderReady = state.providerConfigured.get(button.dataset.provider) === true;
-        button.disabled = off || busy || !retryProviderReady;
+        button.disabled = off || busy || !retryProviderReady || !profileUI.ready();
         button.title = retryProviderReady
-          ? 'Start a new run for the failures from this run that still need enrichment.'
+          ? 'Retry with this run’s original provider and the currently selected profile’s latest revision.'
           : 'This run’s provider is no longer configured. Add its connection details in AI Providers to retry.';
       }
       const activeId = busy ? status.options?.queueItemId : null;
@@ -425,7 +427,9 @@
 
     async function refresh() {
       try {
+        const profileEpoch = profileUI.epoch();
         const status = await api('/api/enrich/status');
+        profileUI.sync(status.activeProfile, profileEpoch);
         el('connStatus').hidden = false;
         renderProviders(status);
         applyEnabled(status);
@@ -445,6 +449,7 @@
           statusLine1 = [
             status.cancelRequested ? 'Cancelling…' : 'Running',
             status.title,
+            status.profile ? profileUI.label(status.profile) : null,
             `${status.provider}${status.model ? ` · ${status.model}` : ''}`,
           ].filter(Boolean).join(' · ');
           statusLine2 = [
@@ -470,8 +475,7 @@
         el('enrichStatusLine2').textContent = statusLine2;
         el('enrichStatusLine2').hidden = !statusLine2;
         el('viewConfigurationBtn').hidden = !status.configurationId;
-        el('viewConfigurationBtn').textContent = status.configurationId
-          ? `Config ${status.configurationId.slice(0, 8)}` : 'Configuration';
+        el('viewConfigurationBtn').textContent = status.running ? 'View run settings' : 'View last run settings';
         const goal = status.options?.maxAnalyzed || status.options?.targeted || status.progress?.total || 0;
         const done = status.options?.maxAnalyzed ? analyzed : status.progress?.position || 0;
         el('enrichProgress').hidden = !status.running || goal === 0;
@@ -542,6 +546,7 @@
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
             provider: el('enrichProvider').value,
+            expectedActiveRevisionId: profileUI.revision(),
             maxAnalyzed: Number(el('enrichMax').value) || 100,
             limit: Math.max((Number(el('enrichMax').value) || 100) * 20, 1000),
             skipAnySuccessful: el('enrichSkip').checked,
@@ -567,7 +572,9 @@
       el('retryStrip').hidden = true;
       try {
         const provider = el('enrichProvider').value;
-        const body = await api(`/api/enrich/failure-limited${provider ? `?provider=${encodeURIComponent(provider)}` : ''}`);
+        const profileId = profileUI.id();
+        const body = await api(`/api/enrich/failure-limited?provider=${encodeURIComponent(provider)}&profileId=${encodeURIComponent(profileId)}`);
+        body.profileId = profileId;
         if (seq !== state.failureLimitedSeq) return; // superseded by a newer load
         state.failureLimited = body;
         const show = (body.count ?? 0) > 0;
@@ -595,6 +602,7 @@
             // The provider that produced these ids — not the picker, which
             // may have changed since the strip loaded.
             provider: stuck.provider,
+            expectedActiveRevisionId: profileUI.revision(),
             assetIds: stuck.assetIds,
             retryFailureLimited: true,
             sendToCurate: el('enrichCurate').checked,
@@ -616,7 +624,9 @@
 
     async function loadStuckDetails() {
       const provider = el('enrichProvider').value;
-      return api(`/api/enrich/failure-limited/details${provider ? `?provider=${encodeURIComponent(provider)}` : ''}`);
+      const profileId = profileUI.id();
+      const details = await api(`/api/enrich/failure-limited/details?provider=${encodeURIComponent(provider)}&profileId=${encodeURIComponent(profileId)}`);
+      return { ...details, profileId };
     }
 
     function stuckThumb(assetId) {
@@ -701,11 +711,11 @@
     // Discard all resolves the CURRENT stuck set on the server — never the
     // popup's snapshot — so it can't act on stale rows and isn't limited
     // by the popup's 500-row display cap.
-    async function discardAllStuck(provider) {
+    async function discardAllStuck(provider, profileId) {
       const body = await api('/api/enrich/discarded', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ all: true, provider }),
+        body: JSON.stringify({ all: true, provider, profileId }),
       });
       discardToast(body);
       // The operation's own truncation flag — NOT `body.truncated`, which
@@ -832,7 +842,7 @@
       try {
         // The provider that produced the popup's stuck set — not the
         // picker, which may have changed since (same rule as Retry).
-        await discardAllStuck(details.provider);
+        await discardAllStuck(details.provider, details.profileId);
       } catch (error) {
         toast(error.message, true);
       }
@@ -929,9 +939,14 @@
           if (!send.checked) reopen.checked = false;
           reopenWrap.style.opacity = send.checked ? '' : '0.45';
         });
-        opts.append(sendWrap, reopenWrap);
+        const skipWrap = document.createElement('label');
+        skipWrap.title = 'Off: analyze photos whose saved inference inputs differ, preserving existing Curate decisions.';
+        const skip = document.createElement('input');
+        skip.type = 'checkbox'; skip.checked = true;
+        skipWrap.append(skip, 'Only unenriched');
+        opts.append(sendWrap, reopenWrap, skipWrap);
 
-        run.addEventListener('click', () => void runQueued(item.id, run, send.checked, reopen.checked));
+        run.addEventListener('click', () => void runQueued(item.id, run, send.checked, reopen.checked, skip.checked));
         card.append(top, opts);
         box.append(card);
       }
@@ -939,7 +954,7 @@
       syncRunButtons(state.lastStatus);
     }
 
-    async function runQueued(id, button, sendToCurate = true, reopenDecided = false) {
+    async function runQueued(id, button, sendToCurate = true, reopenDecided = false, skipAnySuccessful = true) {
       button.disabled = true;
       try {
         const body = await api(`/api/enrich/queue/${id}/run`, {
@@ -947,10 +962,11 @@
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
             provider: el('enrichProvider').value,
+            expectedActiveRevisionId: profileUI.revision(),
             sendToCurate,
             reopenDecided,
             // Re-opening implies a fresh look: re-analyze even the enriched.
-            skipAnySuccessful: !reopenDecided,
+            skipAnySuccessful: !reopenDecided && skipAnySuccessful,
           }),
         });
         await loadQueue();
@@ -989,7 +1005,7 @@
       // The plan captures each item's checkboxes as currently set.
       const plan = [...document.querySelectorAll('#queueList .qitem[data-qid]')].map((card) => {
         const boxes = card.querySelectorAll('.opts input');
-        return { id: Number(card.dataset.qid), sendToCurate: boxes[0].checked, reopenDecided: boxes[1].checked };
+        return { id: Number(card.dataset.qid), sendToCurate: boxes[0].checked, reopenDecided: boxes[1].checked, skipAnySuccessful: !boxes[1].checked && boxes[2].checked };
       });
       if (plan.length === 0) return;
       el('runAllBtn').disabled = true;
@@ -997,7 +1013,7 @@
         const body = await api('/api/enrich/queue/run-all', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ provider: el('enrichProvider').value, plan }),
+          body: JSON.stringify({ provider: el('enrichProvider').value, plan, expectedActiveRevisionId: profileUI.revision() }),
         });
         const jobs = (n) => `${n} job${n === 1 ? '' : 's'}`;
         const leftBehind = [
@@ -1089,7 +1105,7 @@
         if (run.configurationId) {
           const configBtn = document.createElement('button');
           configBtn.className = 'p-btn quiet run-configuration';
-          configBtn.textContent = `Config ${run.configurationId.slice(0, 8)}`;
+          configBtn.textContent = 'View run settings';
           configBtn.title = 'Inspect the saved prompts, taxonomy, and settings used by this run';
           configBtn.addEventListener('click', () => void openRunConfiguration(run.configurationId));
           top.append(configBtn);
@@ -1117,6 +1133,7 @@
         const detail = document.createElement('div');
         detail.className = 'detail';
         detail.textContent = [
+          run.profile ? profileUI.label(run.profile) : null,
           run.provider,
           run.model,
           run.inferenceHostLabel ? `host: ${run.inferenceHostLabel}` : null,
@@ -1198,7 +1215,7 @@
         const body = await api(`/api/enrich/runs/${run.id}/retry`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ sendToCurate: el('enrichCurate').checked }),
+          body: JSON.stringify({ sendToCurate: el('enrichCurate').checked, expectedActiveRevisionId: profileUI.revision() }),
         });
         if (body.started === false) {
           toast('Those photos no longer need enrichment.');
@@ -1220,23 +1237,23 @@
 
     el('viewConfigurationBtn').addEventListener('click', () => {
       const id = state.lastStatus?.configurationId;
-      if (id) void openRunConfiguration(id);
+      if (id) void openRunConfiguration(id, state.lastStatus.running ? 'Current run settings' : 'Last run settings');
     });
 
-    async function openRunConfiguration(id) {
+    async function openRunConfiguration(id, title = 'Run settings') {
       try {
         const entry = await api(`/api/enrich/configurations/${encodeURIComponent(id)}`);
         const saved = entry.snapshot;
         state.liveLog = false;
-        el('logPopupTitle').textContent = `Configuration ${entry.id.slice(0, 8)}`;
+        el('logPopupTitle').textContent = title;
         el('logPopupMeta').textContent = [
+          saved.profile ? profileUI.label(saved.profile) : null,
           saved.inference.provider.name, saved.inference.provider.model,
-          saved.inference.image.source, `Inference ${entry.inferenceId.slice(0, 8)}`,
-        ].join(' · ');
+          `Image: ${saved.inference.image.source}`,
+        ].filter(Boolean).join(' · ');
         el('logPopupBody').textContent = [
           'Saved inputs for this execution. Later Settings edits do not change this record.',
           'Curate continues to apply current review policy. Re-run failed photos uses settings at retry start.',
-          `Configuration: ${entry.id}\nInference: ${entry.inferenceId}`,
           `System prompt\n${saved.inference.systemPrompt}`,
           `Effective user prompt\n${saved.inference.userPrompt}`,
           `User template\n${saved.userTemplate}`,
@@ -1246,6 +1263,9 @@
           `Taxonomy at execution start\n${JSON.stringify(saved.taxonomy, null, 2)}`,
           `Output schema\n${JSON.stringify(saved.inference.jsonSchema, null, 2)}`,
         ].join('\n\n');
+        el('runSettingsTechnical').hidden = false;
+        el('runSettingsTechnical').open = false;
+        el('runSettingsIdentifiers').textContent = `Configuration: ${entry.id}\nInference: ${entry.inferenceId}`;
         el('logPopupBody').scrollTop = 0;
         el('logPopup').hidden = false;
       } catch (error) {
@@ -1264,6 +1284,7 @@
         return;
       }
       state.liveLog = false;
+      el('runSettingsTechnical').hidden = true;
       el('logPopupTitle').textContent = entry.title;
       el('logPopupMeta').textContent = [
         entry.provider,
@@ -1278,6 +1299,7 @@
     }
 
     function renderLiveLog() {
+      el('runSettingsTechnical').hidden = true;
       const body = el('logPopupBody');
       const log = state.lastStatus?.log ?? [];
       const atBottom = body.scrollHeight - body.scrollTop - body.clientHeight < 60;
@@ -1316,7 +1338,8 @@
     });
 
     el('logPopupCopy').addEventListener('click', async () => {
-      const text = el('logPopupBody').textContent;
+      const text = [el('logPopupMeta').textContent, el('logPopupBody').textContent,
+        el('runSettingsTechnical').hidden ? '' : el('runSettingsIdentifiers').textContent].filter(Boolean).join('\n\n');
       let copied = false;
       try {
         await navigator.clipboard.writeText(text);
@@ -1336,83 +1359,6 @@
       setTimeout(() => { el('logPopupCopy').textContent = 'Copy'; }, 1600);
     });
 
-    // --- taxonomy + prompt viewer (read-only; loaded on first open) ---
-
-    async function loadTaxonomyPanel() {
-      if (loadTaxonomyPanel.loaded) return;
-      loadTaxonomyPanel.loaded = true;
-      const body = el('taxBody');
-      try {
-        const [tax, prompts] = await Promise.all([api('/api/taxonomy'), api('/api/enrich/prompts')]);
-        body.replaceChildren();
-
-        const mk = (tag, cls, text) => {
-          const node = document.createElement(tag);
-          if (cls) node.className = cls;
-          if (text != null) node.textContent = text;
-          return node;
-        };
-
-        body.append(mk('div', 'tp-head', `Taxonomy ${tax.version ? `· version ${tax.version}` : ''}`));
-        const hard = new Set(tax.hardExclusionTags ?? []);
-        for (const [category, tags] of Object.entries(tax.tags ?? {})) {
-          const row = mk('div', 'tp-cat');
-          row.append(mk('span', 'c', category));
-          for (const t of tags) {
-            const chip = mk('span', `tag-chip${hard.has(t) ? ' hard' : ''}`, t);
-            if (hard.has(t)) chip.title = 'Hard exclusion — a photo with this tag is never shown on the frame';
-            row.append(chip);
-          }
-          body.append(row);
-        }
-        if (hard.size) {
-          body.append(mk('div', 'tp-note', 'Red tags are hard exclusions: any photo the model marks with one is kept off the frame.'));
-        }
-        const thresholds = Object.entries(tax.thresholds ?? {});
-        if (thresholds.length) {
-          body.append(mk('div', 'tp-note', `Confidence thresholds: ${thresholds.map(([k, v]) => `${k} ${v}`).join(' · ')}`));
-        }
-
-        if (Array.isArray(tax.responseFields) && tax.responseFields.length) {
-          body.append(mk('div', 'tp-head', 'Response fields'));
-          body.append(mk('div', 'tp-note',
-            'Every reply must be JSON with exactly these fields — enforced through structured output, not the prompt text. This is why captions and quality scores appear without ever being asked for in prose. The field list is fixed (Pictaria’s features depend on it); the tags the model may use inside it come from the taxonomy above.'));
-          for (const rf of tax.responseFields) {
-            const row = mk('div', 'tp-cat');
-            row.append(mk('span', 'c', rf.field));
-            row.append(mk('span', 'tag-chip', rf.type));
-            row.append(mk('span', 'rf-use', `→ ${rf.usedFor}`));
-            body.append(row);
-          }
-        }
-
-        body.append(mk('div', 'tp-head', `Prompt · version ${prompts.version}`));
-        body.append(mk('div', 'tp-note', `System prompt — the model’s standing instructions${prompts.customized?.systemPrompt ? ' (customized in Settings)' : ''}:`));
-        body.append(mk('pre', 'prompt', prompts.systemPrompt));
-        body.append(mk('div', 'tp-note', `Per-photo message — {approved_tags} is replaced with the taxonomy tags above${prompts.customized?.userTemplate ? ' (customized in Settings)' : ''}:`));
-        body.append(mk('pre', 'prompt', prompts.userTemplate));
-        const editNote = mk('div', 'tp-note');
-        editNote.append('Both the prompts and the taxonomy are editable in ');
-        const link = mk('a', null, 'Settings → Enrich');
-        link.href = '/settings.html#sec-enrich';
-        link.style.color = 'var(--p-accent)';
-        editNote.append(link, ' — changes apply immediately. How the pieces fit together is explained in ');
-        const docsLink = mk('a', null, 'the enrichment guide');
-        docsLink.href = 'https://github.com/pictaria-ai/pictaria-server/blob/main/docs/ENRICH.md';
-        docsLink.target = '_blank';
-        docsLink.rel = 'noopener';
-        docsLink.style.color = 'var(--p-accent)';
-        editNote.append(docsLink, '.');
-        body.append(editNote);
-      } catch (error) {
-        loadTaxonomyPanel.loaded = false;
-        body.replaceChildren();
-        body.append(Object.assign(document.createElement('div'), { className: 'tp-note', textContent: `Could not load: ${error.message}` }));
-      }
-    }
-
-    el('taxPanel').addEventListener('toggle', () => { if (el('taxPanel').open) void loadTaxonomyPanel(); });
-
     // Library size for the "remaining" arithmetic (from the Insights snapshot).
     fetch('/api/insights', { headers: headers() }).then((r) => r.ok ? r.json() : null).then((body) => {
       const photos = body?.snapshot?.totals?.photos;
@@ -1421,10 +1367,12 @@
 
     state.idlePolling = setInterval(refreshIfIdle, IDLE_STATUS_POLL_MS);
     document.addEventListener('visibilitychange', refreshIfIdle);
+    window.addEventListener('focus', () => { void refresh(); });
+    document.addEventListener('visibilitychange', () => { if (!document.hidden) void refresh(); });
+    profileUI.load().catch(error => toast(error.message, true));
     refresh();
     loadQueue();
     loadRuns();
-    loadFailureLimited();
   </script>
 </body>
 </html>

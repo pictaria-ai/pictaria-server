@@ -565,9 +565,12 @@
           <span id="modalSub" class="sub"></span>
           <span id="modalCoverage" class="sub" title="✦ enriched · ✓ curated — computed from your local Pictaria database"></span>
           <div class="p-grow"></div>
-          <button id="modalEnrichBtn" class="p-btn accent" hidden>Send to Enrich</button>
+          <button id="modalEnrichBtn" class="p-btn accent" aria-describedby="modalEnrichProfileNote" hidden>Send to Enrich</button>
           <button id="modalCurateBtn" class="p-btn accent" hidden>Send to Curate</button>
           <a id="modalAlbumBtn" class="p-btn accent" target="_blank" rel="noopener" hidden>Create Album</a>
+        </div>
+        <div id="modalEnrichProfileNote" class="mh-row" hidden>
+          <span class="sub">Photos use the active profile when their run starts. Choose it on <a href="/enrich.html">Enrich</a>.</span>
         </div>
       </div>
       <div class="modal-body">

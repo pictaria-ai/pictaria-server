@@ -466,6 +466,35 @@ const ENRICH_MIGRATIONS = [
       addColumnIfMissing(db, 'job_runs', 'retry_source_run_id', 'INTEGER');
     },
   },
+  {
+    version: 9,
+    up(db) {
+      db.exec(`
+        CREATE TABLE IF NOT EXISTS enrich_profiles (
+          id TEXT PRIMARY KEY,
+          name TEXT NOT NULL,
+          current_revision_id TEXT NOT NULL,
+          archived INTEGER NOT NULL DEFAULT 0,
+          is_default INTEGER NOT NULL DEFAULT 0
+        );
+        CREATE UNIQUE INDEX IF NOT EXISTS idx_enrich_profile_default ON enrich_profiles(is_default) WHERE is_default = 1;
+        CREATE TABLE IF NOT EXISTS enrich_profile_revisions (
+          id TEXT PRIMARY KEY,
+          profile_id TEXT NOT NULL REFERENCES enrich_profiles(id),
+          revision INTEGER NOT NULL,
+          name TEXT NOT NULL,
+          system_prompt TEXT NOT NULL,
+          user_template TEXT NOT NULL,
+          taxonomy_json TEXT NOT NULL,
+          created_at TEXT NOT NULL,
+          UNIQUE(profile_id, revision)
+        );
+      `);
+      for (const table of ['enrich_queue', 'enrich_configurations']) {
+        addColumnIfMissing(db, table, 'profile_revision_id', 'TEXT REFERENCES enrich_profile_revisions(id)');
+      }
+    },
+  },
 ];
 
 // The review projection of a normalized output: exactly the fields the
@@ -725,10 +754,18 @@ export class Repository {
       throw new Error('Enrich configuration exceeds the storage limit.');
     }
     this.db.prepare(`
-      INSERT OR IGNORE INTO enrich_configurations (id, inference_id, snapshot_json, created_at)
-      VALUES (?, ?, ?, ?)
-    `).run(configuration.id, configuration.inferenceId, json, utcNow());
+      INSERT OR IGNORE INTO enrich_configurations (id, inference_id, snapshot_json, created_at, profile_revision_id)
+      VALUES (?, ?, ?, ?, ?)
+    `).run(configuration.id, configuration.inferenceId, json, utcNow(), configuration.snapshot.profile?.revisionId ?? null);
     return configuration.id;
+  }
+
+  configurationProfile(id) {
+    if (!id) return null;
+    const row = this.db.prepare(`SELECT r.id, r.profile_id, r.revision, r.name
+      FROM enrich_configurations c JOIN enrich_profile_revisions r ON r.id = c.profile_revision_id
+      WHERE c.id = ?`).get(id);
+    return row ? { id: row.profile_id, revisionId: row.id, revision: row.revision, name: row.name } : null;
   }
 
   getRunConfiguration(id) {
@@ -1229,6 +1266,7 @@ export class Repository {
       caption: typeof row.caption === 'string' && row.caption ? row.caption : null,
       provider: row.provider,
       model: row.model,
+      profile: this.configurationProfile(row.configuration_id),
       configurationId: row.configuration_id ?? null,
       inferenceId: row.inference_id ?? null,
     };
@@ -2052,6 +2090,7 @@ export class Repository {
         promptVersion: row.prompt_version,
         taxonomyVersion: row.taxonomy_version,
         inferenceHostLabel: jobRunHostLabel(row.inference_host_label),
+        profile: this.configurationProfile(row.configuration_id),
         configurationId: row.configuration_id ?? null,
         inferenceId: row.inference_id ?? null,
         retrySourceRunId: row.retry_source_run_id ?? null,

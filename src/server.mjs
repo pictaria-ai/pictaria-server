@@ -17,6 +17,7 @@ import { CaptionWritebackService } from './enrich/captionWriteback.mjs';
 import { RefereeService } from './enrich/refereeService.mjs';
 import { EnrichJobRunner } from './enrich/jobRunner.mjs';
 import { EnrichScheduler } from './enrich/scheduler.mjs';
+import { EnrichmentProfiles, ProfileError } from './enrich/profiles.mjs';
 import { loadActiveTaxonomy, replaceTaxonomy } from './enrich/taxonomy.mjs';
 import { SmartAlbumStore } from './albums/store.mjs';
 import { SmartAlbumValidationError } from './albums/smartAlbums.mjs';
@@ -130,6 +131,7 @@ settingsStore.onApplied = () => {
   }
   immichPing = emptyImmichStatus();
   enrichScheduler.settingsChanged();
+  captionWriteback.wake();
   // First-time setup: the moment Immich becomes reachable, populate
   // Insights instead of waiting for the hourly staleness check. A no-op
   // whenever the snapshot is fresh or Immich is still unconfigured.
@@ -161,6 +163,8 @@ const publicDir = join(config.rootDir, 'public');
 const taxonomy = loadActiveTaxonomy(config);
 const repo = new Repository(config.databasePath);
 repo.initSchema();
+const profiles = new EnrichmentProfiles({ repo, config });
+profiles.initialize();
 const activityLog = createActivityLog({ repo, setIntervalFn: lifecycle.setInterval });
 const activityHistory = createActivityHistory({ repo });
 settingsStore.onUpdated = (fields) => activityLog.settingsChanged({ fields });
@@ -171,7 +175,7 @@ const immich = new ImmichClient({
 });
 const review = new ReviewService({ repo, immich, taxonomy, config, log: (message) => console.log(`[Pictaria] ${message}`) });
 const captionWriteback = new CaptionWritebackService({ repo, immich, config, log: (message) => console.log(`[Pictaria] ${message}`) });
-const enrichRunner = new EnrichJobRunner({ repo, immich, taxonomy, config });
+const enrichRunner = new EnrichJobRunner({ repo, immich, taxonomy, config, profiles });
 const enrichScheduler = new EnrichScheduler({ runner: enrichRunner, repo, config });
 const referee = new RefereeService({ repo, immich, review, enrichRunner, config, log: (message) => console.log(`[Pictaria] ${message}`) });
 const albumStore = new SmartAlbumStore(config.albums.dataFile, { installationSecret });
@@ -289,14 +293,14 @@ lifecycle.register('thumbhash-backfill', 3000, (timeoutMs) => awaitDrain(thumbha
 
 const features = [
   createActivityRoutes({ activityHistory }),
-  createEnrichRoutes({ review, enrichRunner, taxonomy, repo, requireImmich, config, immich, captionWriteback, referee, activityLog }),
+  createEnrichRoutes({ review, enrichRunner, taxonomy, profiles, repo, requireImmich, config, immich, captionWriteback, referee, activityLog }),
   createAlbumsRoutes({ immich, store: albumStore, config, requireImmich, enrichRepo: repo }),
   createWakeWordRoutes({ store: wakeWordModels }),
   createFrameRoutes({ immich, frameHub, frameLedger, requireImmich, voiceMetrics, activityLog }),
   createVoiceRoutes({ immich, config, requireImmich, voiceMetrics, activityLog }),
   createAmbientRoutes({ config }),
   createInsightsRoutes({ collector: insightsCollector, repo: insightsRepo, immich, config, settingsStore, requireImmich }),
-  createSettingsRoutes({ settingsStore }),
+  createSettingsRoutes({ settingsStore, profiles }),
   createSupportRoutes({ config }),
   createBackupRoutes({ config, backupState }),
 ];
@@ -321,7 +325,7 @@ const server = http.createServer(async (request, response) => {
       }));
       return;
     }
-    if (error instanceof UpstreamPaginationError || error instanceof SmartAlbumValidationError) {
+    if (error instanceof UpstreamPaginationError || error instanceof SmartAlbumValidationError || error instanceof ProfileError) {
       sendError(response, error.status, error.code, error.message);
       return;
     }

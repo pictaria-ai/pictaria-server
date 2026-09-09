@@ -298,7 +298,7 @@ const ENRICH_FIELDS = {
   // Version remains a readable label. Enrich snapshots identify the actual
   // content, so editing a taxonomy no longer requires inventing a new label.
   taxonomyJson: {
-    label: 'Taxonomy override',
+    label: 'Curate policy taxonomy',
     multiline: true,
     maxLength: 200000,
     read: () => '',
