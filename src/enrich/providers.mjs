@@ -1,3 +1,4 @@
+import { measureProviderRequest } from './timing.mjs';
 import { execFileSync } from 'node:child_process';
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { request as httpRequest } from 'node:http';
@@ -91,7 +92,7 @@ const GEMINI_JSON_SCHEMA_KEYWORDS = new Set([
 // 5xx) from "the provider judged this request's content" — the runner only
 // charges an asset's permanent failure allowance for the latter.
 export class ProviderRequestError extends Error {
-  constructor(message, { status = null, timeout = false, cancelled = false, retryAfterMs = null } = {}) {
+  constructor(message, { status = null, timeout = false, cancelled = false, invalidResponse = false, retryAfterMs = null } = {}) {
     super(message);
     this.name = 'ProviderRequestError';
     this.status = status;
@@ -104,6 +105,7 @@ export class ProviderRequestError extends Error {
     // an HTTP status. Carried explicitly rather than sniffed from the
     // message text.
     this.timeout = timeout;
+    this.invalidResponse = invalidResponse;
     // User-requested cancellation shares the transport teardown used by a
     // timeout, but is kept distinct so Enrich can stop immediately without
     // presenting the request as a provider failure.
@@ -873,6 +875,13 @@ export class OllamaLocalProvider {
 }
 
 async function postJson(provider, url, body, extraHeaders, { signal = null } = {}) {
+  if (signal?.aborted) throw new ProviderRequestError(`${provider.providerName} request failed: cancelled`, { cancelled: true });
+  // Serialize image/prompt data before measuring the dispatched HTTP request.
+  const payload = JSON.stringify(body);
+  return measureProviderRequest((onResponse) => postJsonTransport(provider, url, payload, extraHeaders, { signal, onResponse }));
+}
+
+async function postJsonTransport(provider, url, payload, extraHeaders, { signal, onResponse }) {
   const headers = {
     'Content-Type': 'application/json',
     Accept: 'application/json',
@@ -883,7 +892,7 @@ async function postJson(provider, url, body, extraHeaders, { signal = null } = {
   // group can run 10+ minutes). Default transport is node:http(s) with a
   // single wall-clock deadline; injected fetchImpl (tests, custom) is kept.
   if (provider.fetchImpl === fetch) {
-    return nodePostJson(provider, url, headers, JSON.stringify(body), { signal });
+    return nodePostJson(provider, url, headers, payload, { signal, onResponse });
   }
   const controller = new AbortController();
   let timedOut = false;
@@ -911,7 +920,7 @@ async function postJson(provider, url, body, extraHeaders, { signal = null } = {
       redirect: 'error',
       signal: controller.signal,
       headers,
-      body: JSON.stringify(body),
+      body: payload,
     });
   } catch (error) {
     const reason = cancelled
@@ -928,6 +937,7 @@ async function postJson(provider, url, body, extraHeaders, { signal = null } = {
     signal?.removeEventListener('abort', onCancel);
   }
 
+  onResponse(response.status);
   if (!response.ok) {
     const detail = await readErrorDetail(response, provider);
     throw new ProviderRequestError(providerStatusMessage(provider.providerName, response.status, detail), {
@@ -955,6 +965,7 @@ async function postJson(provider, url, body, extraHeaders, { signal = null } = {
   } catch (error) {
     throw new ProviderRequestError(
       `${provider.providerName} request failed: ${sanitizeDiagnostic(error?.message ?? error, { secrets: [provider.apiKey] })}`,
+      { invalidResponse: error instanceof SyntaxError },
     );
   }
 }
@@ -984,7 +995,7 @@ async function readErrorDetail(response, provider) {
 // POST JSON over node:http(s): same semantics as the fetch path (throws the
 // provider-labelled error on failure, resolves with parsed JSON), but the
 // only timeout is our own absolute deadline.
-function nodePostJson(provider, url, headers, payload, { signal = null } = {}) {
+function nodePostJson(provider, url, headers, payload, { signal = null, onResponse = () => {} } = {}) {
   return new Promise((resolve, reject) => {
     if (signal?.aborted) {
       reject(new ProviderRequestError(`${provider.providerName} request failed: cancelled`, { cancelled: true }));
@@ -1005,11 +1016,11 @@ function nodePostJson(provider, url, headers, payload, { signal = null } = {}) {
       clearTimeout(deadline);
       signal?.removeEventListener('abort', onCancel);
     };
-    const fail = (reason, { timeout = false, cancelled = false } = {}) => {
+    const fail = (reason, { timeout = false, cancelled = false, invalidResponse = false } = {}) => {
       cleanup();
       reject(new ProviderRequestError(
         `${provider.providerName} request failed: ${sanitizeDiagnostic(reason, { secrets: [provider.apiKey] })}`,
-        { timeout, cancelled },
+        { timeout, cancelled, invalidResponse },
       ));
     };
     // Set when our own deadline destroys the socket, so the resulting
@@ -1022,6 +1033,7 @@ function nodePostJson(provider, url, headers, payload, { signal = null } = {}) {
       headers,
       ...(isolateConnection ? { agent: false } : {}),
     }, (response) => {
+      onResponse(response.statusCode);
       let received = 0;
       response.on('data', (chunk) => {
         received += chunk.length;
@@ -1047,7 +1059,7 @@ function nodePostJson(provider, url, headers, payload, { signal = null } = {}) {
         try {
           resolve(JSON.parse(text));
         } catch {
-          fail('response was not valid JSON');
+          fail('response was not valid JSON', { invalidResponse: true });
         }
       });
     });

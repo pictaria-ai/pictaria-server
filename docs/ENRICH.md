@@ -645,6 +645,99 @@ For each photo it keeps the newest normalized enrichment result needed by
 Curate and caption search; older run metadata remains, but raw provider
 response envelopes and superseded normalized payloads are not retained.
 
+## Photo and provider-request timing
+
+New Enrich work records two separate measurements. **Photo duration** starts
+before image download and ends after local result persistence, including
+image preparation, validation, all request attempts, and retry waits. It does
+not include earlier metadata discovery, queue waiting, or later background
+caption/tag synchronization. **Request duration** measures a dispatched HTTP
+request through response-body reading and outer JSON decoding, including
+upload/network/provider wait. Image encoding and local output validation are
+outside this request timer. This is observed request latency, not pure model
+inference time or tokens per second.
+
+Durations are nonnegative milliseconds measured with a monotonic clock.
+UTC ISO timestamps provide chronology and may move independently when the
+system clock changes. A received HTTP response is not automatically a usable
+result: only attempts marked `accepted` passed adapter extraction and local
+schema/taxonomy validation. Other bounded outcomes are `http_error`,
+`transport_error`, `timeout`, `cancelled`, `invalid_response`, `other_error`,
+`response_received` (acceptance not established), and `interrupted`.
+`running` marks work still in progress. HTTP status is stored when known;
+no prompt text, image bytes, raw response bodies, headers, or free-form
+errors are stored in timing records.
+
+Every processed photo gets its own execution ID and each actual HTTP request
+gets an ordinal within that execution. Validation and overload retries,
+including extra requests made inside an adapter, remain separate requests.
+Retry waits add to photo duration, not request latency. Existing retry rules
+are unchanged: timeouts do not gain an automatic retry from instrumentation;
+a later manual rerun has a new execution ID. A successful valid attempt
+remains usable even if result persistence fails or the enclosing job later
+fails or is cancelled. Latest-success results and human decisions remain
+independent of this telemetry.
+
+Skipped photos increment run counters by reason (already succeeded, human
+discard, failure limit); they do not create measured executions or requests.
+A download failure creates a failed photo execution with no provider attempt.
+Cancellation before dispatch also creates no request. Photos excluded during
+metadata selection are not executions. These distinctions prevent large
+mostly-enriched scans from filling detailed history with zero-work rows.
+
+A confirmed request timeout or cancellation has a measured finish and
+elapsed duration. On shutdown or restart, unfinished work instead becomes
+`interrupted`, retaining null finish/duration fields. Already completed
+requests retain their exact measurements. A response received without
+established validation stays `response_received`; it never enters a
+successful-request sample. Late completion cannot overwrite interrupted
+telemetry. Hard-crash runs remain discoverable in timing history even if no
+terminal job summary was written. Older processing rows and logs cannot
+supply accurate historical timings and are not backfilled as zero.
+
+### Bounded timing storage and API
+
+`enrich_timing_runs` links to the saved configuration, which retains provider,
+model, and immutable profile-revision attribution. Modern job summaries and
+active status expose `timingRunId`; a legacy/selection-only job may have none.
+`enrich_photo_executions` links to a timing run, asset, and terminal processing
+record where available. `enrich_provider_attempts` links to a photo execution.
+The timing store is separate from the durable latest-success/results contract.
+
+Retention keeps the newest 100 timing runs, up to 10,000 detailed photo
+executions, and up to 60,000 individual requests across runs. Photo/request
+pruning is batched every 100 inserts (also on the first insert after opening),
+so at most 99 additional terminal rows can accrue between passes. Running
+work is protected. Deleting a timing run removes its photo/request details;
+deleting photo detail removes its requests. Summary `photo_count` and
+`attempt_count` are lifetime counts for that timing run, independent of
+retained detail. Photo counts exclude skips, which have separate counters.
+Timing expiration never deletes enrichment results, configuration snapshots,
+profiles, human decisions, or queues. These fixed limits are independent of
+job-log storage; configurable summary/log retention remains PIC-327 work.
+
+Authenticated read APIs, using the existing run cursor convention:
+
+- `GET /api/enrich/timings` lists retained timing runs, including interrupted
+  runs without a job summary; `job_run_id` is nullable.
+- `GET /api/enrich/timings/:timingRunId/photos` returns photo execution detail
+  plus the run metadata, retained count, and `truncated` coverage flag.
+- `GET /api/enrich/timings/photos/:photoExecutionId/attempts` returns request
+  detail plus the photo metadata, retained count, and `truncated` flag.
+
+Each response has `items` and a nullable `nextCursor`. Pass that cursor back
+with `cursor`; ordering is ascending record ID. HTTP `limit` defaults to 20
+and is restricted to 1–50; repository reads clamp to at most 100. Detail fields
+use the database's descriptive names (`duration_ms`, `started_at`, `outcome`,
+`ordinal`, etc.). Expired/missing detail returns 404. A null `timingRunId`
+means no trustworthy timing was recorded, not zero-duration work. Increasing
+future retention cannot recover records already expired. Views must account
+for `truncated` when interpreting samples or reliability totals.
+
+PIC-343 supplies this data contract; PIC-332 owns the native comparison and
+per-photo display. The current dashboard continues showing whole-run
+throughput until that work is implemented.
+
 ## Writing captions to Immich descriptions
 
 Every enrichment produces a one-sentence caption. With **Settings →

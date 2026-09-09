@@ -145,7 +145,6 @@ CREATE TABLE IF NOT EXISTS job_runs (
   inference_host_label TEXT,
   configuration_id TEXT REFERENCES enrich_configurations(id),
   inference_id TEXT,
-  timing_run_id INTEGER,
   retry_source_run_id INTEGER,
   targeted INTEGER,
   status TEXT NOT NULL,

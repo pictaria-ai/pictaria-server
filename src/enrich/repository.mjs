@@ -7,6 +7,7 @@ import { addColumnIfMissing, migrateDatabase, tableExists } from '../migrations.
 import { preparePrivateDatabasePath, restrictPrivateDatabaseModes } from '../privateDatabase.mjs';
 import { sanitizeDiagnostic } from '../diagnostics.mjs';
 import { validateAssetBatch } from './assetBatch.mjs';
+import { EnrichTimingStore, TIMING_SCHEMA } from './timing.mjs';
 import { ACTION_RULES } from './reviewActions.mjs';
 import { canonicalJson, MAX_RUN_CONFIGURATION_BYTES } from './runConfiguration.mjs';
 
@@ -48,6 +49,7 @@ const SCHEMA_PATH = join(dirname(fileURLToPath(import.meta.url)), 'schema.sql');
 // migration-time base-schema exec fail before the rebuild can happen. Indexes
 // are backward-compatible metadata, not a persisted-data contract change.
 const ACTIVITY_HISTORY_INDEXES = [
+  { table: 'job_runs', columns: ['timing_run_id'], sql: 'CREATE INDEX IF NOT EXISTS idx_job_runs_timing ON job_runs(timing_run_id)' },
   {
     table: 'processing_runs',
     columns: ['inference_id', 'status', 'asset_id'],
@@ -495,6 +497,14 @@ const ENRICH_MIGRATIONS = [
       }
     },
   },
+  {
+    version: 10,
+    up(db) {
+      db.exec(TIMING_SCHEMA);
+      addColumnIfMissing(db, 'job_runs', 'timing_run_id', 'INTEGER');
+      db.exec('CREATE INDEX IF NOT EXISTS idx_job_runs_timing ON job_runs(timing_run_id)');
+    },
+  },
 ];
 
 // The review projection of a normalized output: exactly the fields the
@@ -577,6 +587,7 @@ export class Repository {
     this.databasePath = String(databasePath);
     preparePrivateDatabasePath(this.databasePath);
     this.db = new DatabaseSync(this.databasePath);
+    this.timings = new EnrichTimingStore(this.db);
     this.db.exec('PRAGMA journal_mode = WAL');
     // Decisions, tags, and captions are personal data: keep the DB (and its
     // WAL/SHM sidecars) private to the server user even under a permissive
@@ -589,7 +600,7 @@ export class Repository {
   }
 
   initSchema() {
-    const schemaSql = readFileSync(SCHEMA_PATH, 'utf8');
+    const schemaSql = readFileSync(SCHEMA_PATH, 'utf8') + TIMING_SCHEMA;
     const result = migrateDatabase(this.db, {
       schema: schemaSql,
       migrations: ENRICH_MIGRATIONS,
@@ -1967,16 +1978,16 @@ export class Repository {
     return this.db.prepare('DELETE FROM enrich_queue WHERE id = ?').run(id).changes > 0;
   }
 
-  recordJobRun({ title, provider, model, promptVersion, taxonomyVersion, inferenceHostLabel, configurationId = null, inferenceId = null, retrySourceRunId = null, targeted, status, error, counters, log, startedAt, finishedAt }) {
+  recordJobRun({ timingRunId = null, title, provider, model, promptVersion, taxonomyVersion, inferenceHostLabel, configurationId = null, inferenceId = null, retrySourceRunId = null, targeted, status, error, counters, log, startedAt, finishedAt }) {
     const safeError = error === null || error === undefined ? null : sanitizeDiagnostic(error);
     const safeLog = boundedJobLog(log);
     const safeHostLabel = jobRunHostLabel(inferenceHostLabel);
     this.db.prepare(`
-      INSERT INTO job_runs (title, provider, model, prompt_version, taxonomy_version, inference_host_label, targeted, status, error, counters_json, log_json, started_at, finished_at, configuration_id, inference_id, retry_source_run_id)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      INSERT INTO job_runs (title, provider, model, prompt_version, taxonomy_version, inference_host_label, targeted, status, error, counters_json, log_json, started_at, finished_at, configuration_id, inference_id, retry_source_run_id, timing_run_id)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `).run(title, provider, model ?? null, promptVersion ?? null, taxonomyVersion ?? null, safeHostLabel, targeted ?? null,
       status, safeError, counters ? JSON.stringify(counters) : null,
-      safeLog?.length > 0 ? JSON.stringify(safeLog) : null, startedAt, finishedAt, configurationId, inferenceId, retrySourceRunId);
+      safeLog?.length > 0 ? JSON.stringify(safeLog) : null, startedAt, finishedAt, configurationId, inferenceId, retrySourceRunId, timingRunId);
     this.db.prepare(`
       DELETE FROM job_runs
       WHERE id NOT IN (SELECT id FROM job_runs ORDER BY id DESC LIMIT ?)
@@ -2065,11 +2076,11 @@ export class Repository {
     const hasCursor = Number.isSafeInteger(cursor) && cursor > 0;
     const rows = (hasCursor ? this.db.prepare(`
       SELECT id, title, provider, model, prompt_version, taxonomy_version, inference_host_label, targeted,
-             configuration_id, inference_id, retry_source_run_id, status, error, counters_json, log_json IS NOT NULL AS has_log, started_at, finished_at
+             configuration_id, inference_id, retry_source_run_id, timing_run_id, status, error, counters_json, log_json IS NOT NULL AS has_log, started_at, finished_at
       FROM job_runs WHERE id < ? ORDER BY id DESC LIMIT ?
     `).all(cursor, boundedLimit + 1) : this.db.prepare(`
       SELECT id, title, provider, model, prompt_version, taxonomy_version, inference_host_label, targeted,
-             configuration_id, inference_id, retry_source_run_id, status, error, counters_json, log_json IS NOT NULL AS has_log, started_at, finished_at
+             configuration_id, inference_id, retry_source_run_id, timing_run_id, status, error, counters_json, log_json IS NOT NULL AS has_log, started_at, finished_at
       FROM job_runs ORDER BY id DESC LIMIT ?
     `).all(boundedLimit + 1));
     const hasMore = rows.length > boundedLimit;
@@ -2094,6 +2105,7 @@ export class Repository {
         configurationId: row.configuration_id ?? null,
         inferenceId: row.inference_id ?? null,
         retrySourceRunId: row.retry_source_run_id ?? null,
+        timingRunId: row.timing_run_id ?? null,
         targeted: row.targeted === null ? null : Number(row.targeted),
         status: row.status,
         error: row.error,
