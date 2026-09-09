@@ -11,7 +11,7 @@
   <script src="/nav.js" defer></script>
   <link rel="stylesheet" href="/pictaria.css">
   <style>
-    .runs-navigation { display: flex; justify-content: flex-end; padding: 10px 0; font-size: 13px; }
+    .runs-navigation { margin-left: auto; flex: none; font-size: 13px; font-weight: 400; }
     .runs-navigation a { color: var(--p-accent-deep); }
     .run-actions { justify-content: flex-start; }
     .run-actions a { text-decoration: none; }
@@ -227,8 +227,7 @@
     </section>
 
     <details id="runsPanel" class="p-panel panel">
-      <summary><span class="chev">&#9654;</span> Recent runs <span class="sub">— what ran and how your photos were processed</span></summary>
-      <div class="runs-navigation"><a href="/enrich-performance.html">View performance</a></div>
+      <summary><span class="chev">&#9654;</span> Recent runs <span class="runs-navigation"><a href="/enrich-performance.html">View performance</a></span></summary>
 
       <div id="runsList" class="qlist queue" style="margin-top: 12px"></div>
       <div class="qline" style="margin-top: 10px">

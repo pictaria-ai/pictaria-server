@@ -39,8 +39,14 @@ test('Enrich compares setups and opens paginated photo/request details with hone
   assert.equal(await page.evaluate('document.getElementById("performanceList")'), null);
   assert.equal(await page.evaluate('document.querySelector("#runsList .performance-more")'), null);
   assert.equal(await page.evaluate('document.querySelector(".runs-navigation a").getAttribute("href")'), '/enrich-performance.html');
-  const detailsUrl = await page.evaluate('document.querySelector("#runsList .qitem a").href');
-  await page.navigate(detailsUrl);
+  assert.equal(await page.evaluate('document.getElementById("runsPanel").open'), false);
+  assert.ok(await page.evaluate('document.querySelector(".runs-navigation a").getBoundingClientRect().height > 0'));
+  await page.evaluate('document.querySelector(".runs-navigation a").click()');
+  await page.waitFor('document.querySelectorAll("#performanceRuns tr").length === 20');
+  assert.equal(await page.evaluate('document.getElementById("compareView").hidden'), true);
+  await page.navigate(`${server.base}/enrich.html`);
+  await page.waitFor('document.querySelectorAll("#runsList .qitem").length === 20');
+  await page.evaluate('document.getElementById("runsPanel").open = true; document.querySelector("#runsList .qitem a").click()');
   await page.waitFor('document.getElementById("photoTimingBody").textContent.includes("Detailed timing was not recorded")');
   await page.evaluate('document.getElementById("photoTimingClose").click()');
   await page.waitFor('location.hash === "#runs"');
