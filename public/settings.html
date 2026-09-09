@@ -336,7 +336,7 @@
             <p id="profileNote" class="setting-desc"></p>
             <details id="profileArchivedSection" hidden>
               <summary id="profileArchivedSummary">Archived profiles</summary>
-              <p class="setting-desc">Archived profiles are hidden from new runs. Their saved settings remain available to queued runs and history.</p>
+              <p class="setting-desc">Archived profiles are hidden from new runs. Their saved settings remain available in run history.</p>
               <div id="profileArchivedList"></div>
             </details>
           </fieldset>
@@ -384,14 +384,14 @@
                 <p id="profileUserError" class="profile-error" role="alert"></p>
               </section>
               <div class="profile-save-area">
-                <p class="setting-desc">Changes apply to future runs. Photos already queued or processing keep their saved settings. Saving does not start enrichment.</p>
+                <p class="setting-desc">Changes apply when this profile is active and new work starts. Running jobs keep their saved settings. Saving does not activate the profile or start enrichment.</p>
                 <div class="profile-actions"><button id="profileSave" type="submit" class="p-btn primary">Save changes</button><button id="profileClose" type="button" class="p-btn quiet">Cancel</button><button id="profileValidate" type="button" class="p-btn quiet">Check configuration</button></div>
                 <p class="setting-desc">Check configuration checks format and required fields without sending photos to a model.</p>
               </div>
             </fieldset>
           </form>
           <p id="profileEditorNote" class="setting-desc" role="status" aria-live="polite"></p>
-          <a id="profileReturn" class="p-btn" href="/enrich.html" hidden>Go to Enrich</a>
+          <a id="profileReturn" class="p-btn" href="/enrich.html" hidden>Use this profile</a>
         </div>
       </div>
     </details>

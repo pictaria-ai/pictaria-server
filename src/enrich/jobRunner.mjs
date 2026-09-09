@@ -33,8 +33,9 @@ export class EnrichJobRunner {
   status() {
     return {
       ...this.state,
+      activeProfile: this.profiles?.list().find(p => p.isActive) ?? null,
       log: [...this.state.log],
-      defaults: { provider: this.config.defaultProvider, imageSource: this.config.imageSource, profileId: this.profiles?.list().find(p => p.isDefault)?.id ?? null },
+      defaults: { provider: this.config.defaultProvider, imageSource: this.config.imageSource, profileId: this.profiles?.list().find(p => p.isActive)?.id ?? null },
       available: availableProviders(this.config),
     };
   }

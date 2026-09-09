@@ -693,7 +693,7 @@ test('admin UI smoke: gate, Insights lens, Curate, Smart Albums', { timeout: 120
     );
     assert.deepEqual(await page.evaluate('window.__historyRetry'), {
       path: '/api/enrich/runs/1/retry',
-      body: { sendToCurate: true, profileId: await page.evaluate('document.getElementById("enrichProfile").value') },
+      body: { sendToCurate: true, expectedActiveRevisionId: await page.evaluate('(async () => (await (await fetch("/api/enrich/profiles")).json()).activeProfile.revisionId)()') },
     });
 
     await page.navigate(`${server.base}/remote.html`);

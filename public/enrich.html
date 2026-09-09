@@ -164,8 +164,8 @@
 
     <section id="profilePanel" class="p-panel panel">
       <div class="es-main">
-        <label for="enrichProfile"><strong>Enrichment profile</strong></label>
-        <select id="enrichProfile" class="p-select" aria-label="Enrichment profile"></select>
+        <label for="enrichProfile"><strong>Active profile</strong></label>
+        <select id="enrichProfile" class="p-select" aria-label="Active enrichment profile"></select>
         <span class="p-tab-divider"></span>
         <a id="profileManage" class="p-muted" href="/settings.html#sec-enrichment-profiles" style="font-size: 12px">View and manage profiles</a>
       </div>
@@ -195,6 +195,7 @@
         <div class="p-grow"></div>
         <button id="runAllBtn" class="p-btn accent" hidden title="Runs every queued job below, one after another, using each item's current checkboxes. A failure or cancel stops the chain — whatever remains stays queued.">Run all</button>
       </div>
+      <p id="activeRunProfile" class="provider-note"></p>
       <div class="qitem">
         <div class="qline top">
           <span class="t">Library sweep</span>
@@ -293,7 +294,6 @@
     const el = (id) => document.getElementById(id);
     const profileUI = createEnrichProfilePicker({ api, toast, changed() {
       void loadFailureLimited();
-      void loadQueue();
       syncRunButtons(state.lastStatus);
     } });
 
@@ -411,7 +411,7 @@
       }
       for (const button of document.querySelectorAll('#runsList .run-retry')) {
         const retryProviderReady = state.providerConfigured.get(button.dataset.provider) === true;
-        button.disabled = off || busy || !retryProviderReady;
+        button.disabled = off || busy || !retryProviderReady || !profileUI.ready();
         button.title = retryProviderReady
           ? 'Retry with this run’s original provider and the currently selected profile’s latest revision.'
           : 'This run’s provider is no longer configured. Add its connection details in AI Providers to retry.';
@@ -427,7 +427,9 @@
 
     async function refresh() {
       try {
+        const profileEpoch = profileUI.epoch();
         const status = await api('/api/enrich/status');
+        profileUI.sync(status.activeProfile, profileEpoch);
         el('connStatus').hidden = false;
         renderProviders(status);
         applyEnabled(status);
@@ -544,7 +546,7 @@
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
             provider: el('enrichProvider').value,
-            profileId: profileUI.id(),
+            expectedActiveRevisionId: profileUI.revision(),
             maxAnalyzed: Number(el('enrichMax').value) || 100,
             limit: Math.max((Number(el('enrichMax').value) || 100) * 20, 1000),
             skipAnySuccessful: el('enrichSkip').checked,
@@ -600,7 +602,7 @@
             // The provider that produced these ids — not the picker, which
             // may have changed since the strip loaded.
             provider: stuck.provider,
-            profileId: stuck.profileId,
+            expectedActiveRevisionId: profileUI.revision(),
             assetIds: stuck.assetIds,
             retryFailureLimited: true,
             sendToCurate: el('enrichCurate').checked,
@@ -945,7 +947,7 @@
         opts.append(sendWrap, reopenWrap, skipWrap);
 
         run.addEventListener('click', () => void runQueued(item.id, run, send.checked, reopen.checked, skip.checked));
-        card.append(top, opts, profileUI.queueControl(item));
+        card.append(top, opts);
         box.append(card);
       }
       // Fresh buttons need the current disabled rules (a run may be active).
@@ -960,6 +962,7 @@
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
             provider: el('enrichProvider').value,
+            expectedActiveRevisionId: profileUI.revision(),
             sendToCurate,
             reopenDecided,
             // Re-opening implies a fresh look: re-analyze even the enriched.
@@ -1010,7 +1013,7 @@
         const body = await api('/api/enrich/queue/run-all', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ provider: el('enrichProvider').value, plan }),
+          body: JSON.stringify({ provider: el('enrichProvider').value, plan, expectedActiveRevisionId: profileUI.revision() }),
         });
         const jobs = (n) => `${n} job${n === 1 ? '' : 's'}`;
         const leftBehind = [
@@ -1212,7 +1215,7 @@
         const body = await api(`/api/enrich/runs/${run.id}/retry`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ sendToCurate: el('enrichCurate').checked, profileId: profileUI.id() }),
+          body: JSON.stringify({ sendToCurate: el('enrichCurate').checked, expectedActiveRevisionId: profileUI.revision() }),
         });
         if (body.started === false) {
           toast('Those photos no longer need enrichment.');
@@ -1364,6 +1367,8 @@
 
     state.idlePolling = setInterval(refreshIfIdle, IDLE_STATUS_POLL_MS);
     document.addEventListener('visibilitychange', refreshIfIdle);
+    window.addEventListener('focus', () => { void refresh(); });
+    document.addEventListener('visibilitychange', () => { if (!document.hidden) void refresh(); });
     profileUI.load().catch(error => toast(error.message, true));
     refresh();
     loadQueue();

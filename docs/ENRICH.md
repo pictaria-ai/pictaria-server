@@ -232,7 +232,7 @@ Each execution captures its configuration **before selecting photos**.
 Prompts, taxonomy, provider settings, image source, and processing options stay
 fixed through photo selection, automatic retries, tag mapping, and history.
 Provider/model and operational settings apply at execution start. Queued
-profile inputs remain pinned to the revision selected when queued. Saving an edit never starts work. Cancel and
+profile inputs are captured from the active profile when execution starts. Run all captures one profile revision for the entire batch. Saving an edit never starts work. Cancel and
 operational pause controls remain live; changing the Immich connection cancels
 an active run and invalidates an in-progress queue resolution, keeping the
 queue item available to start again.
@@ -364,10 +364,9 @@ your approved tags on every request.
 ## Enrichment profiles
 
 Use **Settings → Enrichment profiles** to keep several named prompt/taxonomy
-setups. The profile list shows the default used by Daily Enrich and Send to
-Enrich. Choose **New profile**, enter a name, and start from the **Built-in
-setup** (the configured template files) or a copy of an existing profile.
-Each row’s **⋯** menu offers **Duplicate**, **Make default**, and **Archive**
+setups. The profile list marks the active profile used by new Enrich work.
+Choose **New profile**, enter a name, and start from the **Built-in setup** (the configured template files) or a copy of an existing profile.
+Each row’s **⋯** menu offers **Duplicate** and **Archive**
 where applicable. Restore profiles from the collapsed **Archived profiles** list.
 
 **Edit** opens one profile at a time: name, **Tags & categories**, then
@@ -381,31 +380,32 @@ per-photo prompt and must include `{approved_tags}`.
 photos to a model. Field errors reveal the relevant editor; invalid edits
 and stale saves from another window leave the last usable revision intact.
 Unsaved edits are marked, and cancelling or leaving asks before discarding
-them. Saving does not start enrichment. **Go to Enrich** appears for the saved
-profile; choose it to prepare a run with that profile selected.
+them. Saving does not activate the profile or start enrichment. **Use this profile**
+activates the saved profile on the server and returns to Enrich.
 
 On Enrich, use the profile picker to choose a saved setup and **View and
 manage profiles** to open the profile list in Settings. From a saved profile’s
-editor, **Go to Enrich** selects that profile for manual runs. Creation,
-validation, default selection, archiving, and restoration live in Settings.
+editor, **Use this profile** activates it and returns to Enrich. Creation,
+validation, archiving, and restoration live in Settings.
 
 Profiles contain prompts and taxonomy only. Provider/model connections,
-image settings, and processing controls remain separate. Selecting a profile
-on Enrich applies to new manual runs and explicit failed-photo retries in
-that tab. **Make default** chooses the durable default for Daily Enrich,
-Send to Enrich from Insights, and API requests that omit `profileId`.
-The Insights photo dialog explains that Send to Enrich pins the default
-profile's current revision and that the queued profile can be changed on Enrich.
-Changing the default never starts work or changes an existing queue item.
+image settings, and processing controls remain separate. **Active profile**
+on Enrich is saved on the server and shared by browser tabs and sessions.
+The picker refreshes from server status and on returning to the page. A stale
+start or activation request is rejected so a different profile cannot run
+silently. Changing the active profile does not start work.
 
-Every saved edit, including a rename, creates an immutable numbered revision.
-A queue item pins its selected revision when added, independently of the
-provider/model settings resolved at execution start. Queue cards show the
-saved name and revision. **Use selected profile** explicitly replaces that
-item's pin with the currently selected profile's latest revision; it is refused
-while that item is running, resolving, or owned by Run all. The same photo
-slice may be queued under different revisions. Run all honors each item's pin
-and its **Only unenriched** setting.
+Library sweeps, individual queued groups, manual retries, and Daily Enrich
+capture the active profile’s current revision when execution starts, before
+photo selection. **Run all** captures one revision for the entire batch.
+Every started execution and its automatic retries keep their captured inputs,
+even if the active profile changes, is edited, or is later archived.
+
+Queueing saves only the photo selection. Pending groups use the active profile
+when started; they have no profile picker or saved profile pin. Identical
+photo selections deduplicate regardless of the active profile. A cancelled
+or failed job retains its history; starting it again captures the then-active
+profile. Explicit per-job profile overrides are not supported.
 
 To try a different profile on already-enriched photos, turn **Only unenriched**
 off for a small manual run or a queued slice. Identical inference inputs still
@@ -434,9 +434,9 @@ In particular, Curate reads `review` buckets and `hard_exclusion_tags` from
 the shared policy in Settings; editing those sections inside an inference
 profile does not change Curate.
 
-**Archive** removes a profile from new selections, preserving its queued
-revisions and historical attribution. Restore it through **Archived profiles**.
-Choose another default before archiving the default. There is no hard delete;
+**Archive** removes a profile from new selections, preserving running jobs
+and historical attribution. Restore it through **Archived profiles**.
+Activate another profile before archiving the active one. There is no hard delete;
 up to 100 profiles, including archived ones, are supported. Revisions are
 retained with the enrichment database and can grow as profiles are edited;
 each revision has bounded prompt/taxonomy fields. List/status requests return
@@ -444,14 +444,16 @@ small metadata only; editor/detail requests load the content separately.
 
 On first upgrade, the effective prompt text and taxonomy (including saved
 overrides, with their existing precedence over configured files) are copied
-into **Default**. Old pending queue items pin that migrated revision once.
+into **Default**, the initial active profile. When upgrading an earlier v1.2
+preview, its saved default becomes the active profile, and pending queue pins
+are cleared. Existing queued selections and saved run configurations remain.
 The old settings values remain on disk for provenance/rollback, but saved
 inference profiles then own their content: later environment/file changes do
 not overwrite them. **New profile → Built-in setup** explicitly imports the current
 configured files. Legacy prompt writes through Settings are rejected with a
 pointer to profiles; `taxonomyJson` continues to own the shared live Curate
 policy. Existing human decisions and old unknown configuration identities
-are preserved. Profiles, revisions, default choice, and queue pins participate
+are preserved. Profiles, revisions, active choice, and queued selections participate
 in the standard SQLite backup and restore.
 
 ## When things go wrong
@@ -622,7 +624,7 @@ retry on the next run — see "When things go wrong" above for the split.
 A card with failures that still need work offers **Re-run N failed photos**.
 This starts a normal targeted run through the original provider (using that
 provider's current connection and model settings) with the selected profile's
-current revision (default profile when omitted by API callers), including both content and
+current revision at execution start, including both content and
 infrastructure failures. The server recalculates the set when you click: a
 photo that has since succeeded under any setup, disappeared from Immich, or
 been deliberately discarded is left out. The content-failure cap is disabled
@@ -911,14 +913,18 @@ and expect the queue to breathe a little while enrichment is running.
   without saving or dispatching model work.
 - `GET|PATCH /api/enrich/profiles/:id` — full current profile or save an edit;
   PATCH also requires `expectedRevisionId` for optimistic concurrency.
-- `POST /api/enrich/profiles/:id/default` — make an active profile the default.
+- `POST /api/enrich/profiles/active` — activate `{ profileId, expectedActiveRevisionId? }`.
+  List responses include `activeProfileId` and active-profile metadata. The
+  optional expected revision rejects stale activation requests with 409.
 - `POST /api/enrich/profiles/:id/archive` — `{ archived: true|false }`.
-- `PATCH /api/enrich/queue/:id/profile` — `{ profileId, expectedRevisionId }`;
-  explicitly replace an unowned queue pin with that profile's current revision.
-- New manual runs, queue insertion, history retry, and failure-limited
-  reads/discard accept `profileId`; omission selects the durable default.
-  Run-all plan entries also accept `skipAnySuccessful`. Direct manual runs
-  cannot supply historical `profileRevisionId` pins.
+- Start routes (manual, queue run, Run all, history retry) accept optional
+  `expectedActiveRevisionId` for stale-client protection. They always use the
+  active profile and reject `profileId`/`profileRevisionId` overrides. Queue
+  insertion also rejects profile overrides. Run-all entries accept `skipAnySuccessful`.
+- Failure-limited reads/discard may specify `profileId` for diagnostics; omission
+  uses the active profile. This does not activate it or override execution.
+- The old per-profile `/default` and per-queue `/profile` mutation endpoints
+  return 410 with guidance to use the active-profile workflow.
 
 - `GET /api/enrich/status` — runner state, live counters, log tail, provider
   availability, library stats, `enabled`.
@@ -1004,7 +1010,7 @@ and expect the queue to breathe a little while enrichment is running.
 - `GET /api/enrich/runs/:id/log` — one run's full log.
 - `GET /api/enrich/caption?assetId=…` — one photo's full stored caption
   (the Curate lightbox uses it).
-- `GET /api/enrich/prompts` — selected/default profile prompt text plus
+- `GET /api/enrich/prompts` — selected/active profile prompt text plus
   built-in text; optional `?profileId=`.
 - `GET /api/taxonomy` — version, buckets, thresholds, raw source, response-field contract, full tags per
   category, hard exclusions. Optional `?profileId=` selects an inference

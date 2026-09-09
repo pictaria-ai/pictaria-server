@@ -29,13 +29,11 @@ export class EnrichmentProfiles {
           systemPrompt: this.config.promptOverrides?.systemPrompt || prompts.systemPrompt,
           userTemplate: this.config.promptOverrides?.userTemplate || prompts.userTemplate,
           taxonomy: loadActiveTaxonomy(this.config).raw });
-        this.setDefault(profile.id);
+        this.db.prepare('UPDATE enrich_profiles SET is_default = 1 WHERE id = ?').run(profile.id);
       }
-      const initial = this.defaultProfile();
-      // Old pending slices had no pinned inputs. Preserve them and capture the
-      // migrated effective default once, before any post-upgrade profile edits.
-      this.db.prepare('UPDATE enrich_queue SET profile_revision_id = ? WHERE profile_revision_id IS NULL')
-        .run(initial.revisionId);
+      // Earlier v1.2 previews pinned queued profiles. Pending work now resolves
+      // the active profile at execution; immutable run history remains intact.
+      this.db.prepare('UPDATE enrich_queue SET profile_revision_id = NULL WHERE profile_revision_id IS NOT NULL').run();
     });
   }
 
@@ -43,14 +41,14 @@ export class EnrichmentProfiles {
     return this.db.prepare(`SELECT p.id, p.name, p.archived, p.is_default, r.id AS revision_id, r.revision
       FROM enrich_profiles p JOIN enrich_profile_revisions r ON r.id = p.current_revision_id
       ORDER BY p.archived, p.is_default DESC, p.name COLLATE NOCASE, p.id`).all().map(row => ({
-      id: row.id, name: row.name, archived: Boolean(row.archived), isDefault: Boolean(row.is_default),
+      id: row.id, name: row.name, archived: Boolean(row.archived), isActive: Boolean(row.is_default),
       revisionId: row.revision_id, revision: row.revision,
     }));
   }
 
-  defaultProfile() {
+  activeProfile() {
     const row = this.db.prepare('SELECT id FROM enrich_profiles WHERE is_default = 1 AND archived = 0').get();
-    if (!row) throw new ProfileError('The default enrichment profile is missing. Restore the profile database.', 409);
+    if (!row) throw new ProfileError('The active enrichment profile is missing. Restore the profile database.', 409);
     return this.get(row.id);
   }
 
@@ -59,7 +57,7 @@ export class EnrichmentProfiles {
     const row = this.db.prepare('SELECT * FROM enrich_profiles WHERE id = ?').get(id);
     if (!row) throw new ProfileError('That enrichment profile no longer exists.', 404);
     return { ...this.revision(row.current_revision_id), name: row.name,
-      archived: Boolean(row.archived), isDefault: Boolean(row.is_default) };
+      archived: Boolean(row.archived), isActive: Boolean(row.is_default) };
   }
 
   revision(id) {
@@ -85,7 +83,7 @@ export class EnrichmentProfiles {
         throw new ProfileError('Choose a valid enrichment profile or revision.');
     }
     const selected = profileRevisionId ? this.revision(profileRevisionId)
-      : profileId ? this.get(profileId) : this.defaultProfile();
+      : profileId ? this.get(profileId) : this.activeProfile();
     if (selected.archived) throw new ProfileError('This profile is archived. Restore it or choose another profile.', 409);
     if (profileId && profileId !== selected.id) throw new ProfileError('The revision does not belong to the selected profile.');
     return { ...selected, taxonomy: parseTaxonomySource(JSON.stringify(selected.taxonomy)),
@@ -148,10 +146,18 @@ export class EnrichmentProfiles {
       value.systemPrompt, value.userTemplate, JSON.stringify(value.taxonomy), new Date().toISOString());
   }
 
-  setDefault(id) {
+  assertActive(expectedRevisionId) {
+    const active = this.activeProfile();
+    if (expectedRevisionId !== undefined && expectedRevisionId !== active.revisionId)
+      throw new ProfileError('The active profile changed. Refresh Enrich and review the active profile before trying again.', 409);
+    return active;
+  }
+
+  setActive(id, expectedRevisionId) {
     return this.repo.transaction(() => {
+      this.assertActive(expectedRevisionId);
       const profile = this.get(id);
-      if (profile.archived) throw new ProfileError('Restore this profile before making it the default.', 409);
+      if (profile.archived) throw new ProfileError('Restore this profile before activating it.', 409);
       this.db.prepare('UPDATE enrich_profiles SET is_default = 0 WHERE is_default = 1').run();
       this.db.prepare('UPDATE enrich_profiles SET is_default = 1 WHERE id = ?').run(id);
       return this.get(id);
@@ -161,7 +167,7 @@ export class EnrichmentProfiles {
   archive(id, archived) {
     if (typeof archived !== 'boolean') throw new ProfileError('Archived must be true or false.');
     const current = this.get(id);
-    if (current.isDefault && archived) throw new ProfileError('Choose another default profile before archiving this one.', 409);
+    if (current.isActive && archived) throw new ProfileError('Choose another active profile before archiving this one.', 409);
     this.db.prepare('UPDATE enrich_profiles SET archived = ? WHERE id = ?').run(archived ? 1 : 0, id);
     return this.get(id);
   }

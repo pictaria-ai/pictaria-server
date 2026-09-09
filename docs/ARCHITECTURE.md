@@ -202,22 +202,23 @@ data/               all persistent state (gitignored): enrichment.sqlite,
   its enrichment database (see Scale: review state is cached in-process and
   projected at write time, so external writes are invisible until restart).
 - **Enrich profiles**: `enrich/profiles.mjs` owns named profiles and immutable
-  revisions in enrichment.sqlite (schema 9, persistent-state contract 10).
+  revisions in enrichment.sqlite (schema 9, persistent-state contract 11).
   `routes/enrichProfiles.mjs` exposes bounded management APIs;
   `public/enrich-profiles.js` owns the Settings profile manager and the Enrich
   profile picker. Settings uses a profile list and focused editor with draft
-  protection and validation before saving. Enrich links to the Settings profile list; the editor’s return link selects
-  its saved profile on Enrich. Profiles contain explicit prompt
-  text and taxonomy, with an installation default; provider/model selection
-  stays separate. Queue rows pin revisions at insertion and expose an explicit
-  guarded replacement action. Profile metadata in configurations lets history
-  and photo attribution use indexed joins without loading snapshot blobs.
+  protection and validation before saving. Enrich links to the Settings profile
+  list; the editor’s Use this profile action activates its saved profile before
+  returning to Enrich. Profiles contain explicit prompt text and taxonomy, with
+  one server-saved active choice; provider/model selection stays separate.
+  Queue rows store selections only; execution captures the active revision.
+  Profile metadata in configurations lets history and photo attribution use indexed joins without loading snapshot blobs.
   Legacy effective settings seed Default once; shared Curate policy stays
   live and independent. Revisions survive archive and job-summary pruning.
 - **Enrich execution configuration**: `enrich/runConfiguration.mjs` captures
   effective inputs before the first asynchronous photo-selection call. Queue
   reservations hold the captured provider/client and configuration through
-  selection and execution; profile inputs were already pinned at queue insertion.
+  selection and execution. Run all captures one active profile revision for
+  the entire chain, including items that start after a profile edit or switch.
   `enrich_configurations` deduplicates immutable,
   non-secret JSON snapshots; `processing_runs` and `job_runs` carry nullable
   configuration and inference IDs. Legacy rows retain NULL identity.

@@ -261,16 +261,22 @@ to know which upgrade caused it.
 
 ## Named Enrich profiles (unreleased v1.2 work)
 
-Schema 9 / persistent-state contract 10 adds profiles and queue pins. The
-first boot copies effective prompts/taxonomy into Default and pins old queue
-items to that revision; it does not launch enrichment. Verify Default contains
-your customization and the old queue still shows its expected slices. Subsequent
-inference edits belong in Settings → Enrichment profiles; Settings retains the shared live
-Curate policy. Changing configured files later does not rewrite saved profiles.
+Schema 9 / persistent-state contract 11 provides profiles and one server-saved
+active choice. Earlier v1.2 previews used contract 10 with per-item queue pins.
+Upgrading preserves the saved default as the active profile and clears pending
+queue pins; photo selections, immutable revisions, and run history are retained.
+The physical `is_default` column stores the active choice, and the nullable
+queue pin column is retained for compatibility but is no longer used.
+Contract 11 ensures a recovery point before this behavior/state conversion.
+For installations without profiles, first boot copies effective prompts/taxonomy
+into the initial active profile, Default; it does not launch enrichment. Verify
+the active profile contains your customization and the queue still shows its
+expected slices. Subsequent inference edits belong in Settings → Enrichment
+profiles; Settings retains the shared live Curate policy. Changing configured files later does not rewrite saved profiles.
 See [profile behavior and migration](ENRICH.md#enrichment-profiles).
 
 Startup takes the usual complete pre-migration snapshot before mutation.
 Rollback requires restoring that snapshot into a clean volume with the older
 image; do not run an older server directly against the new database. Profile
-revisions and default/queue references live in enrichment.sqlite and are included
+revisions and the active choice live in enrichment.sqlite and are included
 in standard backups.

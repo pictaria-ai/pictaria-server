@@ -263,7 +263,6 @@ function queueItemFromRow(row) {
     filters: JSON.parse(row.filters_json),
     estimatedCount: row.estimated_count === null ? null : Number(row.estimated_count),
     requestedAt: row.requested_at,
-    profileRevisionId: row.profile_revision_id ?? null,
   };
 }
 
@@ -1842,7 +1841,7 @@ export class Repository {
     return Number(row?.count ?? 0);
   }
 
-  queueAdd({ title, filters, estimatedCount = null, profileRevisionId = null, protectedIds = [], now = new Date() }) {
+  queueAdd({ title, filters, estimatedCount = null, protectedIds = [], now = new Date() }) {
     const safeTitle = String(title || 'Photo slice').slice(0, 120);
     const filtersJson = JSON.stringify(filters);
     const safeEstimatedCount = Number.isSafeInteger(estimatedCount) && estimatedCount >= 0 ? estimatedCount : null;
@@ -1857,8 +1856,8 @@ export class Repository {
     return this.transaction(() => {
       this.queueMaintain({ protectedIds, now });
       const duplicate = this.db.prepare(
-        'SELECT * FROM enrich_queue WHERE filters_json = ? AND profile_revision_id IS ? ORDER BY id LIMIT 1',
-      ).get(filtersJson, profileRevisionId);
+        'SELECT * FROM enrich_queue WHERE filters_json = ? ORDER BY id LIMIT 1',
+      ).get(filtersJson);
       if (duplicate) {
         return { id: Number(duplicate.id), duplicate: true };
       }
@@ -1883,8 +1882,8 @@ export class Repository {
         );
       }
       const result = this.db.prepare(
-        'INSERT INTO enrich_queue (title, filters_json, estimated_count, requested_at, profile_revision_id) VALUES (?, ?, ?, ?, ?)',
-      ).run(safeTitle, filtersJson, safeEstimatedCount, new Date(now).toISOString(), profileRevisionId);
+        'INSERT INTO enrich_queue (title, filters_json, estimated_count, requested_at) VALUES (?, ?, ?, ?)',
+      ).run(safeTitle, filtersJson, safeEstimatedCount, new Date(now).toISOString());
       return { id: Number(result.lastInsertRowid), duplicate: false };
     });
   }

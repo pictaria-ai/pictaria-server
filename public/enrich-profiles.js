@@ -90,7 +90,7 @@ window.createEnrichProfileManager = function ({ api, toast }) {
     clearErrors(); note(''); taxonomySummary(); view('profileEditor'); updateDirty();
     if (existing) {
       remember(existing.id);
-      el('profileReturn').href = `/enrich.html?profile=${encodeURIComponent(existing.id)}`;
+      el('profileReturn').href = '/enrich.html';
     }
     if (!afterSave) focus('profileName');
   }
@@ -121,18 +121,15 @@ window.createEnrichProfileManager = function ({ api, toast }) {
         await request(`/api/enrich/profiles/${p.id}/archive`, 'POST', { archived: false }); await loadList(); toast(`${p.name} restored.`);
       }));
       else {
-        if (p.isDefault) row.append(node('span', 'Default', 'p-chip'));
+        if (p.isActive) row.append(node('span', 'Active', 'p-chip'));
         row.append(button('Edit', 'edit', p, () => open(p.id)));
         const menu = node('details', '', 'profile-menu'); const summary = node('summary', '⋯', 'p-btn quiet');
         summary.setAttribute('aria-label', `More actions for ${p.name}`); menu.append(summary);
         const actions = node('div', '', 'profile-menu-actions');
         actions.append(button('Duplicate', 'duplicate', p, () => startCreate(p.id)));
-        if (!p.isDefault) {
-          actions.append(button('Make default', 'default', p, async () => {
-            await request(`/api/enrich/profiles/${p.id}/default`, 'POST', {}); await loadList(); toast(`${p.name} is now the default for Daily Enrich and Send to Enrich.`);
-          }));
+        if (!p.isActive) {
           actions.append(button('Archive', 'archive', p, async () => {
-            await request(`/api/enrich/profiles/${p.id}/archive`, 'POST', { archived: true }); await loadList(); toast(`${p.name} archived. Queued runs and history keep their saved settings.`);
+            await request(`/api/enrich/profiles/${p.id}/archive`, 'POST', { archived: true }); await loadList(); toast(`${p.name} archived. Saved run history is retained.`);
           }));
         }
         menu.append(actions); row.append(menu);
@@ -142,7 +139,7 @@ window.createEnrichProfileManager = function ({ api, toast }) {
     const count = profiles.filter(p => p.archived).length;
     el('profileArchivedSection').hidden = !count;
     el('profileArchivedSummary').textContent = `Archived profiles (${count})`;
-    el('profileNote').textContent = `${profiles.find(p => p.isDefault)?.name} is used by Daily Enrich and Send to Enrich. You can choose any profile for a manual run.`;
+    el('profileNote').textContent = `${profiles.find(p => p.isActive)?.name} is active for new Enrich work. Browsing or editing a profile does not activate it.`;
   }
   async function back() {
     if (!await discard()) return;
@@ -162,6 +159,15 @@ window.createEnrichProfileManager = function ({ api, toast }) {
     }
     return true;
   }
+  el('profileReturn').addEventListener('click', event => {
+    event.preventDefault();
+    void action(async () => {
+      if (dirty() || !editing) return;
+      const current = await api('/api/enrich/profiles');
+      await request('/api/enrich/profiles/active', 'POST', { profileId: editing.id, expectedActiveRevisionId: current.activeProfile.revisionId });
+      location.assign('/enrich.html');
+    })();
+  });
   el('profileNew').addEventListener('click', action(() => startCreate()));
   el('profileClose').addEventListener('click', action(back));
   el('profileBack').addEventListener('click', action(back));
@@ -232,44 +238,41 @@ window.createEnrichProfileManager = function ({ api, toast }) {
 window.createEnrichProfilePicker = function ({ api, toast, changed }) {
   const el = id => document.getElementById(id);
   const select = el('enrichProfile');
-  let profiles = [];
-  let loaded = false;
-  const label = p => `${p.name} · r${p.revision}${p.isDefault ? ' · default' : ''}`;
-  const selected = () => profiles.find(p => p.id === select.value);
-  const request = (path, method, body) => api(path, { method, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
-  const action = fn => async () => { try { await fn(); } catch (error) { toast(error.message, true); } };
-  function update() {
-    const url = new URL(location.href);
-    url.searchParams.set('profile', select.value);
-    history.replaceState(null, '', url);
-    changed();
-  }
-  async function load(preferred = new URLSearchParams(location.search).get('profile')) {
-    const data = await api('/api/enrich/profiles');
-    profiles = data.profiles.filter(p => !p.archived);
-    select.replaceChildren(...profiles.map(p => new Option(label(p), p.id)));
-    select.value = profiles.some(p => p.id === preferred) ? preferred : data.defaultProfileId;
-    if (preferred && select.value !== preferred) toast('That profile is unavailable or archived. The default profile is selected.', true);
+  const label = p => `${p.name} · r${p.revision}`;
+  let active = null, loaded = false, saving = false, epoch = 0;
+  function sync(profile, requestEpoch = epoch) {
+    if (!profile || saving || requestEpoch !== epoch) return;
+    const previous = active?.revisionId;
+    active = profile;
+    let option = [...select.options].find(option => option.value === profile.id);
+    if (!option) { option = new Option('', profile.id); select.add(option); }
+    option.textContent = label(profile); select.value = profile.id;
     loaded = true;
-    el('profileNote').textContent = `Selected for new manual runs. Daily Enrich and Send to Enrich use the default: ${profiles.find(p => p.isDefault)?.name}. Queued items keep their saved revision.`;
-    update();
+    el('profileNote').textContent = `Active for new sweeps, queued jobs, retries, and Daily Enrich. Run all uses one saved revision for the batch. Running work keeps its settings.`;
+    el('activeRunProfile').textContent = `Run with ${profile.name}`;
+    if (previous !== active.revisionId) changed();
   }
-  select.addEventListener('change', update);
-  return { load, id: () => select.value, ready: () => loaded && Boolean(selected()), label,
-    queueControl(item) {
-      const wrap = document.createElement('span');
-      wrap.className = 'qline';
-      const current = document.createElement('span');
-      current.textContent = item.profile ? `Profile: ${label(item.profile)}` : 'Profile: migrated default';
-      const button = document.createElement('button');
-      button.className = 'p-btn quiet queue-profile';
-      button.textContent = 'Use selected profile';
-      button.title = 'Replace this queued choice with the selected profile’s current revision';
-      button.addEventListener('click', action(async () => {
-        await request(`/api/enrich/queue/${item.id}/profile`, 'PATCH', { profileId: select.value, expectedRevisionId: item.profileRevisionId });
-        changed(); toast('Queued profile updated to the selected revision.');
-      }));
-      wrap.append(current, button); return wrap;
-    },
-  };
+  async function load() {
+    const requestEpoch = epoch;
+    const data = await api('/api/enrich/profiles');
+    if (requestEpoch !== epoch || saving) return;
+    select.replaceChildren(...data.profiles.filter(p => !p.archived).map(p => new Option(label(p), p.id)));
+    sync(data.activeProfile, requestEpoch);
+  }
+  select.addEventListener('change', async () => {
+    const profileId = select.value;
+    saving = true; epoch++; select.disabled = true;
+    el('profileNote').textContent = 'Saving active profile…'; changed();
+    try {
+      const value = await api('/api/enrich/profiles/active', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ profileId, expectedActiveRevisionId: active?.revisionId }) });
+      saving = false; epoch++; sync(value);
+    } catch (error) {
+      saving = false; epoch++; loaded = false;
+      try { await load(); } catch { /* polling will retry */ }
+      toast(error.message, true);
+    } finally { select.disabled = false; saving = false; changed(); }
+  });
+  return { load, sync, epoch: () => epoch, id: () => active?.id, revision: () => active?.revisionId,
+    ready: () => loaded && !saving && Boolean(active), label };
 };

@@ -108,16 +108,29 @@ export function createEnrichRoutes({ review, enrichRunner, taxonomy, profiles = 
   // photos) only to die at start(). The chain's own next item never
   // passes through here — it starts after the runner is already idle.
   const queueBusy = () => enrichRunner.isBusy() || sliceResolutions > 0;
+  function checkActiveStart(body, response) {
+    try {
+      if (body?.profileId !== undefined || body?.profileRevisionId !== undefined) {
+        sendError(response, 400, 'invalid_enrich_profile', 'Runs use the active profile. Select it on Enrich before starting.');
+        return false;
+      }
+      profiles?.assertActive(body?.expectedActiveRevisionId);
+      return true;
+    } catch (error) {
+      sendError(response, error.status ?? 409, error.code ?? 'invalid_enrich_profile', diagnostic(error));
+      return false;
+    }
+  }
   // Start one queued item. Shared by the single Run button and the Run-all
   // chain; `chainNext` (if given) fires after this item's clean finish, so
   // a cancel or failure stops the chain with the queue intact.
-  async function startQueuedItem(item, { provider, sendToCurate = true, reopenDecided = false, skipAnySuccessful, chainNext } = {}) {
+  async function startQueuedItem(item, { provider, sendToCurate = true, reopenDecided = false, skipAnySuccessful, chainNext, profileRevisionId } = {}) {
     // Claim the shared runner synchronously, before slice resolution awaits
     // Immich. Daily Enrich and other starts now see the same ownership state
     // as the queue routes, including between Run-all items.
     const reopen = reopenDecided === true;
     const reservation = enrichRunner.reserve({
-      profileRevisionId: item.profileRevisionId,
+      profileRevisionId,
       provider,
       skipAnySuccessful: skipAnySuccessful === undefined ? !reopen : skipAnySuccessful !== false,
       sendToCurate: sendToCurate !== false || reopen,
@@ -165,7 +178,7 @@ export function createEnrichRoutes({ review, enrichRunner, taxonomy, profiles = 
     const limit = queuePageLimit(searchParams?.get('limit'));
     const page = repo.queuePage({ afterId, limit });
     return {
-      items: profiles ? page.items.map(item => ({ ...item, profile: profiles.attribution(item.profileRevisionId) })) : page.items,
+      items: page.items,
       nextCursor: page.nextAfterId === null ? null : encodeQueueCursor(page.nextAfterId),
       total: page.total,
     };
@@ -271,7 +284,7 @@ export function createEnrichRoutes({ review, enrichRunner, taxonomy, profiles = 
     };
   }
 
-  const profileRoutes = profiles ? createEnrichProfileRoutes({ profiles, repo, protectedQueueIds, queuePagePayload }) : null;
+  const profileRoutes = profiles ? createEnrichProfileRoutes({ profiles }) : null;
 
   return async function handleEnrichRoute(request, response, url) {
     if (profileRoutes && await profileRoutes(request, response, url)) return true;
@@ -477,10 +490,7 @@ export function createEnrichRoutes({ review, enrichRunner, taxonomy, profiles = 
         return true;
       }
       try {
-        if (body?.profileRevisionId) {
-          sendError(response, 400, 'invalid_enrich_profile', 'Select a current profile for a new run; pinned revisions belong to queued work.');
-          return true;
-        }
+        if (!checkActiveStart(body, response)) return true;
         sendJson(response, 202, enrichRunner.start(body ?? {}));
       } catch (error) {
         sendError(response, error?.code === 'invalid_enrich_profile' ? error.status : 409, error?.code === 'invalid_enrich_profile' ? error.code : 'enrich_run_conflict', diagnostic(error));
@@ -618,6 +628,10 @@ export function createEnrichRoutes({ review, enrichRunner, taxonomy, profiles = 
 
     if (request.method === 'POST' && url.pathname === '/api/enrich/queue') {
       const body = await readJsonBody(request);
+      if (body?.profileId !== undefined || body?.profileRevisionId !== undefined) {
+        sendError(response, 400, 'invalid_enrich_profile', 'Queue photo selections only; the active profile is captured when work starts.');
+        return true;
+      }
       const filters = normalizeSliceFilters(body?.filters);
       if (!filters) {
         sendError(response, 400, 'invalid_slice', 'At least one slice filter is required.');
@@ -630,7 +644,6 @@ export function createEnrichRoutes({ review, enrichRunner, taxonomy, profiles = 
       }
       try {
         const result = repo.queueAdd({
-          profileRevisionId: profiles?.resolve({ profileId: body.profileId }).revisionId ?? null,
           title: String(body.title || 'Photo slice').slice(0, 120),
           filters,
           estimatedCount: Number(body.estimatedCount),
@@ -674,6 +687,7 @@ export function createEnrichRoutes({ review, enrichRunner, taxonomy, profiles = 
         return true;
       }
       try {
+        if (!checkActiveStart(body, response)) return true;
         const { status, truncated } = await startQueuedItem(item, {
           provider: body?.provider,
           sendToCurate: body?.sendToCurate,
@@ -749,6 +763,8 @@ export function createEnrichRoutes({ review, enrichRunner, taxonomy, profiles = 
         sendError(response, 409, 'enrich_run_conflict', 'An enrichment run or queued-job resolution is already in progress.');
         return true;
       }
+      if (!checkActiveStart(body, response)) return true;
+      const profileRevisionId = profiles?.activeProfile().revisionId;
       const provider = body?.provider;
       // Items removed as covered during the synchronous walk, with their
       // photo counts aggregated so the response stays honest about photos
@@ -792,6 +808,7 @@ export function createEnrichRoutes({ review, enrichRunner, taxonomy, profiles = 
           }
           try {
             const started = await startQueuedItem(queued, {
+              profileRevisionId,
               provider,
               sendToCurate: entry.sendToCurate,
               reopenDecided: entry.reopenDecided,
@@ -933,9 +950,9 @@ export function createEnrichRoutes({ review, enrichRunner, taxonomy, profiles = 
         return true;
       }
       try {
+        if (!checkActiveStart(body, response)) return true;
         const status = enrichRunner.start({
           provider: failures.provider,
-          ...(body?.profileId ? { profileId: body.profileId } : {}),
           assetIds: failures.assetIds,
           skipAnySuccessful: true,
           retryFailureLimited: true,

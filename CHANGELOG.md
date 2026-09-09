@@ -7,16 +7,14 @@ All notable changes to Pictaria Server are documented here. This project follows
 
 ### Added
 
-- Named Enrich profiles: create from built-in, duplicate, edit and validate
-  in Settings → Enrichment profiles. Enrich keeps a profile picker and a
-  View and manage profiles link to the Settings profile list. Settings
-  groups profiles into a list with a Default badge and focused editors,
-  readable tag summaries, contextual help, and protection for unsaved edits.
-  Save reusable prompts/taxonomy, choose a default, and archive/restore. Queue items pin a
-  revision and allow explicit replacement; run history and photo captions
-  identify the saved profile. Daily Enrich uses the default profile.
-  Insights explains the default-profile choice before queueing, and the
-  profile editor distinguishes inference taxonomy from shared Curate policy.
+- Named Enrich profiles: manage reusable prompts and taxonomy in Settings.
+  One server-saved **Active profile** on Enrich controls new sweeps, queued
+  groups, retries, and Daily Enrich. Queueing saves photos only; execution
+  captures the active revision. Run all captures one revision for the batch.
+  Active selection synchronizes across tabs; stale start requests are rejected.
+  Settings provides a profile list, focused editors, readable tag summaries,
+  contextual help, and unsaved-edit protection. **Use this profile** explicitly
+  activates a saved profile. Running work and history retain their saved inputs.
 - Queued runs have an independent **Only unenriched** option, allowing a new
   profile pass without reopening existing human Curate decisions.
 - Enrich runs and per-photo results now reference saved, deduplicated
@@ -39,10 +37,11 @@ All notable changes to Pictaria Server are documented here. This project follows
 
 ### Upgrade notes
 
-- Enrichment schema 9 and persistent-state contract 10 add named profiles
-  and pinned queue revisions. Existing effective overrides seed Default once;
-  queued legacy slices pin that revision. Saved profiles then own inference
-  content, while Settings taxonomy JSON remains the shared live Curate policy.
+- Enrichment schema 9 and persistent-state contract 11 add named profiles
+  and one saved active profile. Existing effective overrides seed Default once;
+  that profile becomes the initial active choice. Earlier preview queue pins
+  are cleared while queued selections and historical snapshots are preserved.
+  Saved profiles then own inference content, while Settings taxonomy JSON remains the shared live Curate policy.
   Old prompt settings remain preserved but are no longer edited through the
   Settings API. Normal pre-migration backup and snapshot-restore rollback apply.
 - Enrichment schema 8 (included in this upgrade) adds configuration
