@@ -10,8 +10,11 @@
   <script src="/auth-gate.js" defer></script>
   <script src="/nav.js" defer></script>
   <link rel="stylesheet" href="/pictaria.css">
-  <link rel="stylesheet" href="/enrich-performance.css">
   <style>
+    .runs-navigation { display: flex; justify-content: flex-end; padding: 10px 0; font-size: 13px; }
+    .runs-navigation a { color: var(--p-accent-deep); }
+    .run-actions { justify-content: flex-start; }
+    .run-actions a { text-decoration: none; }
     main { max-width: var(--p-page-w-narrow); margin: 0 auto; padding: 26px 18px 60px; }
     h1 { font-size: 20px; font-weight: 800; letter-spacing: 0.2px; margin: 8px 0 18px; }
     .intro { color: var(--p-muted); font-size: 13px; margin: -8px 0 16px; line-height: 1.5; }
@@ -223,16 +226,10 @@
       <div id="queueList" class="qlist queue"></div>
     </section>
 
-    <section class="p-panel panel" aria-labelledby="performanceTitle">
-      <div class="performance-heading"><h2 id="performanceTitle">Performance comparison</h2><div class="p-grow"></div><button id="performanceAll" class="p-btn quiet" hidden>Show all comparisons</button></div>
-      <div class="provider-note">Compare successful-request speed and reliability across your setups. Overall throughput also includes downloads, failures, and retry waits.</div>
-      <div id="performanceError" class="provider-note" role="status"></div><button id="performanceRetry" class="p-btn quiet" hidden>Try again</button>
-      <div id="performanceList" class="performance-list"><div class="provider-note">Loading performance…</div></div>
-      <div id="performanceWindow" class="provider-note"></div>
-    </section>
     <details id="runsPanel" class="p-panel panel">
       <summary><span class="chev">&#9654;</span> Recent runs <span class="sub">— what ran and how your photos were processed</span></summary>
-      <div class="provider-note" style="margin-top: 10px">End-to-end throughput uses successful photos only and covers Pictaria’s whole photo path: Immich download, image preparation, network, model response, and any retries. Skips do not count. It is useful for comparing your setups, but it is not pure model or token speed.</div>
+      <div class="runs-navigation"><a href="/enrich-performance.html">View performance</a></div>
+
       <div id="runsList" class="qlist queue" style="margin-top: 12px"></div>
       <div class="qline" style="margin-top: 10px">
         <span id="runsCount" class="m"></span>
@@ -277,15 +274,9 @@
     </div>
   </div>
 
-  <dialog id="photoTimingDialog" class="timing-dialog" aria-labelledby="photoTimingTitle" aria-describedby="photoTimingNote">
-    <div class="timing-dialog-header"><h2 id="photoTimingTitle">Photo details</h2><button id="photoTimingClose" class="p-btn quiet">Close</button></div>
-    <p id="photoTimingNote" class="provider-note timing-dialog-note"></p>
-    <div id="photoTimingBody" class="timing-dialog-body"></div>
-  </dialog>
   <div id="toast" class="p-toast"></div>
 
   <script src="/enrich-profiles.js"></script>
-  <script src="/enrich-performance.js"></script>
   <script>
     const IDLE_STATUS_POLL_MS = 15_000;
     const state = {
@@ -306,7 +297,6 @@
       runsRefreshPending: false,
     };
     const el = (id) => document.getElementById(id);
-    const performanceUI = createEnrichPerformance({ api, changed: () => renderRuns() });
     const profileUI = createEnrichProfilePicker({ api, toast, changed() {
       void loadFailureLimited();
       syncRunButtons(state.lastStatus);
@@ -1058,13 +1048,6 @@
 
     // --- run history ---
 
-    function fmtThroughput(value) {
-      if (!Number.isFinite(value) || value <= 0) return null;
-      return value >= 100 ? Math.round(value).toLocaleString()
-        : value >= 10 ? value.toFixed(1)
-          : value.toFixed(2);
-    }
-
     function syncRunsPaging() {
       const count = el('runsCount');
       const button = el('runsMoreBtn');
@@ -1079,7 +1062,6 @@
     function renderRuns() {
       const runs = state.runs;
       const box = el('runsList');
-      const expanded = new Set([...box.children].filter(c => c.querySelector('.performance-more')?.open).map(c => c.dataset.runId));
       box.replaceChildren();
       if (!runs.length) {
         const none = document.createElement('div');
@@ -1157,24 +1139,17 @@
           run.inferenceHostLabel ? `host: ${run.inferenceHostLabel}` : null,
           run.configurationId ? null : 'Configuration unknown (legacy run)',
           run.retrySourceRunId ? `Retry of run #${run.retrySourceRunId} with settings at retry start` : null,
-          run.status === 'finished' ? null : run.status + (run.error ? `: ${String(run.error).slice(0, 80)}` : ''),
+          run.status === 'finished' ? 'Completed' : run.status + (run.error ? `: ${String(run.error).slice(0, 80)}` : ''),
           counts,
         ].filter(Boolean).join(' · ');
         if (run.status === 'failed') detail.classList.add('bad');
 
         card.append(top, detail);
-        const photosPerMinute = fmtThroughput(run.throughput?.photosPerMinute);
-        const secondsPerPhoto = fmtThroughput(run.throughput?.secondsPerPhoto);
-        if (photosPerMinute && secondsPerPhoto) {
-          const throughput = document.createElement('div');
-          throughput.className = 'detail';
-          const sampleSize = run.throughput.successfulPhotos;
-          throughput.textContent = `End-to-end: ${photosPerMinute} photos/min · ${secondsPerPhoto} sec/photo · over ${sampleSize.toLocaleString()} photo${sampleSize === 1 ? '' : 's'}`;
-          throughput.title = 'Whole-run wall clock: Immich download, image preparation, network, model response, and retries. This is not pure model or token speed.';
-          card.append(throughput);
-        }
-        performanceUI.decorateRun(card, run, actions);
-        if (expanded.has(String(run.id)) && card.querySelector('.performance-more')) card.querySelector('.performance-more').open = true;
+        const detailsLink = document.createElement('a');
+        detailsLink.className = 'p-btn quiet';
+        detailsLink.href = `/enrich-performance.html#run=${encodeURIComponent(run.id)}`;
+        detailsLink.textContent = 'View details';
+        actions.prepend(detailsLink);
         if (retryBtn) actions.append(retryBtn);
         if (actions.childElementCount) card.append(actions);
         box.append(card);
@@ -1194,7 +1169,7 @@
         const previousCursor = state.runsNextCursor;
         const params = new URLSearchParams({ limit: '20' });
         if (more) params.set('cursor', previousCursor);
-        const [page] = await Promise.all([api(`/api/enrich/runs?${params}`), performanceUI.refresh()]);
+        const page = await api(`/api/enrich/runs?${params}`);
         const total = Number.isSafeInteger(page.total)
           ? page.total
           : state.runs.length + (page.runs?.length ?? 0);

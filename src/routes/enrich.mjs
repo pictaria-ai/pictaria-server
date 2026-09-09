@@ -925,6 +925,15 @@ export function createEnrichRoutes({ review, enrichRunner, taxonomy, profiles = 
       return true;
     }
 
+    const runSummaryMatch = url.pathname.match(/^\/api\/enrich\/runs\/(\d+)$/);
+    if (request.method === 'GET' && runSummaryMatch) {
+      const id = Number(runSummaryMatch[1]);
+      const run = Number.isSafeInteger(id) && id > 0 ? repo.getJobRunSummary(id) : null;
+      if (!run) sendError(response, 404, 'run_not_found', 'This run is no longer available in history.');
+      else sendJson(response, 200, { run });
+      return true;
+    }
+
     if (request.method === 'GET' && url.pathname === '/api/enrich/performance') {
       const raw = url.searchParams.get('limit') ?? '3';
       if (!/^\d+$/.test(raw) || Number(raw) < 1 || Number(raw) > 100) {

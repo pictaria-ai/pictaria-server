@@ -2084,43 +2084,55 @@ export class Repository {
       FROM job_runs ORDER BY id DESC LIMIT ?
     `).all(boundedLimit + 1));
     const hasMore = rows.length > boundedLimit;
-    const runs = rows.slice(0, boundedLimit).map((row) => {
-      const id = Number(row.id);
-      const counters = row.counters_json ? JSON.parse(row.counters_json) : null;
-      // Modern completed runs record failed=0 authoritatively. Avoid a
-      // historical-window query for those overwhelmingly common clean cards;
-      // legacy/interrupted rows with absent counters still get reconstructed.
-      const retryableFailures = Number.isFinite(counters?.failed) && counters.failed === 0
-        ? 0
-        : this.jobRunRetryFailures(id, { limit: 0 })?.count ?? 0;
-      return {
-        id,
-        title: row.title,
-        provider: row.provider,
-        model: row.model,
-        promptVersion: row.prompt_version,
-        taxonomyVersion: row.taxonomy_version,
-        inferenceHostLabel: jobRunHostLabel(row.inference_host_label),
-        profile: this.configurationProfile(row.configuration_id),
-        configurationId: row.configuration_id ?? null,
-        inferenceId: row.inference_id ?? null,
-        retrySourceRunId: row.retry_source_run_id ?? null,
-        timingRunId: row.timing_run_id ?? null,
-        targeted: row.targeted === null ? null : Number(row.targeted),
-        status: row.status,
-        error: row.error,
-        counters,
-        hasLog: Boolean(row.has_log),
-        startedAt: row.started_at,
-        finishedAt: row.finished_at,
-        throughput: jobRunThroughput(counters, row.started_at, row.finished_at),
-        retryableFailures,
-      };
-    });
+    const runs = rows.slice(0, boundedLimit).map((row) => this.jobRunSummary(row));
     return {
       runs,
       nextBeforeId: hasMore ? runs.at(-1)?.id ?? null : null,
       total: Number(this.db.prepare('SELECT COUNT(*) AS count FROM job_runs').get()?.count ?? 0),
+    };
+  }
+
+  getJobRunSummary(id) {
+    const row = this.db.prepare(`
+      SELECT id, title, provider, model, prompt_version, taxonomy_version, inference_host_label, targeted,
+             configuration_id, inference_id, retry_source_run_id, timing_run_id, status, error, counters_json,
+             log_json IS NOT NULL AS has_log, started_at, finished_at
+      FROM job_runs WHERE id = ?
+    `).get(id);
+    return row ? this.jobRunSummary(row) : null;
+  }
+
+  jobRunSummary(row) {
+    const id = Number(row.id);
+    const counters = row.counters_json ? JSON.parse(row.counters_json) : null;
+    // Modern completed runs record failed=0 authoritatively. Avoid a
+    // historical-window query for those overwhelmingly common clean cards;
+    // legacy/interrupted rows with absent counters still get reconstructed.
+    const retryableFailures = Number.isFinite(counters?.failed) && counters.failed === 0
+      ? 0
+      : this.jobRunRetryFailures(id, { limit: 0 })?.count ?? 0;
+    return {
+      id,
+      title: row.title,
+      provider: row.provider,
+      model: row.model,
+      promptVersion: row.prompt_version,
+      taxonomyVersion: row.taxonomy_version,
+      inferenceHostLabel: jobRunHostLabel(row.inference_host_label),
+      profile: this.configurationProfile(row.configuration_id),
+      configurationId: row.configuration_id ?? null,
+      inferenceId: row.inference_id ?? null,
+      retrySourceRunId: row.retry_source_run_id ?? null,
+      timingRunId: row.timing_run_id ?? null,
+      targeted: row.targeted === null ? null : Number(row.targeted),
+      status: row.status,
+      error: row.error,
+      counters,
+      hasLog: Boolean(row.has_log),
+      startedAt: row.started_at,
+      finishedAt: row.finished_at,
+      throughput: jobRunThroughput(counters, row.started_at, row.finished_at),
+      retryableFailures,
     };
   }
 

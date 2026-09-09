@@ -89,6 +89,14 @@ test('performance API validates limits and empty state without depending on Prom
   assert.equal((await get('/api/enrich/performance')).body.comparisons.length, 3);
   assert.equal((await get('/api/enrich/performance?limit=100')).body.comparisons.length, 5);
   const latest = repo.listJobRuns()[0];
+  assert.deepEqual((await get(`/api/enrich/runs/${latest.id}`)).body.run, latest);
+  assert.equal((await get('/api/enrich/runs/999999')).status, 404);
+  assert.equal((await get('/api/enrich/runs/9007199254740992')).status, 404);
+  assert.equal((await get('/api/enrich/runs/0')).status, 404);
+  const oldest = repo.listJobRuns(100).at(-1);
+  for (let i = 0; i < 25; i++) seedPerformanceRun(repo, { photos: [] });
+  assert.deepEqual((await get(`/api/enrich/runs/${oldest.id}`)).body.run, oldest);
+  assert.equal('log' in (await get(`/api/enrich/runs/${oldest.id}`)).body.run, false);
   const page = await get(`/api/enrich/timings/${latest.timingRunId}/photos`); assert.ok(page.body.items[0].filename);
 });
 

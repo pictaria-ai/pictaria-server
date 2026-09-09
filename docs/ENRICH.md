@@ -736,8 +736,13 @@ for `truncated` when interpreting samples or reliability totals.
 
 ### Performance comparison and photo details
 
-Enrich shows a compact **Performance comparison** panel above Recent runs.
-It starts with the three most recently used setups; **Show all comparisons**
+**Enrich performance** is a dedicated page linked from Recent runs on Enrich
+and from the Enrich section in Settings. **Runs** is the default view: a paged
+history of run dates, provider/model/profile, photo outcomes, and total time.
+Enrich keeps compact outcome summaries and existing settings/log/retry actions;
+**View details** links directly to the selected run on the performance page.
+
+The **Compare setups** view starts with the three most recently used setups; **Show all comparisons**
 includes every setup within the retained timing window (at most 100 runs).
 Ordering follows recent use, not speed. Each setup shows typical successful
 request time (median), successful requests and timeout counts, and overall
@@ -773,9 +778,11 @@ although their accepted requests still contribute to latency. Throughput is
 `total successes / total elapsed time`, never an average of individual run
 rates. No completed processing jobs means unavailable throughput; a measured
 zero-success cohort shows zero photos/min and unavailable seconds/success.
-The existing individual-run end-to-end rates remain on Recent runs cards.
+Individual-run end-to-end rates remain available in the run details, including
+for historical runs without granular timing.
 
-**View photo details** opens a dialog with filenames/thumbnails, outcomes,
+Selecting a run opens a dialog with its outcome summary, expandable metrics,
+and filenames/thumbnails, outcomes,
 total photo durations, and expandable individual requests. Both photo and
 request lists fetch 20 records at a time with Load more controls. The dialog
 fills the phone screen; Escape or Close returns focus to the invoking action.
@@ -790,7 +797,10 @@ answers **Timing expired**, while older runs without a timing link say timing
 was not recorded. Partial samples show retained counts and explicit warnings.
 Successful timing samples never hide recorded timeout/failure counts.
 
-`GET /api/enrich/performance?limit=3` supplies this view. Comparison limits are
+`GET /api/enrich/runs/:id` supplies a single retained run summary for direct
+links, without loading logs or scanning intervening history pages. A missing
+run returns 404, distinct from a retained run whose timing has expired.
+`GET /api/enrich/performance?limit=3` supplies comparisons and timing summaries. Comparison limits are
 1–100. Its `comparisons` contain setup context and metrics; `runs` contains
 summaries for at most the latest 100 timing runs; `window` describes the cohort.
 Aggregation reads at most 10,100 photo rows and 60,100 requests, accounting for

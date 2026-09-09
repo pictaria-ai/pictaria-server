@@ -206,9 +206,11 @@ data/               all persistent state (gitignored): enrichment.sqlite,
   It groups effective inference identity with profile and host context, pools
   valid accepted-request samples, and separately weights completed-run
   throughput by total elapsed time. `public/enrich-performance.js` and its
-  stylesheet own the comparison panel and native photo-details dialog; the
-  existing Enrich page delegates run-summary decoration and refreshes to that
-  module. No persistent schema or settings contract changes are needed.
+  stylesheet own comparisons and the native run/photo-details dialog.
+  `public/enrich-performance.html` and `enrich-performance-page.js` own the
+  dedicated Runs / Compare setups page, paginated history, and direct run
+  links. Enrich and Settings link to this page; Enrich no longer fetches
+  comparison aggregates. No persistent schema or settings contract changes are needed.
 - **Enrich timing**: `enrich/timing.mjs` owns compact execution/request records
   and their schema, appended to the base enrichment schema by the repository.
   Schema 10 / persistent-state contract 12 adds timing tables and a nullable

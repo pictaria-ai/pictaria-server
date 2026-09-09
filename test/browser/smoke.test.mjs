@@ -638,7 +638,8 @@ test('admin UI smoke: gate, Insights lens, Curate, Smart Albums', { timeout: 120
       return card?.textContent ?? '';
     })()`);
     assert.match(runComparison, /local_lmstudio · smoke-vision-model · host: Smoke inference host/);
-    assert.match(runComparison, /End-to-end: 6\.00 photos\/min · 10\.0 sec\/photo · over 12 photos/);
+    assert.doesNotMatch(runComparison, /End-to-end:|Typical successful request:/);
+    assert.match(runComparison, /View details/);
     // Configuration details use the same authenticated route as the UI;
     // neither credentials nor large prompt bodies ride the history feed.
     const unauthenticated = await fetch(`${server.base}/api/enrich/configurations/${SAVED_CONFIGURATION.id}`);
@@ -659,7 +660,7 @@ test('admin UI smoke: gate, Insights lens, Curate, Smart Albums', { timeout: 120
         .find((item) => item.textContent.includes('Seeded one-photo run'));
       return card?.textContent ?? '';
     })()`);
-    assert.match(onePhotoComparison, /End-to-end: 150 photos\/min · 0\.40 sec\/photo · over 1 photo/);
+    assert.match(onePhotoComparison, /View details/);
     await page.evaluate(`(() => {
       const card = [...document.querySelectorAll('#runsList .qitem')]
         .find((item) => item.textContent.includes('Seeded failed run'));

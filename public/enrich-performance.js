@@ -1,6 +1,6 @@
 /* Enrich timing presentation. Result state, request outcomes, and timing
  * availability stay distinct; all external labels enter through textContent. */
-function createEnrichPerformance({ api, changed = () => {} }) {
+function createEnrichPerformance({ api, changed = () => {}, closed = () => {} }) {
   const el = id => document.getElementById(id);
   const node = (tag, text, cls) => { const n = document.createElement(tag); if (text != null) n.textContent = text; if (cls) n.className = cls; return n; };
   const number = n => Number(n ?? 0).toLocaleString();
@@ -14,8 +14,8 @@ function createEnrichPerformance({ api, changed = () => {} }) {
   const plural = (n, singular, multiple = `${singular}s`) => `${number(n)} ${n === 1 ? singular : multiple}`;
   const button = (text, action) => { const b = node('button', text, 'p-btn quiet'); b.type = 'button'; b.addEventListener('click', action); return b; };
   const date = value => { const d = new Date(value); return Number.isFinite(d.getTime()) ? d.toLocaleDateString() : 'unknown date'; };
-  const providerName = value => ({ local_lmstudio: 'LM Studio', local_ollama: 'Ollama (local)', cloud_ollama: 'Ollama (cloud)', venice: 'Venice', openai: 'OpenAI', openrouter: 'OpenRouter', openai_compatible: 'OpenAI-compatible' }[value] ?? value);
-  let returnFocus = null; let returnRunId = null;
+  const providerName = value => ({ local_lmstudio: 'LM Studio', local_ollama: 'Ollama (local)', cloud_ollama: 'Ollama (cloud)', venice: 'Venice', cloud_openai: 'OpenAI', openai: 'OpenAI', openrouter: 'OpenRouter', openai_compatible: 'OpenAI-compatible' }[value] ?? value);
+  let returnFocus = null; let returnRunId = null; let returnJobId = null;
   let snapshot = null; let showAll = false; let loading = false; let generation = 0; let controller = null;
   const dialog = el('photoTimingDialog');
   dialog.addEventListener('close', () => {
@@ -25,6 +25,7 @@ function createEnrichPerformance({ api, changed = () => {} }) {
       generation++; controller?.abort();
       const target = returnFocus?.isConnected ? returnFocus : [...document.querySelectorAll('.run-photo-details')].find(b => b.dataset.timingRunId === String(returnRunId));
       target?.focus({ preventScroll: true });
+      closed(returnJobId);
     }
   });
   el('photoTimingClose').addEventListener('click', () => dialog.close());
@@ -41,7 +42,7 @@ function createEnrichPerformance({ api, changed = () => {} }) {
     const details = node('details', null, 'performance-more'); details.append(node('summary', 'More metrics'));
     const content = node('div', null, 'performance-explanation');
     content.append(node('p', `Successful requests: median ${duration(m.latency.medianMs)}; average ${duration(m.latency.meanMs)}. Based on ${plural(m.latency.sampleCount, 'measured, accepted request')}.`));
-    content.append(node('p', `${requestSummary(m)}. ${plural(m.retries, 'retry request')} among ${plural(m.requests, 'retained request')}. ${plural(m.invalidResponses, 'invalid response')} included in other failures.`));
+    content.append(node('p', [requestSummary(m) + '.', `${plural(m.requests, 'retained request')}.`, m.retries ? `${plural(m.retries, 'retry request')}.` : null, m.invalidResponses ? `${plural(m.invalidResponses, 'invalid response')} included in other failures.` : null].filter(Boolean).join(' ')));
     content.append(node('p', `These requests came from ${plural(m.retainedPhotos, 'retained photo execution')} across ${plural(m.runCount, 'run')}. ${number(m.failedRuns)} failed, ${number(m.cancelledRuns)} cancelled, ${number(m.interruptedRuns)} interrupted, ${number(m.activeRuns)} in progress. Each photo can have several requests.`));
     content.append(node('p', m.throughputRuns
       ? `Overall throughput: ${rate(m.photosPerMinute)} successful photos/min; ${m.secondsPerPhoto === null ? 'seconds per successful photo unavailable (no successes)' : `${rate(m.secondsPerPhoto)} seconds per successful photo`}. ${plural(m.successfulPhotos, 'successful photo')} over ${duration(m.elapsedMs)} in ${plural(m.throughputRuns, 'completed run')}. Includes download, preparation, failures, and retry waits.`
@@ -87,32 +88,48 @@ function createEnrichPerformance({ api, changed = () => {} }) {
       el('performanceRetry').hidden = false;
     } finally { loading = false; el('performanceAll').disabled = false; }
   }
-  function decorateRun(card, run, actions) {
+  function runSummary(run) {
+    const summary = node('section', null, 'run-detail-summary');
+    summary.append(node('p', [providerName(run.provider), run.model, run.profile?.name,
+      run.inferenceHostLabel].filter(Boolean).join(' · '), 'performance-context'));
+    const started = new Date(run.startedAt);
+    if (run.startedAt && Number.isFinite(started.getTime())) summary.append(node('p', started.toLocaleString(), 'performance-context'));
+    const c = run.counters;
+    const elapsed = run.startedAt && run.finishedAt ? new Date(run.finishedAt) - new Date(run.startedAt) : null;
+    summary.append(node('p', [run.status === 'finished' ? 'Completed' : outcomeLabel(run.status),
+      c ? `${plural(c.succeeded ?? 0, 'successful photo')} · ${plural(c.failed ?? 0, 'failed photo')}` : 'Photo counts unavailable',
+      Number.isFinite(elapsed) && elapsed >= 0 ? `${duration(elapsed)} total` : 'Duration unavailable'].join(' · ')));
     const data = snapshot?.runs.find(r => r.timingRunId === run.timingRunId);
     if (data) {
       const m = data.metrics;
-      card.append(node('div', `${m.latency.sampleCount ? `Typical successful request: ${duration(m.latency.medianMs)}. ` : ''}${requestSummary(m)}.`, 'detail performance-run-summary'));
-      if (m.truncated) card.append(node('div', 'Partial timing history', 'performance-warning'));
-      card.append(metricDetails(m));
-    } else {
-      card.append(node('div', run.timingRunId ? 'Timing summary unavailable' : 'Detailed timing was not recorded for this run.', 'detail'));
+      summary.append(node('p', `${m.latency.sampleCount ? `Typical successful request: ${duration(m.latency.medianMs)}. ` : ''}${requestSummary(m)}.`, 'performance-run-summary'));
+      summary.append(metricDetails(m));
+    } else if (run.timingRunId) summary.append(node('p', 'Timing summary unavailable', 'provider-note'));
+    // Historical runs still have their original whole-run rate, even if their
+    // request timings were never recorded or have expired.
+    if (Number.isFinite(run.throughput?.photosPerMinute)) {
+      summary.append(node('p', `Run throughput: ${rate(run.throughput.photosPerMinute)} photos/min · ${rate(run.throughput.secondsPerPhoto)} sec/photo · ${plural(run.throughput.successfulPhotos, 'successful photo')}. Includes downloads, failures, and retry waits.`, 'provider-note'));
     }
-    if (run.timingRunId) {
-      const b = button('View photo details', () => void openPhotos(run, b)); b.classList.add('run-photo-details'); b.dataset.timingRunId = String(run.timingRunId); actions.prepend(b);
-    }
+    if (run.error) summary.append(node('p', String(run.error), 'performance-warning'));
+    return summary;
   }
   const outcomeLabel = value => ({ succeeded: 'Enriched', failed: 'Failed', cancelled: 'Cancelled', interrupted: 'Interrupted', running: 'In progress',
     accepted: 'Successful response', timeout: 'Timed out', http_error: 'HTTP error', transport_error: 'Connection error', invalid_response: 'Invalid response',
     response_received: 'Response received; not validated', other_error: 'Other error' }[value] ?? value);
 
   async function openPhotos(run, opener) {
-    returnFocus = opener; returnRunId = run.timingRunId;
+    returnFocus = opener; returnRunId = run.timingRunId; returnJobId = run.id;
     const seq = ++generation; controller?.abort(); controller = new AbortController();
     const signal = controller.signal;
     el('photoTimingTitle').textContent = run.title || 'Photo details';
-    const body = el('photoTimingBody'); body.replaceChildren();
+    const body = el('photoTimingBody'); body.replaceChildren(runSummary(run));
     el('photoTimingNote').textContent = 'Photo time includes downloading, retries, and saving results. Expand a photo to inspect its requests.';
-    dialog.showModal(); el('photoTimingClose').focus();
+    if (!dialog.open) dialog.showModal(); el('photoTimingClose').focus();
+    if (!run.timingRunId) {
+      body.append(node('p', 'Detailed timing was not recorded for this run.', 'provider-note'));
+      return;
+    }
+    body.append(node('h3', 'Photos', 'timing-section-title'));
     let cursor = null; let pending = false;
     const list = node('div', null, 'timing-photo-list'); const message = node('div', 'Loading photos…', 'provider-note');
     const more = button('Load more photos', () => void load()); more.hidden = true; body.append(message, list, more);
@@ -177,5 +194,5 @@ function createEnrichPerformance({ api, changed = () => {} }) {
     return row;
   }
   function validPhotoDuration(value) { return typeof value === 'number' && Number.isFinite(value) && value >= 0; }
-  return { refresh, decorateRun };
+  return { refresh, openRun: openPhotos, close: () => { if (dialog.open) dialog.close(); } };
 }

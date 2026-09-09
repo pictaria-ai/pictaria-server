@@ -1,0 +1,72 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Pictaria — Enrich performance</title>
+  <link rel="icon" type="image/png" sizes="32x32" href="/brand/favicon-32.png">
+  <script src="/theme.js"></script>
+  <script src="/auth-gate.js" defer></script>
+  <script src="/nav.js" defer></script>
+  <link rel="stylesheet" href="/pictaria.css">
+  <link rel="stylesheet" href="/enrich-performance.css">
+</head>
+<body>
+  <header class="p-topbar">
+    <a class="p-brand" href="/">
+      <img src="/brand/mark-128.png" alt="">
+      <img class="p-brand-word" src="/brand/wordmark.png" alt="Pictaria">
+      <span class="p-brand-service">Enrich</span>
+    </a>
+    <span class="p-supporter-slot" aria-live="polite"></span>
+    <nav class="p-nav">
+      <a href="/insights.html">Insights</a>
+      <a href="/enrich.html" class="active">Enrich</a>
+      <a href="/curate.html">Curate</a>
+      <a href="/albums.html">Albums</a>
+      <a href="/metrics.html">Frame</a>
+      <a href="/remote.html">Remote</a>
+    </nav>
+    <div class="p-grow"></div>
+    <span id="connStatus" class="p-chip p-conn" hidden><span class="p-dot ok"></span> Connected</span>
+    <a class="p-gear" href="/settings.html" title="Settings" aria-label="Settings">&#9881;</a>
+  </header>
+
+  <main class="performance-page">
+    <a class="performance-back" href="/enrich.html">← Enrich</a>
+    <div class="performance-page-heading"><h1>Enrich performance</h1><button id="refreshPerformance" class="p-btn quiet" type="button">Refresh</button></div>
+    <p class="performance-intro">See what happened in your runs and how your setups compare.</p>
+    <nav class="performance-views" aria-label="Performance views">
+      <a id="runsViewLink" href="#runs" aria-current="page">Runs</a>
+      <a id="compareViewLink" href="#compare">Compare setups</a>
+    </nav>
+    <section id="runsView" aria-labelledby="runsTitle">
+      <h2 id="runsTitle" class="performance-section-title">Runs</h2>
+      <p class="provider-note">Open a run to see its results, photo timings, and individual requests.</p>
+      <div id="runsError" class="provider-note" role="status"></div>
+      <button id="runsRetry" class="p-btn quiet" hidden>Try again</button>
+      <div class="performance-table-wrap">
+        <table class="performance-runs"><caption class="p-sr-only">Enrichment run history, most recent first</caption>
+          <thead><tr><th scope="col">Run</th><th scope="col">Setup</th><th scope="col">Photo outcomes</th><th scope="col">Total time</th></tr></thead>
+          <tbody id="performanceRuns"></tbody>
+        </table>
+      </div>
+      <div class="performance-paging"><span id="runsCount" class="provider-note" role="status">Loading runs…</span><button id="runsMore" class="p-btn quiet" hidden>Load more runs</button></div>
+    </section>
+    <section id="compareView" aria-labelledby="performanceTitle" hidden>
+      <div class="performance-heading"><h2 id="performanceTitle">Compare setups</h2><div class="p-grow"></div><button id="performanceAll" class="p-btn quiet" hidden>Show all comparisons</button></div>
+      <p class="provider-note">Typical request time measures successful responses. Timeouts and failures explain reliability; overall throughput includes downloads and retry waits.</p>
+      <div id="performanceError" class="provider-note" role="status"></div><button id="performanceRetry" class="p-btn quiet" hidden>Try again</button>
+      <div id="performanceList" class="performance-list"><div class="provider-note">Loading performance…</div></div>
+      <p id="performanceWindow" class="provider-note"></p>
+    </section>
+  </main>
+  <dialog id="photoTimingDialog" class="timing-dialog" aria-labelledby="photoTimingTitle" aria-describedby="photoTimingNote">
+    <div class="timing-dialog-header"><h2 id="photoTimingTitle">Run details</h2><button id="photoTimingClose" class="p-btn quiet">Close</button></div>
+    <p id="photoTimingNote" class="provider-note timing-dialog-note"></p>
+    <div id="photoTimingBody" class="timing-dialog-body"></div>
+  </dialog>
+  <script src="/enrich-performance.js"></script>
+  <script src="/enrich-performance-page.js"></script>
+</body>
+</html>
