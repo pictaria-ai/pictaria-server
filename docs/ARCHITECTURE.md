@@ -214,6 +214,14 @@ data/               all persistent state (gitignored): enrichment.sqlite,
   links. Enrich and Settings link to this page; Enrich no longer fetches
   comparison aggregates. `public/enrich-format.js` shares readable provider,
   status, date, duration, and rate formatting between these views. No persistent schema or settings contract changes are needed.
+- **Automatic AI tag sync**: `enrich/aiTagSyncStore.mjs` owns the schema-12
+  asset-keyed outbox and persistent lane backoff. The runner enqueues in the
+  successful-photo transaction. `aiTagSync.mjs` reuses the review service's
+  reconciliation/verification in bounded slices, with generation-checked
+  acknowledgement. `tagWriteCoordinator.mjs` serializes AI, Curate and direct
+  favorite/never-show tag work, prioritizing human requests; AI retries have
+  separate storage and do not fill or sleep inside the decision queue. Enrich
+  exposes status and retry. See [Enrich](ENRICH.md#the-pipeline).
 - **Enrich timing**: `enrich/timing.mjs` owns compact execution/request records
   and their schema, appended to the base enrichment schema by the repository.
   Schema 10 / persistent-state contract 12 adds timing tables and a nullable

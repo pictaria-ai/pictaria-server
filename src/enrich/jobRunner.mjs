@@ -11,12 +11,13 @@ import { configuredSecrets, sanitizeDiagnostic } from '../diagnostics.mjs';
 const LOG_TAIL_LIMIT = 500;
 
 export class EnrichJobRunner {
-  constructor({ repo, immich, taxonomy, config, profiles = null }) {
+  constructor({ repo, immich, taxonomy, config, profiles = null, onTagsQueued = () => {} }) {
     this.repo = repo;
     this.immich = immich;
     this.taxonomy = taxonomy;
     this.config = config;
     this.profiles = profiles;
+    this.onTagsQueued = onTagsQueued;
     this.state = idleState();
     this.runPromise = null;
     this.runLifecycle = null;
@@ -230,6 +231,7 @@ export class EnrichJobRunner {
         ...fixedOptions,
         maxFailuresPerAsset: fixedOptions.retryFailureLimited ? 0 : this.config.maxFailuresPerAsset,
         listForReview: fixedOptions.sendToCurate,
+        syncAiTags: true,
         captionWriteback: Boolean(this.config.captionWriteback),
       },
     });
@@ -495,6 +497,8 @@ export class EnrichJobRunner {
         retryFailureLimited: this.state.options.retryFailureLimited,
         imageSource: this.state.options.imageSource,
         promptVersion: this.state.promptVersion,
+        syncAiTags: configuration.snapshot.processing.syncAiTags === true,
+        onTagsQueued: this.onTagsQueued,
         applyTags: false,
         dryRun: true,
         listForReview: this.state.options.sendToCurate,

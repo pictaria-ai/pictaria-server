@@ -47,7 +47,7 @@ test('a complete legacy installation upgrades, restarts, backs up, and restores 
     const sourceConfig = fixtureConfig(sourceRoot);
 
     const first = await openInstallation(sourceConfig, 'initialize');
-    assert.deepEqual(first.enrichmentMigration.applied, [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11]);
+    assert.deepEqual(first.enrichmentMigration.applied, [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12]);
     await assertRepresentativeState(first, sourceConfig);
 
     const migratedDefault = first.profiles.activeProfile();
@@ -69,6 +69,12 @@ test('a complete legacy installation upgrades, restarts, backs up, and restores 
     const photo = first.enrichment.timings.photos(timingRun.id).items[0];
     assert.equal(first.enrichment.timings.attempts(photo.id).items[0].outcome, 'accepted');
 
+
+    // New automatic tag-sync intent and its retry state survive restart and
+    // the real online-backup / clean-volume restore path below.
+    const syncRun = first.enrichment.db.prepare("SELECT MAX(id) id FROM processing_runs WHERE asset_id='timing-fixture' AND status='succeeded'").get();
+    first.enrichment.aiTagSync.enqueue('timing-fixture', syncRun.id);
+    first.enrichment.aiTagSync.defer('Synthetic Immich outage', 2000000000000);
 
     const migratedSettings = readFileSync(sourceConfig.settingsPath, 'utf8');
     const firstSnapshot = semanticSnapshot(first);
@@ -134,7 +140,7 @@ test('contract 10 upgrade snapshots queue pins before clearing them and retains 
     writeFileSync(config.persistentState.inventoryPath, JSON.stringify(inventory));
 
     const upgraded = await openInstallation(config, 'verify');
-    assert.equal(upgraded.inventory.upgrade.stateVersion, 14);
+    assert.equal(upgraded.inventory.upgrade.stateVersion, 15);
     assert.deepEqual(semanticSnapshot(upgraded), before);
     assert.equal(upgraded.profiles.activeProfile().id, travel.id);
     assert.equal(upgraded.enrichment.db.prepare('SELECT COUNT(*) AS n FROM enrich_queue WHERE profile_revision_id IS NOT NULL').get().n, 0);
@@ -191,6 +197,29 @@ function createDatabaseFromSql(databasePath, fixturePath) {
   }
 }
 
+test('contract 14 upgrade snapshots schema 11 before tag sync and does not backfill old photos', async () => {
+  const workspace = mkdtempSync(join(tmpdir(), 'pictaria-ai-sync-recovery-'));
+  try {
+    const root = join(workspace, 'source'); materializeLegacyInstallation(root);
+    const config = fixtureConfig(root); const installed = await openInstallation(config, 'initialize');
+    installed.enrichment.db.exec('DROP TABLE ai_tag_sync; DROP TABLE ai_tag_sync_state; PRAGMA user_version = 11;');
+    closeInstallation(installed);
+    const inventory = JSON.parse(readFileSync(config.persistentState.inventoryPath, 'utf8'));
+    inventory.upgrade.stateVersion = 14; writeFileSync(config.persistentState.inventoryPath, JSON.stringify(inventory));
+    const upgraded = await openInstallation(config, 'verify');
+    assert.deepEqual(upgraded.enrichmentMigration.applied, [12]);
+    assert.equal(upgraded.enrichment.aiTagSync.status().pending, 0);
+    const snapshotDir = join(config.backup.dir, upgraded.inventory.upgrade.recoveryPoint.snapshotName);
+    const snapshot = new DatabaseSync(join(snapshotDir, 'enrichment.sqlite'), { readOnly: true });
+    try {
+      assert.equal(getUserVersion(snapshot), 11);
+      assert.equal(snapshot.prepare("SELECT name FROM sqlite_master WHERE name='ai_tag_sync'").get(), undefined);
+    } finally { snapshot.close(); }
+    assert.equal(upgraded.inventory.upgrade.stateVersion, 15);
+    closeInstallation(upgraded);
+  } finally { rmSync(workspace, { recursive: true, force: true }); }
+});
+
 test('contract 13 upgrade snapshots version 6 settings and history before adopting retention settings', async () => {
   const workspace = mkdtempSync(join(tmpdir(), 'pictaria-retention-recovery-'));
   try {
@@ -205,7 +234,7 @@ test('contract 13 upgrade snapshots version 6 settings and history before adopti
     const inventory = JSON.parse(readFileSync(config.persistentState.inventoryPath, 'utf8'));
     inventory.upgrade.stateVersion = 13; writeFileSync(config.persistentState.inventoryPath, JSON.stringify(inventory));
     const upgraded = await openInstallation(config, 'verify');
-    assert.equal(upgraded.inventory.upgrade.stateVersion, 14);
+    assert.equal(upgraded.inventory.upgrade.stateVersion, 15);
     assert.equal(JSON.parse(readFileSync(config.settingsPath, 'utf8')).version, 7);
     assert.equal(config.enrichHistoryRuns, 100); assert.equal(config.enrichHistoryLogs, 100);
     const snapshotDir = join(config.backup.dir, upgraded.inventory.upgrade.recoveryPoint.snapshotName);
@@ -232,7 +261,7 @@ test('contract 12 upgrade saves schema-10 history before introducing discovery',
     const inventory = JSON.parse(readFileSync(config.persistentState.inventoryPath, 'utf8'));
     inventory.upgrade.stateVersion = 12; writeFileSync(config.persistentState.inventoryPath, JSON.stringify(inventory));
     const upgraded = await openInstallation(config, 'verify');
-    assert.deepEqual(upgraded.enrichmentMigration.applied, [11]);
+    assert.deepEqual(upgraded.enrichmentMigration.applied, [11, 12]);
     assert.equal(upgraded.enrichment.listJobRuns()[0].title, 'Before discovery');
     assert.equal(upgraded.enrichment.db.prepare('SELECT COUNT(*) n FROM enrich_inventory').get().n, 0);
     const snapshotPath = join(config.backup.dir, upgraded.inventory.upgrade.recoveryPoint.snapshotName, 'enrichment.sqlite');
@@ -259,7 +288,7 @@ test('contract 11 upgrade saves a schema-9 recovery point before introducing tim
     const inventory = JSON.parse(readFileSync(config.persistentState.inventoryPath, 'utf8'));
     inventory.upgrade.stateVersion = 11; writeFileSync(config.persistentState.inventoryPath, JSON.stringify(inventory));
     const upgraded = await openInstallation(config, 'verify');
-    assert.deepEqual(upgraded.enrichmentMigration.applied, [10, 11]);
+    assert.deepEqual(upgraded.enrichmentMigration.applied, [10, 11, 12]);
     assert.equal(upgraded.enrichment.listJobRuns()[0].timingRunId, null);
     const snapshotDir = join(config.backup.dir, upgraded.inventory.upgrade.recoveryPoint.snapshotName);
     closeInstallation(upgraded);
@@ -351,6 +380,8 @@ function semanticSnapshot(installation) {
     queue: installation.enrichment.queuePage().items,
     settingsVersion: JSON.parse(readFileSync(installation.settings.filePath, 'utf8')).version,
     enrichmentVersion: getUserVersion(installation.enrichment.db),
+    aiTagSync: installation.enrichment.db.prepare('SELECT * FROM ai_tag_sync ORDER BY asset_id').all(),
+    aiTagSyncState: installation.enrichment.aiTagSync.status(),
     assetCount: installation.enrichment.db.prepare('SELECT COUNT(*) AS n FROM assets').get().n,
     tagCount: installation.enrichment.db.prepare('SELECT COUNT(*) AS n FROM asset_tags').get().n,
     overrideCount: installation.enrichment.db.prepare('SELECT COUNT(*) AS n FROM manual_overrides').get().n,
