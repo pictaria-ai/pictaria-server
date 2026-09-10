@@ -50,6 +50,7 @@ test('Enrich-only success survives tag outage and the Enrich retry button syncs 
   const result = await page.evaluate(`(async()=>{const r=await fetch('/api/enrich/run',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({provider:'local_lmstudio',assetIds:['${assetId}'],sendToCurate:false})});return {status:r.status,body:await r.json()}})()`);
   assert.equal(result.status, 202, JSON.stringify(result));
   await page.waitFor('document.getElementById("tagSyncStatus").textContent.includes("1 pending") && !document.getElementById("tagSyncRetry").hidden');
+  assert.match(await page.evaluate('document.getElementById("tagSyncError").textContent'), /^Immich:/);
   assert.equal(inferenceCalls, 1);
   const succeeded = await page.evaluate("(async()=>{const s=await(await fetch('/api/enrich/status')).json();return s.liveCounters.succeeded})()");
   assert.equal(succeeded, 1);

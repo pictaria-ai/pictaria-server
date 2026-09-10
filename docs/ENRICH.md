@@ -62,8 +62,9 @@ bounded AI slices (at most 10 photos). It does not interrupt a network request
 already in flight. AI backoff never holds the coordinator or consumes the
 Curate backlog allowance. Shared verification checks both additions and stale
 AI-tag removals, with one settle delay per slice rather than per photo.
-Systemic failures pause the AI lane for 30 seconds; photo-specific failures
-are parked after five attempts and can be retried from Enrich.
+Any failed sync slice pauses the AI lane for 30 seconds. Systemic failures
+do not consume individual photo attempts; photo-specific failures are parked
+after five attempts and can be retried from Enrich.
 
 New saved run configurations record `processing.syncAiTags: true`. The older
 `applyTags`/`dryRun` fields describe only the separate legacy batch-end write

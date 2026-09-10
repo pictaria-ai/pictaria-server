@@ -10,7 +10,7 @@ All notable changes to Pictaria Server are documented here. This project follows
 - Every successfully enriched photo now queues its AI tags for Immich,
   regardless of Send to Curate. Tag-based albums/searches can include photos
   before review; human `frame/*` decisions and unrelated tags remain intact.
-  Enrich shows pending/failed tag sync and retry. A separate durable backlog
+  Enrich shows pending/failed tag sync and retry, with errors labeled Immich. A separate durable backlog
   preserves results through outages without filling Curate's decision queue;
   coordinated tag writes prioritize human actions. Pictaria reconciles its
   `ai/*` namespace, including replacing manual tags within that prefix.

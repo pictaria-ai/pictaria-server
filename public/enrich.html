@@ -454,7 +454,8 @@
         el('tagSyncStatus').textContent = !sync ? 'Sync status unavailable.'
           : `${sync.paused ? 'Paused — Enrich is turned off. ' : ''}${sync.pending} pending · ${sync.failed} failed`;
         el('tagSyncError').hidden = !sync?.lastError;
-        el('tagSyncError').textContent = sync?.lastError || '';
+        el('tagSyncError').textContent = sync?.lastError
+          ? (/^Immich\b/i.test(sync.lastError) ? sync.lastError : `Immich: ${sync.lastError}`) : '';
         el('tagSyncRetry').hidden = !sync || (!sync.failed && !sync.lastError);
         el('tagSyncRetry').disabled = !!sync?.paused;
         el('connStatus').hidden = false;

@@ -4,6 +4,7 @@ import { createServer } from 'node:http';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { terminateTestProcess } from './processCleanup.mjs';
 
 // Zero-dependency headless-browser harness: system Chrome/Chromium driven
 // over raw CDP with Node's builtin WebSocket client. No npm packages — the
@@ -155,24 +156,15 @@ export async function launchChrome() {
   let stopPromise;
   function stopChrome() {
     stopPromise ??= (async () => {
-      const parentRunning = child.exitCode === null && child.signalCode === null;
-      const parentExit = parentRunning
-        ? new Promise((resolveExit) => child.once('exit', resolveExit))
-        : null;
-      try {
-        if (hasProcessGroup) {
-          process.kill(-child.pid, 'SIGKILL');
-        } else if (parentRunning) {
-          child.kill('SIGKILL');
-        }
-      } catch (error) {
-        if (error?.code !== 'ESRCH') {
-          throw error;
-        }
-      }
-      if (parentExit) {
-        await parentExit;
-      }
+      await terminateTestProcess(child, {
+        kill() {
+          if (hasProcessGroup) {
+            process.kill(-child.pid, 'SIGKILL');
+          } else if (child.exitCode === null && child.signalCode === null) {
+            child.kill('SIGKILL');
+          }
+        },
+      });
       // Chrome's Linux subprocesses can finish touching profile files just
       // after the parent exits. Node's bounded ENOTEMPTY retry handles that
       // documented rimraf race without hiding a persistent cleanup failure.
