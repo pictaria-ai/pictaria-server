@@ -201,10 +201,11 @@ light even on remote links.
 
 ## Starting runs
 
-- **Library sweep** — the Enrich page's *Start*: scans newest-first,
-  analyzes up to the *Photos* budget (skips don't consume the budget).
-  *Only unenriched* (default on) skips photos that already have a
-  successful run from any model.
+- **Library sweep** — the Enrich page's *Start*: selects newest-first from
+  Enrich's local inventory and analyzes up to the *Photos* budget. SQL excludes
+  covered, discarded, and failure-limited photos before applying that budget.
+  *Only unenriched* (default on) excludes photos with a successful run from
+  any model. Each selected photo is checked against Immich before processing.
 - **Daily Enrich** — an optional set-it-and-forget-it library sweep under
   **Settings → Enrich**. Choose a local time and daily photo budget; Pictaria
   uses the provider currently selected on the Enrich page, analyzes only
@@ -214,10 +215,59 @@ light even on remote links.
   queued run already in progress keeps priority and the daily sweep waits
   quietly. Enabling the schedule after today's chosen time starts that day's
   catch-up promptly. Each attempt appears in **Recent runs** as `Daily Enrich`,
-  including a zero-photo run when the library was already caught up. A run
+  including a zero-photo run when no eligible photos were found. A run
   that starts but fails is recorded there and waits until the next day rather
   than retrying automatically; after correcting the problem, start a manual
   run if you do not want to wait.
+
+### Library discovery and freshness
+
+The first budgeted sweep builds an Enrich-owned inventory in 1,000-record
+metadata pages. It saves each page and publishes only after finishing the
+pass. A restart, cancellation, outage, or bounded incomplete pass can resume
+from its checkpoint. It does not download images or call the AI provider
+during inventory construction. The existing Enrich database holds this
+rebuildable cache separately from processing history and human decisions.
+
+Later sweeps query changes with explicit timeline, archive, and hidden
+visibility partitions and include retained trash records, then compute
+eligibility locally. This works with the inspected v2/v3 search defaults
+without requiring locked-library permissions. Only timeline images are
+processed, matching the previous library-search scope; this change introduces
+no new stack-child exclusion rule. Changing profiles keeps the inventory and
+re-evaluates history using the captured inference configuration.
+
+Each completed refresh advances from the largest source `updatedAt`, never
+from Pictaria's clock. The next incremental pass starts one millisecond later
+to avoid repeatedly reading a large import sharing the boundary timestamp.
+Late arrivals at that exact timestamp, silent access changes, and photos missed
+by mutable remote offset pagination are handled by a full reconciliation on
+the next sweep after 24 hours. This is eventual discovery, not a remote
+snapshot or an instant notification stream. Ordinary newer uploads are found
+by the next incremental pass even when their capture dates are old.
+
+Permanent deletions and locked/inaccessible transitions cannot all appear in
+search results. A burst of 100 consecutive rejected candidates starts a full
+catch-up within the same run. Rejected candidates do not consume the AI photo
+budget. Permission/server failures propagate instead of being recorded as
+confirmed deletions. Only one catch-up is attempted per run; continuing churn
+can still produce an explicit incomplete result.
+
+A refresh is bounded to 2,000 pages and ten minutes, with a checkpoint retained
+if either is reached. Candidate validation has a separate bound (at least
+10,000, or the requested photo budget plus 1,000). Exhaustion is reported in
+run history as **Library discovery is incomplete**, with instructions to run
+again; it is never reported as no remaining work. The log records scanned
+metadata, candidates, validations, and rejections. Very large/slow libraries
+may need another run to finish construction; Daily Enrich retains its existing
+once-per-day attempt policy. Discovery resumes the next time it is invoked.
+
+Changing the Immich URL or API key rebuilds the inventory, preserving Enrich
+history and human decisions. A database lease prevents concurrent inventory
+writers; a process killed without releasing it can delay a restart by up to
+five minutes. Explicit targeted queue/retry jobs keep their existing selection
+path. Low-level CLI calls with offsets or no photo budget retain their bounded
+metadata-window semantics.
 
 **“Enriched” is per effective inference configuration.** With *Only
 unenriched* on, any previous success covers a photo. With it off, Pictaria
@@ -284,8 +334,9 @@ captions, and search; existing human decisions remain authoritative.
 
 Enriching and reviewing are separate pipelines that compose. Every run has a
 **Send to Curate** option (on by default): photos join the Curate review
-queue as the run enriches them (photos that were already enriched count
-too). Photos that fail are never listed — they stay with the queued job and
+queue as the run enriches them. Library sweeps send only their new successes;
+they do not send the already-enriched library implicitly. Explicit targeted
+selections can still send existing results. Photos that fail are never listed — they stay with the queued job and
 enter Curate when a later run enriches them, so the review queue only ever
 holds photos with real AI signal. Turn the option off to enrich purely for
 tags, captions, and albums — Curate never hears about it.
@@ -754,10 +805,11 @@ Retries, failures, and incomplete timing retain their request details.
 Routine already-enriched photos are omitted from run outcome summaries and
 future per-photo logs. Discovery shows “Finding photos to enrich…” before
 processing starts; an empty completed selection is described without claiming
-the entire library is complete. Failure-limit and discarded counts remain
-explicit. Internal skip counters and metadata-window diagnostics are retained;
-existing saved logs are unchanged. This presentation does not optimize the
-underlying Immich metadata scan.
+the entire library is complete. Targeted runs retain explicit failure-limit
+and discarded counts; library discovery filters those candidates in SQL.
+Internal skip counters and discovery diagnostics are retained;
+existing saved logs are unchanged. Budgeted library sweeps now use the
+inventory discovery described above.
 
 The **Compare setups** view starts with the three most recently used setups; **Show all comparisons**
 includes every setup within the retained timing window (at most 100 runs).

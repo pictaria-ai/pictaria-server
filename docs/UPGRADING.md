@@ -282,6 +282,25 @@ revisions and the active choice live in enrichment.sqlite and are included
 in standard backups.
 
 
+## Enrich discovery (unreleased v1.2 work)
+
+Schema 11 / persistent-state contract 13 adds a rebuildable Enrich inventory,
+a staging table, and a checkpoint/lease record to enrichment.sqlite. Existing
+processing history, results, queues, profiles, and human decisions remain
+unchanged. No historical assets are assumed to form a complete inventory;
+the first budgeted library sweep constructs one from Immich.
+
+The standard pre-migration recovery point is created before this migration.
+Normal backups include both the published inventory and any saved in-progress
+scan. Resume uses the same source credentials; a URL/key change starts a fresh
+inventory without clearing enrichment history. A restored active lease can
+delay discovery for up to five minutes before it expires.
+
+Rollback requires the pre-upgrade snapshot and its matching older build. Do
+not run an older server directly against contract-13 state. The upgrade tests
+verify that a contract-12/schema-10 recovery snapshot contains neither the
+new tables nor changes to existing job history.
+
 ## Enrich timing (unreleased v1.2 work)
 
 Schema 10 / persistent-state contract 12 adds timing runs, photo executions,

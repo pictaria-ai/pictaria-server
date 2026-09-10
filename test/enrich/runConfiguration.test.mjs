@@ -329,7 +329,7 @@ test('v7 upgrade preserves successes as unknown identity, with no invented snaps
   db.close();
   const repo = new Repository(path);
   try {
-    assert.deepEqual(repo.initSchema().applied, [8, 9, 10]);
+    assert.deepEqual(repo.initSchema().applied, [8, 9, 10, 11]);
     const config = snapshot();
     assert.equal(repo.hasAnySuccessfulRun('a1'), true);
     assert.equal(repo.hasSuccessfulRun({ assetId: 'a1', ...config.runKey }), false);

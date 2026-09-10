@@ -7,6 +7,14 @@ All notable changes to Pictaria Server are documented here. This project follows
 
 ### Changed
 
+- Library sweeps and Daily Enrich select work from a resumable Enrich inventory,
+  avoiding repeated walks through already-enriched photos and the old 100k
+  discovery cliff. Refreshes track visibility/trash changes; stale candidate
+  bursts trigger reconciliation. Incomplete discovery keeps a checkpoint and
+  reports a failure rather than claiming the library is caught up.
+- Send to Curate on a library sweep adds only that run's successful photos.
+  Explicit targeted selections can still send previously enriched results.
+
 - Enrich performance labels median request times explicitly instead of using
   “Typical,” with a short median/average explanation in run details.
 

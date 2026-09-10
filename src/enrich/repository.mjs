@@ -8,6 +8,8 @@ import { preparePrivateDatabasePath, restrictPrivateDatabaseModes } from '../pri
 import { sanitizeDiagnostic } from '../diagnostics.mjs';
 import { validateAssetBatch } from './assetBatch.mjs';
 import { EnrichTimingStore, TIMING_SCHEMA } from './timing.mjs';
+import { DISCOVERY_SCHEMA } from './discovery.mjs';
+import { matchingRun, workEligibility } from './eligibility.mjs';
 import { ACTION_RULES } from './reviewActions.mjs';
 import { canonicalJson, MAX_RUN_CONFIGURATION_BYTES } from './runConfiguration.mjs';
 
@@ -505,6 +507,7 @@ const ENRICH_MIGRATIONS = [
       db.exec('CREATE INDEX IF NOT EXISTS idx_job_runs_timing ON job_runs(timing_run_id)');
     },
   },
+  { version: 11, up(db) { db.exec(DISCOVERY_SCHEMA); } },
 ];
 
 // The review projection of a normalized output: exactly the fields the
@@ -600,7 +603,7 @@ export class Repository {
   }
 
   initSchema() {
-    const schemaSql = readFileSync(SCHEMA_PATH, 'utf8') + TIMING_SCHEMA;
+    const schemaSql = readFileSync(SCHEMA_PATH, 'utf8') + TIMING_SCHEMA + DISCOVERY_SCHEMA;
     const result = migrateDatabase(this.db, {
       schema: schemaSql,
       migrations: ENRICH_MIGRATIONS,
@@ -900,11 +903,15 @@ export class Repository {
   // successful, matching the runner's check order.
   assetIdsNeedingWork(assetIds, { runKey, skipAnySuccessful = true, maxFailuresPerAsset = 0 }) {
     const match = matchingRun(runKey);
-    const needy = new Set(assetIds.filter((id) => typeof id === 'string' && id));
+    const needy = new Set();
+    const eligibility = workEligibility({ runKey, skipAnySuccessful, maxFailuresPerAsset });
     const successful = new Set();
     const failureLimited = new Set();
     const discarded = new Set();
     for (const chunk of idChunks(assetIds)) {
+      for (const row of this.db.prepare(`WITH candidates AS (SELECT value AS asset_id FROM json_each(?))
+        SELECT i.asset_id FROM candidates i LEFT JOIN assets a ON a.asset_id=i.asset_id
+        WHERE ${eligibility.sql}`).all(JSON.stringify(chunk), ...eligibility.params)) needy.add(row.asset_id);
       const marks = chunk.map(() => '?').join(', ');
       // Human-discarded photos are dropped first and never run, but a
       // successful classification still wins below, matching the runner's
@@ -2644,17 +2651,4 @@ function sortKeysDeep(value) {
     );
   }
   return value;
-}
-
-// Modern executions always supply a content identity, so NULL legacy rows
-// never match them. The label path supports historical repository queries
-// and import tooling; it does not invent identity for old records.
-function matchingRun(runKey, prefix = '') {
-  if (runKey.inferenceId) {
-    return { sql: `${prefix}inference_id = ?`, params: [runKey.inferenceId] };
-  }
-  return {
-    sql: `${prefix}provider = ? AND ${prefix}model = ? AND ${prefix}prompt_version = ? AND ${prefix}taxonomy_version = ?`,
-    params: [runKey.provider, runKey.model, runKey.promptVersion, runKey.taxonomyVersion],
-  };
 }

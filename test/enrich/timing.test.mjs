@@ -248,7 +248,7 @@ test('schema 9 upgrades without inventing old timing, and the migration is resta
   db.exec("PRAGMA user_version = 9; INSERT INTO job_runs(title, provider, status, started_at, finished_at) VALUES ('Old', 'venice', 'finished', '2026-09-01', '2026-09-01');"); db.close();
   const repo = new Repository(path);
   try {
-    assert.deepEqual(repo.initSchema().applied, [10]);
+    assert.deepEqual(repo.initSchema().applied, [10, 11]);
     assert.equal(repo.listJobRuns()[0].timingRunId, null); assert.deepEqual(repo.timings.runs().items, []);
     assert.deepEqual(repo.initSchema().applied, []);
   } finally { repo.close(); }
