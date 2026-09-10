@@ -7,6 +7,10 @@ All notable changes to Pictaria Server are documented here. This project follows
 
 ### Changed
 
+- Performance run dialogs offer Copy for displayed details, compact photo rows,
+  and a visible Immich link explanation. Single-request photos omit duplicate
+  displayed durations; retries and differing request/total times stay explicit.
+
 - Enrich run summaries focus on photos processed, with explicit failure-limit
   and discard exceptions. Routine already-enriched counts and future per-photo
   skip log entries are omitted; diagnostic counters remain available. Discovery

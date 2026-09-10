@@ -20,17 +20,19 @@
 .timing-dialog-note { padding: 12px 18px 0; margin: 0; }
 .timing-dialog-body { padding: 12px 18px 18px; overflow-y: auto; min-height: 0; }
 .timing-photo-list { margin: 8px 0 12px; }
-.timing-photo { border-bottom: 1px solid var(--p-line); padding: 4px 0; }
-.timing-photo-heading { display: flex; align-items: center; gap: 10px; padding: 8px 0; }
+.timing-photo { border-bottom: 1px solid var(--p-line); padding: 8px 0; }
+.timing-photo-heading { display: flex; align-items: center; gap: 10px; padding: 0; }
 .timing-photo a { color: var(--p-ink); }
 .timing-photo-image { display: inline-flex; flex: none; }
 .timing-photo img { width: 48px; height: 48px; object-fit: cover; border-radius: 6px; flex: none; }
 .timing-photo-info { display: grid; min-width: 0; flex: 1; gap: 3px; }
 .timing-photo-info strong { font-size: 13px; overflow-wrap: anywhere; }
 .timing-photo-duration { font-size: 13px; font-variant-numeric: tabular-nums; text-align: right; max-width: 100px; }
-.timing-attempts { margin: 2px 0 12px 58px; font-size: 12px; }
-.timing-attempts ol { padding-left: 20px; list-style: none; padding-inline-start: 0; }
-.timing-attempts li { padding: 5px 0; line-height: 1.5; overflow-wrap: anywhere; }
+.timing-attempts { margin: 0; font-size: 12px; }
+.timing-attempts .provider-note:empty, .timing-attempts ol:empty { display: none; }
+.timing-attempts p { margin: 2px 0; }
+.timing-attempts ol { margin: 0; padding: 0; list-style: none; }
+.timing-attempts li { padding: 1px 0; line-height: 1.5; overflow-wrap: anywhere; }
 @media (max-width: 600px) {
   .performance-values { grid-template-columns: 1fr; gap: 10px; }
   .performance-values > div { grid-template-columns: 1fr auto; column-gap: 12px; }

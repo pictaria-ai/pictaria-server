@@ -15,7 +15,7 @@ test('Enrich compares setups and opens paginated photo/request details with hone
   const repo = new Repository(join(dir, 'enrichment.sqlite')); repo.initSchema();
   for (let i = 0; i < 21; i++) repo.recordJobRun({ title: `Older run ${i}`, provider: 'venice', status: 'finished', counters: { succeeded: 0, analyzed: 0, failed: 0 }, startedAt: '2026-08-01T12:00:00Z', finishedAt: '2026-08-01T12:00:01Z' });
   seedPerformanceRun(repo, { model: 'Earlier setup', photos: [{ outcome: 'failed', requests: [{ outcome: 'timeout', ms: 60000 }] }] });
-  seedPerformanceRun(repo, { model: 'Second setup', title: 'Exceptions', status: 'cancelled', skipped: 200, failureLimited: 2, discarded: 1 }); seedPerformanceRun(repo, { model: 'Third setup', title: 'Already covered', photos: [], skipped: 25 });
+  seedPerformanceRun(repo, { model: 'Second setup', title: 'Exceptions', photos: [{ms: 8000, requests: [{outcome: 'accepted', ms: 8000}]}], status: 'cancelled', skipped: 200, failureLimited: 2, discarded: 1 }); seedPerformanceRun(repo, { model: 'Third setup', title: 'Already covered', photos: [], skipped: 25 });
   const latest = seedPerformanceRun(repo, { title: 'Travel photos', elapsedMs: 1800000, model: 'Vision-model-with-a-long-name-that-stays-readable-on-a-narrow-phone-screen', provider: 'venice',
     photos: [
       { filename: '<img src=x onerror=alert(1)>.jpg', ms: 73000, requests: [{ outcome: 'timeout', ms: 60000 }, { outcome: 'accepted', ms: 8000 }] },
@@ -79,6 +79,23 @@ test('Enrich compares setups and opens paginated photo/request details with hone
   await openRun('Exceptions');
   await page.waitFor('document.querySelectorAll(".timing-photo").length === 1');
   assert.match(await page.evaluate('document.querySelector(".run-detail-summary").textContent'), /2 at failure limit · 1 discarded/);
+  assert.equal(await page.evaluate('document.querySelector(".timing-photo ol").children.length'), 0);
+  assert.equal(await page.evaluate('document.querySelector(".timing-photo").innerText.match(/8 s/g).length'), 1);
+  assert.ok(await page.evaluate('document.querySelector(".timing-photo").getBoundingClientRect().height <= 80'));
+  assert.match(await page.evaluate('document.getElementById("photoTimingNote").textContent'), /Photo links open Immich in a new tab/);
+  await page.evaluate(`Object.defineProperty(navigator, 'clipboard', {configurable:true, value:{writeText:async text=>{window.copiedRun=text;}}}); document.getElementById('photoTimingCopy').click()`);
+  await page.waitFor('document.getElementById("photoTimingCopy").textContent === "Copied ✓"');
+  assert.match(await page.evaluate('window.copiedRun'), /Exceptions[\s\S]*Photos[\s\S]*8 s total/);
+  assert.match(await page.evaluate('window.copiedRun'), /1 photo shown of 1 retained/);
+  // Plain-HTTP clipboard fallback must stay inside the active modal.
+  await page.evaluate(`navigator.clipboard.writeText=async()=>{throw Error('Unavailable')}; window.originalExecCommand=document.execCommand; document.execCommand=command=>{const t=document.activeElement; window.fallbackRun=t.value; return command==='copy' && t.tagName==='TEXTAREA' && document.getElementById('photoTimingDialog').contains(t);}; document.getElementById('photoTimingCopy').click()`);
+  await page.waitFor('window.fallbackRun?.includes("8 s total")');
+  assert.equal(await page.evaluate('document.getElementById("photoTimingCopy").textContent'), 'Copied ✓');
+  assert.equal(await page.evaluate('document.activeElement.id'), 'photoTimingCopy');
+  await page.evaluate(`document.execCommand=()=>false; document.getElementById('photoTimingCopy').click()`);
+  await page.waitFor('document.getElementById("photoTimingCopy").textContent === "Copy failed"');
+  await page.evaluate('document.execCommand=window.originalExecCommand');
+
   assert.doesNotMatch(await page.evaluate('document.getElementById("photoTimingBody").textContent'), /skipped|200/);
   await page.evaluate('document.getElementById("photoTimingClose").click()');
   await page.waitFor('location.hash === "#runs"');

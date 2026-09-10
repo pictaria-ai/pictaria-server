@@ -33,6 +33,26 @@ function createEnrichPerformance({ api, changed = () => {}, closed = () => {} })
     backdropPress = false;
   });
   el('photoTimingClose').addEventListener('click', () => dialog.close());
+  let copyReset = null;
+  el('photoTimingCopy').addEventListener('click', async () => {
+    const seq = generation;
+    const text = [el('photoTimingTitle').innerText, el('photoTimingNote').innerText,
+      el('photoTimingBody').innerText].filter(Boolean).join('\n\n');
+    let copied = false;
+    try { await navigator.clipboard.writeText(text); copied = true; }
+    catch {
+      if (seq !== generation || !dialog.open) return;
+      // Keep the fallback inside the modal: the rest of the document is inert.
+      const scratch = node('textarea'); scratch.value = text;
+      scratch.style.position = 'fixed'; scratch.style.opacity = '0';
+      dialog.append(scratch); scratch.select();
+      try { copied = document.execCommand('copy'); } catch { /* Report failure. */ }
+      scratch.remove(); el('photoTimingCopy').focus({ preventScroll: true });
+    }
+    if (seq !== generation || !dialog.open) return;
+    clearTimeout(copyReset); el('photoTimingCopy').textContent = copied ? 'Copied ✓' : 'Copy failed';
+    copyReset = setTimeout(() => { el('photoTimingCopy').textContent = 'Copy'; }, 1600);
+  });
   el('performanceAll').addEventListener('click', () => { showAll = !showAll; void refresh(); });
   el('performanceRetry').addEventListener('click', () => void refresh());
 
@@ -136,9 +156,10 @@ function createEnrichPerformance({ api, changed = () => {}, closed = () => {} })
     returnFocus = opener; returnRunId = run.timingRunId; returnJobId = run.id;
     const seq = ++generation; controller?.abort(); controller = new AbortController();
     const signal = controller.signal;
+    clearTimeout(copyReset); el('photoTimingCopy').textContent = 'Copy';
     el('photoTimingTitle').textContent = run.title || 'Photo details';
     const body = el('photoTimingBody'); body.replaceChildren(runSummary(run));
-    el('photoTimingNote').textContent = 'Photo time includes downloading, retries, and saving results. Request time measures each call to the AI provider.';
+    el('photoTimingNote').textContent = 'Photo time includes downloading, retries, and saving results. Request time measures each call to the AI provider. Photo links open Immich in a new tab.';
     if (!dialog.open) dialog.showModal(); el('photoTimingClose').focus();
     if (!run.timingRunId) {
       body.append(node('p', 'Detailed timing was not recorded for this run.', 'provider-note'));
@@ -190,7 +211,7 @@ function createEnrichPerformance({ api, changed = () => {}, closed = () => {} })
     info.append(node('span', result, 'performance-context'));
     const time = node('span', validPhotoDuration(photo.duration_ms) ? `${duration(photo.duration_ms)} total` : photo.outcome === 'running' ? 'In progress' : 'Timing incomplete', 'timing-photo-duration');
     heading.append(imageWrap, info, time); row.append(heading);
-    const content = node('div', null, 'timing-attempts'); row.append(content);
+    const content = node('div', null, 'timing-attempts'); info.append(content);
     let pending = false; let cursor = null; let shown = 0;
     const notice = node('div', '', 'provider-note'); const list = node('ol'); const more = button('Load more requests', () => void load());
     more.hidden = true; content.append(notice, list, more);
@@ -198,7 +219,13 @@ function createEnrichPerformance({ api, changed = () => {}, closed = () => {} })
     if (photo.error_kind === 'download_error') content.prepend(node('p', 'The image could not be downloaded.', 'provider-note'));
     function render(page) {
       for (const attempt of page.items) {
-        list.append(node('li', `Request ${attempt.ordinal}${attempt.ordinal > 1 ? ' (retry)' : ''}: ${outcomeLabel(attempt.outcome)}${attempt.http_status && attempt.outcome !== 'accepted' ? ` · HTTP ${attempt.http_status}` : ''} · ${duration(attempt.duration_ms)}`));
+        const sameTime = !page.truncated && !page.nextCursor && page.retained === 1
+          && photo.attempt_count === 1 && validPhotoDuration(photo.duration_ms)
+          && validPhotoDuration(attempt.duration_ms) && duration(photo.duration_ms) === duration(attempt.duration_ms);
+        // For a single accepted request with the same displayed duration,
+        // Enriched + total time already convey the complete visible result.
+        if (sameTime && attempt.outcome === 'accepted' && photo.outcome === 'succeeded') continue;
+        list.append(node('li', `Request ${attempt.ordinal}${attempt.ordinal > 1 ? ' (retry)' : ''}: ${outcomeLabel(attempt.outcome)}${attempt.http_status && attempt.outcome !== 'accepted' ? ` · HTTP ${attempt.http_status}` : ''}${sameTime ? '' : ` · ${duration(attempt.duration_ms)}`}`));
       }
       shown += page.items.length; cursor = page.nextCursor;
       notice.textContent = page.truncated ? `${shown} of ${page.retained} retained requests shown; some older request details have expired.`

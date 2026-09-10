@@ -744,6 +744,11 @@ status labels, provider names, and duration formats match across views; long
 durations use minutes/hours while short requests retain precise seconds.
 Enrich keeps compact outcome summaries and existing settings/log/retry actions;
 **View details** links directly to the selected run on the performance page.
+**Copy** copies the currently displayed run details, including pagination and
+retention notices; load more photos/requests first to include additional rows.
+Photo links open Immich in a new tab. Compact photo rows show a total time once
+when a single request has the same displayed duration; differing request times
+and retries remain explicit.
 Routine already-enriched photos are omitted from run outcome summaries and
 future per-photo logs. Discovery shows “Finding photos to enrich…” before
 processing starts; an empty completed selection is described without claiming
