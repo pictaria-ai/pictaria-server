@@ -34,17 +34,22 @@ export class DiscoveryIncompleteError extends Error {
   }
 }
 
-function normalize(asset) {
+function normalize(asset, partition) {
   const updated = typeof asset?.updatedAt === 'string' ? Date.parse(asset.updatedAt) : NaN;
   const takenMs = asset?.fileCreatedAt == null ? null
     : typeof asset.fileCreatedAt === 'string' ? Date.parse(asset.fileCreatedAt) : NaN;
   if (typeof asset?.id !== 'string' || !asset.id || asset.id.length > 200 || !Number.isFinite(updated)
-      || (takenMs !== null && !Number.isFinite(takenMs))
-      || !['IMAGE', 'VIDEO', 'AUDIO', 'OTHER'].includes(asset.type)
-      || !['timeline', 'archive', 'hidden', 'locked'].includes(asset.visibility)
-      || typeof asset.isTrashed !== 'boolean') throw new Error('Immich returned incomplete discovery metadata.');
+      || (takenMs !== null && !Number.isFinite(takenMs))) throw new Error('Immich returned incomplete discovery metadata.');
+  // Search is explicitly partitioned. Only an absent visibility can inherit
+  // that filter; live getAsset validation never receives this fallback.
+  const inferredVisibility = asset.visibility == null && partition !== undefined;
+  const visibility = inferredVisibility ? partition : asset.visibility;
+  const uncertain = !['IMAGE', 'VIDEO', 'AUDIO', 'OTHER'].includes(asset.type)
+    || !['timeline', 'archive', 'hidden', 'locked'].includes(visibility)
+    || typeof asset.isTrashed !== 'boolean';
   const taken = takenMs === null ? '' : new Date(takenMs).toISOString();
-  return { id: asset.id, taken, updated, eligible: asset.type === 'IMAGE' && asset.visibility === 'timeline' && !asset.isTrashed ? 1 : 0 };
+  return { id: asset.id, taken, updated, uncertain, inferredVisibility,
+    eligible: !uncertain && asset.type === 'IMAGE' && visibility === 'timeline' && asset.isTrashed === false ? 1 : 0 };
 }
 
 // Owns only a rebuildable inventory. Never deletes processing history or human
@@ -52,14 +57,15 @@ function normalize(asset) {
 // prevents a second process from interleaving refresh transactions.
 export class EnrichDiscovery {
   constructor(repo, immich, { shouldStop = () => false, log = () => {}, now = Date.now,
+    monotonicNow = () => performance.now(),
     maxPages = MAX_PAGES, maxRefreshMs = MAX_REFRESH_MS, maxValidations = MAX_VALIDATIONS,
     rejectionBurst = REJECTION_BURST } = {}) {
-    Object.assign(this, { repo, immich, shouldStop, log, now, maxPages, maxRefreshMs, maxValidations, rejectionBurst });
+    Object.assign(this, { repo, immich, shouldStop, log, now, monotonicNow, maxPages, maxRefreshMs, maxValidations, rejectionBurst });
     this.db = repo.db;
     this.sourceKey = createHash('sha256').update(JSON.stringify([immich.baseUrl, immich.apiKey])).digest('hex');
     this.lease = randomUUID(); this.owned = false;
     this.after = null; this.buffer = []; this.seen = new Set(); this.reconciled = false;
-    this.diagnostics = { pages: 0, scanned: 0, candidates: 0, validated: 0, rejected: 0 };
+    this.diagnostics = { pages: 0, scanned: 0, candidates: 0, validated: 0, rejected: 0, refreshMs: 0 };
   }
   state() { return JSON.parse(this.db.prepare('SELECT state_json FROM enrich_discovery WHERE id=1').get().state_json); }
   save(state) {
@@ -113,7 +119,12 @@ export class EnrichDiscovery {
     if (!this.shouldStop() && (resumed || full)) { this.begin('delta'); await this.refresh(); }
   }
   async refresh() {
-    const started = this.now(); let pages = 0;
+    const started = this.monotonicNow();
+    try { await this.refreshPages(); }
+    finally { this.diagnostics.refreshMs += this.monotonicNow() - started; }
+  }
+  async refreshPages() {
+    const started = this.now(); let pages = 0, warnedMetadata = false;
     while (this.state().scan && !this.shouldStop()) {
       if (pages >= this.maxPages || this.now() - started >= this.maxRefreshMs) throw new DiscoveryIncompleteError();
       const state = this.state(), scan = state.scan;
@@ -128,7 +139,11 @@ export class EnrichDiscovery {
       }
       const next = parseProgressingPage(response.assets.nextPage, scan.page, { label: 'Immich discovery', maxPage: Number.MAX_SAFE_INTEGER });
       if (next !== null && (!items.length || next !== scan.page + 1)) throw new Error('Immich returned an incomplete discovery page sequence.');
-      const rows = items.map(normalize);
+      const rows = items.map(asset => normalize(asset, VISIBILITIES[scan.partition]));
+      if (!warnedMetadata && rows.some(row => row.uncertain || row.inferredVisibility)) {
+        this.log('Library discovery: incomplete eligibility metadata; missing visibility uses the search partition, and uncertain photos are excluded.');
+        warnedMetadata = true;
+      }
       this.repo.transaction(() => {
         const insert = this.db.prepare(`INSERT INTO enrich_inventory_stage VALUES(?,?,?,?) ON CONFLICT(asset_id)
           DO UPDATE SET taken_at=excluded.taken_at,updated_at=excluded.updated_at,eligible=excluded.eligible
@@ -188,6 +203,10 @@ export class EnrichDiscovery {
       this.diagnostics.validated++;
       const current = asset ? normalize(asset) : null;
       if (current && current.id !== row.asset_id) throw new Error('Immich returned the wrong discovery asset.');
+      if (current?.uncertain && !this.warnedValidationMetadata) {
+        this.log('Library discovery: excluding photos with uncertain eligibility during live validation.');
+        this.warnedValidationMetadata = true;
+      }
       if (current?.eligible) {
         this.save(this.state());
         return asset;
@@ -210,6 +229,6 @@ export class EnrichDiscovery {
   }
   summary() {
     const d = this.diagnostics;
-    return `Library discovery: ${d.pages} metadata pages, ${d.scanned} scanned, ${d.candidates} candidates, ${d.validated} validated, ${d.rejected} rejected.`;
+    return `Library discovery: ${d.pages} metadata pages, ${d.scanned} scanned, ${d.candidates} candidates, ${d.validated} validated, ${d.rejected} rejected. Metadata refresh time: ${(d.refreshMs / 1000).toFixed(1)} s.`;
   }
 }

@@ -125,6 +125,77 @@ test('a changed inference reuses the inventory but Only unenriched still prevent
   assert.equal(h.calls.downloads.length, 2);
 });
 
+test('uncertain eligibility across metadata pages is excluded without blocking valid work or repeating warnings per photo', async t => {
+  const rows = Array.from({ length: 1501 }, (_, n) => photo(n)); const h = fixture(t, rows);
+  const patches = [{ type: 'FUTURE' }, { type: null }, { visibility: 'future' }, { visibility: '' },
+    { isTrashed: 'false' }, { isTrashed: null }, { isTrashed: 0 }];
+  h.hooks.search = body => {
+    if (body.updatedAfter) return;
+    const items = rows.slice((body.page - 1) * body.size, body.page * body.size)
+      .map(row => row.id === rows[1500].id ? row : { ...row, ...patches[Number(row.id.slice(6)) % patches.length] });
+    return Response.json({ assets: { items, nextPage: body.page === 1 ? '2' : null } });
+  };
+  const log = []; const result = await runBatch({ ...h.options, log: m => log.push(m) });
+  assert.equal(result.counters.succeeded, 1);
+  assert.deepEqual(h.calls.gets, [rows[1500].id]); assert.deepEqual(h.calls.downloads, [rows[1500].id]);
+  assert.equal(log.filter(m => m.includes('incomplete eligibility metadata')).length, 1);
+  assert.equal(h.repo.db.prepare('SELECT COUNT(*) n FROM enrich_inventory WHERE eligible=0').get().n, 1500);
+  assert.equal((await runBatch(h.options)).counters.analyzed, 0);
+  // A later source correction makes a quarantined row eligible again.
+  h.change(rows[0].id, { updatedAt: '2026-02-01T00:00:00.000Z' });
+  assert.equal((await runBatch(h.options)).counters.succeeded, 1);
+  assert.deepEqual(h.calls.downloads, [rows[1500].id, rows[0].id]);
+});
+
+test('missing search visibility inherits only its partition; live validation must independently confirm eligibility', async t => {
+  const h = fixture(t, [photo(0), photo(1), photo(2)]);
+  h.hooks.search = body => Response.json({ assets: {
+    items: body.updatedAfter ? (body.visibility === 'timeline' ? []
+      : [photo(body.visibility === 'archive' ? 10 : 11, { visibility: undefined })])
+      : [photo(0, { visibility: undefined }), photo(1, { visibility: undefined }), photo(2, { visibility: undefined })],
+    nextPage: null,
+  } });
+  h.hooks.get = id => id === photo(1).id ? Response.json(photo(1, { visibility: undefined }))
+    : id === photo(2).id ? Response.json(photo(2, { isTrashed: 'false' })) : undefined;
+  const log = []; const result = await runBatch({ ...h.options, log: m => log.push(m) });
+  assert.equal(result.counters.succeeded, 1);
+  assert.deepEqual(h.calls.gets, [photo(0).id, photo(1).id, photo(2).id]);
+  assert.deepEqual(h.calls.downloads, [photo(0).id]);
+  assert.equal(h.repo.db.prepare('SELECT eligible FROM enrich_inventory WHERE asset_id=?').get(photo(10).id).eligible, 0);
+  assert.equal(h.repo.db.prepare('SELECT eligible FROM enrich_inventory WHERE asset_id=?').get(photo(11).id).eligible, 0);
+  assert.equal(log.filter(m => m.includes('uncertain eligibility during live validation')).length, 1);
+});
+
+test('missing row identity or update timestamp still stops at the unpublished checkpoint', async t => {
+  for (const patch of [{ id: undefined }, { updatedAt: undefined }, { updatedAt: 'invalid' }]) {
+    const h = fixture(t, [photo(0)]);
+    h.hooks.search = () => Response.json({ assets: { items: [photo(0, patch)], nextPage: null } });
+    const d = new EnrichDiscovery(h.repo, h.immich);
+    try {
+      await assert.rejects(d.prepare(), /incomplete discovery metadata/);
+      assert.equal(d.state().ready, false); assert.equal(d.state().scan.page, 1);
+      assert.equal(d.state().watermark, null);
+      assert.equal(h.repo.db.prepare('SELECT COUNT(*) n FROM enrich_inventory_stage').get().n, 0);
+    } finally { d.close(); }
+  }
+});
+
+test('metadata refresh timing includes interrupted refreshes and excludes time between discovery calls', async t => {
+  const h = fixture(t, [photo(0)]); let clock = 0;
+  h.hooks.search = () => { clock += 250; };
+  const d = new EnrichDiscovery(h.repo, h.immich, { monotonicNow: () => clock });
+  try {
+    await d.prepare(); assert.equal(d.diagnostics.refreshMs, 1000); // full + three partitions
+    clock += 60000; // provider/other run work does not count as metadata refresh
+    assert.equal((await d.next({ runKey: h.runKey })).id, photo(0).id);
+    assert.match(d.summary(), /Metadata refresh time: 1\.0 s/);
+    d.begin('delta');
+    h.hooks.search = () => { clock += 500; return Response.json({ assets: { items: null, nextPage: null } }); };
+    await assert.rejects(d.refresh(), /invalid discovery page/);
+    assert.equal(d.diagnostics.refreshMs, 1500);
+  } finally { d.close(); }
+});
+
 test('permanent cleanup triggers bounded full catch-up within this run, rather than empty daily attempts', async t => {
   const rows = Array.from({ length: 6050 }, (_, n) => photo(n)); const h = fixture(t, rows);
   const d = new EnrichDiscovery(h.repo, h.immich); await d.prepare(); d.close();

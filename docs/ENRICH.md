@@ -237,6 +237,17 @@ processed, matching the previous library-search scope; this change introduces
 no new stack-child exclusion rule. Changing profiles keeps the inventory and
 re-evaluates history using the captured inference configuration.
 
+Unknown photo types, visibility values, or non-boolean trash flags make a
+record ineligible without blocking the rest of discovery. Missing visibility
+in a search row inherits that request's explicit visibility partition. Before
+processing, a separate live photo lookup must confirm an image with timeline
+visibility and `isTrashed: false`; it never inherits search visibility.
+Diagnostics for incomplete eligibility metadata are bounded to one per
+refresh and one for live validation per run. Missing IDs or invalid update
+timestamps, malformed capture dates, and broken page structure still stop the
+refresh without advancing its checkpoint. Corrected records are reconsidered
+on a newer source update or full reconciliation.
+
 Each completed refresh advances from the largest source `updatedAt`, never
 from Pictaria's clock. The next incremental pass starts one millisecond later
 to avoid repeatedly reading a large import sharing the boundary timestamp.
@@ -258,7 +269,9 @@ if either is reached. Candidate validation has a separate bound (at least
 10,000, or the requested photo budget plus 1,000). Exhaustion is reported in
 run history as **Library discovery is incomplete**, with instructions to run
 again; it is never reported as no remaining work. The log records scanned
-metadata, candidates, validations, and rejections. Very large/slow libraries
+metadata, candidates, validations, rejections, and elapsed metadata refresh
+time (including interrupted refreshes, excluding AI processing and live
+candidate lookups). Very large/slow libraries
 may need another run to finish construction; Daily Enrich retains its existing
 once-per-day attempt policy. Discovery resumes the next time it is invoked.
 

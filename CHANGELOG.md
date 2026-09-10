@@ -12,6 +12,9 @@ All notable changes to Pictaria Server are documented here. This project follows
   discovery cliff. Refreshes track visibility/trash changes; stale candidate
   bursts trigger reconciliation. Incomplete discovery keeps a checkpoint and
   reports a failure rather than claiming the library is caught up.
+- Unexpected eligibility metadata excludes the affected photos instead of
+  blocking every library sweep at the same page. Discovery logs include
+  metadata refresh time and bounded diagnostics for uncertain eligibility.
 - Send to Curate on a library sweep adds only that run's successful photos.
   Explicit targeted selections can still send previously enriched results.
 
