@@ -761,8 +761,8 @@ underlying Immich metadata scan.
 
 The **Compare setups** view starts with the three most recently used setups; **Show all comparisons**
 includes every setup within the retained timing window (at most 100 runs).
-Ordering follows recent use, not speed. Each setup shows typical successful
-request time (median), successful requests and timeout counts, and overall
+Ordering follows recent use, not speed. Each setup shows median successful
+request time, successful requests and timeout counts, and overall
 successful photos/minute. Request counts read “3 of 5 requests succeeded”
 with timeouts separately identified. Profile/revision and host labels are
 prominent, with a last-used date on each setup. **More metrics** includes the arithmetic mean,

@@ -91,7 +91,7 @@ function createEnrichPerformance({ api, changed = () => {}, closed = () => {} })
 
       const m = group.metrics; const grid = node('div', null, 'performance-values');
       const value = (label, text, note) => { const n = node('div'); n.append(node('span', label, 'performance-label'), node('strong', text), node('span', note, 'performance-label')); return n; };
-      grid.append(value('Typical successful request', m.latency.sampleCount ? duration(m.latency.medianMs) : 'No timing yet', `${plural(m.latency.sampleCount, 'request')} · median`),
+      grid.append(value('Median request time', m.latency.sampleCount ? duration(m.latency.medianMs) : 'No timing yet', `${plural(m.latency.sampleCount, 'successful request')}`),
         value('Requests', `${number(m.accepted)} of ${number(m.requests)} requests succeeded`, m.timeouts ? `${number(m.timeouts)} timed out` : 'No timeouts recorded'),
         value('Overall throughput', m.photosPerMinute === null ? 'Not available' : `${rate(m.photosPerMinute)} photos/min`, `${plural(m.throughputRuns, 'completed run')}`));
       card.append(grid);
@@ -139,9 +139,9 @@ function createEnrichPerformance({ api, changed = () => {}, closed = () => {} })
       requests.add('Outcomes', requestSummary(m));
       if (m.invalidResponses) requests.box.append(node('p', `${plural(m.invalidResponses, 'invalid response')} included in other failures.`, 'provider-note'));
       if (m.retries) requests.add('Retries', plural(m.retries, 'request'));
-      requests.add('Typical time', duration(m.latency.medianMs));
+      requests.add('Median time', duration(m.latency.medianMs));
       requests.add('Average time', duration(m.latency.meanMs));
-      requests.box.append(node('p', `Typical is the median. Both times use ${plural(m.latency.sampleCount, 'measured successful request')}.`, 'provider-note'));
+      requests.box.append(node('p', `Median is the middle value; average is the mean. Both use ${plural(m.latency.sampleCount, 'measured successful request')}.`, 'provider-note'));
       if (m.truncated) summary.append(node('p', `Some older timing details have expired. Request metrics use the remaining ${number(m.requests)} of ${number(m.recordedRequests)} recorded requests and ${number(m.retainedPhotos)} of ${number(m.photoCount)} photo executions.`, 'performance-warning'));
     } else if (run.timingRunId) summary.append(node('p', 'Request summary unavailable.', 'provider-note'));
     if (run.error) summary.append(node('p', String(run.error), 'performance-warning'));

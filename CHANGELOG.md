@@ -7,6 +7,9 @@ All notable changes to Pictaria Server are documented here. This project follows
 
 ### Changed
 
+- Enrich performance labels median request times explicitly instead of using
+  “Typical,” with a short median/average explanation in run details.
+
 - Performance run dialogs offer Copy for displayed details, compact photo rows,
   and a visible Immich link explanation. Successful single-request photos consistently show Enriched and total time;
   retries, failures, and incomplete timings retain request details. The
