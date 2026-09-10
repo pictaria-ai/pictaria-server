@@ -26,13 +26,14 @@ const REMOTE_FETCH_CONCURRENCY = 8;
 const SYNC_ASSET_BATCH_SIZE = 50;
 
 export class ReviewService {
-  constructor({ repo, immich, taxonomy, config = null, log = () => {}, verifyDelayMs = 1500 }) {
+  constructor({ repo, immich, taxonomy, config = null, log = () => {}, verifyDelayMs = 1500, tagWrites = null }) {
     this.repo = repo;
     this.immich = immich;
     this.taxonomy = taxonomy;
     this.config = config;
     this.log = log;
     this.verifyDelayMs = verifyDelayMs;
+    this.tagWrites = tagWrites;
     this._syncWake = null;
     this._syncLastCompletedAt = null;
     this._syncWorkerRunning = false;
@@ -414,6 +415,11 @@ export class ReviewService {
   }
 
   async pushDecisionToImmich(job) {
+    if (this.tagWrites) return this.tagWrites.run(() => this.#pushDecisionToImmich(job), { priority: 2 });
+    return this.#pushDecisionToImmich(job);
+  }
+
+  async #pushDecisionToImmich(job) {
     if (job.assetIds.length > SYNC_ASSET_BATCH_SIZE) {
       throw new Error(`Review sync work exceeded the ${SYNC_ASSET_BATCH_SIZE}-asset worker slice.`);
     }
@@ -444,8 +450,7 @@ export class ReviewService {
   // a short settle and repair once; if it is still inconsistent, throw so the
   // durable queue retries the whole (idempotent) job. A never-show decision
   // must not complete while the remote photo is still eligible.
-  async verifyAndRepairTags(job) {
-    const localTagsByAsset = this.repo.loadAssetTagsFor(job.assetIds, { prefix: 'ai/' });
+  async verifyAndRepairTags(job, { localTagsByAsset = this.repo.loadAssetTagsFor(job.assetIds, { prefix: 'ai/' }), verifyAiRemovals = false } = {}) {
     const expectedByAsset = new Map(
       job.assetIds.map((assetId) => [assetId, [...(localTagsByAsset[assetId] ?? []), ...job.add]]),
     );
@@ -468,7 +473,10 @@ export class ReviewService {
         if (missing.length > 0) {
           missingByAsset.set(assetId, missing);
         }
-        const retained = job.remove.filter((tag) => remoteTags.has(tag));
+        const retained = [...new Set([
+          ...job.remove.filter((tag) => remoteTags.has(tag)),
+          ...(verifyAiRemovals ? [...remoteTags].filter(tag => tag.startsWith('ai/') && !(localTagsByAsset[assetId] ?? []).includes(tag)) : []),
+        ])];
         if (retained.length > 0) {
           retainedByAsset.set(assetId, retained);
           retainedTagIdsByAsset.set(
@@ -492,9 +500,12 @@ export class ReviewService {
             .map(([assetId, tags]) => `${assetId}: ${tags.join(', ')}`)
             .join(' | ')}`);
         }
-        throw new Error(
+        const error = new Error(
           `Immich did not retain all requested tags after a repair attempt. Confirm Tags is enabled for the API-key account and that the affected photos are owned by or writable to that account, then retry. ${problems.join(' | ')}`,
         );
+        error.code = 'immich_tag_inconsistent';
+        error.assetIds = [...new Set([...missingByAsset.keys(), ...retainedByAsset.keys()])];
+        throw error;
       }
       const inconsistentAssets = new Set([...missingByAsset.keys(), ...retainedByAsset.keys()]);
       this.log(`immich tag state is still inconsistent on ${inconsistentAssets.size} asset(s); repairing`);
@@ -524,8 +535,7 @@ export class ReviewService {
 
   // Reconcile ai/* tags in Immich with the local source of truth for the
   // decided assets: parallel reads, then one grouped write per tag.
-  async syncAiTagsForAssets(assetIds, knownTagIds) {
-    const localTagsByAsset = this.repo.loadAssetTagsFor(assetIds, { prefix: 'ai/' });
+  async syncAiTagsForAssets(assetIds, knownTagIds, { localTagsByAsset = this.repo.loadAssetTagsFor(assetIds, { prefix: 'ai/' }), remoteAssets = null } = {}) {
     const allLocalTags = [...new Set(assetIds.flatMap((assetId) => localTagsByAsset[assetId] ?? []))].sort();
     const tagIds = { ...knownTagIds };
     if (allLocalTags.length > 0) {
@@ -533,7 +543,7 @@ export class ReviewService {
     }
 
     const remoteMaps = await mapWithConcurrency(assetIds, REMOTE_FETCH_CONCURRENCY, async (assetId) => {
-      const remoteAsset = await this.immich.getAsset(assetId);
+      const remoteAsset = remoteAssets?.get(assetId) ?? await this.immich.getAsset(assetId);
       return tagMap(Array.isArray(remoteAsset?.tags) ? remoteAsset.tags : []);
     });
 

@@ -9,6 +9,7 @@ import { sanitizeDiagnostic } from '../diagnostics.mjs';
 import { validateAssetBatch } from './assetBatch.mjs';
 import { EnrichTimingStore, TIMING_SCHEMA } from './timing.mjs';
 import { historyRetention } from './historyRetention.mjs';
+import { AiTagSyncStore, AI_TAG_SYNC_SCHEMA } from './aiTagSyncStore.mjs';
 import { DISCOVERY_SCHEMA } from './discovery.mjs';
 import { matchingRun, workEligibility } from './eligibility.mjs';
 import { ACTION_RULES } from './reviewActions.mjs';
@@ -509,6 +510,7 @@ const ENRICH_MIGRATIONS = [
     },
   },
   { version: 11, up(db) { db.exec(DISCOVERY_SCHEMA); } },
+  { version: 12, up(db) { db.exec(AI_TAG_SYNC_SCHEMA); } },
 ];
 
 // The review projection of a normalized output: exactly the fields the
@@ -592,6 +594,7 @@ export class Repository {
     preparePrivateDatabasePath(this.databasePath);
     this.db = new DatabaseSync(this.databasePath);
     this.timings = new EnrichTimingStore(this.db);
+    this.aiTagSync = new AiTagSyncStore(this.db);
     this.historyRetention = historyRetention();
     this.db.exec('PRAGMA journal_mode = WAL');
     // Decisions, tags, and captions are personal data: keep the DB (and its
@@ -605,7 +608,7 @@ export class Repository {
   }
 
   initSchema() {
-    const schemaSql = readFileSync(SCHEMA_PATH, 'utf8') + TIMING_SCHEMA + DISCOVERY_SCHEMA;
+    const schemaSql = readFileSync(SCHEMA_PATH, 'utf8') + TIMING_SCHEMA + DISCOVERY_SCHEMA + AI_TAG_SYNC_SCHEMA;
     const result = migrateDatabase(this.db, {
       schema: schemaSql,
       migrations: ENRICH_MIGRATIONS,

@@ -89,7 +89,7 @@ function runPageLimit(value) {
   return limit;
 }
 
-export function createEnrichRoutes({ review, enrichRunner, taxonomy, profiles = null, repo, requireImmich, config, immich, captionWriteback, referee, activityLog = null }) {
+export function createEnrichRoutes({ review, aiTagSync = null, enrichRunner, taxonomy, profiles = null, repo, requireImmich, config, immich, captionWriteback, referee, activityLog = null }) {
   const diagnostic = (value) => sanitizeDiagnostic(value instanceof Error ? value.message : value, {
     secrets: configuredSecrets(config, immich),
   });
@@ -466,11 +466,18 @@ export function createEnrichRoutes({ review, enrichRunner, taxonomy, profiles = 
       return true;
     }
 
+    if (request.method === 'POST' && url.pathname === '/api/enrich/tag-sync/retry' && aiTagSync) {
+      await readJsonBody(request);
+      sendJson(response, 200, { requeued: aiTagSync.retry(), sync: aiTagSync.status() });
+      return true;
+    }
+
     if (request.method === 'GET' && url.pathname === '/api/enrich/status') {
       sendJson(response, 200, {
         ...enrichRunner.status(),
         enabled: config.enrichEnabled,
         resolvingSlice: sliceResolutions > 0,
+        tagSync: aiTagSync?.status() ?? null,
         library: repo.libraryStats(),
       });
       return true;

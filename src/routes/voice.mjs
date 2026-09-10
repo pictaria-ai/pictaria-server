@@ -50,7 +50,8 @@ function voiceProseBudgetMs(config) {
   return Math.min(Number.isFinite(configured) && configured > 0 ? configured : 25000, MAX_VOICE_PROSE_BUDGET_MS);
 }
 
-export function createVoiceRoutes({ immich, config, requireImmich, voiceMetrics = null, activityLog = null }) {
+export function createVoiceRoutes({ immich, config, requireImmich, voiceMetrics = null, activityLog = null, tagWrites = null }) {
+  const withTagWrite = work => tagWrites ? tagWrites.run(work, { priority: 2 }) : work();
   const voiceConfig = config.voice;
   const ambientConfig = config.ambient;
   const promptsConfig = config.prompts ?? {};
@@ -281,16 +282,18 @@ export function createVoiceRoutes({ immich, config, requireImmich, voiceMetrics 
       }
       const assetId = decodeURIComponent(favoriteMatch[1]);
       try {
-        const tags = await immich.upsertTags([FRAME_FAVORITE_TAG]);
-        const favoriteTag = findFrameTag(tags, FRAME_FAVORITE_TAG);
-        if (!favoriteTag?.id) {
-          activityLog?.assetFavorited({ assetId, outcome: 'failed' });
-          sendError(response, 502, 'favorite_tag_missing', 'Immich did not return the favorite tag ID.');
-          return true;
-        }
-        await immich.tagAssetsBulk({ tagIds: [favoriteTag.id], assetIds: [assetId] });
-        activityLog?.assetFavorited({ assetId });
-        sendJson(response, 200, { assetId, tag: favoriteTag });
+        await withTagWrite(async () => {
+          const tags = await immich.upsertTags([FRAME_FAVORITE_TAG]);
+          const favoriteTag = findFrameTag(tags, FRAME_FAVORITE_TAG);
+          if (!favoriteTag?.id) {
+            activityLog?.assetFavorited({ assetId, outcome: 'failed' });
+            sendError(response, 502, 'favorite_tag_missing', 'Immich did not return the favorite tag ID.');
+            return true;
+          }
+          await immich.tagAssetsBulk({ tagIds: [favoriteTag.id], assetIds: [assetId] });
+          activityLog?.assetFavorited({ assetId });
+          sendJson(response, 200, { assetId, tag: favoriteTag });
+        });
       } catch (error) {
         activityLog?.assetFavorited({ assetId, outcome: 'failed' });
         throw error;
@@ -305,26 +308,28 @@ export function createVoiceRoutes({ immich, config, requireImmich, voiceMetrics 
       }
       const assetId = decodeURIComponent(neverShowMatch[1]);
       try {
-        const tags = await immich.upsertTags([FRAME_NEVER_SHOW_TAG]);
-        const neverShowTag = findFrameTag(tags, FRAME_NEVER_SHOW_TAG);
-        if (!neverShowTag?.id) {
-          activityLog?.assetHidden({ assetId, outcome: 'failed' });
-          sendError(response, 502, 'never_show_tag_missing', 'Immich did not return the never-show tag ID.');
-          return true;
-        }
-        await immich.tagAssetsBulk({ tagIds: [neverShowTag.id], assetIds: [assetId] });
+        await withTagWrite(async () => {
+          const tags = await immich.upsertTags([FRAME_NEVER_SHOW_TAG]);
+          const neverShowTag = findFrameTag(tags, FRAME_NEVER_SHOW_TAG);
+          if (!neverShowTag?.id) {
+            activityLog?.assetHidden({ assetId, outcome: 'failed' });
+            sendError(response, 502, 'never_show_tag_missing', 'Immich did not return the never-show tag ID.');
+            return true;
+          }
+          await immich.tagAssetsBulk({ tagIds: [neverShowTag.id], assetIds: [assetId] });
 
-        const allTags = await immich.listTags();
-        const eligibleTag = findFrameTag(allTags, FRAME_ELIGIBLE_TAG);
-        if (eligibleTag?.id) {
-          await immich.untagAssets({ tagId: eligibleTag.id, assetIds: [assetId] });
-        }
+          const allTags = await immich.listTags();
+          const eligibleTag = findFrameTag(allTags, FRAME_ELIGIBLE_TAG);
+          if (eligibleTag?.id) {
+            await immich.untagAssets({ tagId: eligibleTag.id, assetIds: [assetId] });
+          }
 
-        activityLog?.assetHidden({ assetId });
-        sendJson(response, 200, {
-          addedTag: neverShowTag,
-          assetId,
-          removedTag: eligibleTag ?? null,
+          activityLog?.assetHidden({ assetId });
+          sendJson(response, 200, {
+            addedTag: neverShowTag,
+            assetId,
+            removedTag: eligibleTag ?? null,
+          });
         });
       } catch (error) {
         activityLog?.assetHidden({ assetId, outcome: 'failed' });

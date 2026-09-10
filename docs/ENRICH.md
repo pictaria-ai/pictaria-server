@@ -1,7 +1,8 @@
 # Enrich
 
 AI models look at your photos and propose tags from a controlled taxonomy,
-plus a one-sentence caption. Proposed tags land in **Curate** for human review.
+plus a one-sentence caption. AI tags sync to Immich after every successfully
+enriched photo. **Send to Curate** optionally adds those photos to human review.
 Results are stored in `data/enrichment.sqlite`; if optional caption writeback
 is enabled, successful captions are also copied automatically into Immich
 descriptions under the rules documented below.
@@ -31,12 +32,51 @@ For each photo, one *processing run*:
    (latest normalized output, provider/model, and a reference to the saved
    configuration) locally. Raw provider envelopes are not retained.
 
-Enrichment runs are always dry runs against Immich. Tags reach Immich only
-through Curate decisions, via a durable background sync worker that verifies
-and repairs both required additions and required removals after writing. For
-that sync, enable **Tags** under **Immich Account Settings → Features** for the
-account whose API key Pictaria uses, and grant that key `tag.read`,
-`tag.create`, and `tag.asset`.
+Every successful dashboard enrichment durably queues its `ai/*` tags for
+Immich, whether or not **Send to Curate** is checked. Sync starts while the run
+continues; it does not wait for the whole batch. **Send to Curate** controls
+review-list membership only. Curate retains authority over human decisions
+such as `frame/eligible`, `frame/favorite`, and `frame/never-show`.
+
+Pictaria manages the `ai/*` namespace: re-enrichment adds missing tags and
+removes stale ones, including manually added Immich tags inside that prefix.
+Tags outside `ai/*` are preserved. The AI-derived `frame/review` marker stays
+local and is not published by automatic tag sync. An album/search filtering
+on AI tags can now include photos before review; use Curate decision tags
+when approval is required.
+
+**Immich tag sync** in Enrich's Status card shows pending/failed photos, the
+latest error, and **Retry sync** when intervention is needed. A remote sync
+failure does not fail enrichment or repeat an AI call. Enable **Tags** under
+**Immich Account Settings → Features** for the API-key account, and grant
+`tag.read`, `tag.create`, and `tag.asset`. Fix connection/permission problems
+and retry there. Deleted photos are skipped. Turning Enrich off pauses this
+queue while preserving pending work; it does not block Curate sync.
+
+AI sync has a separate durable queue with one row per photo and no historical
+tag payload. Repeated enrichment coalesces to the newest local result. A
+processing-run generation prevents an older in-flight completion or failure
+from clearing newer queued work. The same tag-write coordinator serves
+Curate and favorite/never-show routes, with human work taking priority between
+bounded AI slices (at most 10 photos). It does not interrupt a network request
+already in flight. AI backoff never holds the coordinator or consumes the
+Curate backlog allowance. Shared verification checks both additions and stale
+AI-tag removals, with one settle delay per slice rather than per photo.
+Any failed sync slice pauses the AI lane for 30 seconds. Systemic failures
+do not consume individual photo attempts; photo-specific failures are parked
+after five attempts and can be retried from Enrich.
+
+New saved run configurations record `processing.syncAiTags: true`. The older
+`applyTags`/`dryRun` fields describe only the separate legacy batch-end write
+path, which stays disabled for dashboard runs. Historical configurations are
+not rewritten. Background sync time is not part of photo inference timing.
+
+This change uses Enrich schema 12 and persistent-state contract 15. Startup
+creates the required pre-migration recovery snapshot; rollback restores that
+snapshot. Queue state is included in normal database backup/restore and
+resumes idempotently. Upgrade does **not** backfill tags for older enriched
+photos. Those photos sync on a subsequent successful enrichment or Curate
+decision; a bulk historical-sync action is not included.
 
 ## Providers
 

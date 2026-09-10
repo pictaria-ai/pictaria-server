@@ -13,6 +13,8 @@ import { isImmichVersionSupported, parseImmichVersion } from './immichCompatibil
 import { Repository } from './enrich/repository.mjs';
 import { ReviewService } from './enrich/reviewService.mjs';
 import { backfillAssetVisuals } from './enrich/visualBackfill.mjs';
+import { TagWriteCoordinator } from './enrich/tagWriteCoordinator.mjs';
+import { AiTagSyncService } from './enrich/aiTagSync.mjs';
 import { CaptionWritebackService } from './enrich/captionWriteback.mjs';
 import { RefereeService } from './enrich/refereeService.mjs';
 import { EnrichJobRunner } from './enrich/jobRunner.mjs';
@@ -133,6 +135,7 @@ settingsStore.onApplied = () => {
   immichPing = emptyImmichStatus();
   enrichScheduler.settingsChanged();
   captionWriteback.wake();
+  aiTagSync.wake();
   // First-time setup: the moment Immich becomes reachable, populate
   // Insights instead of waiting for the hourly staleness check. A no-op
   // whenever the snapshot is fresh or Immich is still unconfigured.
@@ -177,9 +180,11 @@ const immich = new ImmichClient({
   apiKey: config.immichApiKey,
   timeoutMs: config.requestTimeoutMs,
 });
-const review = new ReviewService({ repo, immich, taxonomy, config, log: (message) => console.log(`[Pictaria] ${message}`) });
+const tagWrites = new TagWriteCoordinator();
+const review = new ReviewService({ repo, immich, taxonomy, config, tagWrites, log: (message) => console.log(`[Pictaria] ${message}`) });
 const captionWriteback = new CaptionWritebackService({ repo, immich, config, log: (message) => console.log(`[Pictaria] ${message}`) });
-const enrichRunner = new EnrichJobRunner({ repo, immich, taxonomy, config, profiles });
+const aiTagSync = new AiTagSyncService({ repo, immich, review, tagWrites, config, log: message => console.log(`[Pictaria] ${message}`) });
+const enrichRunner = new EnrichJobRunner({ repo, immich, taxonomy, config, profiles, onTagsQueued: () => aiTagSync.wake() });
 const enrichScheduler = new EnrichScheduler({ runner: enrichRunner, repo, config });
 const referee = new RefereeService({ repo, immich, review, enrichRunner, config, log: (message) => console.log(`[Pictaria] ${message}`) });
 const albumStore = new SmartAlbumStore(config.albums.dataFile, { installationSecret });
@@ -204,6 +209,7 @@ const insightsCollector = new InsightsCollector({
 
 review.startSyncWorker();
 captionWriteback.start();
+aiTagSync.start();
 referee.start();
 // Near-dup grouping needs thumbhashes; fill rows that predate the columns
 // once Immich is reachable. No-op after the first complete pass. The pass
@@ -281,6 +287,7 @@ lifecycle.setTimeout(scheduleBackupTick, 60000);
 // the 5s force-exit guard in shutdown(). stop(timeoutMs) resolves within its
 // budget; false means "gave up waiting" and gets warned by name.
 lifecycle.register('review-sync', 3000, (timeoutMs) => review.stopSyncWorker(timeoutMs));
+lifecycle.register('ai-tag-sync', 3000, timeoutMs => aiTagSync.stop(timeoutMs));
 lifecycle.register('caption-writeback', 3000, (timeoutMs) => captionWriteback.stop(timeoutMs));
 lifecycle.register('enrich-runner', 3000, (timeoutMs) => enrichRunner.stop(timeoutMs));
 lifecycle.register('enrich-scheduler', 3000, () => enrichScheduler.stop());
@@ -297,11 +304,11 @@ lifecycle.register('thumbhash-backfill', 3000, (timeoutMs) => awaitDrain(thumbha
 
 const features = [
   createActivityRoutes({ activityHistory }),
-  createEnrichRoutes({ review, enrichRunner, taxonomy, profiles, repo, requireImmich, config, immich, captionWriteback, referee, activityLog }),
+  createEnrichRoutes({ review, aiTagSync, enrichRunner, taxonomy, profiles, repo, requireImmich, config, immich, captionWriteback, referee, activityLog }),
   createAlbumsRoutes({ immich, store: albumStore, config, requireImmich, enrichRepo: repo }),
   createWakeWordRoutes({ store: wakeWordModels }),
   createFrameRoutes({ immich, frameHub, frameLedger, requireImmich, voiceMetrics, activityLog }),
-  createVoiceRoutes({ immich, config, requireImmich, voiceMetrics, activityLog }),
+  createVoiceRoutes({ immich, config, tagWrites, requireImmich, voiceMetrics, activityLog }),
   createAmbientRoutes({ config }),
   createInsightsRoutes({ collector: insightsCollector, repo: insightsRepo, immich, config, settingsStore, requireImmich }),
   createSettingsRoutes({ settingsStore, profiles }),

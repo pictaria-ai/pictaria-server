@@ -142,8 +142,8 @@
 
   <main>
     <h1><span class="glyph">✦</span> Enrich</h1>
-    <p class="intro">AI models analyze your photos and propose tags from the taxonomy. Proposed tags land in
-      <a href="/curate.html" style="color: var(--p-accent)">Curate</a> for your review. If caption writeback is enabled,
+    <p class="intro">AI models analyze your photos and sync AI tags to Immich. Send photos to
+      <a href="/curate.html" style="color: var(--p-accent)">Curate</a> when you want to review them. If caption writeback is enabled,
       successful captions are copied automatically into Immich descriptions. You add photo groups to the Enrich queue from
       <a href="/insights.html" style="color: var(--p-accent)">Insights</a>.</p>
 
@@ -193,6 +193,12 @@
         <span class="p-score-track"><span id="enrichBar" class="p-score-fill" style="width: 0%"></span></span>
         <span id="enrichBarText" class="p-muted"></span>
       </div>
+      <div class="es-main" style="margin-top: 12px">
+        <strong>Immich tag sync</strong><span id="tagSyncStatus" class="p-muted" role="status">Loading…</span>
+        <div class="p-grow"></div><button id="tagSyncRetry" class="p-btn quiet" hidden>Retry sync</button>
+      </div>
+      <p class="p-muted" style="margin-bottom: 0">AI tags sync after each photo is enriched. Curate decisions stay separate.</p>
+      <p id="tagSyncError" class="p-muted" hidden></p>
     </section>
 
     <section id="runPanel" class="p-panel panel">
@@ -210,7 +216,7 @@
         <div class="qline opts">
           <label>Photos <input id="enrichMax" class="p-input" type="number" min="1" value="100" style="width: 74px"></label>
           <label title="Checked: skips photos any model has already enriched. Unchecked: re-enriches photos your current model + prompt + taxonomy hasn't processed yet — exact-duplicate re-runs are always skipped either way."><input id="enrichSkip" type="checkbox" checked> Only unenriched</label>
-          <label title="When the run finishes, the analyzed photos join the Curate review queue. Uncheck to enrich for tags/albums only."><input id="enrichCurate" type="checkbox" checked> Send to Curate</label>
+          <label title="Adds each successfully enriched photo to Curate. AI tags sync to Immich either way."><input id="enrichCurate" type="checkbox" checked> Send to Curate</label>
         </div>
       </div>
       <!-- Photos stuck at the content-failure limit under the selected
@@ -431,11 +437,27 @@
       el('runAllBtn').disabled = off || busy || providerUnavailable;
     }
 
+    el('tagSyncRetry').addEventListener('click', async () => {
+      el('tagSyncRetry').disabled = true;
+      try { await api('/api/enrich/tag-sync/retry', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({}) }); }
+      catch (error) { toast(error.message, true); }
+      finally { el('tagSyncRetry').disabled = false; }
+      await refresh();
+    });
+
     async function refresh() {
       try {
         const profileEpoch = profileUI.epoch();
         const status = await api('/api/enrich/status');
         profileUI.sync(status.activeProfile, profileEpoch);
+        const sync = status.tagSync;
+        el('tagSyncStatus').textContent = !sync ? 'Sync status unavailable.'
+          : `${sync.paused ? 'Paused — Enrich is turned off. ' : ''}${sync.pending} pending · ${sync.failed} failed`;
+        el('tagSyncError').hidden = !sync?.lastError;
+        el('tagSyncError').textContent = sync?.lastError
+          ? (/^Immich\b/i.test(sync.lastError) ? sync.lastError : `Immich: ${sync.lastError}`) : '';
+        el('tagSyncRetry').hidden = !sync || (!sync.failed && !sync.lastError);
+        el('tagSyncRetry').disabled = !!sync?.paused;
         el('connStatus').hidden = false;
         renderProviders(status);
         applyEnabled(status);
@@ -519,7 +541,8 @@
         // polling through that gap — an item retired as fully covered
         // would otherwise sit stale on screen, with its history row
         // missing, until a manual reload.
-        const busy = status.running || status.resolvingSlice;
+        const busy = status.running || status.resolvingSlice
+          || (sync?.pending > 0 && !sync.paused && sync.retryAfter <= Date.now());
         if (busy && !state.polling) state.polling = setInterval(refresh, 2000);
         if (!busy && state.polling) {
           clearInterval(state.polling);

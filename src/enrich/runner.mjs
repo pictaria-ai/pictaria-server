@@ -214,6 +214,8 @@ async function executeBatch({
   applyTags = false,
   dryRun = true,
   listForReview = false,
+  syncAiTags = false,
+  onTagsQueued = () => {},
   captionWriteback = false,
   shouldStop = () => false,
   log = () => {},
@@ -482,6 +484,7 @@ async function executeBatch({
             model: provider.modelName,
             taxonomyVersion: taxonomy.version,
           });
+          if (syncAiTags) repo.aiTagSync.enqueue(assetId, processingRunId);
           let listed = 0;
           if (listForReview) {
             // "Send to Curate" on: each photo joins the review queue as it
@@ -495,6 +498,11 @@ async function executeBatch({
           }
           return listed;
         });
+        if (syncAiTags) {
+          // Waking is best effort; the durable worker also polls after restart.
+          try { onTagsQueued(); } catch {}
+          log('  AI tags queued for Immich');
+        }
         photoOutcome = 'succeeded';
         assetDecisions[assetId] = decisions;
         counters.succeeded += 1;
@@ -587,6 +595,8 @@ async function executeBatch({
   if (applyTags && !dryRun) {
     await syncTagDecisions(immich, assetDecisions);
     log('applied mapped tags to Immich');
+  } else if (syncAiTags) {
+    log('AI tag sync continues in the background; see Immich tag sync on Enrich.');
   } else {
     log('dry run complete; no Immich tags were written');
   }

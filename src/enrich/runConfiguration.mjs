@@ -83,6 +83,7 @@ export function captureRunConfiguration({
       reprocess: processing.reprocess === true,
       maxFailuresPerAsset: processing.maxFailuresPerAsset ?? 2,
       retryFailureLimited: processing.retryFailureLimited === true,
+      syncAiTags: processing.syncAiTags === true,
       applyTags: processing.applyTags === true,
       dryRun: processing.dryRun !== false,
       listForReview: processing.listForReview === true,
