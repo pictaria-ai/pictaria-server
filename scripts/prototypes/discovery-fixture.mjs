@@ -20,9 +20,13 @@ export class SyntheticSource {
   remove(id) { this.rows.delete(id); this.cache.clear(); }
   async scan({ page, size, updatedAfter }) {
     this.calls.pages++;
+    // Contract experiment only, NOT a version-aware Immich adapter. `deleted`
+    // models retained trash; remove() models a permanently absent record.
+    const broadDelta = this.mode === 'enrich-with-broad-delta' && updatedAfter !== null;
+    const eligibleOnly = this.mode === 'enrich' || (this.mode === 'enrich-with-broad-delta' && !broadDelta);
     const cacheKey = `${this.mode}:${updatedAfter}`;
     if (!this.cache.has(cacheKey)) this.cache.set(cacheKey, [...this.rows.values()]
-      .filter(r => !r.deleted && (this.mode !== 'enrich' || isEligible(r)) && (updatedAfter === null || r.updatedAt > updatedAfter))
+      .filter(r => (broadDelta || !r.deleted) && (!eligibleOnly || isEligible(r)) && (updatedAfter === null || r.updatedAt >= updatedAfter))
       .sort((a, b) => (b.takenAt ?? '').localeCompare(a.takenAt ?? '') || b.id.localeCompare(a.id)));
     const rows = this.cache.get(cacheKey), items = rows.slice((page - 1) * size, page * size).map(r => ({ ...r }));
     this.calls.rows += items.length;

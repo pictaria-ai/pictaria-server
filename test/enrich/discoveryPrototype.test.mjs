@@ -170,3 +170,63 @@ test('mutable offset pagination requires reconciliation even when a pass reaches
     assert.ok(!index.candidates(options).some(r => r.asset_id === rows[0].id));
   } finally { box.close(); }
 });
+
+test('filtered deltas miss a large cleanup and exhaust six validation budgets before reaching eligible work', async () => {
+  const box = sandbox();
+  try {
+    const rows = library(150000, false), source = new SyntheticSource(rows), index = box.index();
+    box.repo.transaction(() => { for (const row of rows.slice(6050)) history(box.repo, row); });
+    index.begin(); await finish(index, source);
+    const changedAt = index.state().watermark + 5000;
+    for (const row of rows.slice(0, 3000)) source.change(row.id, { visibility: 'hidden', updatedAt: changedAt });
+    for (const row of rows.slice(3000, 6000)) source.remove(row.id);
+    const before = { ...source.calls };
+    index.begin('delta'); await finish(index, source);
+    assert.equal(source.calls.pages - before.pages, 1);
+    assert.equal(source.calls.rows - before.rows, 0); // none of the transitions reached the inventory
+    for (let attempt = 0; attempt < 6; attempt++) {
+      const result = await index.select(source, options);
+      assert.equal(result.selected.length, 0);
+      assert.equal(result.validated, 1000);
+      assert.equal(result.limited, true); // MUST NOT become "library caught up" in production
+    }
+    const result = await index.select(source, options);
+    assert.deepEqual(result.selected.map(r => r.id), rows.slice(6000, 6050).map(r => r.id));
+    assert.equal(result.validated, 50);
+    assert.equal(result.limited, false);
+  } finally { box.close(); }
+});
+
+test('broad delta contract sees hidden, stack and trash transitions but permanent deletion still needs reconciliation', async () => {
+  const box = sandbox();
+  try {
+    const rows = library(4050, false), source = new SyntheticSource(rows, 'enrich-with-broad-delta'), index = box.index();
+    index.begin(); await finish(index, source);
+    const changedAt = index.state().watermark + 5000;
+    for (const row of rows.slice(0, 1000)) source.change(row.id, { visibility: 'hidden', updatedAt: changedAt });
+    for (const row of rows.slice(1000, 2000)) source.change(row.id, { stackChild: true, updatedAt: changedAt });
+    for (const row of rows.slice(2000, 3000)) source.change(row.id, { deleted: true, updatedAt: changedAt });
+    for (const row of rows.slice(3000, 4000)) source.remove(row.id);
+    const before = { ...source.calls };
+    index.begin('delta'); await finish(index, source);
+    assert.equal(source.calls.rows - before.rows, 3000);
+    assert.equal(source.calls.pages - before.pages, 3);
+    const first = await index.select(source, options);
+    assert.equal(first.selected.length, 0);
+    assert.equal(first.validated, 1000); // permanent deletions are not a searchable change feed
+    assert.equal(first.limited, true);
+    // Model the required response to a rejection burst: bounded full catch-up,
+    // rather than waiting for tomorrow's selection. No automatic scheduler exists here.
+    index.begin('full');
+    const step = await index.step(source, { maxPages: 1, pageSize: 25 });
+    assert.deepEqual(step, { pages: 1, complete: false });
+    const resumed = box.reopen();
+    assert.equal(resumed.state().scan.page, 2);
+    assert.deepEqual(await resumed.step(source, { maxPages: 1, pageSize: 25 }), { pages: 1, complete: true });
+    assert.equal(resumed.db.prepare('SELECT COUNT(*) AS n FROM prototype_inventory').get().n, 50);
+    const result = await resumed.select(source, options);
+    assert.deepEqual(result.selected.map(r => r.id), rows.slice(4000).map(r => r.id));
+    assert.equal(result.validated, 50);
+    assert.equal(result.limited, false);
+  } finally { box.close(); }
+});
