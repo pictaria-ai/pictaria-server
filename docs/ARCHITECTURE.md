@@ -206,7 +206,9 @@ data/               all persistent state (gitignored): enrichment.sqlite,
   It groups effective inference identity with profile and host context, pools
   valid accepted-request samples, and separately weights completed-run
   throughput by total elapsed time. `public/enrich-performance.js` and its
-  stylesheet own comparisons and the native run/photo-details dialog.
+  stylesheet own comparisons and the native run/photo-details dialog. Photo
+  detail pages embed at most 20 initial requests per photo and the configured
+  public Immich URL; subsequent request pages use the existing timing endpoint.
   `public/enrich-performance.html` and `enrich-performance-page.js` own the
   dedicated Runs / Compare setups page, paginated history, and direct run
   links. Enrich and Settings link to this page; Enrich no longer fetches

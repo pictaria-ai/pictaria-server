@@ -27,7 +27,7 @@ test('Enrich compares setups and opens paginated photo/request details with hone
   repo.recordJobRun({ title: 'Before timing was recorded', provider: 'venice', status: 'finished', counters: { succeeded: 1, analyzed: 1, failed: 0 }, startedAt: latest.start, finishedAt: latest.end });
   const assets = repo.db.prepare('SELECT asset_id AS id FROM assets').all().map(a => ({ ...a, type: 'IMAGE' })); repo.close();
   immich = await startFakeImmich({ assets, serveAssetDetails: true });
-  server = await bootServer(dir, { env: { IMMICH_BASE_URL: immich.base, IMMICH_API_KEY: 'fake', ENRICH_ENABLED: 'true' } });
+  server = await bootServer(dir, { env: { IMMICH_BASE_URL: immich.base, IMMICH_API_KEY: 'fake', IMMICH_PUBLIC_URL: 'https://photos.example.test/immich', ENRICH_ENABLED: 'true' } });
   assert.equal((await fetch(`${server.base}/api/enrich/performance`)).status, 401);
   assert.equal((await fetch(`${server.base}/api/enrich/runs/1`)).status, 401);
   browser = await launchChrome(); const page = await browser.newPage();
@@ -46,7 +46,13 @@ test('Enrich compares setups and opens paginated photo/request details with hone
   assert.equal(await page.evaluate('document.getElementById("compareView").hidden'), true);
   await page.navigate(`${server.base}/enrich.html`);
   await page.waitFor('document.querySelectorAll("#runsList .qitem").length === 20');
-  await page.evaluate('document.getElementById("runsPanel").open = true; document.querySelector("#runsList .qitem a").click()');
+  await page.evaluate('document.getElementById("runsPanel").open = true');
+  assert.equal(await page.evaluate('getComputedStyle(document.querySelector("#runsList .run-actions a")).alignItems'), 'center');
+  await page.evaluate('document.querySelector("#runsList .run-configuration").click()');
+  await page.waitFor('document.querySelectorAll("#logPopupMeta .run-setting-row").length === 3');
+  const settingsRows = await page.evaluate('[...document.querySelectorAll("#logPopupMeta .run-setting-row")].map(r=>r.textContent)');
+  assert.match(settingsRows[0], /^AI provider: Venice/); assert.match(settingsRows[1], /^Profile:/); assert.match(settingsRows[2], /^Image: Preview/);
+  await page.evaluate('document.getElementById("logPopupClose").click(); document.querySelector("#runsList .qitem a").click()');
   await page.waitFor('document.getElementById("photoTimingBody")?.textContent.includes("Detailed timing was not recorded")');
   await page.evaluate('document.getElementById("photoTimingClose").click()');
   await page.waitFor('location.hash === "#runs"');
@@ -62,11 +68,11 @@ test('Enrich compares setups and opens paginated photo/request details with hone
   await page.waitFor('!document.getElementById("runsView").hidden');
   const openRun = async title => page.evaluate(`(() => { const link=[...document.querySelectorAll('.run-detail-link')].find(n=>n.textContent===${JSON.stringify(title)}); link.click(); })()`);
   await openRun('Expired timing'); await page.waitFor('document.getElementById("photoTimingBody").textContent.includes("Timing expired")');
-  assert.match(await page.evaluate('document.getElementById("photoTimingBody").textContent'), /Run throughput:/);
+  assert.match(await page.evaluate('document.getElementById("photoTimingBody").textContent'), /Throughput/);
   await page.evaluate('document.getElementById("photoTimingClose").click()');
   await page.waitFor('location.hash === "#runs"');
   await openRun('Travel photos'); await page.waitFor('document.querySelectorAll(".timing-photo").length===20');
-  assert.match(await page.evaluate('document.querySelector(".run-detail-summary").textContent'), /30 min total/);
+  assert.match(await page.evaluate('document.querySelector(".run-detail-summary").textContent'), /Total time30 min/);
   assert.match(await page.evaluate('[...document.querySelectorAll("#performanceRuns tr")].find(r=>r.textContent.includes("Travel photos")).lastChild.textContent'), /30 min.*photos\/min/);
   assert.ok(await page.evaluate('[...document.querySelectorAll(".run-status")].some(s=>s.textContent === "Cancelled")'));
   assert.equal(await page.evaluate('document.querySelector(".run-detail-summary p:nth-child(2)").textContent'), await page.evaluate('[...document.querySelectorAll("#performanceRuns tr")].find(r=>r.textContent.includes("Travel photos")).firstChild.querySelector(".performance-context").textContent'));
@@ -74,15 +80,38 @@ test('Enrich compares setups and opens paginated photo/request details with hone
   assert.equal(await page.evaluate('document.querySelector(".timing-photo-info strong").textContent'), '<img src=x onerror=alert(1)>.jpg');
   assert.equal(await page.evaluate('document.querySelector(".timing-photo-info strong img")'), null);
   assert.match(await page.evaluate('document.querySelectorAll(".timing-photo")[1].textContent'), /Saved enrichment available.*timing interrupted/);
-  await page.evaluate('document.querySelector(".timing-photo").open=true');
+  assert.equal(await page.evaluate('document.querySelector("#photoTimingBody details")'), null);
   await page.waitFor('document.querySelector(".timing-photo ol").children.length===2');
   assert.match(await page.evaluate('document.querySelector(".timing-photo ol").textContent'), /Request 1.*Timed out.*1 min.*Request 2.*Successful response.*8 s/);
-  await page.evaluate('document.querySelectorAll(".timing-photo")[3].open=true');
+  assert.equal(await page.evaluate('document.querySelector(".timing-photo").tagName'), 'ARTICLE');
   await page.waitFor('document.querySelectorAll(".timing-photo")[3].querySelectorAll("li").length===20');
+  // Request paging errors preserve the already rendered rows and recover.
+  await page.evaluate(`window.requestFetch=window.fetch; window.fetch=(url,...args)=>String(url).includes('/attempts?')?Promise.resolve(new Response('{}',{status:503})):window.requestFetch(url,...args)`);
   await page.evaluate('document.querySelectorAll(".timing-photo")[3].querySelector("button").click()');
+  await page.waitFor('document.querySelectorAll(".timing-photo")[3].textContent.includes("Could not load requests")');
+  await page.evaluate('window.fetch=window.requestFetch; document.querySelectorAll(".timing-photo")[3].querySelector("button").click()');
   await page.waitFor('document.querySelectorAll(".timing-photo")[3].querySelectorAll("li").length===22');
   await page.evaluate('document.querySelector("#photoTimingBody > button").click()');
   await page.waitFor('document.querySelectorAll(".timing-photo").length===25');
+  const photoLink = await page.evaluate(`(() => { const a=document.querySelector('.timing-photo-info a'); return {href:a.href,target:a.target,rel:a.rel,title:a.title}; })()`);
+  assert.match(photoLink.href, /^https:\/\/photos\.example\.test\/immich\/photos\/fixture-photo-\d+-0$/);
+  assert.equal(photoLink.target, '_blank'); assert.match(photoLink.rel, /noopener/); assert.match(photoLink.title, /Immich/);
+  assert.equal(await page.evaluate('document.querySelector(".timing-photo .provider-note").textContent'), '');
+  // A real backdrop click closes; clicking content and dragging out do not.
+  const clickAt = async (x,y) => {
+    await page.send('Input.dispatchMouseEvent',{type:'mousePressed',x,y,button:'left',clickCount:1});
+    await page.send('Input.dispatchMouseEvent',{type:'mouseReleased',x,y,button:'left',clickCount:1});
+  };
+  const rect=await page.evaluate('(() => {const r=document.getElementById("photoTimingDialog").getBoundingClientRect();return {x:r.left+20,y:r.top+20};})()');
+  await clickAt(rect.x,rect.y);
+  assert.equal(await page.evaluate('document.getElementById("photoTimingDialog").open'),true);
+  await page.send('Input.dispatchMouseEvent',{type:'mousePressed',x:rect.x,y:rect.y,button:'left',clickCount:1});
+  await page.send('Input.dispatchMouseEvent',{type:'mouseReleased',x:5,y:5,button:'left',clickCount:1});
+  assert.equal(await page.evaluate('document.getElementById("photoTimingDialog").open'),true);
+  await clickAt(5,5);
+  await page.waitFor('!document.getElementById("photoTimingDialog").open && location.hash === "#runs"');
+  await page.waitFor('document.activeElement.textContent === "Travel photos"');
+  await openRun('Travel photos'); await page.waitFor('document.querySelectorAll(".timing-photo").length===20');
   // Escape closes the native modal and returns focus to the invoking action.
   await page.send('Input.dispatchKeyEvent', { type: 'keyDown', key: 'Escape', code: 'Escape', windowsVirtualKeyCode: 27 });
   await page.send('Input.dispatchKeyEvent', { type: 'keyUp', key: 'Escape', code: 'Escape', windowsVirtualKeyCode: 27 });

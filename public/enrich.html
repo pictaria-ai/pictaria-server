@@ -14,7 +14,8 @@
     .runs-navigation { margin-left: auto; flex: none; font-size: 13px; font-weight: 400; }
     .runs-navigation a { color: var(--p-ink); }
     .run-actions { justify-content: flex-start; }
-    .run-actions a { text-decoration: none; }
+    .run-actions a { text-decoration: none; display: inline-flex; align-items: center; justify-content: center; }
+    .run-setting-row { padding: 3px 0; line-height: 1.5; overflow-wrap: anywhere; }
     main { max-width: var(--p-page-w-narrow); margin: 0 auto; padding: 26px 18px 60px; }
     h1 { font-size: 20px; font-weight: 800; letter-spacing: 0.2px; margin: 8px 0 18px; }
     .intro { color: var(--p-muted); font-size: 13px; margin: -8px 0 16px; line-height: 1.5; }
@@ -1227,11 +1228,16 @@
         const saved = entry.snapshot;
         state.liveLog = false;
         el('logPopupTitle').textContent = title;
-        el('logPopupMeta').textContent = [
-          saved.profile ? profileUI.label(saved.profile) : null,
-          saved.inference.provider.name, saved.inference.provider.model,
-          `Image: ${saved.inference.image.source}`,
-        ].filter(Boolean).join(' · ');
+        el('logPopupMeta').replaceChildren();
+        for (const [label, value] of [
+          ['AI provider', [enrichFormat.provider(saved.inference.provider.name), saved.inference.provider.model].filter(Boolean).join(' · ')],
+          ['Profile', saved.profile ? `${saved.profile.name} · revision ${saved.profile.revision}` : 'Not recorded'],
+          ['Image', enrichFormat.status(saved.inference.image.source)],
+        ]) {
+          const row = document.createElement('div'); row.className = 'run-setting-row';
+          const heading = document.createElement('strong'); heading.textContent = `${label}: `;
+          row.append(heading, value, '\n'); el('logPopupMeta').append(row);
+        }
         el('logPopupBody').textContent = [
           'Saved inputs for this execution. Later Settings edits do not change this record.',
           'Curate continues to apply current review policy. Re-run failed photos uses settings at retry start.',

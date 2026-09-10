@@ -786,13 +786,27 @@ zero-success cohort shows zero photos/min and unavailable seconds/success.
 Individual-run end-to-end rates remain available in the run details, including
 for historical runs without granular timing.
 
-Selecting a run opens a dialog with its outcome summary, expandable metrics,
-and filenames/thumbnails, outcomes,
-total photo durations, and expandable individual requests. Both photo and
-request lists fetch 20 records at a time with Load more controls. The dialog
-fills the phone screen; Escape or Close returns focus to the invoking action.
-Switching runs cancels the old view's requests so a late response cannot replace
-the newly selected run.
+Selecting a run opens a dialog with structured **Run** and **Requests** summaries.
+Run outcomes, photo counts, duration, and throughput appear once; request outcomes,
+retries, median/average successful-request times, and sample sizes are visible
+without expansion. Compare setups retains its **More metrics** disclosure.
+
+Each photo shows its total time and individual provider requests directly, without
+an accordion. The thumbnail and filename open that photo in Immich in a new tab
+when a public Immich URL is configured. Successful requests omit routine HTTP 200
+labels; error responses retain their status codes. Retention notices appear when
+details are partial, rather than repeating full counts on every complete photo.
+Photo and request lists remain paginated at 20 records. The photo response includes
+each photo's first 20 requests, avoiding a separate initial HTTP request per photo;
+additional requests use the existing paginated attempt endpoint.
+
+The dialog fills the phone screen. Clicking the backdrop, Escape, or Close returns
+focus to the invoking action; dragging from inside the dialog to the backdrop does
+not dismiss it. Switching runs cancels the old view's requests so a late response
+cannot replace the newly selected run.
+
+**View run settings** on Enrich presents AI provider/model, profile/revision, and
+image source on separate labeled lines above the immutable saved inputs.
 
 A saved enrichment result and an execution's timing completeness are separate.
 An interrupted execution with a saved result shows that enrichment is available

@@ -98,6 +98,17 @@ test('performance API validates limits and empty state without depending on Prom
   assert.deepEqual((await get(`/api/enrich/runs/${oldest.id}`)).body.run, oldest);
   assert.equal('log' in (await get(`/api/enrich/runs/${oldest.id}`)).body.run, false);
   const page = await get(`/api/enrich/timings/${latest.timingRunId}/photos`); assert.ok(page.body.items[0].filename);
+  assert.equal(page.body.immichUrl, null);
+  assert.equal(page.body.items[0].requests.items[0].outcome, 'accepted');
+  assert.equal(page.body.items[0].requests.nextCursor, null);
+  assert.equal('nextAfterId' in page.body.items[0].requests, false);
+  const retries = seedPerformanceRun(repo, { photos: [{ requests: Array.from({length:22}, () => accepted(1000)) }] });
+  const details = await get(`/api/enrich/timings/${retries.runId}/photos`);
+  const initial = details.body.items[0].requests;
+  assert.equal(initial.items.length, 20); assert.equal(initial.retained, 22);
+  const rest = await get(`/api/enrich/timings/photos/${retries.photoIds[0]}/attempts?cursor=${encodeURIComponent(initial.nextCursor)}`);
+  assert.equal(rest.body.items.length, 2); assert.equal(rest.body.nextCursor, null);
+  assert.equal(rest.body.items[0].ordinal, 21);
 });
 
 test('the comparison cohort is bounded to retained runs and unknown identities never collapse together', t => {

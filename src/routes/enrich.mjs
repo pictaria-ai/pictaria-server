@@ -956,8 +956,15 @@ export function createEnrichRoutes({ review, enrichRunner, taxonomy, profiles = 
           : repo.timings.runs(options);
       if (!result) sendError(response, 404, 'timing_not_found', 'Timing history is unavailable or has expired.');
       else {
-        const { nextAfterId, ...data } = result;
-        sendJson(response, 200, { ...data, nextCursor: nextAfterId === null ? null : encodeRunCursor(nextAfterId) });
+        const pageResponse = ({ nextAfterId, ...data }) => ({ ...data,
+          nextCursor: nextAfterId === null ? null : encodeRunCursor(nextAfterId) });
+        const page = pageResponse(result);
+        if (timingMatch[1]) {
+          page.immichUrl = config?.immichPublicUrl || null;
+          page.items = page.items.map(photo => ({ ...photo,
+            requests: photo.requests ? pageResponse(photo.requests) : null }));
+        }
+        sendJson(response, 200, page);
       }
       return true;
     }

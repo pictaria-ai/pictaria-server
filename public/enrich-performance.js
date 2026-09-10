@@ -21,6 +21,17 @@ function createEnrichPerformance({ api, changed = () => {}, closed = () => {} })
       closed(returnJobId);
     }
   });
+  let backdropPress = false;
+  const outsideDialog = event => {
+    const r = dialog.getBoundingClientRect();
+    return event.target === dialog && (event.clientX < r.left || event.clientX > r.right || event.clientY < r.top || event.clientY > r.bottom);
+  };
+  dialog.addEventListener('pointerdown', event => { backdropPress = outsideDialog(event); });
+  dialog.addEventListener('pointercancel', () => { backdropPress = false; });
+  dialog.addEventListener('click', event => {
+    if (backdropPress && outsideDialog(event)) dialog.close();
+    backdropPress = false;
+  });
   el('photoTimingClose').addEventListener('click', () => dialog.close());
   el('performanceAll').addEventListener('click', () => { showAll = !showAll; void refresh(); });
   el('performanceRetry').addEventListener('click', () => void refresh());
@@ -90,22 +101,31 @@ function createEnrichPerformance({ api, changed = () => {}, closed = () => {} })
     summary.append(node('p', [providerName(run.provider), run.model, run.profile?.name,
       run.inferenceHostLabel].filter(Boolean).join(' · '), 'performance-context'));
     summary.append(node('p', when(run.startedAt), 'performance-context'));
-    const c = run.counters;
-    const elapsed = runElapsed(run);
-    summary.append(node('p', [status(run.status),
-      c ? `${plural(c.succeeded ?? 0, 'successful photo')} · ${plural(c.failed ?? 0, 'failed photo')}` : 'Photo counts unavailable',
-      Number.isFinite(elapsed) && elapsed >= 0 ? `${duration(elapsed)} total` : 'Duration unavailable'].join(' · ')));
-    const data = snapshot?.runs.find(r => r.timingRunId === run.timingRunId);
-    if (data) {
-      const m = data.metrics;
-      summary.append(node('p', `${m.latency.sampleCount ? `Typical successful request: ${duration(m.latency.medianMs)}. ` : ''}${requestSummary(m)}.`, 'performance-run-summary'));
-      summary.append(metricDetails(m));
-    } else if (run.timingRunId) summary.append(node('p', 'Timing summary unavailable', 'provider-note'));
-    // Historical runs still have their original whole-run rate, even if their
-    // request timings were never recorded or have expired.
-    if (Number.isFinite(run.throughput?.photosPerMinute)) {
-      summary.append(node('p', `Run throughput: ${rate(run.throughput.photosPerMinute)} photos/min · ${rate(run.throughput.secondsPerPhoto)} sec/photo · ${plural(run.throughput.successfulPhotos, 'successful photo')}. Includes downloads, failures, and retry waits.`, 'provider-note'));
-    }
+    const sections = node('div', null, 'run-metric-sections'); summary.append(sections);
+    const section = title => {
+      const box = node('section'); box.append(node('h3', title));
+      const list = node('dl', null, 'run-metrics'); box.append(list); sections.append(box);
+      return { box, add(label, value) { list.append(node('dt', label), node('dd', value)); } };
+    };
+    const c = run.counters; const m = snapshot?.runs.find(r => r.timingRunId === run.timingRunId)?.metrics;
+    const runInfo = section('Run'); runInfo.add('Status', status(run.status));
+    const skipped = (c?.skippedSuccessful ?? 0) + (c?.skippedFailureLimit ?? 0) + (c?.skippedDiscarded ?? 0);
+    runInfo.add('Photos', c ? [`${number(c.succeeded)} enriched`, c.failed ? `${number(c.failed)} failed` : null,
+      skipped ? `${number(skipped)} skipped` : null].filter(Boolean).join(' · ') : 'Counts unavailable');
+    runInfo.add('Total time', duration(runElapsed(run)));
+    const throughput = Number.isFinite(run.throughput?.photosPerMinute) ? run.throughput : m?.throughputRuns ? m : null;
+    runInfo.add('Throughput', throughput ? `${rate(throughput.photosPerMinute)} photos/min${Number.isFinite(throughput.secondsPerPhoto) ? ` · ${rate(throughput.secondsPerPhoto)} s/photo` : ''}` : 'Unavailable');
+    runInfo.box.append(node('p', 'Throughput uses successful photos and includes downloads, failures, and retry waits.', 'provider-note'));
+    if (m) {
+      const requests = section('Requests');
+      requests.add('Outcomes', requestSummary(m));
+      if (m.invalidResponses) requests.box.append(node('p', `${plural(m.invalidResponses, 'invalid response')} included in other failures.`, 'provider-note'));
+      if (m.retries) requests.add('Retries', plural(m.retries, 'request'));
+      requests.add('Typical time', duration(m.latency.medianMs));
+      requests.add('Average time', duration(m.latency.meanMs));
+      requests.box.append(node('p', `Typical is the median. Both times use ${plural(m.latency.sampleCount, 'measured successful request')}.`, 'provider-note'));
+      if (m.truncated) summary.append(node('p', `Some older timing details have expired. Request metrics use the remaining ${number(m.requests)} of ${number(m.recordedRequests)} recorded requests and ${number(m.retainedPhotos)} of ${number(m.photoCount)} photo executions.`, 'performance-warning'));
+    } else if (run.timingRunId) summary.append(node('p', 'Request summary unavailable.', 'provider-note'));
     if (run.error) summary.append(node('p', String(run.error), 'performance-warning'));
     return summary;
   }
@@ -114,12 +134,13 @@ function createEnrichPerformance({ api, changed = () => {}, closed = () => {} })
     response_received: 'Response received; not validated', other_error: 'Other error' }[value] ?? value);
 
   async function openPhotos(run, opener) {
+    backdropPress = false;
     returnFocus = opener; returnRunId = run.timingRunId; returnJobId = run.id;
     const seq = ++generation; controller?.abort(); controller = new AbortController();
     const signal = controller.signal;
     el('photoTimingTitle').textContent = run.title || 'Photo details';
     const body = el('photoTimingBody'); body.replaceChildren(runSummary(run));
-    el('photoTimingNote').textContent = 'Photo time includes downloading, retries, and saving results. Expand a photo to inspect its requests.';
+    el('photoTimingNote').textContent = 'Photo time includes downloading, retries, and saving results. Request time measures each call to the AI provider.';
     if (!dialog.open) dialog.showModal(); el('photoTimingClose').focus();
     if (!run.timingRunId) {
       body.append(node('p', 'Detailed timing was not recorded for this run.', 'provider-note'));
@@ -134,7 +155,7 @@ function createEnrichPerformance({ api, changed = () => {}, closed = () => {} })
       try {
         const page = await api(`/api/enrich/timings/${run.timingRunId}/photos?limit=20${cursor ? `&cursor=${encodeURIComponent(cursor)}` : ''}`, { signal });
         if (seq !== generation) return;
-        for (const photo of page.items) list.append(photoRow(photo, seq, signal));
+        for (const photo of page.items) list.append(photoRow(photo, page.immichUrl, seq, signal));
         cursor = page.nextCursor; more.textContent = 'Load more photos'; more.hidden = !cursor;
         message.textContent = page.retained
           ? `${plural(list.childElementCount, 'photo')} shown of ${number(page.retained)} retained.${page.truncated ? ' Older photo details have expired.' : ''}`
@@ -150,43 +171,59 @@ function createEnrichPerformance({ api, changed = () => {}, closed = () => {} })
     }
     await load();
   }
-  function photoRow(photo, seq, signal) {
-    const row = node('details', null, 'timing-photo'); const summary = node('summary');
-    const img = node('img'); img.alt = ''; img.loading = 'lazy'; img.src = `/api/review/thumbnail/${encodeURIComponent(photo.asset_id)}`;
-    img.addEventListener('error', () => { img.hidden = true; });
-    const info = node('span', null, 'timing-photo-info');
+  function photoRow(photo, immichUrl, seq, signal) {
+    const row = node('article', null, 'timing-photo'); const heading = node('div', null, 'timing-photo-heading');
     const name = photo.filename || `Photo ${photo.asset_id}`;
-    info.append(node('strong', name));
+    let url = null;
+    try {
+      const candidate = new URL(`${immichUrl.replace(/\/+$/, '')}/photos/${encodeURIComponent(photo.asset_id)}`);
+      if (['http:', 'https:'].includes(candidate.protocol)) url = candidate.href;
+    } catch { /* No configured public URL: show the photo without a link. */ }
+    const link = () => {
+      const a = node('a'); a.href = url; a.target = '_blank'; a.rel = 'noopener noreferrer';
+      a.title = 'Open in Immich (new tab)'; a.setAttribute('aria-label', `Open ${name} in Immich (new tab)`); return a;
+    };
+    const img = node('img'); img.alt = ''; img.loading = 'lazy'; img.src = `/api/review/thumbnail/${encodeURIComponent(photo.asset_id)}`;
+    const imageWrap = url ? link() : node('span'); imageWrap.className = 'timing-photo-image'; imageWrap.append(img);
+    img.addEventListener('error', () => { imageWrap.hidden = true; });
+    const info = node('span', null, 'timing-photo-info');
+    const title = node('strong', name); if (url) { const a = link(); a.append(title); info.append(a); } else info.append(title);
     let result = outcomeLabel(photo.outcome);
     if (photo.outcome === 'interrupted' && photo.savedResultAvailable) result = 'Saved enrichment available · timing interrupted';
     if (photo.resultStatus === 'succeeded') result = 'Enriched';
-    info.append(node('span', `${result} · ${plural(photo.attempt_count, 'request')}`, 'performance-context'));
-    const time = node('span', validPhotoDuration(photo.duration_ms) ? duration(photo.duration_ms) : photo.outcome === 'running' ? 'In progress' : 'Timing incomplete', 'timing-photo-duration');
-    summary.append(img, info, time); row.append(summary);
+    info.append(node('span', result, 'performance-context'));
+    const time = node('span', validPhotoDuration(photo.duration_ms) ? `${duration(photo.duration_ms)} total` : photo.outcome === 'running' ? 'In progress' : 'Timing incomplete', 'timing-photo-duration');
+    heading.append(imageWrap, info, time); row.append(heading);
     const content = node('div', null, 'timing-attempts'); row.append(content);
-    let loaded = false; let pending = false; let cursor = null; let shown = 0;
+    let pending = false; let cursor = null; let shown = 0;
     const notice = node('div', '', 'provider-note'); const list = node('ol'); const more = button('Load more requests', () => void load());
     more.hidden = true; content.append(notice, list, more);
     if (photo.outcome === 'interrupted' && photo.savedResultAvailable) content.prepend(node('p', 'This photo has saved enrichment. This execution’s completion time is unknown; the saved result may be from an earlier run.', 'provider-note'));
     if (photo.error_kind === 'download_error') content.prepend(node('p', 'The image could not be downloaded.', 'provider-note'));
-    row.addEventListener('toggle', () => { if (row.open && !loaded) void load(); });
+    function render(page) {
+      for (const attempt of page.items) {
+        list.append(node('li', `Request ${attempt.ordinal}${attempt.ordinal > 1 ? ' (retry)' : ''}: ${outcomeLabel(attempt.outcome)}${attempt.http_status && attempt.outcome !== 'accepted' ? ` · HTTP ${attempt.http_status}` : ''} · ${duration(attempt.duration_ms)}`));
+      }
+      shown += page.items.length; cursor = page.nextCursor;
+      notice.textContent = page.truncated ? `${shown} of ${page.retained} retained requests shown; some older request details have expired.`
+        : cursor ? `${shown} of ${page.retained} requests shown.` : !page.retained ? 'No provider request was sent.' : '';
+      if (!page.retained && page.truncated) notice.textContent = 'Request timing details have expired.';
+      more.textContent = 'Load more requests'; more.hidden = !cursor;
+    }
     async function load() {
-      if (pending) return; pending = true; more.disabled = true; notice.textContent = 'Loading requests…';
+      if (pending || seq !== generation) return; pending = true; more.disabled = true;
       try {
         const page = await api(`/api/enrich/timings/photos/${photo.id}/attempts?limit=20${cursor ? `&cursor=${encodeURIComponent(cursor)}` : ''}`, { signal });
         if (seq !== generation) return;
-        for (const attempt of page.items) {
-          list.append(node('li', `Request ${attempt.ordinal}${attempt.ordinal > 1 ? ' (retry)' : ''} · ${outcomeLabel(attempt.outcome)}${attempt.http_status ? ` · HTTP ${attempt.http_status}` : ''} · ${duration(attempt.duration_ms)}`));
-        }
-        shown += page.items.length; loaded = true; cursor = page.nextCursor;
-        notice.textContent = page.retained ? `${shown} of ${page.retained} retained requests.${page.truncated ? ' Some request details have expired.' : ''}` : page.truncated ? 'Request timing details have expired.' : 'No provider request was sent.';
-        more.textContent = 'Load more requests'; more.hidden = !cursor;
+        render(page);
       } catch (error) {
         if (seq !== generation) return;
         notice.textContent = error.status === 404 ? 'Timing expired.' : `Could not load requests. ${error.message}`;
         more.textContent = 'Try again'; more.hidden = error.status === 404;
       } finally { if (seq === generation) { pending = false; more.disabled = false; } }
     }
+    if (photo.requests) render(photo.requests);
+    else notice.textContent = 'Request timing details have expired.';
     return row;
   }
   function validPhotoDuration(value) { return typeof value === 'number' && Number.isFinite(value) && value >= 0; }

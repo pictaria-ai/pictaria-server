@@ -105,6 +105,7 @@ export function enrichPhotoDetails(repo, runId, options) {
   return { ...page, items: page.items.map(p => {
     const info = lookup.get(p.processing_run_id, p.asset_id);
     return { ...p, filename: info?.original_path?.split(/[\\/]/).at(-1) || null,
-      savedResultAvailable: info?.saved_run_id != null, resultStatus: info?.result_status ?? null };
+      savedResultAvailable: info?.saved_run_id != null, resultStatus: info?.result_status ?? null,
+      requests: repo.timings.attempts(p.id, { limit: 20 }) };
   }) };
 }

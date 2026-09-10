@@ -21,15 +21,14 @@
 .timing-dialog-body { padding: 12px 18px 18px; overflow-y: auto; min-height: 0; }
 .timing-photo-list { margin: 8px 0 12px; }
 .timing-photo { border-bottom: 1px solid var(--p-line); padding: 4px 0; }
-.timing-photo > summary { display: flex; align-items: center; gap: 10px; padding: 8px 0; cursor: pointer; list-style: none; }
-.timing-photo > summary::-webkit-details-marker { display: none; }
-.timing-photo > summary::before { content: '▸'; color: var(--p-muted); }
-.timing-photo[open] > summary::before { content: '▾'; }
+.timing-photo-heading { display: flex; align-items: center; gap: 10px; padding: 8px 0; }
+.timing-photo a { color: var(--p-ink); }
+.timing-photo-image { display: inline-flex; flex: none; }
 .timing-photo img { width: 48px; height: 48px; object-fit: cover; border-radius: 6px; flex: none; }
 .timing-photo-info { display: grid; min-width: 0; flex: 1; gap: 3px; }
 .timing-photo-info strong { font-size: 13px; overflow-wrap: anywhere; }
 .timing-photo-duration { font-size: 13px; font-variant-numeric: tabular-nums; text-align: right; max-width: 100px; }
-.timing-attempts { margin: 2px 0 12px 24px; font-size: 12px; }
+.timing-attempts { margin: 2px 0 12px 58px; font-size: 12px; }
 .timing-attempts ol { padding-left: 20px; list-style: none; padding-inline-start: 0; }
 .timing-attempts li { padding: 5px 0; line-height: 1.5; overflow-wrap: anywhere; }
 @media (max-width: 600px) {
@@ -80,3 +79,14 @@
 .performance-setup { display: flex; flex-wrap: wrap; gap: 4px 18px; font-size: 13px; font-weight: 600; margin: 8px 0 4px; line-height: 1.5; overflow-wrap: anywhere; }
 .performance-setup > span { min-width: 0; }
 .performance-values > div:nth-child(2) strong { font-size: 16px; }
+
+.run-metric-sections { display: grid; grid-template-columns: 1fr 1.2fr; gap: 24px; }
+.run-metric-sections h3 { margin: 8px 0; font-size: 14px; }
+.run-metric-sections > section { min-width: 0; }
+.run-metrics { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 8px 14px; margin: 12px 0; }
+.run-metrics dt { color: var(--p-muted); }
+.run-metrics dd { margin: 0; font-variant-numeric: tabular-nums; }
+@media (max-width: 600px) {
+  .run-metric-sections { grid-template-columns: 1fr; gap: 6px; }
+  .timing-attempts { margin-left: 0; }
+}
