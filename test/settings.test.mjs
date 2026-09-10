@@ -210,7 +210,7 @@ test('an existing settings file is loaded without being rewritten or gaining a s
   const dir = mkdtempSync(join(tmpdir(), 'pictaria-settings-'));
   try {
     const path = join(dir, 'settings.json');
-    const original = '{"version":6,"credentialBindings":{},"voice":{"openAiTtsVoice":"ash"}}\n';
+    const original = '{"version":7,"credentialBindings":{},"voice":{"openAiTtsVoice":"ash"}}\n';
     writeFileSync(path, original, { mode: 0o600 });
 
     const config = makeConfig();
@@ -1202,7 +1202,7 @@ test('the version 1 fixture migrates deterministically without mutating its inpu
   assert.equal(first.state.voice.openAiAskModel, 'gpt-4o-mini');
 });
 
-test('version 3 settings migrate through version 6 without inventing provider configuration', () => {
+test('version 3 settings migrate through version 7 without inventing provider configuration', () => {
   const migrated = migrateSettingsState({
     version: 3,
     credentialBindings: {},
@@ -1210,13 +1210,13 @@ test('version 3 settings migrate through version 6 without inventing provider co
   });
 
   assert.equal(migrated.from, 3);
-  assert.equal(migrated.to, 6);
+  assert.equal(migrated.to, SETTINGS_VERSION);
   assert.equal(migrated.migrated, true);
   assert.equal(migrated.state.enrich.defaultProvider, 'local_lmstudio');
   assert.equal(Object.hasOwn(migrated.state.enrich, 'openAiCompatibleBaseUrl'), false);
 });
 
-test('version 4 settings migrate to version 6 without inventing an inference host label', () => {
+test('version 4 settings migrate to version 7 without inventing an inference host label', () => {
   const migrated = migrateSettingsState({
     version: 4,
     credentialBindings: {},
@@ -1224,12 +1224,12 @@ test('version 4 settings migrate to version 6 without inventing an inference hos
   });
 
   assert.equal(migrated.from, 4);
-  assert.equal(migrated.to, 6);
+  assert.equal(migrated.to, SETTINGS_VERSION);
   assert.equal(migrated.migrated, true);
   assert.equal(Object.hasOwn(migrated.state.enrich, 'inferenceHostLabel'), false);
 });
 
-test('version 5 settings migrate to version 6 without enabling Daily Enrich', () => {
+test('version 5 settings migrate to version 7 without enabling Daily Enrich', () => {
   const migrated = migrateSettingsState({
     version: 5,
     credentialBindings: {},
@@ -1237,7 +1237,7 @@ test('version 5 settings migrate to version 6 without enabling Daily Enrich', ()
   });
 
   assert.equal(migrated.from, 5);
-  assert.equal(migrated.to, 6);
+  assert.equal(migrated.to, SETTINGS_VERSION);
   assert.equal(migrated.migrated, true);
   assert.equal(migrated.state.enrich.enabled, true);
   assert.equal(Object.hasOwn(migrated.state.enrich, 'scheduledEnabled'), false);
@@ -1285,9 +1285,15 @@ test('unknown same-version fields fail with downgrade-safe guidance', () => {
   );
 });
 
-test('the persisted settings contract matches the frozen version 6 snapshot', () => {
-  const expected = JSON.parse(readFileSync(new URL('./fixtures/upgrades/settings-contract-v6.json', import.meta.url), 'utf8'));
+test('the persisted settings contract matches the frozen version 7 snapshot', () => {
+  const expected = JSON.parse(readFileSync(new URL('./fixtures/upgrades/settings-contract-v7.json', import.meta.url), 'utf8'));
   assert.deepEqual(settingsContract(), expected);
+});
+
+test('version 6 migrates without overriding history defaults or environment preferences', () => {
+  const migrated = migrateSettingsState({ version: 6, credentialBindings: {}, enrich: { enabled: true } });
+  assert.equal(migrated.to, 7);
+  assert.deepEqual(migrated.state.enrich, { enabled: true });
 });
 
 test('daily Enrich schedule settings apply live, persist, and validate time boundaries', () => {

@@ -6,6 +6,7 @@ import { parseBoundedJsonFileSync } from './boundedFile.mjs';
 import { normalizeBaseUrl, normalizeHttpUrl } from './config.mjs';
 import { parseTaxonomySource } from './enrich/taxonomy.mjs';
 import { parseSupporterKey } from './support/supporterKey.mjs';
+import { HISTORY_LIMITS } from './enrich/historyRetention.mjs';
 
 // UI-editable settings, persisted to data/settings.json. Precedence:
 // settings.json override → environment → built-in default. Overrides are
@@ -62,6 +63,18 @@ const SERVER_FIELDS = {
 };
 
 const ENRICH_FIELDS = {
+  historyRuns: {
+    env: 'ENRICH_HISTORY_RUNS', label: 'Run summaries to keep',
+    number: { min: HISTORY_LIMITS.minRuns, max: HISTORY_LIMITS.maxRuns, integer: true },
+    read: config => config.enrichHistoryRuns ?? HISTORY_LIMITS.defaultRuns,
+    apply: (config, value) => { config.enrichHistoryRuns = value; },
+  },
+  historyLogs: {
+    env: 'ENRICH_HISTORY_LOGS', label: 'Run logs to keep',
+    number: { min: 0, max: HISTORY_LIMITS.maxLogs, integer: true },
+    read: config => config.enrichHistoryLogs ?? HISTORY_LIMITS.defaultLogs,
+    apply: (config, value) => { config.enrichHistoryLogs = value; },
+  },
   enabled: {
     env: 'ENRICH_ENABLED',
     label: 'Enable AI enrichment',
@@ -546,7 +559,7 @@ const SECTIONS = {
 
 const PROTOTYPE_SPECIAL_KEYS = new Set(['__proto__', 'prototype', 'constructor']);
 
-export const SETTINGS_VERSION = 6;
+export const SETTINGS_VERSION = 7;
 
 // Only credentials whose destination authority can vary belong here. Fixed
 // public APIs (OpenAI, ElevenLabs, Geoapify) do not need a stored binding.
@@ -663,6 +676,7 @@ const SETTINGS_MIGRATIONS = new Map([
     migrated.version = 6;
     return migrated;
   }],
+  [6, (state) => ({ ...structuredClone(state), version: 7 })],
 ]);
 
 // The persisted contract intentionally excludes labels and help copy: those
@@ -678,6 +692,7 @@ export function settingsContract() {
       if (field.secret) properties.push('secret');
       if (field.enum) properties.push(`enum=${JSON.stringify(field.enum)}`);
       if (field.number) properties.push(`range=${field.number.min}..${field.number.max}`);
+      if (field.number?.integer) properties.push('integer');
       if (!field.number && !field.boolean && !field.json) properties.push(`maxLength=${field.maxLength ?? 4000}`);
       signatures.push(`${section}.${key}|${properties.join('|')}`);
     }
@@ -1253,6 +1268,7 @@ function coerce(field, key, raw, store = null) {
     if (!Number.isFinite(value) || value < field.number.min || value > field.number.max) {
       throw new SettingsError(`${key} must be a number between ${field.number.min} and ${field.number.max}.`);
     }
+    if (field.number.integer && !Number.isSafeInteger(value)) throw new SettingsError(`${key} must be a whole number.`);
     return value;
   }
   const value = String(raw).trim();

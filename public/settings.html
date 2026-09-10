@@ -804,6 +804,10 @@
         { key: 'captionWriteback', type: 'switch', desc: 'Copies each photo’s AI caption into its Immich description, making photos searchable in Immich by what’s in them. Pictaria fills an empty description or updates its own earlier text and checks immediately before writing; Immich cannot make that check and update atomic, so a narrow concurrent human-edit race remains. Runs in the background; new enrichments follow automatically.', docs: 'https://github.com/pictaria-ai/pictaria-server/blob/main/docs/ENRICH.md#writing-captions-to-immich-descriptions' },
         { key: 'imageSource', type: 'select', labels: { preview: 'Preview (recommended)', thumbnail: 'Thumbnail (fastest, least detail)', original: 'Original (largest upload)' }, desc: 'The image size sent to the model for analysis.' },
         { key: 'inferenceHostLabel', type: 'text', placeholder: 'e.g. M4 Mac mini · LM Studio', desc: 'Optional label copied into each new run’s history, useful when comparing the same model on different machines. You supply and maintain this text; Pictaria does not inspect the model host.' },
+        { group: 'Run history', groupDesc: 'Keep older runs available in Enrich and Performance. Lowering a limit permanently removes older records; increasing it cannot restore deleted history. Enrichment results and Curate decisions are preserved.' },
+        { key: 'historyRuns', type: 'number', min: 100, max: 1000, width: 140, desc: 'Keep 100–1,000 run summaries, including saved settings and overall results. Default: 100. Photo and request details have separate limits and may expire sooner.' },
+        { key: 'historyLogs', type: 'number', min: 0, max: 100, width: 140, desc: 'Keep diagnostic logs for the newest 0–100 runs. Default: 100. Older summaries remain available without their logs. Each log is capped at 256 KiB.' },
+        { groupEnd: true },
         { group: 'Live Curate review policy', groupDesc: 'Shared policy for results from all profiles. Inference prompts and taxonomies are managed in Settings → Enrichment profiles.' },
         { key: 'taxonomyJson', type: 'textarea', rows: 14, taxonomyLoad: true, placeholder: 'Using the built-in taxonomy — paste an edited copy here to override.', desc: 'The shared live Curate policy as taxonomy JSON. Threshold and review-bucket changes apply to existing scores across all profiles without AI calls. This does not edit inference profiles or remap stored tags. Clear to restore the built-in review policy.', docs: 'https://github.com/pictaria-ai/pictaria-server/blob/main/docs/ENRICH.md#taxonomy-prompts-and-the-response-schema' },
         { groupEnd: true },
@@ -1034,6 +1038,8 @@
             input.autocomplete = 'off';
             if (row.placeholder) input.placeholder = row.placeholder;
             if (row.width) input.style.width = `${row.width}px`;
+            if (row.min !== undefined) input.min = row.min;
+            if (row.max !== undefined) input.max = row.max;
           }
           input.id = id;
           input.dataset.type = row.type;
@@ -1416,6 +1422,7 @@
         if (row.head) continue;
         const input = el(`f2-${section}-${row.key}`);
         if (!input) continue;
+        if (row.type === 'number' && row.min !== undefined && !input.reportValidity()) return;
         // Effective environment/default values are rendered so users can see
         // them, but must not become stored overrides merely because another
         // field in the same presentation section was saved.
@@ -1438,6 +1445,10 @@
         'scheduledPhotoBudget',
       ].some((key) => Object.hasOwn(patch.enrich, key))) {
         patch.enrich.scheduledTimeZone = Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC';
+      }
+      if (section === 'enrich' && ['historyRuns', 'historyLogs'].some(key =>
+        Object.hasOwn(patch.enrich ?? {}, key) && Number(patch.enrich[key]) < Number(clean[key]))) {
+        if (!confirm('Lowering these limits permanently deletes older run summaries or logs now. Enrichment results and Curate decisions are preserved. Continue?')) return;
       }
       el(`save-${section}`).disabled = true;
       const note = el(`note-${section}`);

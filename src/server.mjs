@@ -122,6 +122,7 @@ try {
 let appliedTaxonomySource = config.taxonomyOverrideJson || '';
 let appliedLocationGroupsJson = JSON.stringify(config.insights.locationGroups ?? []);
 settingsStore.onApplied = () => {
+  repo.setHistoryRetention({ runs: config.enrichHistoryRuns, logs: config.enrichHistoryLogs });
   if (immich.baseUrl !== config.immichBaseUrl || immich.apiKey !== config.immichApiKey) {
     enrichRunner.sourceChanged();
   }
@@ -165,6 +166,7 @@ const repo = new Repository(config.databasePath);
 repo.initSchema();
 // Reconcile only at process startup, never when another reader opens the DB.
 repo.timings.interrupt();
+repo.setHistoryRetention({ runs: config.enrichHistoryRuns, logs: config.enrichHistoryLogs });
 const profiles = new EnrichmentProfiles({ repo, config });
 profiles.initialize();
 const activityLog = createActivityLog({ repo, setIntervalFn: lifecycle.setInterval });

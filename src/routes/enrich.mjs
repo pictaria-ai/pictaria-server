@@ -1,4 +1,5 @@
 import { enrichPerformance, enrichPhotoDetails } from '../enrich/performance.mjs';
+import { HISTORY_LIMITS } from '../enrich/historyRetention.mjs';
 import { createEnrichProfileRoutes } from './enrichProfiles.mjs';
 import { HttpBodyError, readJsonBody, sendError, sendImage, sendJson } from '../http.mjs';
 import { describeResponseFields } from '../enrich/schema.mjs';
@@ -936,8 +937,8 @@ export function createEnrichRoutes({ review, enrichRunner, taxonomy, profiles = 
 
     if (request.method === 'GET' && url.pathname === '/api/enrich/performance') {
       const raw = url.searchParams.get('limit') ?? '3';
-      if (!/^\d+$/.test(raw) || Number(raw) < 1 || Number(raw) > 100) {
-        throw new HttpBodyError('Performance comparisons must contain 1–100 setups.', 400, 'invalid_performance_limit');
+      if (!/^\d+$/.test(raw) || Number(raw) < 1 || Number(raw) > HISTORY_LIMITS.maxRuns) {
+        throw new HttpBodyError(`Performance comparisons must contain 1–${HISTORY_LIMITS.maxRuns} setups.`, 400, 'invalid_performance_limit');
       }
       sendJson(response, 200, enrichPerformance(repo, { limit: Number(raw) }));
       return true;

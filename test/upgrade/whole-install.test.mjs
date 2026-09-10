@@ -134,7 +134,7 @@ test('contract 10 upgrade snapshots queue pins before clearing them and retains 
     writeFileSync(config.persistentState.inventoryPath, JSON.stringify(inventory));
 
     const upgraded = await openInstallation(config, 'verify');
-    assert.equal(upgraded.inventory.upgrade.stateVersion, 13);
+    assert.equal(upgraded.inventory.upgrade.stateVersion, 14);
     assert.deepEqual(semanticSnapshot(upgraded), before);
     assert.equal(upgraded.profiles.activeProfile().id, travel.id);
     assert.equal(upgraded.enrichment.db.prepare('SELECT COUNT(*) AS n FROM enrich_queue WHERE profile_revision_id IS NOT NULL').get().n, 0);
@@ -190,6 +190,35 @@ function createDatabaseFromSql(databasePath, fixturePath) {
     database.close();
   }
 }
+
+test('contract 13 upgrade snapshots version 6 settings and history before adopting retention settings', async () => {
+  const workspace = mkdtempSync(join(tmpdir(), 'pictaria-retention-recovery-'));
+  try {
+    const root = join(workspace, 'source'); materializeLegacyInstallation(root);
+    const config = fixtureConfig(root);
+    const installed = await openInstallation(config, 'initialize');
+    installed.enrichment.recordJobRun({ title: 'Retained before upgrade', provider: 'venice', status: 'finished',
+      log: ['Original log'], startedAt: '2026-09-01', finishedAt: '2026-09-01' });
+    closeInstallation(installed);
+    const settings = JSON.parse(readFileSync(config.settingsPath, 'utf8'));
+    settings.version = 6; writeFileSync(config.settingsPath, JSON.stringify(settings));
+    const inventory = JSON.parse(readFileSync(config.persistentState.inventoryPath, 'utf8'));
+    inventory.upgrade.stateVersion = 13; writeFileSync(config.persistentState.inventoryPath, JSON.stringify(inventory));
+    const upgraded = await openInstallation(config, 'verify');
+    assert.equal(upgraded.inventory.upgrade.stateVersion, 14);
+    assert.equal(JSON.parse(readFileSync(config.settingsPath, 'utf8')).version, 7);
+    assert.equal(config.enrichHistoryRuns, 100); assert.equal(config.enrichHistoryLogs, 100);
+    const snapshotDir = join(config.backup.dir, upgraded.inventory.upgrade.recoveryPoint.snapshotName);
+    assert.equal(JSON.parse(readFileSync(join(snapshotDir, 'settings.json'), 'utf8')).version, 6);
+    assert.equal(upgraded.enrichment.listJobRuns()[0].title, 'Retained before upgrade');
+    closeInstallation(upgraded);
+    const restoredConfig = fixtureConfig(join(workspace, 'restored')); restoreSnapshot(snapshotDir, restoredConfig);
+    assert.equal(JSON.parse(readFileSync(restoredConfig.settingsPath, 'utf8')).version, 6);
+    assert.equal(JSON.parse(readFileSync(restoredConfig.persistentState.inventoryPath, 'utf8')).upgrade.stateVersion, 13);
+    const restored = new Repository(restoredConfig.databasePath);
+    try { assert.equal(restored.getJobRunLog(restored.listJobRuns()[0].id).log[0], 'Original log'); } finally { restored.close(); }
+  } finally { rmSync(workspace, { recursive: true, force: true }); }
+});
 
 test('contract 12 upgrade saves schema-10 history before introducing discovery', async () => {
   const workspace = mkdtempSync(join(tmpdir(), 'pictaria-discovery-recovery-'));
@@ -264,6 +293,7 @@ async function openInstallation(config, expectedMode) {
   const enrichment = new Repository(config.databasePath);
   const enrichmentMigration = enrichment.initSchema();
   enrichment.timings.interrupt();
+  enrichment.setHistoryRetention({ runs: config.enrichHistoryRuns, logs: config.enrichHistoryLogs });
   const profiles = new EnrichmentProfiles({ repo: enrichment, config });
   profiles.initialize();
   const albums = new SmartAlbumStore(config.albums.dataFile, {

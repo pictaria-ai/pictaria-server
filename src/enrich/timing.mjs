@@ -1,9 +1,10 @@
 import { AsyncLocalStorage } from 'node:async_hooks';
+import { HISTORY_LIMITS } from './historyRetention.mjs';
 
 // Only Enrich enters this context. Concurrent referee/voice calls, even on
 // the same provider object, cannot be attributed to an enrichment photo.
 const invocation = new AsyncLocalStorage();
-export const TIMING_LIMITS = Object.freeze({ runs: 100, photos: 10000, attempts: 60000, page: 100 });
+export const TIMING_LIMITS = Object.freeze({ runs: HISTORY_LIMITS.defaultRuns, photos: 10000, attempts: 60000, page: 100 });
 
 export const TIMING_SCHEMA = `
 CREATE TABLE IF NOT EXISTS enrich_timing_runs (
@@ -82,6 +83,7 @@ export class EnrichTimingStore {
     this.monotonicNow = monotonicNow;
     this.photoWrites = 0;
     this.attemptWrites = 0;
+    this.runLimit = TIMING_LIMITS.runs;
   }
 
   atomic(work) {
@@ -104,19 +106,24 @@ export class EnrichTimingStore {
       ).lastInsertRowid);
       // Preserve active work; the server is single-flight. Every terminal run
       // remains discoverable here even if a crash prevented its job summary.
-      this.db.prepare(`DELETE FROM enrich_timing_runs WHERE outcome != 'running' AND id NOT IN
-        (SELECT id FROM enrich_timing_runs ORDER BY id DESC LIMIT ?)`).run(TIMING_LIMITS.runs);
+      this.pruneRuns();
       return id;
     });
   }
 
   finishRun(id, outcome) {
-    if (outcome === 'interrupted') return this.interrupt(id);
+    if (outcome === 'interrupted') return this.atomic(() => { this.interrupt(id); this.pruneRuns(); });
     return this.atomic(() => {
       this.#interruptPhotos(id);
       this.db.prepare(`UPDATE enrich_timing_runs SET outcome = ?, finished_at = ?
         WHERE id = ? AND outcome = 'running'`).run(outcome, this.wallNow(), id);
+      this.pruneRuns();
     });
+  }
+
+  pruneRuns(limit = this.runLimit) {
+    this.db.prepare(`DELETE FROM enrich_timing_runs WHERE outcome != 'running' AND id NOT IN
+      (SELECT id FROM enrich_timing_runs ORDER BY id DESC LIMIT ?)`).run(limit);
   }
 
   interrupt(id = null) {

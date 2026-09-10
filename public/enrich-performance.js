@@ -109,7 +109,7 @@ function createEnrichPerformance({ api, changed = () => {}, closed = () => {} })
     if (loading) return;
     loading = true; el('performanceAll').disabled = true; el('performanceRetry').hidden = true;
     try {
-      snapshot = await api(`/api/enrich/performance?limit=${showAll ? 100 : 3}`);
+      snapshot = await api(`/api/enrich/performance?limit=${showAll ? 1000 : 3}`);
       el('performanceError').textContent = ''; renderComparisons(); changed();
     } catch (error) {
       el('performanceError').textContent = `Could not refresh performance. ${error.message}`;

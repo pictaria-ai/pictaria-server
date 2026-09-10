@@ -7,6 +7,10 @@ All notable changes to Pictaria Server are documented here. This project follows
 
 ### Changed
 
+- Enrich run history is configurable in Settings: keep 100–1,000 run summaries
+  and Performance history entries, with diagnostic logs separately limited to
+  the newest 0–100 runs. Defaults remain 100 each. Lowering a limit prunes older
+  history after confirmation; photo/request detail retains its existing bounds.
 - Library sweeps and Daily Enrich select work from a resumable Enrich inventory,
   avoiding repeated walks through already-enriched photos and the old 100k
   discovery cliff. Refreshes track visibility/trash changes; stale candidate

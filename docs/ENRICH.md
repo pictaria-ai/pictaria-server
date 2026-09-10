@@ -704,7 +704,40 @@ chance; the run remains capped at 10,000 photos and records its own history
 card. If the original provider is no longer configured, its retry button stays
 disabled until its connection details are restored in Settings.
 
-Pictaria retains the newest 100 run summaries and bounded diagnostic logs.
+### Run history retention
+
+Settings → Enrich → Run history controls how much history stays available:
+
+- **Run summaries to keep:** 100–1,000 (default 100). The same limit applies
+  to timing-run entries in Performance, including configuration attribution,
+  overall outcomes and counters. Active timing runs are protected from pruning.
+- **Run logs to keep:** diagnostic logs for the newest 0–100 runs (default
+  100). Older summaries remain accessible without their logs. Each saved log
+  is independently bounded to 500 entries and 256 KiB; 100 logs therefore
+  occupy at most 25 MiB of log payload.
+
+Settings overrides `ENRICH_HISTORY_RUNS` / `ENRICH_HISTORY_LOGS`, which override
+the built-in defaults. Values must be whole numbers; environment values use
+the normal bounded configuration parsing. Lowering either limit prunes at save
+time (the UI asks for confirmation) and at startup. New runs also prune
+deterministically, newest ID first. API clients changing these settings must
+account for the same immediate deletion. Raising a limit cannot recover
+already-deleted records; restore an earlier backup to recover that history.
+
+Longer summary history does **not** increase photo/request-detail retention.
+Older Performance entries may have incomplete or expired request metrics;
+the page identifies this and uses only retained measurements. Per-run overall
+counts and throughput remain available from retained job summaries. Failed-run
+retry remains available while its summary and relevant processing history
+exist, even when its diagnostic log has expired.
+
+Synthetic measurements with 1,000 ordinary job summaries and 100 short logs
+used about 0.5 MiB for the database. With 100 near-cap logs it used about
+26 MiB. These are fixtures, not an installation-size promise: configuration
+snapshots, enrichment results, photo/request details and other application
+records have separate storage needs. SQLite may reuse freed pages without
+shrinking the database file; retention limits logical records, not file size.
+
 For each photo it keeps the newest normalized enrichment result needed by
 Curate and caption search; older run metadata remains, but raw provider
 response envelopes and superseded normalized payloads are not retained.
@@ -768,7 +801,8 @@ active status expose `timingRunId`; a legacy/selection-only job may have none.
 record where available. `enrich_provider_attempts` links to a photo execution.
 The timing store is separate from the durable latest-success/results contract.
 
-Retention keeps the newest 100 timing runs, up to 10,000 detailed photo
+Retention keeps the configured number of timing runs (100 by default, up to
+1,000), up to 10,000 detailed photo
 executions, and up to 60,000 individual requests across runs. Photo/request
 pruning is batched every 100 inserts (also on the first insert after opening),
 so at most 99 additional terminal rows can accrue between passes. Running
@@ -778,7 +812,8 @@ deleting photo detail removes its requests. Summary `photo_count` and
 retained detail. Photo counts exclude skips, which have separate counters.
 Timing expiration never deletes enrichment results, configuration snapshots,
 profiles, human decisions, or queues. These fixed limits are independent of
-job-log storage; configurable summary/log retention remains PIC-327 work.
+job-log storage. See Run history retention above for the shared summary limit
+and the independent log cap.
 
 Authenticated read APIs, using the existing run cursor convention:
 
@@ -825,7 +860,8 @@ existing saved logs are unchanged. Budgeted library sweeps now use the
 inventory discovery described above.
 
 The **Compare setups** view starts with the three most recently used setups; **Show all comparisons**
-includes every setup within the retained timing window (at most 100 runs).
+includes every setup within the retained timing window (up to the configured
+summary limit, at most 1,000 runs).
 Ordering follows recent use, not speed. Each setup shows median successful
 request time, successful requests and timeout counts, and overall
 successful photos/minute. Request counts read “3 of 5 requests succeeded”
@@ -899,8 +935,9 @@ Successful timing samples never hide recorded timeout/failure counts.
 links, without loading logs or scanning intervening history pages. A missing
 run returns 404, distinct from a retained run whose timing has expired.
 `GET /api/enrich/performance?limit=3` supplies comparisons and timing summaries. Comparison limits are
-1–100. Its `comparisons` contain setup context and metrics; `runs` contains
-summaries for at most the latest 100 timing runs; `window` describes the cohort.
+1–1,000. Its `comparisons` contain setup context and metrics; `runs` contains
+summaries up to the configured history limit (100 by default, at most 1,000);
+`window` describes the cohort.
 Aggregation reads at most 10,100 photo rows and 60,100 requests, accounting for
 the timing store's pruning slack. It loads neither logs nor configuration
 snapshot blobs. The existing photo detail endpoint additionally returns a
