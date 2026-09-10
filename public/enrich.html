@@ -11,6 +11,11 @@
   <script src="/nav.js" defer></script>
   <link rel="stylesheet" href="/pictaria.css">
   <style>
+    .runs-navigation { margin-left: auto; flex: none; font-size: 13px; font-weight: 400; }
+    .runs-navigation a { color: var(--p-ink); }
+    .run-actions { justify-content: flex-start; }
+    .run-actions a { text-decoration: none; display: inline-flex; align-items: center; justify-content: center; }
+    .run-setting-row { padding: 3px 0; line-height: 1.5; overflow-wrap: anywhere; }
     main { max-width: var(--p-page-w-narrow); margin: 0 auto; padding: 26px 18px 60px; }
     h1 { font-size: 20px; font-weight: 800; letter-spacing: 0.2px; margin: 8px 0 18px; }
     .intro { color: var(--p-muted); font-size: 13px; margin: -8px 0 16px; line-height: 1.5; }
@@ -223,8 +228,8 @@
     </section>
 
     <details id="runsPanel" class="p-panel panel">
-      <summary><span class="chev">&#9654;</span> Recent runs <span class="sub">— what ran, with which model and versions, and each run's log</span></summary>
-      <div class="provider-note" style="margin-top: 10px">End-to-end throughput uses successful photos only and covers Pictaria’s whole photo path: Immich download, image preparation, network, model response, and any retries. Skips do not count. It is useful for comparing your setups, but it is not pure model or token speed.</div>
+      <summary><span class="chev">&#9654;</span> Recent runs <span class="runs-navigation"><a href="/enrich-performance.html">View performance</a></span></summary>
+
       <div id="runsList" class="qlist queue" style="margin-top: 12px"></div>
       <div class="qline" style="margin-top: 10px">
         <span id="runsCount" class="m"></span>
@@ -271,6 +276,7 @@
 
   <div id="toast" class="p-toast"></div>
 
+  <script src="/enrich-format.js"></script>
   <script src="/enrich-profiles.js"></script>
   <script>
     const IDLE_STATUS_POLL_MS = 15_000;
@@ -317,7 +323,7 @@
         throw new Error('App password required');
       }
       const body = await response.json().catch(() => null);
-      if (!response.ok) throw new Error(body?.error?.message ?? `Request failed: ${response.status}`);
+      if (!response.ok) { const error = new Error(body?.error?.message ?? `Request failed: ${response.status}`); error.status = response.status; throw error; }
       return body;
     }
 
@@ -435,9 +441,6 @@
         applyEnabled(status);
         el('enrichDot').className = status.running ? 'p-dot ok' : status.error ? 'p-dot bad' : 'p-dot';
         const analyzed = status.liveCounters.succeeded + status.liveCounters.failed;
-        const skippedNote = (counters) => counters?.skippedSuccessful > 0
-          ? `, skipped ${counters.skippedSuccessful.toLocaleString()} already enriched`
-          : '';
         // Two lines: what's running (or ran) on top, its numbers below —
         // long titles wrap without tangling with the counters.
         let statusLine1;
@@ -457,13 +460,14 @@
             `ok ${status.liveCounters.succeeded}`,
             `failed ${status.liveCounters.failed}`,
           ].filter(Boolean).join(' · ');
+          if (!status.options?.targeted && !status.progress && !status.cancelRequested) statusLine2 = 'Finding photos to enrich…';
         } else if (status.finishedAt) {
           statusLine1 = 'Last run: ' + [
             status.cancelled ? 'cancelled' : status.error ? `failed: ${status.error}` : 'finished',
             status.title,
           ].filter(Boolean).join(' · ');
           statusLine2 = status.counters
-            ? `analyzed ${status.counters.analyzed}, ok ${status.counters.succeeded}${skippedNote(status.counters)}`
+            ? enrichFormat.photoOutcomes(status.counters, status.cancelled ? 'cancelled' : status.error ? 'failed' : 'finished')
             : '';
         } else {
           statusLine1 = 'Idle — ready to analyze photos';
@@ -871,12 +875,7 @@
 
     // --- queue (photo groups sent from Insights) ---
 
-    function fmtWhen(iso) {
-      if (!iso) return '';
-      const d = new Date(iso);
-      return d.toLocaleDateString(undefined, { month: 'short', day: 'numeric' })
-        + ' ' + d.toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' });
-    }
+    const fmtWhen = enrichFormat.when;
 
     function renderQueue(items) {
       const box = el('queueList');
@@ -1043,13 +1042,6 @@
 
     // --- run history ---
 
-    function fmtThroughput(value) {
-      if (!Number.isFinite(value) || value <= 0) return null;
-      return value >= 100 ? Math.round(value).toLocaleString()
-        : value >= 10 ? value.toFixed(1)
-          : value.toFixed(2);
-    }
-
     function syncRunsPaging() {
       const count = el('runsCount');
       const button = el('runsMoreBtn');
@@ -1075,6 +1067,7 @@
       for (const run of runs) {
         const card = document.createElement('div');
         card.className = 'qitem';
+        card.dataset.runId = String(run.id);
 
         const top = document.createElement('div');
         top.className = 'qline top';
@@ -1084,14 +1077,10 @@
         title.title = run.title;
         const when = document.createElement('span');
         when.className = 'm';
-        const durationMs = run.startedAt && run.finishedAt
-          ? new Date(run.finishedAt) - new Date(run.startedAt)
-          : null;
-        const duration = Number.isFinite(durationMs) && durationMs > 0
-          ? durationMs < 60_000 ? `${Math.max(1, Math.round(durationMs / 1000))}s` : `${Math.round(durationMs / 60_000)}m`
-          : null;
-        when.textContent = `${fmtWhen(run.startedAt)}${duration ? ` · ${duration}` : ''}`;
+        const durationMs = enrichFormat.elapsed(run);
+        when.textContent = `${fmtWhen(run.startedAt)}${durationMs !== null ? ` · ${enrichFormat.duration(durationMs)}` : ''}`;
         top.append(title, when);
+        const actions = document.createElement('div'); actions.className = 'qline run-actions';
         let retryBtn = null;
         if ((run.retryableFailures ?? 0) > 0) {
           retryBtn = document.createElement('button');
@@ -1108,7 +1097,7 @@
           configBtn.textContent = 'View run settings';
           configBtn.title = 'Inspect the saved prompts, taxonomy, and settings used by this run';
           configBtn.addEventListener('click', () => void openRunConfiguration(run.configurationId));
-          top.append(configBtn);
+          actions.append(configBtn);
         }
         if (run.hasLog) {
           const logBtn = document.createElement('button');
@@ -1116,51 +1105,36 @@
           logBtn.textContent = 'Log';
           logBtn.title = 'The full log of this run, as it appeared while running';
           logBtn.addEventListener('click', () => void openRunLog(run.id));
-          top.append(logBtn);
+          actions.append(logBtn);
         }
 
         // The row answers "how did it go" — counters for every outcome, plus
         // the exact provider/model/optional host context needed to compare
         // two end-to-end runs. Full version detail lives in the log popup.
         const c = run.counters;
-        const counts = c ? [
-          `${(c.succeeded ?? 0).toLocaleString()} ok`,
-          c.failed > 0 ? `${c.failed.toLocaleString()} failed` : null,
-          c.skippedSuccessful > 0 ? `${c.skippedSuccessful.toLocaleString()} already enriched` : null,
-          c.skippedFailureLimit > 0 ? `${c.skippedFailureLimit.toLocaleString()} at failure limit` : null,
-          c.skippedDiscarded > 0 ? `${c.skippedDiscarded.toLocaleString()} discarded` : null,
-        ].filter(Boolean).join(' · ') : null;
+        const counts = enrichFormat.photoOutcomes(c, run.status);
         const detail = document.createElement('div');
         detail.className = 'detail';
         detail.textContent = [
           run.profile ? profileUI.label(run.profile) : null,
-          run.provider,
+          enrichFormat.provider(run.provider),
           run.model,
           run.inferenceHostLabel ? `host: ${run.inferenceHostLabel}` : null,
           run.configurationId ? null : 'Configuration unknown (legacy run)',
           run.retrySourceRunId ? `Retry of run #${run.retrySourceRunId} with settings at retry start` : null,
-          run.status === 'finished' ? null : run.status + (run.error ? `: ${String(run.error).slice(0, 80)}` : ''),
+          enrichFormat.status(run.status) + (run.error ? `: ${String(run.error).slice(0, 80)}` : ''),
           counts,
         ].filter(Boolean).join(' · ');
         if (run.status === 'failed') detail.classList.add('bad');
 
         card.append(top, detail);
-        const photosPerMinute = fmtThroughput(run.throughput?.photosPerMinute);
-        const secondsPerPhoto = fmtThroughput(run.throughput?.secondsPerPhoto);
-        if (photosPerMinute && secondsPerPhoto) {
-          const throughput = document.createElement('div');
-          throughput.className = 'detail';
-          const sampleSize = run.throughput.successfulPhotos;
-          throughput.textContent = `End-to-end: ${photosPerMinute} photos/min · ${secondsPerPhoto} sec/photo · over ${sampleSize.toLocaleString()} photo${sampleSize === 1 ? '' : 's'}`;
-          throughput.title = 'Whole-run wall clock: Immich download, image preparation, network, model response, and retries. This is not pure model or token speed.';
-          card.append(throughput);
-        }
-        if (retryBtn) {
-          const actions = document.createElement('div');
-          actions.className = 'qline run-actions';
-          actions.append(retryBtn);
-          card.append(actions);
-        }
+        const detailsLink = document.createElement('a');
+        detailsLink.className = 'p-btn quiet';
+        detailsLink.href = `/enrich-performance.html#run=${encodeURIComponent(run.id)}`;
+        detailsLink.textContent = 'View details';
+        actions.prepend(detailsLink);
+        if (retryBtn) actions.append(retryBtn);
+        if (actions.childElementCount) card.append(actions);
         box.append(card);
       }
       syncRunButtons(state.lastStatus);
@@ -1246,11 +1220,16 @@
         const saved = entry.snapshot;
         state.liveLog = false;
         el('logPopupTitle').textContent = title;
-        el('logPopupMeta').textContent = [
-          saved.profile ? profileUI.label(saved.profile) : null,
-          saved.inference.provider.name, saved.inference.provider.model,
-          `Image: ${saved.inference.image.source}`,
-        ].filter(Boolean).join(' · ');
+        el('logPopupMeta').replaceChildren();
+        for (const [label, value] of [
+          ['AI provider', [enrichFormat.provider(saved.inference.provider.name), saved.inference.provider.model].filter(Boolean).join(' · ')],
+          ['Profile', saved.profile ? `${saved.profile.name} · revision ${saved.profile.revision}` : 'Not recorded'],
+          ['Image', enrichFormat.status(saved.inference.image.source)],
+        ]) {
+          const row = document.createElement('div'); row.className = 'run-setting-row';
+          const heading = document.createElement('strong'); heading.textContent = `${label}: `;
+          row.append(heading, value, '\n'); el('logPopupMeta').append(row);
+        }
         el('logPopupBody').textContent = [
           'Saved inputs for this execution. Later Settings edits do not change this record.',
           'Curate continues to apply current review policy. Re-run failed photos uses settings at retry start.',

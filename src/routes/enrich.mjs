@@ -1,3 +1,4 @@
+import { enrichPerformance, enrichPhotoDetails } from '../enrich/performance.mjs';
 import { createEnrichProfileRoutes } from './enrichProfiles.mjs';
 import { HttpBodyError, readJsonBody, sendError, sendImage, sendJson } from '../http.mjs';
 import { describeResponseFields } from '../enrich/schema.mjs';
@@ -235,8 +236,8 @@ export function createEnrichRoutes({ review, enrichRunner, taxonomy, profiles = 
         ].filter(Boolean).join(', ');
         const error = new Error(
           leftBehind
-            ? `"${item.title}" has nothing left to analyze — ${covered} already enriched, ${leftBehind} — removed it from the queue.`
-            : `"${item.title}" is already fully covered — removed it from the queue.`,
+            ? `"${item.title}" has nothing left to analyze — ${leftBehind} — removed it from the queue.`
+            : `"${item.title}" has no photos needing enrichment in this selection — removed it from the queue.`,
         );
         error.code = 'fully_covered';
         error.covered = covered;
@@ -924,6 +925,24 @@ export function createEnrichRoutes({ review, enrichRunner, taxonomy, profiles = 
       return true;
     }
 
+    const runSummaryMatch = url.pathname.match(/^\/api\/enrich\/runs\/(\d+)$/);
+    if (request.method === 'GET' && runSummaryMatch) {
+      const id = Number(runSummaryMatch[1]);
+      const run = Number.isSafeInteger(id) && id > 0 ? repo.getJobRunSummary(id) : null;
+      if (!run) sendError(response, 404, 'run_not_found', 'This run is no longer available in history.');
+      else sendJson(response, 200, { run });
+      return true;
+    }
+
+    if (request.method === 'GET' && url.pathname === '/api/enrich/performance') {
+      const raw = url.searchParams.get('limit') ?? '3';
+      if (!/^\d+$/.test(raw) || Number(raw) < 1 || Number(raw) > 100) {
+        throw new HttpBodyError('Performance comparisons must contain 1–100 setups.', 400, 'invalid_performance_limit');
+      }
+      sendJson(response, 200, enrichPerformance(repo, { limit: Number(raw) }));
+      return true;
+    }
+
     // Timing history is separate from results: legacy summaries have no
     // timingRunId, and crash-interrupted runs remain discoverable here.
     const timingMatch = url.pathname.match(/^\/api\/enrich\/timings(?:\/(\d+)\/photos|\/photos\/(\d+)\/attempts)?$/);
@@ -932,13 +951,20 @@ export function createEnrichRoutes({ review, enrichRunner, taxonomy, profiles = 
         afterId: decodeRunCursor(url.searchParams.get('cursor')) ?? 0,
         limit: runPageLimit(url.searchParams.get('limit')),
       };
-      const result = timingMatch[1] ? repo.timings.photos(Number(timingMatch[1]), options)
+      const result = timingMatch[1] ? enrichPhotoDetails(repo, Number(timingMatch[1]), options)
         : timingMatch[2] ? repo.timings.attempts(Number(timingMatch[2]), options)
           : repo.timings.runs(options);
       if (!result) sendError(response, 404, 'timing_not_found', 'Timing history is unavailable or has expired.');
       else {
-        const { nextAfterId, ...data } = result;
-        sendJson(response, 200, { ...data, nextCursor: nextAfterId === null ? null : encodeRunCursor(nextAfterId) });
+        const pageResponse = ({ nextAfterId, ...data }) => ({ ...data,
+          nextCursor: nextAfterId === null ? null : encodeRunCursor(nextAfterId) });
+        const page = pageResponse(result);
+        if (timingMatch[1]) {
+          page.immichUrl = config?.immichPublicUrl || null;
+          page.items = page.items.map(photo => ({ ...photo,
+            requests: photo.requests ? pageResponse(photo.requests) : null }));
+        }
+        sendJson(response, 200, page);
       }
       return true;
     }

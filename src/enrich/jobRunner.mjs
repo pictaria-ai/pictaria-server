@@ -362,7 +362,7 @@ export class EnrichJobRunner {
         skippedDiscarded: discarded,
       },
       log: [
-        `${now.slice(11, 19)} nothing left to analyze — ${covered} already enriched` +
+        `${now.slice(11, 19)} no photos to process in this selection` +
           (failureLimited > 0 ? `, ${failureLimited} at the failure limit` : '') +
           (discarded > 0 ? `, ${discarded} discarded` : '') +
           '; removed the queue item',

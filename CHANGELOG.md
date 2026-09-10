@@ -5,7 +5,35 @@ All notable changes to Pictaria Server are documented here. This project follows
 
 ## Unreleased
 
+### Changed
+
+- Enrich performance labels median request times explicitly instead of using
+  “Typical,” with a short median/average explanation in run details.
+
+- Performance run dialogs offer Copy for displayed details, compact photo rows,
+  and a visible Immich link explanation. Successful single-request photos consistently show Enriched and total time;
+  retries, failures, and incomplete timings retain request details. The
+  introduction scrolls with the details and puts the Immich link note on its own line.
+
+- Enrich run summaries focus on photos processed, with explicit failure-limit
+  and discard exceptions. Routine already-enriched counts and future per-photo
+  skip log entries are omitted; diagnostic counters remain available. Discovery
+  and empty-selection messages explain what the run is doing without implying
+  the entire library has been checked.
+
 ### Added
+
+- A dedicated Enrich performance page, linked from Enrich and Settings, starts
+  with run history and offers a Compare setups view for successful-request
+  speed, outcomes, and throughput. Enrich keeps compact Recent runs with direct
+  View details links. Run details include summaries, photo processing times,
+  paginated requests/retries, and clear incomplete or expired timing states;
+  the dialog fills the screen on phones. Shared formatting, plain-language
+  request counts, prominent profile/host labels and last-used dates, and
+  throughput beneath run duration make comparisons easier to read. Run dialogs
+  show structured metrics and photo requests directly, support backdrop dismissal,
+  and link photos to Immich. Run settings use separate provider, profile, and image
+  rows; the View details link aligns with neighboring buttons.
 
 - Enrich records per-photo processing time and each actual provider request's
   duration and outcome, including retries, timeouts, invalid responses, and

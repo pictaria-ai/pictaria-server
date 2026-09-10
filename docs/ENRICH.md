@@ -734,9 +734,115 @@ means no trustworthy timing was recorded, not zero-duration work. Increasing
 future retention cannot recover records already expired. Views must account
 for `truncated` when interpreting samples or reliability totals.
 
-PIC-343 supplies this data contract; PIC-332 owns the native comparison and
-per-photo display. The current dashboard continues showing whole-run
-throughput until that work is implemented.
+### Performance comparison and photo details
+
+**Enrich performance** is a dedicated page linked from Recent runs on Enrich
+and from the Enrich section in Settings. **Runs** is the default view: a paged
+history of run dates, provider/model/profile, photo outcomes, and total time.
+Successful photos/minute appears beneath total time when available. Run dates,
+status labels, provider names, and duration formats match across views; long
+durations use minutes/hours while short requests retain precise seconds.
+Enrich keeps compact outcome summaries and existing settings/log/retry actions;
+**View details** links directly to the selected run on the performance page.
+**Copy** copies the currently displayed run details, including pagination and
+retention notices; load more photos/requests first to include additional rows.
+Photo links open Immich in a new tab, explained on a separate line in the
+scrolling introduction. Only the title and Copy/Close controls stay fixed.
+Successful photos with one complete request show Enriched and total photo time
+consistently; request timings remain recorded and included in request metrics.
+Retries, failures, and incomplete timing retain their request details.
+Routine already-enriched photos are omitted from run outcome summaries and
+future per-photo logs. Discovery shows “Finding photos to enrich…” before
+processing starts; an empty completed selection is described without claiming
+the entire library is complete. Failure-limit and discarded counts remain
+explicit. Internal skip counters and metadata-window diagnostics are retained;
+existing saved logs are unchanged. This presentation does not optimize the
+underlying Immich metadata scan.
+
+The **Compare setups** view starts with the three most recently used setups; **Show all comparisons**
+includes every setup within the retained timing window (at most 100 runs).
+Ordering follows recent use, not speed. Each setup shows median successful
+request time, successful requests and timeout counts, and overall
+successful photos/minute. Request counts read “3 of 5 requests succeeded”
+with timeouts separately identified. Profile/revision and host labels are
+prominent, with a last-used date on each setup. **More metrics** includes the arithmetic mean,
+request outcomes and retry counts, contributing photo/run counts, total
+throughput time and successes, and timing coverage. No external metrics
+service is needed.
+
+A setup groups the same provider/model, effective inference inputs, profile,
+and recorded host label. Changed prompts, vocabulary, model options, or image
+settings form a different group. Same-profile revisions with identical
+inference inputs can share a group even if their name or review policy changed;
+the label/revision shown is from the most recent run. Run size and processing
+options do not fragment the comparison. They can affect real-world throughput
+and reliability, so use each run's saved settings when investigating a change.
+Unknown inference identity or missing job/host attribution stays isolated by
+run rather than implying equivalent setups.
+
+Median and mean pool valid, measured `accepted` requests directly, including
+those from failed, cancelled, and interrupted runs. They are not averages of
+per-run medians or means. Request outcomes and retries describe the same
+retained request population; a retry means ordinal greater than one. These
+are requests, not unique photos. Sample counts may differ if an accepted
+request has no usable duration. Negative, nonfinite, and durations exceeding
+JavaScript's safe integer range are excluded; actual measured zero remains a
+valid sample and displays as less than 0.01 seconds.
+
+Overall comparison throughput pools successful photo counts and full elapsed
+time from completed jobs that actually processed photos. Completed jobs with
+zero successes still contribute their time; all-skipped jobs do not. Failed,
+cancelled, active, and interrupted jobs do not enter that completed-job cohort,
+although their accepted requests still contribute to latency. Throughput is
+`total successes / total elapsed time`, never an average of individual run
+rates. No completed processing jobs means unavailable throughput; a measured
+zero-success cohort shows zero photos/min and unavailable seconds/success.
+Individual-run end-to-end rates remain available in the run details, including
+for historical runs without granular timing.
+
+Selecting a run opens a dialog with structured **Run** and **Requests** summaries.
+Run outcomes, photo counts, duration, and throughput appear once; request outcomes,
+retries, median/average successful-request times, and sample sizes are visible
+without expansion. Compare setups retains its **More metrics** disclosure.
+
+Each photo shows its total time and individual provider requests directly, without
+an accordion. The thumbnail and filename open that photo in Immich in a new tab
+when a public Immich URL is configured. Successful requests omit routine HTTP 200
+labels; error responses retain their status codes. Retention notices appear when
+details are partial, rather than repeating full counts on every complete photo.
+Photo and request lists remain paginated at 20 records. The photo response includes
+each photo's first 20 requests, avoiding a separate initial HTTP request per photo;
+additional requests use the existing paginated attempt endpoint.
+
+The dialog fills the phone screen. Clicking the backdrop, Escape, or Close returns
+focus to the invoking action; dragging from inside the dialog to the backdrop does
+not dismiss it. Switching runs cancels the old view's requests so a late response
+cannot replace the newly selected run.
+
+**View run settings** on Enrich presents AI provider/model, profile/revision, and
+image source on separate labeled lines above the immutable saved inputs.
+
+A saved enrichment result and an execution's timing completeness are separate.
+An interrupted execution with a saved result shows that enrichment is available
+while timing is incomplete; it does not claim the result belongs to that
+execution if the exact processing-row link was never written. Expired detail
+answers **Timing expired**, while older runs without a timing link say timing
+was not recorded. Partial samples show retained counts and explicit warnings.
+Successful timing samples never hide recorded timeout/failure counts.
+
+`GET /api/enrich/runs/:id` supplies a single retained run summary for direct
+links, without loading logs or scanning intervening history pages. A missing
+run returns 404, distinct from a retained run whose timing has expired.
+`GET /api/enrich/performance?limit=3` supplies comparisons and timing summaries. Comparison limits are
+1–100. Its `comparisons` contain setup context and metrics; `runs` contains
+summaries for at most the latest 100 timing runs; `window` describes the cohort.
+Aggregation reads at most 10,100 photo rows and 60,100 requests, accounting for
+the timing store's pruning slack. It loads neither logs nor configuration
+snapshot blobs. The existing photo detail endpoint additionally returns a
+basename-only filename, exact linked result status when available, and whether
+the photo has a saved enrichment result. Everything is read-only, computed
+from retained SQLite data, and survives process restart without a new schema
+or settings migration.
 
 ## Writing captions to Immich descriptions
 

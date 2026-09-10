@@ -166,7 +166,7 @@ test('Settings manages profiles; Enrich links to profiles and saved run settings
   await click('viewConfigurationBtn');
   await page.waitFor('!document.getElementById("logPopup").hidden');
   assert.equal(await page.evaluate('document.getElementById("logPopupTitle").textContent'), 'Current run settings');
-  assert.match(await page.evaluate('document.getElementById("logPopupMeta").textContent'), /Travel <test> · r2/);
+  assert.match(await page.evaluate('document.getElementById("logPopupMeta").textContent'), /Profile: Travel <test> · revision 2/);
   assert.match(await page.evaluate('document.getElementById("logPopupBody").textContent'), /New revision system prompt/);
   assert.equal(await page.evaluate('document.getElementById("runSettingsTechnical").open'), false);
   assert.match(await page.evaluate('document.getElementById("runSettingsIdentifiers").textContent'), /Configuration: [a-f0-9]{64}/);
