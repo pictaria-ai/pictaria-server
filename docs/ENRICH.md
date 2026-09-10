@@ -746,9 +746,11 @@ Enrich keeps compact outcome summaries and existing settings/log/retry actions;
 **View details** links directly to the selected run on the performance page.
 **Copy** copies the currently displayed run details, including pagination and
 retention notices; load more photos/requests first to include additional rows.
-Photo links open Immich in a new tab. Compact photo rows show a total time once
-when a single request has the same displayed duration; differing request times
-and retries remain explicit.
+Photo links open Immich in a new tab, explained on a separate line in the
+scrolling introduction. Only the title and Copy/Close controls stay fixed.
+Successful photos with one complete request show Enriched and total photo time
+consistently; request timings remain recorded and included in request metrics.
+Retries, failures, and incomplete timing retain their request details.
 Routine already-enriched photos are omitted from run outcome summaries and
 future per-photo logs. Discovery shows “Finding photos to enrich…” before
 processing starts; an empty completed selection is described without claiming

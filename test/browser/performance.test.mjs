@@ -15,7 +15,7 @@ test('Enrich compares setups and opens paginated photo/request details with hone
   const repo = new Repository(join(dir, 'enrichment.sqlite')); repo.initSchema();
   for (let i = 0; i < 21; i++) repo.recordJobRun({ title: `Older run ${i}`, provider: 'venice', status: 'finished', counters: { succeeded: 0, analyzed: 0, failed: 0 }, startedAt: '2026-08-01T12:00:00Z', finishedAt: '2026-08-01T12:00:01Z' });
   seedPerformanceRun(repo, { model: 'Earlier setup', photos: [{ outcome: 'failed', requests: [{ outcome: 'timeout', ms: 60000 }] }] });
-  seedPerformanceRun(repo, { model: 'Second setup', title: 'Exceptions', photos: [{ms: 8000, requests: [{outcome: 'accepted', ms: 8000}]}], status: 'cancelled', skipped: 200, failureLimited: 2, discarded: 1 }); seedPerformanceRun(repo, { model: 'Third setup', title: 'Already covered', photos: [], skipped: 25 });
+  seedPerformanceRun(repo, { model: 'Second setup', title: 'Exceptions', photos: [{ms: 8000, requests: [{outcome: 'accepted', ms: 7900}]}], status: 'cancelled', skipped: 200, failureLimited: 2, discarded: 1 }); seedPerformanceRun(repo, { model: 'Third setup', title: 'Already covered', photos: [], skipped: 25 });
   const latest = seedPerformanceRun(repo, { title: 'Travel photos', elapsedMs: 1800000, model: 'Vision-model-with-a-long-name-that-stays-readable-on-a-narrow-phone-screen', provider: 'venice',
     photos: [
       { filename: '<img src=x onerror=alert(1)>.jpg', ms: 73000, requests: [{ outcome: 'timeout', ms: 60000 }, { outcome: 'accepted', ms: 8000 }] },
@@ -83,6 +83,7 @@ test('Enrich compares setups and opens paginated photo/request details with hone
   assert.equal(await page.evaluate('document.querySelector(".timing-photo").innerText.match(/8 s/g).length'), 1);
   assert.ok(await page.evaluate('document.querySelector(".timing-photo").getBoundingClientRect().height <= 80'));
   assert.match(await page.evaluate('document.getElementById("photoTimingNote").textContent'), /Photo links open Immich in a new tab/);
+  assert.match(await page.evaluate('document.getElementById("photoTimingNote").innerText'), /provider\.\nPhoto links/);
   await page.evaluate(`Object.defineProperty(navigator, 'clipboard', {configurable:true, value:{writeText:async text=>{window.copiedRun=text;}}}); document.getElementById('photoTimingCopy').click()`);
   await page.waitFor('document.getElementById("photoTimingCopy").textContent === "Copied ✓"');
   assert.match(await page.evaluate('window.copiedRun'), /Exceptions[\s\S]*Photos[\s\S]*8 s total/);
@@ -116,6 +117,17 @@ test('Enrich compares setups and opens paginated photo/request details with hone
   await page.waitFor('document.querySelector(".timing-photo ol").children.length===2');
   assert.match(await page.evaluate('document.querySelector(".timing-photo ol").textContent'), /Request 1.*Timed out.*1 min.*Request 2.*Successful response.*8 s/);
   assert.equal(await page.evaluate('document.querySelector(".timing-photo").tagName'), 'ARTICLE');
+  const scrollPositions = await page.evaluate(`(() => {
+    const scroller=document.getElementById('photoTimingScroll');
+    const note=document.getElementById('photoTimingNote');
+    const header=document.querySelector('.timing-dialog-header');
+    const before={note:note.getBoundingClientRect().top,header:header.getBoundingClientRect().top};
+    scroller.scrollTop=100;
+    const result={delta:before.note-note.getBoundingClientRect().top,headerDelta:before.header-header.getBoundingClientRect().top};
+    scroller.scrollTop=0; return result;
+  })()`);
+  assert.equal(scrollPositions.delta, 100); assert.equal(scrollPositions.headerDelta, 0);
+
   await page.waitFor('document.querySelectorAll(".timing-photo")[3].querySelectorAll("li").length===20');
   // Request paging errors preserve the already rendered rows and recover.
   await page.evaluate(`window.requestFetch=window.fetch; window.fetch=(url,...args)=>String(url).includes('/attempts?')?Promise.resolve(new Response('{}',{status:503})):window.requestFetch(url,...args)`);

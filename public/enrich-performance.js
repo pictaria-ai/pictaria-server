@@ -159,7 +159,8 @@ function createEnrichPerformance({ api, changed = () => {}, closed = () => {} })
     clearTimeout(copyReset); el('photoTimingCopy').textContent = 'Copy';
     el('photoTimingTitle').textContent = run.title || 'Photo details';
     const body = el('photoTimingBody'); body.replaceChildren(runSummary(run));
-    el('photoTimingNote').textContent = 'Photo time includes downloading, retries, and saving results. Request time measures each call to the AI provider. Photo links open Immich in a new tab.';
+    el('photoTimingNote').textContent = 'Photo time includes downloads, retries, and saving. Request time measures a call to the AI provider.\nPhoto links open Immich in a new tab.';
+    el('photoTimingScroll').scrollTop = 0;
     if (!dialog.open) dialog.showModal(); el('photoTimingClose').focus();
     if (!run.timingRunId) {
       body.append(node('p', 'Detailed timing was not recorded for this run.', 'provider-note'));
@@ -219,12 +220,13 @@ function createEnrichPerformance({ api, changed = () => {}, closed = () => {} })
     if (photo.error_kind === 'download_error') content.prepend(node('p', 'The image could not be downloaded.', 'provider-note'));
     function render(page) {
       for (const attempt of page.items) {
-        const sameTime = !page.truncated && !page.nextCursor && page.retained === 1
+        const singleCompleteRequest = !page.truncated && !page.nextCursor && page.retained === 1
           && photo.attempt_count === 1 && validPhotoDuration(photo.duration_ms)
-          && validPhotoDuration(attempt.duration_ms) && duration(photo.duration_ms) === duration(attempt.duration_ms);
-        // For a single accepted request with the same displayed duration,
-        // Enriched + total time already convey the complete visible result.
-        if (sameTime && attempt.outcome === 'accepted' && photo.outcome === 'succeeded') continue;
+          && validPhotoDuration(attempt.duration_ms);
+        // Ordinary successes use one consistent row, regardless of how much
+        // time downloading and saving added around the provider request.
+        if (singleCompleteRequest && attempt.outcome === 'accepted' && photo.outcome === 'succeeded') continue;
+        const sameTime = singleCompleteRequest && duration(photo.duration_ms) === duration(attempt.duration_ms);
         list.append(node('li', `Request ${attempt.ordinal}${attempt.ordinal > 1 ? ' (retry)' : ''}: ${outcomeLabel(attempt.outcome)}${attempt.http_status && attempt.outcome !== 'accepted' ? ` · HTTP ${attempt.http_status}` : ''}${sameTime ? '' : ` · ${duration(attempt.duration_ms)}`}`));
       }
       shown += page.items.length; cursor = page.nextCursor;

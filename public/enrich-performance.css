@@ -17,8 +17,10 @@
 .timing-dialog[open] { display: flex; flex-direction: column; }
 .timing-dialog-header { display: flex; align-items: center; gap: 12px; padding: 14px 18px; border-bottom: 1px solid var(--p-line); }
 .timing-dialog-header h2 { font-size: 16px; margin: 0; flex: 1; min-width: 0; overflow-wrap: anywhere; }
-.timing-dialog-note { padding: 12px 18px 0; margin: 0; }
-.timing-dialog-body { padding: 12px 18px 18px; overflow-y: auto; min-height: 0; }
+.timing-dialog-note { padding: 12px 18px 0; margin: 0; white-space: pre-line; }
+.timing-dialog-scroll { overflow-y: auto; min-height: 0; }
+.timing-dialog-header { flex-shrink: 0; }
+.timing-dialog-body { padding: 12px 18px 18px; }
 .timing-photo-list { margin: 8px 0 12px; }
 .timing-photo { border-bottom: 1px solid var(--p-line); padding: 8px 0; }
 .timing-photo-heading { display: flex; align-items: center; gap: 10px; padding: 0; }
