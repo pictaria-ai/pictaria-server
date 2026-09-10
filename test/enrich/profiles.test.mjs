@@ -186,7 +186,7 @@ test('schema-8 fixture migrates to profiles without inventing old run attributio
   db.close();
   const repo = new Repository(path);
   try {
-    assert.deepEqual(repo.initSchema().applied, [9, 10]);
+    assert.deepEqual(repo.initSchema().applied, [9, 10, 11]);
     const config = { promptsDir: join(REPO_ROOT, 'prompts'), promptVersion: 'v1', taxonomyPath: join(REPO_ROOT, 'taxonomy/v1.json'),
       promptOverrides: { systemPrompt: 'Migrated customization' } };
     const profiles = new EnrichmentProfiles({ repo, config }); profiles.initialize();

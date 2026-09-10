@@ -47,7 +47,7 @@ test('a complete legacy installation upgrades, restarts, backs up, and restores 
     const sourceConfig = fixtureConfig(sourceRoot);
 
     const first = await openInstallation(sourceConfig, 'initialize');
-    assert.deepEqual(first.enrichmentMigration.applied, [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]);
+    assert.deepEqual(first.enrichmentMigration.applied, [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11]);
     await assertRepresentativeState(first, sourceConfig);
 
     const migratedDefault = first.profiles.activeProfile();
@@ -134,7 +134,7 @@ test('contract 10 upgrade snapshots queue pins before clearing them and retains 
     writeFileSync(config.persistentState.inventoryPath, JSON.stringify(inventory));
 
     const upgraded = await openInstallation(config, 'verify');
-    assert.equal(upgraded.inventory.upgrade.stateVersion, 12);
+    assert.equal(upgraded.inventory.upgrade.stateVersion, 13);
     assert.deepEqual(semanticSnapshot(upgraded), before);
     assert.equal(upgraded.profiles.activeProfile().id, travel.id);
     assert.equal(upgraded.enrichment.db.prepare('SELECT COUNT(*) AS n FROM enrich_queue WHERE profile_revision_id IS NOT NULL').get().n, 0);
@@ -191,6 +191,30 @@ function createDatabaseFromSql(databasePath, fixturePath) {
   }
 }
 
+test('contract 12 upgrade saves schema-10 history before introducing discovery', async () => {
+  const workspace = mkdtempSync(join(tmpdir(), 'pictaria-discovery-recovery-'));
+  try {
+    const config = fixtureConfig(join(workspace, 'source')); materializeLegacyInstallation(join(workspace, 'source'));
+    const installed = await openInstallation(config, 'initialize');
+    installed.enrichment.db.exec(`DROP TABLE enrich_inventory; DROP TABLE enrich_inventory_stage; DROP TABLE enrich_discovery;
+      PRAGMA user_version = 10;
+      INSERT INTO job_runs(title,provider,status,started_at,finished_at) VALUES('Before discovery','venice','finished','2026-09-01','2026-09-01');`);
+    closeInstallation(installed);
+    const inventory = JSON.parse(readFileSync(config.persistentState.inventoryPath, 'utf8'));
+    inventory.upgrade.stateVersion = 12; writeFileSync(config.persistentState.inventoryPath, JSON.stringify(inventory));
+    const upgraded = await openInstallation(config, 'verify');
+    assert.deepEqual(upgraded.enrichmentMigration.applied, [11]);
+    assert.equal(upgraded.enrichment.listJobRuns()[0].title, 'Before discovery');
+    assert.equal(upgraded.enrichment.db.prepare('SELECT COUNT(*) n FROM enrich_inventory').get().n, 0);
+    const snapshotPath = join(config.backup.dir, upgraded.inventory.upgrade.recoveryPoint.snapshotName, 'enrichment.sqlite');
+    const snapshot = new DatabaseSync(snapshotPath, { readOnly: true });
+    assert.equal(getUserVersion(snapshot), 10);
+    assert.equal(snapshot.prepare("SELECT name FROM sqlite_master WHERE name='enrich_inventory'").get(), undefined);
+    assert.equal(snapshot.prepare('SELECT title FROM job_runs ORDER BY id DESC LIMIT 1').get().title, 'Before discovery');
+    snapshot.close(); closeInstallation(upgraded);
+  } finally { rmSync(workspace, { recursive: true, force: true }); }
+});
+
 test('contract 11 upgrade saves a schema-9 recovery point before introducing timings', async () => {
   const workspace = mkdtempSync(join(tmpdir(), 'pictaria-timing-recovery-'));
   try {
@@ -206,7 +230,7 @@ test('contract 11 upgrade saves a schema-9 recovery point before introducing tim
     const inventory = JSON.parse(readFileSync(config.persistentState.inventoryPath, 'utf8'));
     inventory.upgrade.stateVersion = 11; writeFileSync(config.persistentState.inventoryPath, JSON.stringify(inventory));
     const upgraded = await openInstallation(config, 'verify');
-    assert.deepEqual(upgraded.enrichmentMigration.applied, [10]);
+    assert.deepEqual(upgraded.enrichmentMigration.applied, [10, 11]);
     assert.equal(upgraded.enrichment.listJobRuns()[0].timingRunId, null);
     const snapshotDir = join(config.backup.dir, upgraded.inventory.upgrade.recoveryPoint.snapshotName);
     closeInstallation(upgraded);

@@ -1,4 +1,5 @@
 import { timingErrorKind } from './timing.mjs';
+import { EnrichDiscovery } from './discovery.mjs';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 
@@ -6,7 +7,7 @@ import { OutputValidationError, validateAiOutput } from './schema.mjs';
 import { captureClient, captureRunConfiguration } from './runConfiguration.mjs';
 export { buildUserPrompt } from './runConfiguration.mjs';
 import { mapOutputToTags } from './mapTags.mjs';
-import { ImmichApiError, tagId, tagValue } from '../immich.mjs';
+import { ImmichClient, ImmichApiError, tagId, tagValue } from '../immich.mjs';
 import { configuredSecrets, sanitizeDiagnostic } from '../diagnostics.mjs';
 import { createTraversalBudget } from '../pagination.mjs';
 
@@ -175,13 +176,17 @@ export async function analyzeWithValidationRetry(provider, image, {
 }
 
 export async function runBatch(options) {
-  const timingSession = { id: options.timingRunId ?? null };
+  const timingSession = { id: options.timingRunId ?? null, discovery: null };
   let outcome = 'failed';
   try {
     const result = await executeBatch({ ...options, timingSession });
     outcome = options.shouldStop?.() || options.signal?.aborted ? 'cancelled' : 'finished';
     return result;
   } finally {
+    if (timingSession.discovery) {
+      options.log?.(timingSession.discovery.summary());
+      timingSession.discovery.close();
+    }
     if (timingSession.id !== null && options.timingRunId == null) {
       options.repo.timings.finishRun(timingSession.id, outcome);
     }
@@ -259,6 +264,14 @@ async function executeBatch({
     timingSession.id ??= repo.timings?.startRun(configuration) ?? null;
   }
 
+  // A budgeted whole-library sweep uses a durable inventory. Explicit offsets,
+  // metadata-only CLI scans, and custom list-only adapters retain their bounded
+  // window semantics; targeted queue/retry runs keep their existing path.
+  const discovery = !assetIds && !skipAi && offset === 0 && maxAnalyzed !== null && immich instanceof ImmichClient
+    ? new EnrichDiscovery(repo, immich, { shouldStop, log, maxValidations: Math.max(10000, maxAnalyzed + 1000) }) : null;
+  timingSession.discovery = discovery;
+  if (discovery) await discovery.prepare();
+
   // Only Immich traversal time belongs to this deadline. Provider inference
   // can legitimately take minutes per photo and must not make the next
   // otherwise-healthy metadata window look like a stalled traversal.
@@ -282,7 +295,10 @@ async function executeBatch({
 
   const fetchWindow = async (windowOffset) => {
     let fetched;
-    if (assetIds) {
+    if (discovery) {
+      const asset = await discovery.next({ runKey: configuration.runKey, skipAnySuccessful, reprocess, maxFailuresPerAsset });
+      fetched = asset ? [asset] : [];
+    } else if (assetIds) {
       const targeted = await fetchAssetsChunked(immich, assetIds, {
         shouldStop,
         traversal,
@@ -351,7 +367,7 @@ async function executeBatch({
   };
 
   while (true) {
-    const scanTotal = scanned + assets.length;
+    const scanTotal = discovery ? maxAnalyzed : scanned + assets.length;
     for (const [index, asset] of assets.entries()) {
       if (shouldStop()) {
         log('stopping early: cancellation requested');
@@ -364,14 +380,14 @@ async function executeBatch({
       if (skipAnySuccessful && repo.hasAnySuccessfulRun(assetId)) {
         counters.skippedSuccessful += 1;
         recordSkip('already_succeeded');
-        // Already enriched, so it belongs in Curate just like a fresh success.
-        if (listForReview) listedForReview += repo.reviewListAdd([assetId], 'enrich');
+        // Explicit targeted selections may still send existing results to Curate.
+        if (assetIds && listForReview) listedForReview += repo.reviewListAdd([assetId], 'enrich');
         continue;
       }
       if (!reprocess && repo.hasSuccessfulRun({ assetId, ...runKey })) {
         counters.skippedSuccessful += 1;
         recordSkip('already_succeeded');
-        if (listForReview) listedForReview += repo.reviewListAdd([assetId], 'enrich');
+        if (assetIds && listForReview) listedForReview += repo.reviewListAdd([assetId], 'enrich');
         continue;
       }
       // A human discard is unconditional — it holds even for retry runs
@@ -551,7 +567,7 @@ async function executeBatch({
     if (stopped || window.stopped || assetIds || maxAnalyzed === null || analyzed >= maxAnalyzed) {
       break;
     }
-    if (window.fetchedCount < limit) {
+    if (!discovery && window.fetchedCount < limit) {
       log(`no more assets to scan; analyzed ${analyzed} of ${maxAnalyzed} requested`);
       break;
     }
@@ -565,7 +581,7 @@ async function executeBatch({
   }
 
   if (!stopped && !window.stopped && analyzed === 0 && !counters.skippedFailureLimit && !counters.skippedDiscarded) {
-    log('No photos needed enrichment in the scanned selection.');
+    log(discovery ? 'No eligible photos found in the current inventory; periodic reconciliation checks for changes.' : 'No photos needed enrichment in the scanned selection.');
   }
 
   if (applyTags && !dryRun) {

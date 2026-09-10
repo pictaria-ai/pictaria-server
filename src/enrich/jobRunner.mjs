@@ -541,7 +541,7 @@ export class EnrichJobRunner {
         return;
       }
       // "Send results to Curate": photos join the review list as they are
-      // enriched (or were already enriched) during the run — never on
+      // enriched during the run (or explicitly targeted with existing results) — never on
       // failure, so Curate holds no un-enriched mystery rows. Failed photos
       // stay with the queue item and re-enter when a later run enriches
       // them. Decided photos stay decided — membership never resets
