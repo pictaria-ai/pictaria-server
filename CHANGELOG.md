@@ -5,123 +5,87 @@ All notable changes to Pictaria Server are documented here. This project follows
 
 ## Unreleased
 
-### Changed
+## 1.2.0 - 2026-09-10
 
-- Every successfully enriched photo now queues its AI tags for Immich,
-  regardless of Send to Curate. Tag-based albums/searches can include photos
-  before review; human `frame/*` decisions and unrelated tags remain intact.
-  Enrich shows pending/failed tag sync and retry, with errors labeled Immich. A separate durable backlog
-  preserves results through outages without filling Curate's decision queue;
-  coordinated tag writes prioritize human actions. Pictaria reconciles its
-  `ai/*` namespace, including replacing manual tags within that prefix.
-  Upgrade snapshots schema 11 / state contract 14 before moving to schema 12 /
-  contract 15. Older enriched photos are not automatically backfilled.
-
-- Enrich run history is configurable in Settings: keep 100–1,000 run summaries
-  and Performance history entries, with diagnostic logs separately limited to
-  the newest 0–100 runs. Defaults remain 100 each. Lowering a limit prunes older
-  history after confirmation; photo/request detail retains its existing bounds.
-- Library sweeps and Daily Enrich select work from a resumable Enrich inventory,
-  avoiding repeated walks through already-enriched photos and the old 100k
-  discovery cliff. Refreshes track visibility/trash changes; stale candidate
-  bursts trigger reconciliation. Incomplete discovery keeps a checkpoint and
-  reports a failure rather than claiming the library is caught up.
-- Unexpected eligibility metadata excludes the affected photos instead of
-  blocking every library sweep at the same page. Discovery logs include
-  metadata refresh time and bounded diagnostics for uncertain eligibility.
-- Send to Curate on a library sweep adds only that run's successful photos.
-  Explicit targeted selections can still send previously enriched results.
-
-- Enrich performance labels median request times explicitly instead of using
-  “Typical,” with a short median/average explanation in run details.
-
-- Performance run dialogs offer Copy for displayed details, compact photo rows,
-  and a visible Immich link explanation. Successful single-request photos consistently show Enriched and total time;
-  retries, failures, and incomplete timings retain request details. The
-  introduction scrolls with the details and puts the Immich link note on its own line.
-
-- Enrich run summaries focus on photos processed, with explicit failure-limit
-  and discard exceptions. Routine already-enriched counts and future per-photo
-  skip log entries are omitted; diagnostic counters remain available. Discovery
-  and empty-selection messages explain what the run is doing without implying
-  the entire library has been checked.
+This release focuses on Enrich: reusable profiles, predictable run settings,
+faster library discovery, useful performance history, and automatic AI-tag
+synchronization to Immich.
 
 ### Added
 
-- A dedicated Enrich performance page, linked from Enrich and Settings, starts
-  with run history and offers a Compare setups view for successful-request
-  speed, outcomes, and throughput. Enrich keeps compact Recent runs with direct
-  View details links. Run details include summaries, photo processing times,
-  paginated requests/retries, and clear incomplete or expired timing states;
-  the dialog fills the screen on phones. Shared formatting, plain-language
-  request counts, prominent profile/host labels and last-used dates, and
-  throughput beneath run duration make comparisons easier to read. Run dialogs
-  show structured metrics and photo requests directly, support backdrop dismissal,
-  and link photos to Immich. Run settings use separate provider, profile, and image
-  rows; the View details link aligns with neighboring buttons.
+- **Enrichment profiles** pair reusable prompts and taxonomy. Create, copy,
+  edit, archive, and restore profiles in Settings; select one active profile
+  on Enrich for library sweeps, queued jobs, retries, and Daily Enrich.
+- **Saved run settings** preserve the exact prompts, taxonomy, provider/model,
+  and processing options used for each run. Running work and automatic retries
+  keep those inputs when Settings changes. Run all uses one saved profile
+  revision for the batch.
+- **Enrich performance**, linked from Enrich and Settings, shows run history
+  and compares setups by request speed, reliability, and throughput. Details
+  include photo/request times, retries, timeouts, median and average times,
+  Copy, and photo links to Immich. Missing or expired measurements remain
+  explicit; older runs do not acquire invented timing data.
+- **Configurable history retention** keeps 100–1,000 run summaries and
+  Performance entries, with logs independently limited to the newest 0–100
+  runs. Defaults remain 100 each; photo/request detail has separate bounds.
 
-- Enrich records per-photo processing time and each actual provider request's
-  duration and outcome, including retries, timeouts, invalid responses, and
-  cancellation. Completed requests survive interrupted runs; incomplete and
-  historical measurements remain explicitly unknown. Bounded timing APIs
-  provide the foundation for the upcoming native performance view.
+### Changed
 
-- Named Enrich profiles: manage reusable prompts and taxonomy in Settings.
-  One server-saved **Active profile** on Enrich controls new sweeps, queued
-  groups, retries, and Daily Enrich. Queueing saves photos only; execution
-  captures the active revision. Run all captures one revision for the batch.
-  Active selection synchronizes across tabs; stale start requests are rejected.
-  Settings provides a profile list, focused editors, readable tag summaries,
-  contextual help, and unsaved-edit protection. Create/edit dialogs save back
-  to the profile list; active selection belongs to Enrich. Running work and history retain their saved inputs.
-- Queued runs have an independent **Only unenriched** option, allowing a new
-  profile pass without reopening existing human Curate decisions.
-- Enrich runs and per-photo results now reference saved, deduplicated
-  configurations. A **View run settings** button shows the prompts, taxonomy, and
-  non-secret settings used by each modern run. The Status card distinguishes
-  current and last-run settings; technical identifiers stay collapsed in the viewer. Failed-photo retries record
-  their source run and use settings at retry start.
+- Library sweeps and Daily Enrich use a resumable local inventory and SQL
+  eligibility checks instead of repeatedly walking already-enriched photos.
+  Later runs fetch changed metadata; periodic full reconciliation catches
+  missed changes. Large or interrupted discovery saves progress and reports
+  incomplete work honestly.
+- Every newly successful enrichment queues its AI tags for Immich, whether
+  Send to Curate is on or off. Sync retries survive restart without repeating
+  inference. Enrich shows pending/failed sync and a retry action; a separate
+  backlog and coordinated writes preserve Curate responsiveness.
+- **Send to Curate** on library sweeps adds only photos successfully enriched
+  by that run. Explicit targeted selections can still send existing results.
+- Provider and active-profile controls share one Enrich card. Profile editing
+  lives in Settings, and Recent Runs focuses on processed photos rather than
+  routine already-enriched skips. Logs retain compact discovery diagnostics.
+- Lowering history limits prunes older records after confirmation. Raising
+  limits cannot restore deleted history.
 
 ### Fixed
 
-- Profile creation distinguishes **Pictaria templates** from **Copy of [name]**
-  under **Starting point**. The initial profile is named **My profile**; untouched
-  preview starters named Default receive that name once, preserving history.
-  Edited/user-named profiles keep their names.
-
-- The Enrich master switch also pauses caption writeback, preserving pending
-  captions and saved preferences. Daily Enrich and caption controls show their
-  paused state while Enrich is off. The Enrich page combines provider/profile
-  controls and removes redundant run-profile text.
-
-- Enrich captures its configuration before photo selection and keeps it fixed
-  through inference, retries, validation, tag mapping, and run history. A
-  settings edit can no longer mix taxonomies or prompts within one execution.
-- With **Only unenriched** off, skip checks and failure limits now use actual
-  inference inputs. Custom prompt/vocabulary edits work without new version
-  labels; label-only and review-policy edits do not force AI calls. Taxonomy
-  edits no longer require bumping their display version.
+- Settings changes cannot mix prompts or taxonomy within an enrichment run.
+  With Only unenriched off, reprocessing checks use actual inference inputs;
+  label-only or live review-policy changes do not force new AI calls.
 - An Immich connection change cancels active enrichment and invalidates queue
-  resolution; an execution cannot switch libraries midway through its work.
+  resolution instead of switching libraries midway through a run.
+- Unexpected eligibility metadata excludes affected photos with diagnostics
+  rather than blocking every sweep at the same page.
+- Turning Enrich off pauses Daily Enrich, caption writeback, and automatic
+  AI-tag sync while preserving pending work and saved preferences.
+- Profile creation clearly distinguishes Pictaria templates from copies of
+  saved profiles; new installations start with **My profile**.
+- Browser-test cleanup closes retained Chrome pipes and bounds shutdown waits.
 
 ### Upgrade notes
 
-- Enrichment schema 9 and persistent-state contract 11 add named profiles
-  and one saved active profile. Existing effective overrides seed My profile once;
-  that profile becomes the initial active choice. Earlier preview queue pins
-  are cleared while queued selections and historical snapshots are preserved.
-  Saved profiles then own inference content, while Settings taxonomy JSON remains the shared live Curate policy.
-  Old prompt settings remain preserved but are no longer edited through the
-  Settings API. Normal pre-migration backup and snapshot-restore rollback apply.
-- Enrichment schema 8 (included in this upgrade) adds configuration
-  snapshots without backfilling unknown historical inputs or replaying photos.
-  Legacy successes still skip with **Only unenriched** on; with it off they
-  cannot prove an input match and may be reprocessed. Startup creates the
-  normal pre-migration recovery point; rollback restores that snapshot.
-- Legacy failures no longer count toward the current configuration's failure
-  limit. Previously stuck photos leave the **Stuck photos** strip and can get
-  two fresh attempts (the default limit) on subsequent sweeps, using additional
-  provider calls.
+- This release uses **Enrich schema 12, settings version 7, and persistent-state
+  contract 15**. Startup creates a complete pre-migration recovery snapshot.
+  Keep that snapshot and the prior image/version; rollback requires restoring
+  the snapshot with the matching older build, not opening upgraded state with
+  older code. See [Upgrading](docs/UPGRADING.md#upgrading-to-v120).
+- Existing effective prompts/taxonomy seed the initial active profile once.
+  Check it in Settings after upgrading. Saved profiles then own inference
+  content; the live Curate review policy remains separate. Earlier v1.2 preview
+  queue pins are cleared while selections and historical snapshots remain.
+- **Only unenriched** still skips every prior success. With it off, historical
+  results lacking a known configuration may be reprocessed. Legacy failures
+  no longer count toward the current configuration's failure limit, so
+  subsequent sweeps may make fresh provider calls for previously stuck photos.
+- Automatic tag sync requires Immich tag permissions. Pictaria manages the
+  entire **ai/** namespace: re-enrichment can remove stale or manually added
+  tags within that namespace. Human **frame/** decisions and unrelated tags
+  remain intact. AI-tag searches/albums can include photos before curation.
+  Existing enriched photos are **not** automatically backfilled on upgrade.
+- The first budgeted library sweep builds the inventory. A full metadata
+  reconciliation is expected on the first sweep after 24 hours; ordinary new
+  uploads are discovered incrementally even with older capture dates.
 
 ## 1.1.0 - 2026-09-03
 
