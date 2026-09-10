@@ -83,7 +83,7 @@ test('coverage gaps, orphaned interrupted runs, and saved results are explicit a
 test('performance API validates limits and empty state without depending on Prometheus or Immich', async t => {
   const repo = fixture(t); const handler = createEnrichRoutes({ repo });
   async function get(path) { const out = {}; await handler({ method: 'GET' }, { writeHead(status) { out.status = status; }, end(body) { out.body = JSON.parse(body); } }, new URL(path, 'http://test')); return out; }
-  for (const value of ['0', '101', 'NaN', '3.5', '-1']) await assert.rejects(get(`/api/enrich/performance?limit=${value}`), /1–100/);
+  for (const value of ['0', '1001', 'NaN', '3.5', '-1']) await assert.rejects(get(`/api/enrich/performance?limit=${value}`), /1–100/);
   const empty = await get('/api/enrich/performance'); assert.equal(empty.status, 200); assert.deepEqual(empty.body.comparisons, []);
   for (let i = 0; i < 5; i++) seedPerformanceRun(repo, { model: `Model ${i}` });
   assert.equal((await get('/api/enrich/performance')).body.comparisons.length, 3);

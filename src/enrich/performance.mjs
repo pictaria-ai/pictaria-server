@@ -1,4 +1,5 @@
 import { TIMING_LIMITS } from './timing.mjs';
+import { HISTORY_LIMITS } from './historyRetention.mjs';
 
 const count = value => Number.isSafeInteger(value) && value >= 0 ? value : 0;
 const validDuration = value => typeof value === 'number' && Number.isFinite(value) && value >= 0 && value <= Number.MAX_SAFE_INTEGER;
@@ -59,7 +60,7 @@ export function enrichPerformance(repo, { limit = 3 } = {}) {
     LEFT JOIN enrich_configurations c ON c.id = t.configuration_id
     LEFT JOIN enrich_profile_revisions p ON p.id = c.profile_revision_id
     LEFT JOIN job_runs j ON j.timing_run_id = t.id
-    ORDER BY t.id DESC LIMIT ?`).all(TIMING_LIMITS.runs);
+    ORDER BY t.id DESC LIMIT ?`).all(repo.timings.runLimit);
   const groups = new Map(); const byRun = new Map();
   for (const r of runs) {
     // Effective inference identity splits prompt/vocabulary/model/image
@@ -85,13 +86,13 @@ export function enrichPerformance(repo, { limit = 3 } = {}) {
       WHERE p.timing_run_id IN (${marks}) ORDER BY a.id DESC LIMIT ?`).all(...ids, TIMING_LIMITS.attempts + 100);
     for (const a of attempts) { const r = byRun.get(a.timing_run_id); addAttempt(r.m, a); addAttempt(r.group.m, a); }
   }
-  const max = Number.isSafeInteger(limit) ? Math.max(1, Math.min(100, limit)) : 3;
+  const max = Number.isSafeInteger(limit) ? Math.max(1, Math.min(HISTORY_LIMITS.maxRuns, limit)) : 3;
   return {
     comparisons: [...groups.values()].slice(0, max).map(({ m, ...g }) => ({ ...g, metrics: finish(m) })),
     totalComparisons: groups.size,
     runs: [...byRun].map(([timingRunId, r]) => ({ timingRunId, jobId: r.jobId, outcome: r.outcome, metrics: finish(r.m) })),
     window: { runCount: runs.length, oldestAt: runs.at(-1)?.started_at ?? null, newestAt: runs[0]?.started_at ?? null,
-      maxRuns: TIMING_LIMITS.runs, partial: [...groups.values()].some(g => g.m.retainedPhotos < g.m.photoCount || g.m.requests < g.m.recordedRequests) },
+      maxRuns: repo.timings.runLimit, partial: [...groups.values()].some(g => g.m.retainedPhotos < g.m.photoCount || g.m.requests < g.m.recordedRequests) },
   };
 }
 

@@ -282,6 +282,23 @@ revisions and the active choice live in enrichment.sqlite and are included
 in standard backups.
 
 
+## Enrich history retention (unreleased v1.2 work)
+
+Settings version 7 / persistent-state contract 14 adds bounded run-summary
+and diagnostic-log preferences. The Enrich database remains at schema 11.
+Existing installations retain the defaults of 100 summaries and 100 logs;
+migration does not create overrides that would hide environment preferences.
+The same summary limit applies to Performance timing-run entries, while
+photo/request detail retains its separate bounds.
+
+The normal recovery point is created before settings migration and startup
+pruning. It preserves the prior version-6 settings and retained history.
+Settings and databases are included in normal backups, so restoring a current
+backup also restores its retention preferences. Lowering a configured limit
+prunes immediately on save or startup; raising it cannot restore old records.
+For rollback, restore the pre-upgrade snapshot with its matching older build;
+do not run older code directly against contract-14 state.
+
 ## Enrich discovery (unreleased v1.2 work)
 
 Schema 11 / persistent-state contract 13 adds a rebuildable Enrich inventory,

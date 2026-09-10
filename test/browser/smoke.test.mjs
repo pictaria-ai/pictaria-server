@@ -1521,8 +1521,8 @@ test('admin UI smoke: gate, Insights lens, Curate, Smart Albums', { timeout: 120
 
     assert.equal(
       await page.evaluate('document.querySelectorAll("#fields-enrich details.sub-details").length'),
-      1,
-      'Enrich retains only its advanced prompt and taxonomy subsection',
+      2,
+      'Enrich separates run history from its live Curate review policy',
     );
     assert.deepEqual(
       await page.evaluate(`
@@ -1585,7 +1585,7 @@ test('admin UI smoke: gate, Insights lens, Curate, Smart Albums', { timeout: 120
       1,
       'the Cloud Models division carries the visual separator',
     );
-    const promptGroup = 'document.querySelector("#fields-enrich details.sub-details")';
+    const promptGroup = 'document.getElementById("f2-enrich-taxonomyJson").closest("details.sub-details")';
     assert.equal(await page.evaluate(`${promptGroup}.open`), false, 'live policy group starts collapsed');
     assert.ok(
       await page.evaluate(`!!${promptGroup}.querySelector("#f2-enrich-taxonomyJson")`),

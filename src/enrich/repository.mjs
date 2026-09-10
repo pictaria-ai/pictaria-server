@@ -8,6 +8,7 @@ import { preparePrivateDatabasePath, restrictPrivateDatabaseModes } from '../pri
 import { sanitizeDiagnostic } from '../diagnostics.mjs';
 import { validateAssetBatch } from './assetBatch.mjs';
 import { EnrichTimingStore, TIMING_SCHEMA } from './timing.mjs';
+import { historyRetention } from './historyRetention.mjs';
 import { DISCOVERY_SCHEMA } from './discovery.mjs';
 import { matchingRun, workEligibility } from './eligibility.mjs';
 import { ACTION_RULES } from './reviewActions.mjs';
@@ -591,6 +592,7 @@ export class Repository {
     preparePrivateDatabasePath(this.databasePath);
     this.db = new DatabaseSync(this.databasePath);
     this.timings = new EnrichTimingStore(this.db);
+    this.historyRetention = historyRetention();
     this.db.exec('PRAGMA journal_mode = WAL');
     // Decisions, tags, and captions are personal data: keep the DB (and its
     // WAL/SHM sidecars) private to the server user even under a permissive
@@ -1989,16 +1991,34 @@ export class Repository {
     const safeError = error === null || error === undefined ? null : sanitizeDiagnostic(error);
     const safeLog = boundedJobLog(log);
     const safeHostLabel = jobRunHostLabel(inferenceHostLabel);
-    this.db.prepare(`
-      INSERT INTO job_runs (title, provider, model, prompt_version, taxonomy_version, inference_host_label, targeted, status, error, counters_json, log_json, started_at, finished_at, configuration_id, inference_id, retry_source_run_id, timing_run_id)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-    `).run(title, provider, model ?? null, promptVersion ?? null, taxonomyVersion ?? null, safeHostLabel, targeted ?? null,
-      status, safeError, counters ? JSON.stringify(counters) : null,
-      safeLog?.length > 0 ? JSON.stringify(safeLog) : null, startedAt, finishedAt, configurationId, inferenceId, retrySourceRunId, timingRunId);
+    this.transaction(() => {
+      this.db.prepare(`
+        INSERT INTO job_runs (title, provider, model, prompt_version, taxonomy_version, inference_host_label, targeted, status, error, counters_json, log_json, started_at, finished_at, configuration_id, inference_id, retry_source_run_id, timing_run_id)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `).run(title, provider, model ?? null, promptVersion ?? null, taxonomyVersion ?? null, safeHostLabel, targeted ?? null,
+        status, safeError, counters ? JSON.stringify(counters) : null,
+        safeLog?.length > 0 ? JSON.stringify(safeLog) : null, startedAt, finishedAt, configurationId, inferenceId, retrySourceRunId, timingRunId);
+      this.pruneJobHistory(this.historyRetention);
+    });
+  }
+
+  setHistoryRetention(options) {
+    const policy = historyRetention(options);
+    this.transaction(() => {
+      this.pruneJobHistory(policy);
+      this.timings.pruneRuns(policy.runs);
+    });
+    this.historyRetention = policy;
+    this.timings.runLimit = policy.runs;
+  }
+
+  pruneJobHistory({ runs, logs }) {
     this.db.prepare(`
       DELETE FROM job_runs
       WHERE id NOT IN (SELECT id FROM job_runs ORDER BY id DESC LIMIT ?)
-    `).run(MAX_JOB_RUNS);
+    `).run(runs);
+    this.db.prepare(`UPDATE job_runs SET log_json = NULL WHERE log_json IS NOT NULL
+      AND id NOT IN (SELECT id FROM job_runs ORDER BY id DESC LIMIT ?)`).run(logs);
   }
 
   // Reconstruct the per-photo failures that belong to one historical job.

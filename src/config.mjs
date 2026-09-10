@@ -1,6 +1,7 @@
 import { existsSync, realpathSync, statSync } from 'node:fs';
 import { basename, dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { HISTORY_LIMITS } from './enrich/historyRetention.mjs';
 
 const ROOT_DIR = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 
@@ -77,6 +78,8 @@ export function loadConfig(env = process.env) {
     // Off by default because a run sends the selected image rendition to its
     // chosen model. Voice Interesting is a separate user-invoked model path.
     enrichEnabled: parseBoolean(env.ENRICH_ENABLED),
+    enrichHistoryRuns: clamp(parseInteger(env.ENRICH_HISTORY_RUNS, HISTORY_LIMITS.defaultRuns), HISTORY_LIMITS.minRuns, HISTORY_LIMITS.maxRuns),
+    enrichHistoryLogs: clamp(parseInteger(env.ENRICH_HISTORY_LOGS, HISTORY_LIMITS.defaultLogs), 0, HISTORY_LIMITS.maxLogs),
     enrichSchedule: {
       enabled: parseBoolean(env.ENRICH_SCHEDULE_ENABLED),
       time: normalizeDailyTime(env.ENRICH_SCHEDULE_TIME, '03:00'),
