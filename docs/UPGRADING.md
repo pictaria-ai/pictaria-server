@@ -262,8 +262,9 @@ to know which upgrade caused it.
 ## Upgrading to v1.2.0
 
 v1.2.0 upgrades persistent-state contract 8 from v1.1.0 to **contract 15**,
-with **Enrich schema 12** and **settings version 7**. Upgrades from earlier
-v1.2 development builds follow any remaining migrations. The release does
+with **Enrich schema 12** and **settings version 7**. v1.0.x installations can
+also upgrade directly to v1.2.0; installing v1.1.0 first is not required.
+Upgrades from earlier v1.2 development builds follow any remaining migrations. The release does
 not require a new Immich or Pictaria Frame version.
 
 ### Before and after first startup

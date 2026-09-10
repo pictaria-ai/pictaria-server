@@ -61,7 +61,6 @@ synchronization to Immich.
   AI-tag sync while preserving pending work and saved preferences.
 - Profile creation clearly distinguishes Pictaria templates from copies of
   saved profiles; new installations start with **My profile**.
-- Browser-test cleanup closes retained Chrome pipes and bounds shutdown waits.
 
 ### Upgrade notes
 
