@@ -94,8 +94,11 @@ test('runBatch skips assets with matching successful runs', async () => {
     const provider = fakeProvider();
     const immich = fakeImmich([{ id: 'a1' }]);
     await runBatch({ ...baseOptions, immich, repo, provider, limit: 1 });
-    const { counters } = await runBatch({ ...baseOptions, immich, repo, provider, limit: 1 });
+    const logs = [];
+    const { counters } = await runBatch({ ...baseOptions, immich, repo, provider, limit: 1, log: message => logs.push(message) });
 
+    assert.doesNotMatch(logs.join('\n'), /skipping|successful run already exists/);
+    assert.ok(logs.includes('No photos needed enrichment in the scanned selection.'));
     assert.equal(counters.analyzed, 0);
     assert.equal(counters.skippedSuccessful, 1);
     assert.equal(provider.calls.length, 1);
@@ -211,15 +214,19 @@ test('maxAnalyzed keeps fetching windows until the budget is met', async () => {
     // Enrich the first four so the opening windows are pure skips.
     await runBatch({ ...baseOptions, immich, repo, provider, assetIds: ['a1', 'a2', 'a3', 'a4'] });
 
+    const logs = [];
     const { counters } = await runBatch({
       ...baseOptions,
       immich,
       repo,
       provider,
+      log: message => logs.push(message),
       limit: 2,
       maxAnalyzed: 1,
       skipAnySuccessful: true,
     });
+    assert.doesNotMatch(logs.join('\n'), /skipping|successful run already exists|No photos needed/);
+    assert.ok(logs.some(line => line.includes('analyzing a5')));
 
     assert.equal(counters.analyzed, 1);
     assert.equal(counters.succeeded, 1);

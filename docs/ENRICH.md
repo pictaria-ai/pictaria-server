@@ -744,6 +744,13 @@ status labels, provider names, and duration formats match across views; long
 durations use minutes/hours while short requests retain precise seconds.
 Enrich keeps compact outcome summaries and existing settings/log/retry actions;
 **View details** links directly to the selected run on the performance page.
+Routine already-enriched photos are omitted from run outcome summaries and
+future per-photo logs. Discovery shows “Finding photos to enrich…” before
+processing starts; an empty completed selection is described without claiming
+the entire library is complete. Failure-limit and discarded counts remain
+explicit. Internal skip counters and metadata-window diagnostics are retained;
+existing saved logs are unchanged. This presentation does not optimize the
+underlying Immich metadata scan.
 
 The **Compare setups** view starts with the three most recently used setups; **Show all comparisons**
 includes every setup within the retained timing window (at most 100 runs).

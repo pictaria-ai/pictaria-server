@@ -28,9 +28,7 @@ const performancePage = (() => {
       if (run.inferenceHostLabel) setup.append(node('div', run.inferenceHostLabel, 'performance-context'));
       const outcomes = cell('Photo outcomes'); const c = run.counters;
       outcomes.append(node('div', status(run.status), 'run-status'),
-        node('div', c ? `${count(c.succeeded)} successful · ${count(c.failed)} failed` : 'Counts unavailable', 'performance-context'));
-      const skipped = (c?.skippedSuccessful ?? 0) + (c?.skippedFailureLimit ?? 0) + (c?.skippedDiscarded ?? 0);
-      if (skipped) outcomes.append(node('div', `${count(skipped)} skipped`, 'performance-context'));
+        node('div', enrichFormat.photoOutcomes(c, run.status), 'performance-context'));
       const time = cell('Total time'); time.append(node('div', duration(elapsed(run))));
       if (Number.isFinite(run.throughput?.photosPerMinute)) {
         const throughput = node('div', `${rate(run.throughput.photosPerMinute)} photos/min`, 'performance-context run-throughput');

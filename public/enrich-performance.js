@@ -109,9 +109,7 @@ function createEnrichPerformance({ api, changed = () => {}, closed = () => {} })
     };
     const c = run.counters; const m = snapshot?.runs.find(r => r.timingRunId === run.timingRunId)?.metrics;
     const runInfo = section('Run'); runInfo.add('Status', status(run.status));
-    const skipped = (c?.skippedSuccessful ?? 0) + (c?.skippedFailureLimit ?? 0) + (c?.skippedDiscarded ?? 0);
-    runInfo.add('Photos', c ? [`${number(c.succeeded)} enriched`, c.failed ? `${number(c.failed)} failed` : null,
-      skipped ? `${number(skipped)} skipped` : null].filter(Boolean).join(' · ') : 'Counts unavailable');
+    runInfo.add('Photos', enrichFormat.photoOutcomes(c, run.status));
     runInfo.add('Total time', duration(runElapsed(run)));
     const throughput = Number.isFinite(run.throughput?.photosPerMinute) ? run.throughput : m?.throughputRuns ? m : null;
     runInfo.add('Throughput', throughput ? `${rate(throughput.photosPerMinute)} photos/min${Number.isFinite(throughput.secondsPerPhoto) ? ` · ${rate(throughput.secondsPerPhoto)} s/photo` : ''}` : 'Unavailable');
@@ -159,9 +157,7 @@ function createEnrichPerformance({ api, changed = () => {}, closed = () => {} })
         cursor = page.nextCursor; more.textContent = 'Load more photos'; more.hidden = !cursor;
         message.textContent = page.retained
           ? `${plural(list.childElementCount, 'photo')} shown of ${number(page.retained)} retained.${page.truncated ? ' Older photo details have expired.' : ''}`
-          : 'No photos were processed in this run. Skipped photos do not have request timings.';
-        const skipped = (page.run.skipped_successful ?? 0) + (page.run.skipped_discarded ?? 0) + (page.run.skipped_failure_limit ?? 0);
-        if (skipped) message.textContent += ` ${plural(skipped, 'photo')} skipped.`;
+          : 'No photo timings were recorded for this run.';
         if (!page.retained && page.truncated) message.textContent = 'Photo timing details have expired.';
       } catch (error) {
         if (seq !== generation) return;

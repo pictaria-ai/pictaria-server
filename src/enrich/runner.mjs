@@ -366,14 +366,12 @@ async function executeBatch({
         recordSkip('already_succeeded');
         // Already enriched, so it belongs in Curate just like a fresh success.
         if (listForReview) listedForReview += repo.reviewListAdd([assetId], 'enrich');
-        log(`${position} skipping ${assetId}; successful run already exists`);
         continue;
       }
       if (!reprocess && repo.hasSuccessfulRun({ assetId, ...runKey })) {
         counters.skippedSuccessful += 1;
         recordSkip('already_succeeded');
         if (listForReview) listedForReview += repo.reviewListAdd([assetId], 'enrich');
-        log(`${position} skipping ${assetId}; matching successful run already exists`);
         continue;
       }
       // A human discard is unconditional — it holds even for retry runs
@@ -564,6 +562,10 @@ async function executeBatch({
       log(`no more assets to scan; analyzed ${analyzed} of ${maxAnalyzed} requested`);
       break;
     }
+  }
+
+  if (!stopped && !window.stopped && analyzed === 0 && !counters.skippedFailureLimit && !counters.skippedDiscarded) {
+    log('No photos needed enrichment in the scanned selection.');
   }
 
   if (applyTags && !dryRun) {

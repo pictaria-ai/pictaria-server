@@ -6,7 +6,7 @@ let sequence = 0;
 export function seedPerformanceRun(repo, { model = 'Vision model', provider = 'local_lmstudio', prompt = 'Fixture prompt',
   profile = null, host = null, status = 'finished', elapsedMs = 10000, photos = [{ requests: [{ outcome: 'accepted', ms: 8000 }] }],
   analyzed = photos.length, successes = photos.filter(p => (p.outcome ?? 'succeeded') === 'succeeded').length,
-  skipped = 0, title = 'Library sweep', withJob = true } = {}) {
+  skipped = 0, failureLimited = 0, discarded = 0, title = 'Library sweep', withJob = true } = {}) {
   const seq = ++sequence; const start = new Date(Date.UTC(2026, 8, 1, 12, seq)).toISOString();
   const end = new Date(Date.parse(start) + elapsedMs).toISOString();
   const configuration = captureRunConfiguration({ provider: createProvider(provider, { modelName: model, apiKey: 'fixture-provider-key' }),
@@ -31,7 +31,7 @@ export function seedPerformanceRun(repo, { model = 'Vision model', provider = 'l
   repo.db.prepare(`UPDATE enrich_timing_runs SET started_at=?,finished_at=?,outcome=?,photo_count=?,attempt_count=?,skipped_successful=? WHERE id=?`)
     .run(start, status === 'interrupted' ? null : end, status, photos.length, photos.reduce((n, p) => n + (p.recordedRequests ?? p.requests.length), 0), skipped, runId);
   if (withJob) repo.recordJobRun({ timingRunId: runId, title, provider, model, configurationId: configuration.id, inferenceId: configuration.inferenceId,
-    inferenceHostLabel: host, status, counters: { succeeded: successes, analyzed, failed: Math.max(0, analyzed - successes), skippedSuccessful: skipped },
+    inferenceHostLabel: host, status, counters: { succeeded: successes, analyzed, failed: Math.max(0, analyzed - successes), skippedSuccessful: skipped, skippedFailureLimit: failureLimited, skippedDiscarded: discarded },
     startedAt: start, finishedAt: end });
   return { runId, photoIds, configuration, start, end };
 }

@@ -23,5 +23,17 @@ const enrichFormat = (() => {
     return Number.isFinite(ms) && ms >= 0 ? ms : null;
   };
   const rate = value => Number.isFinite(value) ? value.toLocaleString(undefined, { maximumFractionDigits: 2 }) : '—';
-  return { provider, status, when, duration, elapsed, rate };
+  const photoOutcomes = (c, runStatus) => {
+    if (!c) return 'Counts unavailable';
+    const exceptions = [
+      c.skippedFailureLimit > 0 ? `${c.skippedFailureLimit.toLocaleString()} at failure limit` : null,
+      c.skippedDiscarded > 0 ? `${c.skippedDiscarded.toLocaleString()} discarded` : null,
+    ].filter(Boolean);
+    if (!c.analyzed && !c.succeeded && !c.failed && !exceptions.length) {
+      return runStatus === 'finished' ? 'No photos needed enrichment in the scanned selection.' : 'No photos were processed.';
+    }
+    return [`${(c.succeeded ?? 0).toLocaleString()} enriched`,
+      c.failed > 0 ? `${c.failed.toLocaleString()} failed` : null, ...exceptions].filter(Boolean).join(' · ');
+  };
+  return { provider, status, when, duration, elapsed, rate, photoOutcomes };
 })();

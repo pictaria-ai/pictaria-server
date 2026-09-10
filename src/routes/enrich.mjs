@@ -236,8 +236,8 @@ export function createEnrichRoutes({ review, enrichRunner, taxonomy, profiles = 
         ].filter(Boolean).join(', ');
         const error = new Error(
           leftBehind
-            ? `"${item.title}" has nothing left to analyze — ${covered} already enriched, ${leftBehind} — removed it from the queue.`
-            : `"${item.title}" is already fully covered — removed it from the queue.`,
+            ? `"${item.title}" has nothing left to analyze — ${leftBehind} — removed it from the queue.`
+            : `"${item.title}" has no photos needing enrichment in this selection — removed it from the queue.`,
         );
         error.code = 'fully_covered';
         error.covered = covered;

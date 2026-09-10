@@ -5,6 +5,14 @@ All notable changes to Pictaria Server are documented here. This project follows
 
 ## Unreleased
 
+### Changed
+
+- Enrich run summaries focus on photos processed, with explicit failure-limit
+  and discard exceptions. Routine already-enriched counts and future per-photo
+  skip log entries are omitted; diagnostic counters remain available. Discovery
+  and empty-selection messages explain what the run is doing without implying
+  the entire library has been checked.
+
 ### Added
 
 - A dedicated Enrich performance page, linked from Enrich and Settings, starts

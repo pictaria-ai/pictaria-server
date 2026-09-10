@@ -15,7 +15,7 @@ test('Enrich compares setups and opens paginated photo/request details with hone
   const repo = new Repository(join(dir, 'enrichment.sqlite')); repo.initSchema();
   for (let i = 0; i < 21; i++) repo.recordJobRun({ title: `Older run ${i}`, provider: 'venice', status: 'finished', counters: { succeeded: 0, analyzed: 0, failed: 0 }, startedAt: '2026-08-01T12:00:00Z', finishedAt: '2026-08-01T12:00:01Z' });
   seedPerformanceRun(repo, { model: 'Earlier setup', photos: [{ outcome: 'failed', requests: [{ outcome: 'timeout', ms: 60000 }] }] });
-  seedPerformanceRun(repo, { model: 'Second setup', status: 'cancelled' }); seedPerformanceRun(repo, { model: 'Third setup', photos: [], skipped: 25 });
+  seedPerformanceRun(repo, { model: 'Second setup', title: 'Exceptions', status: 'cancelled', skipped: 200, failureLimited: 2, discarded: 1 }); seedPerformanceRun(repo, { model: 'Third setup', title: 'Already covered', photos: [], skipped: 25 });
   const latest = seedPerformanceRun(repo, { title: 'Travel photos', elapsedMs: 1800000, model: 'Vision-model-with-a-long-name-that-stays-readable-on-a-narrow-phone-screen', provider: 'venice',
     photos: [
       { filename: '<img src=x onerror=alert(1)>.jpg', ms: 73000, requests: [{ outcome: 'timeout', ms: 60000 }, { outcome: 'accepted', ms: 8000 }] },
@@ -36,6 +36,8 @@ test('Enrich compares setups and opens paginated photo/request details with hone
   await page.waitFor('document.querySelector(".gate-backdrop input")');
   await page.evaluate('document.querySelector(".gate-backdrop input").value="smoke-secret"; document.querySelector(".gate-backdrop button").click()');
   await page.waitFor('document.querySelectorAll("#runsList .qitem").length === 20');
+  assert.doesNotMatch(await page.evaluate('document.getElementById("runsList").textContent'), /already enriched|200 skipped|25 skipped/);
+  assert.match(await page.evaluate('document.getElementById("runsList").textContent'), /2 at failure limit · 1 discarded/);
   assert.equal(await page.evaluate('document.getElementById("performanceList")'), null);
   assert.equal(await page.evaluate('document.querySelector("#runsList .performance-more")'), null);
   assert.equal(await page.evaluate('document.querySelector(".runs-navigation a").getAttribute("href")'), '/enrich-performance.html');
@@ -67,6 +69,19 @@ test('Enrich compares setups and opens paginated photo/request details with hone
   await page.evaluate('document.getElementById("runsViewLink").click()');
   await page.waitFor('!document.getElementById("runsView").hidden');
   const openRun = async title => page.evaluate(`(() => { const link=[...document.querySelectorAll('.run-detail-link')].find(n=>n.textContent===${JSON.stringify(title)}); link.click(); })()`);
+  assert.doesNotMatch(await page.evaluate('document.getElementById("performanceRuns").textContent'), /skipped|already enriched/);
+  await openRun('Already covered');
+  await page.waitFor('document.getElementById("photoTimingBody").textContent.includes("No photo timings were recorded")');
+  assert.match(await page.evaluate('document.querySelector(".run-detail-summary").textContent'), /No photos needed enrichment in the scanned selection/);
+  assert.doesNotMatch(await page.evaluate('document.getElementById("photoTimingBody").textContent'), /skipped|25/);
+  await page.evaluate('document.getElementById("photoTimingClose").click()');
+  await page.waitFor('location.hash === "#runs"');
+  await openRun('Exceptions');
+  await page.waitFor('document.querySelectorAll(".timing-photo").length === 1');
+  assert.match(await page.evaluate('document.querySelector(".run-detail-summary").textContent'), /2 at failure limit · 1 discarded/);
+  assert.doesNotMatch(await page.evaluate('document.getElementById("photoTimingBody").textContent'), /skipped|200/);
+  await page.evaluate('document.getElementById("photoTimingClose").click()');
+  await page.waitFor('location.hash === "#runs"');
   await openRun('Expired timing'); await page.waitFor('document.getElementById("photoTimingBody").textContent.includes("Timing expired")');
   assert.match(await page.evaluate('document.getElementById("photoTimingBody").textContent'), /Throughput/);
   await page.evaluate('document.getElementById("photoTimingClose").click()');

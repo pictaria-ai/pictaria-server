@@ -248,7 +248,7 @@ test('a fully covered queue item removes itself and its photos still reach Curat
 
   assert.equal(response.out.statusCode, 200);
   assert.equal(response.out.body.fullyCovered, true);
-  assert.match(response.out.body.message, /fully covered/);
+  assert.match(response.out.body.message, /no photos needing enrichment in this selection/);
   assert.equal(response.out.body.covered, 5);
   assert.equal(response.out.body.failureLimited, 0);
   assert.deepEqual(state.removed, [88]);
@@ -270,7 +270,8 @@ test('photos stuck at the failure limit are reported, not called covered', async
 
   assert.equal(response.out.statusCode, 200);
   assert.equal(response.out.body.fullyCovered, true);
-  assert.match(response.out.body.message, /3 already enriched, 2 at the failure limit/);
+  assert.match(response.out.body.message, /2 at the failure limit/);
+  assert.doesNotMatch(response.out.body.message, /already enriched/);
   assert.equal(response.out.body.covered, 3);
   assert.equal(response.out.body.failureLimited, 2);
   assert.deepEqual(state.removed, [88]); // still auto-removed, but honestly

@@ -187,26 +187,32 @@ test('send-to-Curate off keeps the run out of the review list', async () => {
   assert.equal(repo.reviewListCalls.length, 0);
 });
 
-test('live job logs keep a bounded tail with an omission marker', async () => {
-  const repo = makeRepo();
-  const runner = new EnrichJobRunner({
-    repo,
-    immich: { getAsset: async (id) => ({ id, originalPath: `${id}.jpg` }) },
-    taxonomy,
-    config: makeConfig(),
-  });
-  runner.start({
-    assetIds: Array.from({ length: 600 }, (_, index) => `asset-${index}`),
-    skipAnySuccessful: true,
-    sendToCurate: false,
-    title: 'Large completed slice',
-  });
-  await finished(runner);
-
-  const log = runner.status().log;
-  assert.equal(log.length, 500);
-  assert.equal(log[0], '… earlier log entries omitted');
-  assert.ok(log.at(-1).includes('run complete'));
+test('live job logs omit routine skips and keep a bounded tail for exceptions', async () => {
+  for (const discarded of [false, true]) {
+    const repo = makeRepo();
+    if (discarded) {
+      repo.hasAnySuccessfulRun = () => false;
+      repo.isAssetDiscarded = () => true;
+    }
+    const runner = new EnrichJobRunner({
+      repo, immich: { getAsset: async (id) => ({ id, originalPath: `${id}.jpg` }) },
+      taxonomy, config: makeConfig(),
+    });
+    runner.start({ assetIds: Array.from({ length: 600 }, (_, index) => `asset-${index}`),
+      skipAnySuccessful: true, sendToCurate: false, title: 'Large filtered slice' });
+    await finished(runner);
+    const log = runner.status().log;
+    if (discarded) {
+      assert.equal(log.length, 500);
+      assert.equal(log[0], '… earlier log entries omitted');
+      assert.ok(log.some(line => line.includes('discarded from enrichment')));
+    } else {
+      assert.ok(log.length < 10);
+      assert.doesNotMatch(log.join('\n'), /asset-\d|skipping|earlier log entries omitted/);
+      assert.equal(runner.status().counters.skippedSuccessful, 600);
+    }
+    assert.ok(log.at(-1).includes('run complete'));
+  }
 });
 
 test('a failed run never touches the review list', async () => {
@@ -407,7 +413,8 @@ test('recordCoveredResolution writes a zero-analysis history row with the resolv
   assert.equal(row.counters.skippedSuccessful, 998);
   assert.equal(row.counters.skippedFailureLimit, 2);
   assert.ok(row.startedAt && row.finishedAt);
-  assert.match(row.log[0], /998 already enriched, 2 at the failure limit/);
+  assert.match(row.log[0], /no photos to process in this selection, 2 at the failure limit/);
+  assert.doesNotMatch(row.log[0], /998|already enriched/);
 });
 
 test('retryFailureLimited runs a stuck photo with the failure cap off', async () => {

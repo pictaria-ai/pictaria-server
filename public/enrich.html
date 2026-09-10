@@ -441,9 +441,6 @@
         applyEnabled(status);
         el('enrichDot').className = status.running ? 'p-dot ok' : status.error ? 'p-dot bad' : 'p-dot';
         const analyzed = status.liveCounters.succeeded + status.liveCounters.failed;
-        const skippedNote = (counters) => counters?.skippedSuccessful > 0
-          ? `, skipped ${counters.skippedSuccessful.toLocaleString()} already enriched`
-          : '';
         // Two lines: what's running (or ran) on top, its numbers below —
         // long titles wrap without tangling with the counters.
         let statusLine1;
@@ -463,13 +460,14 @@
             `ok ${status.liveCounters.succeeded}`,
             `failed ${status.liveCounters.failed}`,
           ].filter(Boolean).join(' · ');
+          if (!status.options?.targeted && !status.progress && !status.cancelRequested) statusLine2 = 'Finding photos to enrich…';
         } else if (status.finishedAt) {
           statusLine1 = 'Last run: ' + [
             status.cancelled ? 'cancelled' : status.error ? `failed: ${status.error}` : 'finished',
             status.title,
           ].filter(Boolean).join(' · ');
           statusLine2 = status.counters
-            ? `analyzed ${status.counters.analyzed}, ok ${status.counters.succeeded}${skippedNote(status.counters)}`
+            ? enrichFormat.photoOutcomes(status.counters, status.cancelled ? 'cancelled' : status.error ? 'failed' : 'finished')
             : '';
         } else {
           statusLine1 = 'Idle — ready to analyze photos';
@@ -1114,13 +1112,7 @@
         // the exact provider/model/optional host context needed to compare
         // two end-to-end runs. Full version detail lives in the log popup.
         const c = run.counters;
-        const counts = c ? [
-          `${(c.succeeded ?? 0).toLocaleString()} ok`,
-          c.failed > 0 ? `${c.failed.toLocaleString()} failed` : null,
-          c.skippedSuccessful > 0 ? `${c.skippedSuccessful.toLocaleString()} already enriched` : null,
-          c.skippedFailureLimit > 0 ? `${c.skippedFailureLimit.toLocaleString()} at failure limit` : null,
-          c.skippedDiscarded > 0 ? `${c.skippedDiscarded.toLocaleString()} discarded` : null,
-        ].filter(Boolean).join(' · ') : null;
+        const counts = enrichFormat.photoOutcomes(c, run.status);
         const detail = document.createElement('div');
         detail.className = 'detail';
         detail.textContent = [
