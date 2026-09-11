@@ -5,6 +5,16 @@ All notable changes to Pictaria Server are documented here. This project follows
 
 ## Unreleased
 
+### Fixed
+
+- **Smart Albums on Immich before 3.1** now read metadata through complete
+  date windows, avoiding duplicate or omitted photos at unstable page
+  boundaries. Matching, exclusion and album-membership reads share the
+  compatibility reader; newer Immich versions keep ordinary pagination.
+  Legacy counts are checked independently, with one bounded retry on mismatch.
+  Unverifiable exclusions or membership leave the album unchanged. Legacy
+  exclusion/membership reads also include archived and hidden photos.
+
 ## 1.2.0 - 2026-09-10
 
 This release focuses on Enrich: reusable profiles, predictable run settings,

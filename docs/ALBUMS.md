@@ -33,13 +33,23 @@ people mode.
 Each filter collection accepts up to 25 entries; identifiers are limited to
 200 characters, as are names and location/camera values. Ranked searches are
 limited to 1,000 characters and album names to 200. Before preview, creation,
-or any later run, Pictaria calculates the worst-case people × location × tag ×
-page plan and rejects rules that could require more than 500 Immich requests.
+or any later run, Pictaria checks the people × location × tag × page plan
+and rejects plans exceeding 500 Immich requests.
+This preflight estimates ordinary offset pagination; it does not reserve the
+extra requests needed for legacy date windows and visibility partitions. An
+older Immich run can therefore pass preflight and still reach the runtime
+limit: incomplete matching may be add-only, while incomplete exclusions or
+membership stop the run without changes.
 This happens before variant expansion, album creation, or other Immich work;
-saved rules are checked again on every manual and scheduled run.
+saved rules are checked again on every manual and scheduled run. Actual reads
+also share a hard 500-request budget, including version lookup, legacy date
+windows, visibility partitions, statistics checks, and retries. Metadata
+responses share a 500,000-entry bound (including repeated parent/boundary
+samples), and reads are checked against a five-minute deadline before and
+after each bounded network request.
 
 **Result Size** defaults to **All Matching Photos**. Filtered and search rules
-page until Immich reports a complete result. If the 25-page safety bound is
+read until Immich reports a complete result. If the configured reading bound is
 reached first, Pictaria adds the trustworthy matches found so far but preserves
 every existing album member and shows a warning because the full result is not
 known. Increase `ALBUMS_MAX_SEARCH_PAGES` if a larger library routinely reaches
@@ -111,9 +121,40 @@ the rule matches right now:
   Best of stats — is stored on the rule and returned by the API.
 - Reconciliation is fail-closed. Malformed pagination records an error and
   changes no album membership. A trustworthy All-results traversal that reaches
-  its page limit is safely additive: matching photos found so far can be added,
+  its reading limit is safely additive: matching photos found so far can be added,
   but no existing member is removed. A deliberate Top-N limit or Best-of cutoff
   is still a complete rule-defined selection and reconciles normally.
+
+**Older Immich versions.** Immich 2.x and 3.0.x can reorder photos with equal
+capture timestamps between metadata-search pages. Pictaria uses complete,
+overlapping date windows for metadata matching, blanket exclusions, and
+existing album membership on versions before 3.1. Unknown versions use the
+same conservative path; version lookup network/authentication failures remain
+errors. Version information is resolved once per read session. Known stable
+3.1+ versions retain ordinary paging.
+
+Legacy reads request up to 1,000 photos at once, irrespective of the configured
+page size. Each window must fit completely in one response; an unfinished
+parent sample is never treated as complete. A statistics query compares the
+unique raw count in the covered range, before local filtering or Top-N
+truncation. A mismatch restarts that read once within the shared budget; a
+second mismatch leaves album membership unchanged. Matching counts do not
+guarantee an atomic snapshot if the library changes concurrently.
+
+Exclusions and existing membership must be fully read before any additions or
+removals. On legacy versions these reads explicitly include timeline, archive,
+and hidden visibility. A limit affecting only matching may return completed
+windows for add-only synchronization, with a warning. More than 1,000 photos
+in an indivisible millisecond interval cannot be read safely through this
+legacy API: the run reports that their capture times are too close together
+and leaves the album unchanged. Updating Immich to 3.1+ avoids that legacy
+limitation.
+
+Top-N metadata windows are processed newest first, with deterministic ID
+ordering within equal timestamps. Existing expanded-filter combination rules
+remain in effect. Ranked text search and Best of retain their relevance
+ordering; their exclusion and membership reads still use the compatibility
+reader.
 
 **Scheduling.** A rule can refresh itself every 1–365 days (default 7).
 The scheduler checks every minute for due rules; a failed run records
@@ -192,8 +233,8 @@ that slice, ready to preview and create — same pipeline, same rules.
 
 | Variable | Default | Notes |
 | --- | --- | --- |
-| `ALBUMS_SEARCH_PAGE_SIZE` | `1000` | Page size for search paging against Immich. |
-| `ALBUMS_MAX_SEARCH_PAGES` | `25` | Upper bound on pages fetched per individual search. The complete expanded rule must also fit the fixed 500-request aggregate plan budget. |
+| `ALBUMS_SEARCH_PAGE_SIZE` | `1000` | Page size for ordinary paging. Legacy metadata windows always request 1,000. |
+| `ALBUMS_MAX_SEARCH_PAGES` | `25` | Ordinary pages per search. A legacy metadata traversal/visibility partition instead allows up to `4 × value + 4` requests, including count checks and a retry, to accommodate window splitting. All reads still share the fixed 500-request run budget. |
 
 Result Size itself is per-rule (default 50, maximum 5000).
 
