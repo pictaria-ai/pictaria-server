@@ -16,6 +16,25 @@ Voice **Interesting** command is separate
 from Enrich and can send a preview plus photo metadata to its selected model
 even while enrichment is off.
 
+## Start here
+
+Configure your model under **Settings → AI Providers**, enable Enrich under
+**Settings → Enrich**, then choose the provider and active profile on the
+**Enrich** page. Start with a small library sweep. **My profile** is the initial
+setup; you can use it as-is or customize it in Settings.
+
+- [Enrichment profiles](#enrichment-profiles): create or edit prompts and tags,
+  and understand which settings new runs use.
+- [Run history](#run-history): inspect saved run settings, retry failures, and
+  choose how much history to retain.
+- [Performance and photo details](#performance-comparison-and-photo-details):
+  find per-photo timing and compare setups.
+- [Caption writeback](#writing-captions-to-immich-descriptions): optionally
+  copy captions into Immich descriptions. AI tags sync automatically after
+  successful enrichment, independently of **Send to Curate**.
+- [Upgrading to v1.2.0](UPGRADING.md#upgrading-to-v120): profile migration,
+  discovery, historical results, and rollback.
+
 ## The pipeline
 
 For each photo, one *processing run*:
@@ -378,7 +397,8 @@ captions, and search; existing human decisions remain authoritative.
   unless its run finishes cleanly, and running it again continues where it
   left off (already-enriched photos are skipped).
 - **Recent runs** starts with the newest 20 summaries. **Load more** walks
-  through all 100 retained summaries without loading their potentially large
+  through the configured number of retained summaries (100 by default, up to
+  1,000) without loading their potentially large
   logs; each log is fetched only when you open it. Retry actions remain
   available on older loaded runs and always recalculate which failed photos
   still need work before starting.
@@ -692,8 +712,8 @@ credentials are excluded. Custom prompts and taxonomy are user-authored data
 stored in the local database and included in backups.
 
 Snapshots are deduplicated and referenced by job summaries and per-photo
-processing records. Pruning the newest-100 job summary history never deletes a
-snapshot referenced by a photo’s history. The per-photo caption endpoint also
+processing records. Pruning job summaries to the configured history limit
+never deletes a snapshot referenced by a photo’s history. The per-photo caption endpoint also
 returns its latest successful configuration ID, so those inputs remain
 inspectable after their job summary is pruned. Two runs can have different complete
 configuration IDs but the same inference ID—for example, after changing only
@@ -702,8 +722,8 @@ review thresholds or labels.
 **Re-run failed photos** keeps the original provider and uses settings at the
 retry’s start, with a new snapshot and a link to its source run. This lets a
 corrected prompt fix earlier failures. Automatic retries within an execution
-use its frozen configuration. Replaying historical settings exactly and named
-profile selection are separate future features.
+use its frozen configuration. Named profiles are available now; exact replay
+of historical settings and a per-job profile override are not supported.
 
 The Enrich page lists recent runs: what ran (slice title or library sweep),
 when, provider + model, taxonomy + prompt versions, counters
@@ -1399,7 +1419,9 @@ and expect the queue to breathe a little while enrichment is running.
 ### Enrich master switch and dependent features
 
 Turning off **Enable AI enrichment** prevents new manual and Daily Enrich runs
-and pauses caption writeback. Settings disables Daily Enrich and caption controls
+and pauses caption writeback and automatic AI-tag sync. Pending tag sync stays
+queued; Curate's human-decision sync remains available. Settings disables
+Daily Enrich and caption controls
 with “Paused while Enrich is off,” preserving their saved preferences. Turning
 Enrich back on restores those preferences; the normal Daily Enrich catch-up
 rules still apply. An enrichment execution already started keeps its run settings.

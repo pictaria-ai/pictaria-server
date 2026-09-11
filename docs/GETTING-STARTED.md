@@ -76,7 +76,7 @@ else waits on them.
   the Insights page is your library's story — start clicking.
   ([How it works.](INSIGHTS.md))
 
-- [ ] **Install Pictaria Frame** on the device that will be your frame.
+- [ ] *Optional* — **Install Pictaria Frame** on the device that will be your frame.
   Its setup wizard asks for Immich, your photo albums, this server's URL
   and password, and a **device name** — that name is how the frame appears
   in the Remote page, the Frame stats, and Settings → Devices. Run several
@@ -84,16 +84,30 @@ else waits on them.
 
 - [ ] *Optional* — **Enable Enrich.** AI tagging and captions are **off by
   default** because each run sends the selected image rendition to its chosen
-  model. Configure the connection and
-  model identifier under Settings → AI Providers, then open Enrich and choose
-  the provider for new runs. That choice is remembered across visits and
-  server restarts. Ollama and LM Studio keep everything on your own hardware;
+  model. Turn on **Enable AI enrichment** under Settings → Enrich. Configure
+  the connection and model identifier under Settings → AI Providers, then
+  open Enrich and choose the provider and active profile for new runs.
+  **My profile** is the initial prompt/taxonomy setup; keep it or edit/create
+  profiles under **Settings → Enrichment profiles**. The active choices are
+  remembered across visits and server restarts and apply to library sweeps,
+  queued jobs, and Daily Enrich when they start. Running work keeps its saved
+  inputs. Ollama and LM Studio keep everything on your own hardware;
   OpenAI, OpenRouter, Venice, and Ollama's cloud models are the cloud routes.
+  Start with a small library sweep. Newly successful photos automatically
+  sync their `ai/*` tags to Immich, even with **Send to Curate** off; that
+  checkbox only controls whether photos enter human review. Pictaria manages
+  the `ai/*` namespace, so keep your own tags outside it. The Status card
+  shows any pending/failed **Immich tag sync** and its retry action.
+
   Captions are stored in Pictaria by default; Immich descriptions remain
   unchanged unless you separately turn on **Write captions to Immich
   descriptions**. Use **Write existing captions now** to copy captions made
   before enabling that option.
-  ([Pipeline, providers, taxonomy.](ENRICH.md))
+  Open **View details** in Recent runs for photo timings, or **Enrich
+  performance** to browse runs and compare setups. **View run settings**
+  shows the inputs saved for a run. Settings → Enrich → Run history controls
+  how many summaries and logs are retained.
+  ([Profiles, discovery, performance, and the full pipeline.](ENRICH.md))
 
 - [ ] *Optional* — **Get a free Geoapify key** for place names. Weather
   needs no account or key: it sends the frame's city or US ZIP to Open-Meteo

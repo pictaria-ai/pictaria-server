@@ -7,7 +7,7 @@ Use it as a standalone Immich application or pair it with [Pictaria Frame](https
 Pictaria Server includes:
 
 - **Insights** — understand your collection (`/insights.html`): photos per year with a person/place/tag lens, a "where you were" timeline with auto-detected trips, a people constellation (faces linked by shared photos), records (busiest day, home base, furthest from home), and leaderboards for people, places, cameras, and tags. Every number is clickable — browse the photos behind it, open the same view in Immich, or turn it into an album. Everything is computed by Pictaria from a periodic Immich sweep; optional Geoapify place naming sends coordinates to the provider you configured.
-- **Enrich** — AI photo classification into a controlled taxonomy (`/enrich.html`). Works with operator-hosted Ollama, LM Studio, llama.cpp and other OpenAI-compatible endpoints, or through the cloud with OpenAI, OpenRouter, Venice, or Ollama's cloud models.
+- **Enrich** — AI photo classification into a controlled taxonomy (`/enrich.html`), with reusable prompt/taxonomy profiles and automatic AI-tag sync to Immich. Inspect run and photo timings and compare setups on **Enrich performance** (`/enrich-performance.html`). Works with operator-hosted Ollama, LM Studio, llama.cpp and other OpenAI-compatible endpoints, or through the cloud with OpenAI, OpenRouter, Venice, or Ollama's cloud models.
 - **Curate** — the human review workflow that decides what your frame shows (`/curate.html`). Same-moment photos collapse into **Stacks** with a suggested keeper: a silver ★ from frame-worthiness scores, or a gold ★ when the optional AI referee has compared the group side by side.
 - **Smart Albums** — saved Immich searches (people, tags, places, dates, cameras, or free-text ranked search) that keep real Immich albums up to date on a schedule (`/albums.html`). A free-text rule can run in **Best of** mode: each search hit is double-checked against your own enrichment data and the keepers are ranked by your Curate decisions and photo scores — a "Top 50" that is your best 50, not Immich's first 50. Each run re-syncs the album to its rule, and deleting a rule never deletes the Immich album itself. ([Rules, Best of, the sync.](docs/ALBUMS.md))
 - **Frame Remote** — see what each frame is showing and control it live from your phone (`/remote.html`). Multiple frames run off one server: each device reports under its own name, and a device picker appears when more than one is known so commands reach only the frame you chose. Retired or re-onboarded devices are cleaned up under Settings → Devices.
@@ -112,7 +112,9 @@ Either way, continue with the **[first-run checklist](docs/GETTING-STARTED.md)**
 
 ## Configuration
 
-Only a handful of values have to be environment variables: the listen address/port, the data paths, and `APP_PASSWORD`. Everything else — the Immich connection, AI providers and models, voice, weather, backups — can be set (and changed at any time, no restart) from the web UI. Provider connections and model identifiers live under **Settings → AI Providers**; choose the provider used for new enrichment runs on **Enrich**, where the selection is remembered across visits and restarts. Every UI-editable field also has an env-var form for infrastructure-as-code setups; a value saved in the UI overrides the environment until cleared.
+Only a handful of values have to be environment variables: the listen address/port, the data paths, and `APP_PASSWORD`. Everything else — the Immich connection, AI providers and models, voice, weather, backups — can be set (and changed at any time, no restart) from the web UI. Provider connections and model identifiers live under **Settings → AI Providers**. Manage reusable prompts and taxonomy under **Settings → Enrichment profiles**, then choose the active provider and profile on **Enrich**; those choices are remembered across visits and restarts.
+
+Configuration fields with environment equivalents use a saved UI override until cleared. Enrichment profiles are stored separately in the database: configured prompt/taxonomy files seed the initial profile, but later file changes do not overwrite saved profiles. See the [profile guide](docs/ENRICH.md#enrichment-profiles).
 
 See [docs/CONFIGURATION.md](docs/CONFIGURATION.md) for the complete reference and [.env.example](.env.example) for an annotated starter file. The short version:
 
@@ -220,7 +222,7 @@ The suite includes browser-level smoke tests (`test/browser/`) that drive the re
 ## Design rules
 
 - Zero npm dependencies; Node built-ins only.
-- The taxonomy file is configuration, not code: tags, thresholds, and review-bucket policy live in `taxonomy/v1.json` so users can tune behavior without touching source.
+- Taxonomy is configuration, not code: `taxonomy/v1.json` supplies the starting template, saved profiles own inference content, and shared live Curate policy stays separate. Users can tune behavior without touching source.
 - Human decisions always win over AI output.
 - SQLite is the local source of truth; Immich is synced to, never trusted as the record of review decisions.
 - One password, one data directory, one process: setup should never be the hard part.

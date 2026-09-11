@@ -47,6 +47,8 @@ synchronization to Immich.
   routine already-enriched skips. Logs retain compact discovery diagnostics.
 - Lowering history limits prunes older records after confirmation. Raising
   limits cannot restore deleted history.
+- First-run, configuration, and backup guides now cover the profile workflow,
+  automatic AI-tag sync, performance page, and history controls.
 
 ### Fixed
 
