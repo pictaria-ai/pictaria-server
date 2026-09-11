@@ -35,6 +35,11 @@ Each filter collection accepts up to 25 entries; identifiers are limited to
 limited to 1,000 characters and album names to 200. Before preview, creation,
 or any later run, Pictaria checks the people × location × tag × page plan
 and rejects plans exceeding 500 Immich requests.
+This preflight estimates ordinary offset pagination; it does not reserve the
+extra requests needed for legacy date windows and visibility partitions. An
+older Immich run can therefore pass preflight and still reach the runtime
+limit: incomplete matching may be add-only, while incomplete exclusions or
+membership stop the run without changes.
 This happens before variant expansion, album creation, or other Immich work;
 saved rules are checked again on every manual and scheduled run. Actual reads
 also share a hard 500-request budget, including version lookup, legacy date

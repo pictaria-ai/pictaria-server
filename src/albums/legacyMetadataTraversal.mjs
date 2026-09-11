@@ -95,6 +95,8 @@ export async function* legacyMetadataWindows({ filters, fetchPage }) {
       const dateOrder = captureTimestamp(b.fileCreatedAt).ns - captureTimestamp(a.fileCreatedAt).ns;
       return dateOrder ? dateOrder > 0n ? 1 : -1 : a.id < b.id ? 1 : a.id > b.id ? -1 : 0;
     });
+    // Keep the original upper bound: counts verify all completed newer windows,
+    // not just this window, because traversal always processes newest first.
     yield { items: unique, exhausted: pending.length === 0,
       coverage: { ...base, ...(range.lo === null ? {} : { takenAfter: new Date(range.lo).toISOString() }),
         ...(hi === null ? {} : { takenBefore: new Date(hi).toISOString() }) } };
