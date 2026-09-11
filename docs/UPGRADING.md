@@ -24,7 +24,7 @@ upgrade.
 ## Upgrade — Docker
 
 ```sh
-PICTARIA_RELEASE=v1.1.0 # replace with the release you are installing
+PICTARIA_RELEASE=v1.2.0 # replace with the release you are installing
 curl -fsSL -o docker-compose.release.yml \
   "https://raw.githubusercontent.com/pictaria-ai/pictaria-server/${PICTARIA_RELEASE}/docker-compose.yml"
 diff -u docker-compose.yml docker-compose.release.yml
@@ -45,7 +45,7 @@ docker compose -f docker-compose.release.yml config --images
 ```
 
 The printed image must end in the numeric image version corresponding to the
-source release you selected (`v1.1.0` uses image tag `1.1.0`). Next, make a
+source release you selected (`v1.2.0` uses image tag `1.2.0`). Next, make a
 rollback definition from the currently running Compose file. It should already
 resolve to the version you noted under Settings → Server; verify it before
 replacing the active definition:
@@ -72,7 +72,7 @@ test -z "$(git status --porcelain)" || {
   echo "Stop: preserve or reconcile local changes before upgrading."
   exit 1
 }
-PICTARIA_RELEASE=v1.1.0 # replace with the release you are installing
+PICTARIA_RELEASE=v1.2.0 # replace with the release you are installing
 git fetch --tags --prune
 git switch --detach "$PICTARIA_RELEASE"
 docker compose up -d --build
@@ -97,7 +97,7 @@ test -z "$(git status --porcelain)" || {
   echo "Stop: preserve or reconcile local changes before upgrading."
   exit 1
 }
-PICTARIA_RELEASE=v1.1.0 # replace with the release you are installing
+PICTARIA_RELEASE=v1.2.0 # replace with the release you are installing
 git fetch --tags --prune
 git switch --detach "$PICTARIA_RELEASE"
 ```
@@ -259,84 +259,86 @@ pre-flight checklist — see
 Do not upgrade both on the same day. If something breaks afterwards, you want
 to know which upgrade caused it.
 
-## Named Enrich profiles (unreleased v1.2 work)
+## Upgrading to v1.2.0
 
-Schema 9 / persistent-state contract 11 provides profiles and one server-saved
-active choice. Earlier v1.2 previews used contract 10 with per-item queue pins.
-Upgrading preserves the saved default as the active profile and clears pending
-queue pins; photo selections, immutable revisions, and run history are retained.
-The physical `is_default` column stores the active choice, and the nullable
-queue pin column is retained for compatibility but is no longer used.
-Contract 11 ensures a recovery point before this behavior/state conversion.
-For installations without profiles, first boot copies effective prompts/taxonomy
-into the initial active profile, My profile; it does not launch enrichment. Verify
-the active profile contains your customization and the queue still shows its
-expected slices. Subsequent inference edits belong in Settings → Enrichment
-profiles; Settings retains the shared live Curate policy. Changing configured files later does not rewrite saved profiles.
-See [profile behavior and migration](ENRICH.md#enrichment-profiles).
+v1.2.0 upgrades persistent-state contract 8 from v1.1.0 to **contract 15**,
+with **Enrich schema 12** and **settings version 7**. v1.0.x installations can
+also upgrade directly to v1.2.0; installing v1.1.0 first is not required.
+Upgrades from earlier v1.2 development builds follow any remaining migrations. The release does
+not require a new Immich or Pictaria Frame version.
 
-Startup takes the usual complete pre-migration snapshot before mutation.
-Rollback requires restoring that snapshot into a clean volume with the older
-image; do not run an older server directly against the new database. Profile
-revisions and the active choice live in enrichment.sqlite and are included
-in standard backups.
+### Before and after first startup
 
+Create a complete backup using the checklist above. Startup also creates a
+complete pre-migration recovery snapshot before changing persistent state.
+Retain that snapshot and the previous image/version. Existing enrichment
+results, human decisions, queued photo selections, and retained history are
+preserved, subject to the configured history limits.
 
-## Enrich history retention (unreleased v1.2 work)
+After startup, check:
 
-Settings version 7 / persistent-state contract 14 adds bounded run-summary
-and diagnostic-log preferences. The Enrich database remains at schema 11.
-Existing installations retain the defaults of 100 summaries and 100 logs;
-migration does not create overrides that would hide environment preferences.
-The same summary limit applies to Performance timing-run entries, while
-photo/request detail retains its separate bounds.
+- **Settings → Enrichment profiles:** existing effective prompts and taxonomy
+  seed the initial active profile, **My profile**, once. Verify your
+  customization, then edit inference content through profiles. The shared
+  live Curate review policy remains separate. Changes to configured prompt
+  files do not subsequently rewrite saved profiles.
+- **Enrich:** confirm the active profile and provider. Every new execution,
+  including Daily Enrich and queued jobs, uses the active revision at start;
+  running work and automatic retries retain captured inputs. Earlier v1.2
+  preview queue pins are cleared without removing selected photos or history.
+- **Immich tag sync:** newly successful enrichments sync AI tags whether or
+  not Send to Curate is selected. Ensure the API key has the required tag
+  permissions; pending/failed status and retry are on Enrich. Older enriched
+  photos are not automatically backfilled.
+- **Run history:** defaults retain 100 summaries/Performance entries and logs
+  for 100 runs. Settings can retain 100–1,000 summaries and independently
+  0–100 logs. Lower limits prune immediately after confirmation; raising a
+  limit does not recover deleted records. Photo/request detail is separately
+  bounded.
 
-The normal recovery point is created before settings migration and startup
-pruning. It preserves the prior version-6 settings and retained history.
-Settings and databases are included in normal backups, so restoring a current
-backup also restores its retention preferences. Lowering a configured limit
-prunes immediately on save or startup; raising it cannot restore old records.
-For rollback, restore the pre-upgrade snapshot with its matching older build;
-do not run older code directly against contract-14 state.
+Pictaria reconciles all tags within its **ai/** namespace, including stale or
+manually added tags within that prefix. Automatic AI sync preserves human
+**frame/** decisions and tags outside **ai/**. Tag-based searches and albums
+can now include enriched photos before they have been curated.
 
-## Enrich discovery (unreleased v1.2 work)
+### Discovery, history, and processing behavior
 
-Schema 11 / persistent-state contract 13 adds a rebuildable Enrich inventory,
-a staging table, and a checkpoint/lease record to enrichment.sqlite. Existing
-processing history, results, queues, profiles, and human decisions remain
-unchanged. No historical assets are assumed to form a complete inventory;
-the first budgeted library sweep constructs one from Immich.
+The first budgeted library sweep builds a resumable inventory. Later sweeps
+fetch changed metadata, including uploads with older capture dates, and use
+local SQL to select work. A full metadata reconciliation occurs on the first
+sweep after 24 hours and can also follow a burst of stale candidates. This is
+expected metadata work, not re-enrichment of the whole library.
 
-The standard pre-migration recovery point is created before this migration.
-Normal backups include both the published inventory and any saved in-progress
-scan. Resume uses the same source credentials; a URL/key change starts a fresh
-inventory without clearing enrichment history. A restored active lease can
-delay discovery for up to five minutes before it expires.
+Bounded or interrupted discovery retains its checkpoint. An incomplete result
+asks for another run instead of claiming the library is caught up. Daily
+Enrich keeps its once-per-day attempt policy. See
+[library discovery and freshness](ENRICH.md#library-discovery-and-freshness)
+for eligibility, timing-boundary and pagination limits.
 
-Rollback requires the pre-upgrade snapshot and its matching older build. Do
-not run an older server directly against contract-13 state. The upgrade tests
-verify that a contract-12/schema-10 recovery snapshot contains neither the
-new tables nor changes to existing job history.
+**Only unenriched** continues to skip every previous success. With it off,
+legacy results with unknown configuration inputs may be reprocessed. Legacy
+failures no longer count toward the current configuration's failure limit,
+so later sweeps may make fresh provider calls for previously stuck photos.
+A library sweep sends only its new successful results to Curate; explicitly
+targeted selections can still send existing results.
 
-## Enrich timing (unreleased v1.2 work)
+Historical settings and timing are not reconstructed from logs. Saved
+configuration and timing records identify new runs; older or expired details
+remain explicitly unavailable. On restart, unfinished photo/request timing
+records become interrupted while completed measurements remain intact.
 
-Schema 10 / persistent-state contract 12 adds timing runs, photo executions,
-and provider attempts, plus a nullable `job_runs.timing_run_id` link. No
-historical measurements are reconstructed from logs or processing-row
-creation timestamps. Older job summaries have no timing link. Enrichment
-results, active profiles and immutable revisions, queue selections, and
-human decisions keep their existing meaning.
+### Backup and rollback
 
-The automatic pre-migration recovery point precedes this change. Timing
-records live in enrichment.sqlite and are covered by the existing complete
-backup/restore path. Tests cover upgrading the schema-9 profile release,
-restoring its pre-upgrade snapshot with contract 11 and no timing tables,
-and round-tripping new measurements and profile attribution through backup.
-Rollback requires that snapshot and the corresponding older server; never
-open contract-12 state with an older build.
+Standard complete backups include profiles, configuration snapshots, timing,
+inventory/checkpoints, history preferences, and pending AI-tag synchronization.
+A restored discovery lease can delay new discovery for up to five minutes.
+Changing the Immich URL or API key rebuilds only the inventory, preserving
+enrichment history and human decisions.
 
-On startup, unfinished photo executions and requests become **interrupted**,
-with unknown finish times/durations left null. Completed requests retain
-their measurements, even when the enclosing run never wrote a job summary.
-Repeated startup does not replace completed measurements or invent elapsed
-wall time. See [timing and retention](ENRICH.md#photo-and-provider-request-timing).
+For rollback, stop the server and restore the **complete pre-upgrade snapshot**
+into a clean data directory/volume with the matching older build, following
+[Rolling back](#rolling-back). Never run v1.1.0 or an older development build directly
+against state already upgraded beyond its supported contract.
+
+Restoring Pictaria state does not undo tags or captions already written to
+Immich, or changes made in Immich itself.

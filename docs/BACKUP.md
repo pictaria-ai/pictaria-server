@@ -9,7 +9,7 @@ live in Immich and are covered by whatever backs Immich up.
 
 | File | Contents | Replaceable? |
 | --- | --- | --- |
-| `enrichment.sqlite` (`DATABASE_PATH`) | decisions, tags, captions, run history, review list | **No — the crown jewels** |
+| `enrichment.sqlite` (`DATABASE_PATH`) | decisions, tags, captions, profiles/revisions and active choice, saved run settings, run/timing history, review list, discovery checkpoints, pending AI-tag sync | **No — the crown jewels** |
 | `settings.json` (`SETTINGS_PATH`) | settings overrides, incl. location groups | No |
 | `smart-albums.json` (`ALBUMS_DATA_FILE`) | album rules and job state | No |
 | `frame.db` (`FRAME_DB_PATH`) | which photos the frame has shown, voice command usage counters | No (small) |

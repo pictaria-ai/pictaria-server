@@ -3,7 +3,7 @@
 Status: historical isolated experiment, September 2026. The scripts remain
 separate from production. The production implementation and its deliberate
 freshness limits are now described in [Enrich](ENRICH.md#library-discovery-and-freshness)
-and [Upgrading](UPGRADING.md#enrich-discovery-unreleased-v12-work). In particular,
+and [Upgrading](UPGRADING.md#discovery-history-and-processing-behavior). In particular,
 production preserves timeline-image eligibility, does not adopt the synthetic
 stack-child rule, and uses daily full reconciliation for late timestamp-boundary
 arrivals. The measurements and open questions below record the prototype stage;

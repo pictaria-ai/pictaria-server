@@ -1,8 +1,9 @@
 # Configuration reference
 
-Everything can be configured through environment variables (a `.env` file
-works for bare-Node runs; the Docker image reads normal container env), and
-most day-to-day values can also be changed at runtime from the Settings page —
+The configuration fields below can be set through environment variables (a
+`.env` file works for bare-Node runs; the Docker image reads normal container
+env), and most day-to-day values can also be changed at runtime from the
+Settings page —
 those are marked **UI**. A value saved in the UI overrides the environment
 until cleared and applies immediately, no restart. The listen address/port,
 data paths, and `APP_PASSWORD` are deliberately environment-only.
@@ -13,8 +14,13 @@ data paths, and `APP_PASSWORD` are deliberately environment-only.
 - **AI Providers** owns reusable provider credentials, endpoints, and
   provider-default model identifiers, separated into Local Models and Cloud
   Models.
-- The **Enrich page** chooses the provider for new enrichment runs;
-  **Settings → Enrich** owns enrichment behavior, prompts, and taxonomy.
+- The **Enrich page** chooses the active provider and profile for new runs.
+  **Settings → Enrich** owns processing behavior, Daily Enrich, history
+  retention, and the shared live Curate review policy.
+- **Settings → Enrichment profiles** manages saved prompts and inference
+  taxonomy. Profiles live in the database, not environment overrides;
+  configured template files seed the initial profile and can be imported
+  through **New profile → Pictaria templates**.
 - **Settings → Curate** owns the AI-referee provider/model override and
   other review behavior.
 - **Settings → Voice TTS** owns the voice-answer provider, Interesting and
@@ -36,7 +42,7 @@ deliberately testing another published tag.
 
 | Variable | Default | Notes |
 | --- | --- | --- |
-| `PICTARIA_IMAGE_TAG` | `1.1.0` | Published container image tag selected by `docker-compose.yml`. Image tags omit the `v` used by Git release refs (`1.1.0` versus `v1.1.0`). |
+| `PICTARIA_IMAGE_TAG` | `1.2.0` | Published container image tag selected by `docker-compose.yml`. Image tags omit the `v` used by Git release refs (`1.2.0` versus `v1.2.0`). |
 
 ## Required
 
@@ -139,10 +145,12 @@ files.
 
 | Variable | Default | Notes |
 | --- | --- | --- |
-| `ENRICH_ENABLED` | `false` | Master switch for AI enrichment — off by default because a run sends the selected image rendition to its chosen model. Voice Interesting is a separate, user-invoked model path and does not depend on this switch. Flip Enrich in Settings → Enrich (or here). **UI** |
-| `ENRICH_SCHEDULE_ENABLED` | `false` | Run one daily library sweep for photos that have never been enriched. Uses the provider currently selected on Enrich, sends successful results to Curate, and waits quietly when another enrich run is active. **UI** |
+| `ENRICH_ENABLED` | `false` | Master switch for AI enrichment — off by default because a run sends the selected image rendition to its chosen model. Turning it off pauses Daily Enrich, caption writeback, and automatic AI-tag sync while preserving their preferences and pending work. Curate decision sync remains available. Voice Interesting is a separate, user-invoked model path and does not depend on this switch. Flip Enrich in Settings → Enrich (or here). **UI** |
+| `ENRICH_SCHEDULE_ENABLED` | `false` | Run one daily library sweep for photos that have never been enriched. Uses the active provider and profile selected on Enrich when the run starts, sends successful results to Curate, and waits quietly when another enrich run is active. **UI** |
 | `ENRICH_SCHEDULE_TIME` / `ENRICH_SCHEDULE_TIME_ZONE` | `03:00` / server time zone (`UTC` in stock Compose) | Daily start time (`HH:MM`) and IANA time zone. Settings captures the browser's current time zone automatically, so the normal UI path does not require time-zone setup. **UI** |
 | `ENRICH_SCHEDULE_PHOTO_BUDGET` | `100` | Maximum new photos analyzed by each daily run (1–10,000). Already-enriched photos do not consume this budget. **UI** |
+| `ENRICH_HISTORY_RUNS` | `100` | Retain 100–1,000 run summaries and Performance entries. Photo/request detail has separate bounds and may expire sooner. Settings → Enrich → Run history. **UI** |
+| `ENRICH_HISTORY_LOGS` | `100` | Retain diagnostic logs for the newest 0–100 runs; `0` retains no logs. Older summaries can remain without logs. Lowering either history limit prunes records on save/startup; raising it cannot recover deleted history. Settings → Enrich → Run history. **UI** |
 | `CAPTION_WRITEBACK` | `false` | Copy enrichment captions into Immich's description field, making photos searchable in Immich by their content. Pictaria checks at the final safe point before writing and only fills an empty description or updates its own earlier text; Immich offers no atomic conditional update, so see the precisely documented residual race in [ENRICH.md](ENRICH.md). **UI** |
 | `DEFAULT_PROVIDER` | `cloud_openai` | Initial/infrastructure fallback when the Enrich page has no remembered provider. `cloud_openai` \| `local_lmstudio` \| `local_ollama` \| `openai_compatible` \| `openrouter` \| `cloud_ollama` \| `venice`. Choosing a provider on Enrich saves a UI override. **UI (Enrich page)** |
 | `INFERENCE_HOST_LABEL` | *(empty)* | Optional operator-entered label (maximum 120 characters) copied into each new run summary, such as `M4 Mac mini · LM Studio`. Useful for comparing providers/models hosted on different machines. Pictaria does not detect hardware or rewrite earlier runs when this changes. **UI** |
@@ -162,8 +170,8 @@ files.
 | `VENICE_API_KEY` / `VENICE_MODEL` / `VENICE_BASE_URL` | — / *(empty — no default)* / `https://api.venice.ai/api/v1` | Key and model live under Settings → AI Providers. **UI**. The model must support vision and structured output; the AI referee additionally needs multi-image input (e.g. `qwen3-vl-235b-a22b`). |
 | `IMAGE_SOURCE` | `preview` | Which Immich rendition is sent to the model (`preview`, `thumbnail`, or `original`). Immich previews are WebP. LM Studio cannot ingest them (Pictaria converts on macOS; use `original` in Docker), and current llama.cpp accepts stb_image formats rather than WebP, so use `original` with that endpoint too. **UI** |
 | `MAX_FAILURES_PER_ASSET` | `2` | Give up on an asset after this many content failures per inference configuration (effective prompts, allowed vocabulary/schema, provider/model/generation settings, and image policy). Profile names and revision labels do not create a new allowance when inference inputs are identical; infrastructure failures do not consume it. `0` disables the limit; raising it above an asset's recorded failures re-attempts it on the next run. Stuck photos can also be retried one run at a time from the Enrich page's **Stuck photos** strip. |
-| `TAXONOMY_PATH` | `taxonomy/v1.json` | Seeds the initial inference profile and New profile → Built-in setup. Saved profiles own their taxonomy after initialization; Settings → Enrich retains the separate shared live Curate policy. Version labels need not change after edits. A custom container path requires a matching bind mount and Compose override. |
-| `PROMPTS_DIR` / `PROMPT_VERSION` | `prompts` / `v2` | Prompt templates for enrichment. `PROMPT_VERSION` is forwarded by stock Compose; a custom `PROMPTS_DIR` requires a matching bind mount and Compose override. The templates seed the initial profile and New profile → Built-in setup. Edit saved text in Settings → Enrichment profiles; later file/environment changes do not overwrite saved profiles. |
+| `TAXONOMY_PATH` | `taxonomy/v1.json` | Seeds the initial inference profile and New profile → Pictaria templates. Saved profiles own their taxonomy after initialization; Settings → Enrich retains the separate shared live Curate policy. Version labels need not change after edits. A custom container path requires a matching bind mount and Compose override. |
+| `PROMPTS_DIR` / `PROMPT_VERSION` | `prompts` / `v2` | Prompt templates for enrichment. `PROMPT_VERSION` is forwarded by stock Compose; a custom `PROMPTS_DIR` requires a matching bind mount and Compose override. The templates seed the initial profile and New profile → Pictaria templates. Edit saved text in Settings → Enrichment profiles; later file/environment changes do not overwrite saved profiles. |
 | `CURATE_BURST_GROUPING` | `true` | Collapse same-moment photos (bursts, re-shoots, duplicates) into stacked cards in the Curate queue. Off = flat photo-by-photo queue. **UI** |
 | `CURATE_REFEREE_ENABLED` | `false` | The gold star: an AI model compares each same-moment group side by side and picks the keeper, with a why-line per photo. Runs whenever enrichment is idle; needs `ENRICH_ENABLED`. **UI** |
 | `CURATE_REFEREE_PROVIDER` | *(empty)* | Referee provider; empty = follow the provider currently selected on Enrich. Lives under Settings → Curate. **UI** |

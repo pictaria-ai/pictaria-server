@@ -10,7 +10,8 @@ one config, one password, and one data directory.
 | Feature | What it does | API prefix | UI page |
 | --- | --- | --- | --- |
 | **Insights** | Local collection statistics: yearly histogram + lens, timeline with trips, people constellation, records, leaderboards; every stat opens a photo browser | `/api/insights` | `/insights.html` |
-| **Enrich** | AI tagging/captioning of the Immich library, review workflow | `/api/enrich`, `/api/review`, `/api/taxonomy` | `/curate.html` |
+| **Enrich** | AI tagging/captioning, reusable profiles, library discovery, automatic AI-tag sync, and performance history | `/api/enrich`, `/api/taxonomy` | `/enrich.html`, `/enrich-performance.html`; profiles in Settings |
+| **Curate** | Human review decisions, Stacks, and optional AI referee | `/api/review` | `/curate.html` |
 | **Albums** | Smart albums: saved Immich searches synced to real albums on a schedule; Best-of mode corroborates free-text hits against the enrichment DB and ranks by Curate signals | `/api/albums` | `/albums.html` |
 | **Frame** | Frame hub: device presence, live state per device, remote commands (SSE) routed by device name, display ledger/stats | `/api/frame` | `/remote.html` |
 | **Voice** | Voice pipeline for Pictaria Frame: intent parsing, photo search, photo Q&A, TTS, usage counters | `/api/voice`, `/api/photos` | testers in `/settings.html` (Voice section) |
