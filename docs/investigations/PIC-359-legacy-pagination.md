@@ -1,120 +1,87 @@
-# PIC-359: read-only legacy pagination proof
+# PIC-359: legacy metadata compatibility and removal plan
 
-Target: Pictaria Server v1.2.1. This investigation does not change the running
-application, sync albums, or implement the production fix. Live validation
-results and release tracking belong in PIC-359.
+Target: Pictaria Server v1.2.1. Live evidence and release tracking are in
+PIC-359. The original read-only proof is preserved in Git at `2f671aa`;
+production now uses one implementation, rather than retaining a second copy
+of the algorithm in the probe.
 
-## Why offset pagination is insufficient
+## Module boundaries
 
-Immich 2.7.5 metadata search orders by `fileCreatedAt` only, followed by
-`LIMIT size + 1` and `OFFSET`. Equal timestamps can cross a page boundary in
-different orders. Deduplicating pages cannot recover omitted members.
-Pictaria's duplicate rejection predates v1.2, appearing in the initial public
-release. Detecting overlap before reconciliation protects that particular run,
-but duplicate detection alone is not a completeness proof.
+- `src/albums/metadataSearch.mjs` is the Smart Album metadata reader. Callers
+  provide filters, a selection limit, and whether partial matching is allowed;
+  they receive assets, truncation, and completeness. It owns version selection,
+  ordinary paging, the shared read budget, and count-check/retry orchestration.
+- `src/albums/legacyMetadataTraversal.mjs` owns the pre-3.1 boundary, legacy
+  visibility partitions, timestamp handling and date-window iterator.
+- `src/albums/searchPage.mjs` validates page responses for both metadata and
+  ranked searches. It has no pre-3.1-specific behavior.
+- Smart Album matching, exclusions and membership call the reader. Ranked
+  search remains separate but participates in the shared read budget.
+
+When the supported floor reaches Immich 3.1:
+
+1. Delete the legacy import/dispatch and `readLegacy`/statistics-projection
+   helpers from `metadataSearch.mjs`; the offset reader keeps the same result
+   contract. Remove the version lookup/cache if no other strategy needs it.
+2. Delete `legacyMetadataTraversal.mjs`, the legacy cases in
+   `test/albums/metadataSearch.test.mjs`, and the diagnostic probe below.
+3. Remove legacy compatibility notes; keep shared page validation, run budgets,
+   ordinary paging tests, and safe reconciliation behavior.
+
+No Enrich, Curate, UI, or Smart Album rule schema needs to know that a legacy
+algorithm exists. No persistent compatibility flags or data migration were
+introduced.
+
+## Completeness argument and limits
+
+Immich 2.7.5 and 3.0.x order metadata by `fileCreatedAt` without a unique
+secondary key, then apply offset/limit. Only complete **first-page** responses
+are trusted by the workaround. Incomplete parent samples are discarded and
+split into inclusive `[lower, split]` and `[split, upper]` windows, processed
+newest first. Complete terminal windows cover the requested range without
+precision gaps. Duplicate IDs are allowed only on shared boundaries with
+unchanged timestamps.
+
+Splits use whole milliseconds, matching the API's Date-based query precision;
+response comparisons preserve finer precision if present. Never subtract a
+millisecond to jump over a boundary. More than one page in an indivisible
+millisecond interval fails closed. The count check corroborates the covered
+raw set, including when Top-N stops at a completed prefix; it does not prove
+cross-request snapshot consistency. Exclusion and membership reads must
+complete before any mutation. Only completed matching windows may support
+add-only results when a read budget is reached.
 
 Primary sources:
 
 - [2.7.5 metadata ordering](https://github.com/immich-app/immich/blob/v2.7.5/server/src/repositories/search.repository.ts#L200-L209)
 - [2.7.5 inclusive date bounds](https://github.com/immich-app/immich/blob/v2.7.5/server/src/utils/database.ts#L314-L317)
-- [2.7.5 date input conversion](https://github.com/immich-app/immich/blob/v2.7.5/server/src/validation.ts#L235-L261)
+- [2.7.5 Date conversion](https://github.com/immich-app/immich/blob/v2.7.5/server/src/validation.ts#L235-L261)
+- [3.0.3 ordering](https://github.com/immich-app/immich/blob/v3.0.3/server/src/repositories/search.repository.ts#L197-L206)
 - [3.1.0 secondary ID ordering](https://github.com/immich-app/immich/blob/v3.1.0/server/src/repositories/search.repository.ts#L223-L230)
 
-## Candidate algorithm and its argument
+## Read-only production probe
 
-1. Query **page one** of the requested date range with the original filters.
-2. If Immich reports no next page, that single response contains the full
-   range under its `size + 1` query contract. Accept that range.
-3. Otherwise discard the partial response and divide the range at a whole
-   millisecond: `[lower, split]` and `[split, upper]`. Both bounds are inclusive.
-4. Repeat until every range is complete, within request/item/time limits.
-5. Combine terminal ranges. Deduplicate only equal IDs with unchanged
-   timestamps lying on the shared bounds; reject unexpected overlap.
-
-For a static source, the terminal ranges cover the original range without a
-gap, and each terminal range was read in one response. Consequently, the
-argument does not depend on tie order, detecting duplicates first, or repeated
-queries eventually returning the same set. Parent samples only choose split
-points; they are never accepted as complete results.
-
-Do **not** subtract a millisecond to advance past a timestamp. Responses may
-contain finer precision than JavaScript Date; doing that could skip photos.
-The probe preserves response precision to nanoseconds for comparisons, uses
-millisecond query bounds, and overlaps the bounds deliberately.
-
-## Explicit limits
-
-- More than one page in an indivisible millisecond interval fails closed.
-  This includes oversized exact-timestamp groups and some dense adjacent
-  timestamp groups. The probe returns no partial ID set on failure.
-- Each date traversal permits at most 500 requests, 500,000 returned entries
-  including parent samples/overlaps, and five minutes, with a 30-second network
-  timeout and 32 MiB ceiling per response. The CLI performs two sequential
-  traversals. Optional offset diagnostics have a separate 500-request,
-  five-minute bound. They are evidence only, never a reconciliation source.
-- Completeness relies on the verified first-page/filter contract. A server
-  that silently lies about terminal pages cannot be validated by this client.
-- There is no cross-request snapshot. Concurrent uploads, changes to dates,
-  tags, or album membership can change the set during a traversal. Some
-  changes are detected; two identical passes are corroboration, not proof
-  against every concurrent edit.
-- The prototype uses a strict 2.7.5 response shape. It does not decide the
-  production version-selection policy or support arbitrary query dialects.
-
-## Running the standalone probe
-
-Use Node 22.16 or newer. Store the instance URL and key in a private file:
-
-```text
-IMMICH_BASE_URL=https://your-immich-host
-IMMICH_API_KEY=your-read-only-key
-```
-
-The key only needs `asset.read` and `tag.read`. Do not add this file, filter
-files, private hostnames, asset IDs, or raw responses to Git or the PR.
+Store `IMMICH_BASE_URL` and `IMMICH_API_KEY` in a private environment file.
+The key needs `asset.read`, `tag.read`, and `asset.statistics`.
 
 ```sh
 node --env-file=/private/probe.env scripts/probes/immich-legacy-pagination.mjs
-node --env-file=/private/probe.env scripts/probes/immich-legacy-pagination.mjs --compare-offset
+node --env-file=/private/probe.env scripts/probes/immich-legacy-pagination.mjs --filters-file /private/filters.json
 ```
 
-The default query searches `frame/eligible`, image type, timeline visibility.
-For an exclusion or membership query, use `--filters-file /private/filters.json`
-with the exact metadata filters for that read path, for example `tagIds` or
-`albumIds`. The file contains an object, not a full Pictaria Smart Album rule.
-Keep version-specific visibility semantics explicit when preparing it.
+The default is timeline-visible images tagged `frame/eligible`. A filters file
+can supply `tagIds` for an exclusion query or `albumIds` for membership;
+omitting visibility exercises the legacy visibility partitions. It contains
+metadata filters, not a complete Smart Album rule. The probe calls the actual
+production reader through the bounded Immich client. Its transport allows only
+version/tag reads and metadata/statistics searches, rejects redirects, and
+prints aggregate counts/timing or redacted error categories. It performs no
+writes and persists no asset data. Do not commit private environment/filter
+files, addresses, IDs, timestamps or raw responses.
 
-Only `GET /server/version`, `GET /tags`, and `POST /search/metadata` are allowed
-by the probe's transport. Redirects are rejected. Output contains aggregate
-counts, consistency checks, and generic errors; never credentials, URLs,
-photo IDs, capture dates, filenames or server response bodies. IDs are held
-in memory only. No files are written by the probe.
+Tests: `node --test test/albums/*.test.mjs`.
 
-Offset diagnostics compare the legacy traversal with the date result, query
-the timestamp bucket at every page's last item independently, and sample up
-to three six-photo timestamp groups if available. A successful legacy pass
-does not disprove the bug: unstable ordering may happen to agree on that pass.
-
-## Before production integration
-
-- Apply a shared verified traversal to metadata matching, exclusion reads,
-  and current-membership reads. Validate all three on an appropriate fixture
-  and controlled album; a successful tag-only probe does not cover them all.
-- Preserve existing AND/OR filter planning, ranked search/Best-of, Top-N,
-  deterministic ordering, visibility/trash rules, and aggregate work limits.
-  This prototype collects sets and does not establish Top-N semantics.
-- Keep efficient stable ordering on known fixed servers. Establish the
-  earliest fixed version, conservative unknown-version behavior, and error
-  handling without guessing capabilities from network/permission errors.
-- Use existing bounded transport, cancellation, and diagnostics in the
-  application. Do not copy the standalone transport into runtime code.
-- Decide how partial trustworthy ranges interact with existing add-only
-  partial-search behavior. Never remove members from an untrusted result.
-- Validate the pathological timestamp-group error and ordinary tie handling
-  in user-facing diagnostics, then update the compatibility documentation.
-- Audit other consumers separately: Enrich inventory discovery, Insights
-  collection, visual backfill, generic image listing and Frame metadata
-  pagination also consume this endpoint. A shared endpoint is evidence for
-  follow-up investigation, not proof of identical symptoms in each feature.
-
-Tests: `node --test test/probes/immich-legacy-pagination.test.mjs`.
+Before release: independently review the implementation; validate production
+reads on older and fixed newer Immich; test add/remove behavior on a controlled
+album. Do not hot-edit the personal production container or infer deployment
+approval from the read-only investigation.
