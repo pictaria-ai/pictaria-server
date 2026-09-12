@@ -5,6 +5,11 @@ All notable changes to Pictaria Server are documented here. This project follows
 
 ## Unreleased
 
+## 1.2.1 - 2026-09-12
+
+This patch improves Smart Album compatibility with older Immich versions and
+hierarchical tag synchronization with Immich 3.2.
+
 ### Documentation
 
 - Added guidance for managed tags and Immich workflows, API-key rotation and
@@ -25,6 +30,19 @@ All notable changes to Pictaria Server are documented here. This project follows
   successful Immich tag-creation response by refreshing the tag list once.
   This avoids a fallback incompatible with hierarchical tags on Immich 3.2;
   unresolved tags remain visible errors handled by the existing sync queues.
+
+### Upgrade notes
+
+- No new persisted-state migration from v1.2.0: persistent-state contract 15,
+  Enrich schema 12, and settings version 7 are unchanged. Earlier releases
+  still perform the v1.2 migrations when upgrading directly to v1.2.1.
+- Node requirements, the Frame protocol, and the Immich compatibility floor
+  are unchanged. The legacy Smart Album reader needs `asset.statistics` to
+  verify completeness in addition to the existing asset/tag read permissions.
+- Targeted live checks passed on Immich 2.7.5, 3.1, and 3.2: Smart Album
+  reconciliation and Enrich/Curate tag writes. Broader Server/Frame testing
+  against Immich 3.2 remains separate; this is not a blanket compatibility
+  certification. See [Upgrading](docs/UPGRADING.md#upgrading-to-v121).
 
 ## 1.2.0 - 2026-09-10
 

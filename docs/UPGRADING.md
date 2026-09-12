@@ -31,7 +31,7 @@ Pictaria backups do not include Immich's data.
 ## Upgrade — Docker
 
 ```sh
-PICTARIA_RELEASE=v1.2.0 # replace with the release you are installing
+PICTARIA_RELEASE=v1.2.1 # replace with the release you are installing
 curl -fsSL -o docker-compose.release.yml \
   "https://raw.githubusercontent.com/pictaria-ai/pictaria-server/${PICTARIA_RELEASE}/docker-compose.yml"
 diff -u docker-compose.yml docker-compose.release.yml
@@ -52,7 +52,7 @@ docker compose -f docker-compose.release.yml config --images
 ```
 
 The printed image must end in the numeric image version corresponding to the
-source release you selected (`v1.2.0` uses image tag `1.2.0`). Next, make a
+source release you selected (`v1.2.1` uses image tag `1.2.1`). Next, make a
 rollback definition from the currently running Compose file. It should already
 resolve to the version you noted under Settings → Server; verify it before
 replacing the active definition:
@@ -79,7 +79,7 @@ test -z "$(git status --porcelain)" || {
   echo "Stop: preserve or reconcile local changes before upgrading."
   exit 1
 }
-PICTARIA_RELEASE=v1.2.0 # replace with the release you are installing
+PICTARIA_RELEASE=v1.2.1 # replace with the release you are installing
 git fetch --tags --prune
 git switch --detach "$PICTARIA_RELEASE"
 docker compose up -d --build
@@ -104,7 +104,7 @@ test -z "$(git status --porcelain)" || {
   echo "Stop: preserve or reconcile local changes before upgrading."
   exit 1
 }
-PICTARIA_RELEASE=v1.2.0 # replace with the release you are installing
+PICTARIA_RELEASE=v1.2.1 # replace with the release you are installing
 git fetch --tags --prune
 git switch --detach "$PICTARIA_RELEASE"
 ```
@@ -265,6 +265,29 @@ pre-flight checklist — see
 
 Do not upgrade both on the same day. If something breaks afterwards, you want
 to know which upgrade caused it.
+
+## Upgrading to v1.2.1
+
+v1.2.1 fixes Smart Album pagination on Immich before 3.1 and recovery from
+incomplete tag-creation responses, including hierarchical tags on Immich 3.2.
+It does not require upgrading Immich or Pictaria Frame.
+
+From **v1.2.0**, this is a code-only update: **persistent-state contract 15,
+Enrich schema 12, and settings version 7 remain unchanged**. Create a complete
+backup, then install the matching v1.2.1 source or container image. If needed,
+stop the server and return to v1.2.0 without restoring data, provided no other
+migration occurred. Switching code does not undo album, tag, or caption
+changes already made in Immich.
+
+Older v1.0.x and v1.1.0 installations can upgrade directly to v1.2.1. They
+still perform the [v1.2 data migrations](#upgrading-to-v120) described below;
+rollback to those older versions requires the complete pre-migration snapshot.
+
+After updating, run an affected Smart Album and check its membership. For
+pending tag writes, use the existing Retry sync action if necessary; another
+AI inference run is not required. On older Immich, metadata reads require
+`asset.statistics` as well as the existing asset/tag read permissions to
+check completeness. See [Immich compatibility](IMMICH-COMPATIBILITY.md).
 
 ## Upgrading to v1.2.0
 
