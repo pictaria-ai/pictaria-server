@@ -49,10 +49,6 @@ class FakeImmich {
     return created;
   }
 
-  async createTag(tag) {
-    return { id: `tag-${tag}`, value: tag };
-  }
-
   async tagAssetsBulk({ assetIds, tagIds }) {
     this.calls.push(['tag', tagIds, assetIds]);
     for (const assetId of assetIds) {
