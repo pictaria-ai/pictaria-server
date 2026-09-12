@@ -126,7 +126,7 @@ definitions; copies moved outside `ai/*` also remain on photos during AI sync.
 
 ### Let workflows write their own tags
 
-[Immich 3.2 workflows](https://github.com/immich-app/immich/releases/tag/v3.2.0#workflow-tags-trigger-and-actions)
+[Immich 3.2 workflows](https://github.com/immich-app/immich/releases/tag/v3.2.0)
 can react when an asset receives a tag, including one written by Pictaria,
 and can add tags themselves. A workflow could react to `ai/scene/mountains`
 and add `personal/hiking-candidate`, which AI sync preserves.

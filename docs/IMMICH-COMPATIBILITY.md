@@ -112,7 +112,7 @@ that read and the upstream update atomic.
 Immich 3.2's normal person migration preserves existing person IDs. Simply
 upgrading Immich does not require resetting recognition to keep using Pictaria.
 The optional reset for shared recognition groups is a separate operation:
-the [Immich 3.2 notes](https://github.com/immich-app/immich/releases/tag/v3.2.0#view-own-people-in-shared-assets)
+the [Immich 3.2 notes](https://github.com/immich-app/immich/releases/tag/v3.2.0)
 explain that applying group recognition retroactively requires a reset for
 all users in the group. Names and birth dates for machine-recognized people
 are lost, and recognition results can change.
