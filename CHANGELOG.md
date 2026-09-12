@@ -15,6 +15,11 @@ All notable changes to Pictaria Server are documented here. This project follows
   Unverifiable exclusions or membership leave the album unchanged. Legacy
   exclusion/membership reads also include archived and hidden photos.
 
+- Enrich and Curate tag sync now recover missing IDs from an incomplete
+  successful Immich tag-creation response by refreshing the tag list once.
+  This avoids a fallback incompatible with hierarchical tags on Immich 3.2;
+  unresolved tags remain visible errors handled by the existing sync queues.
+
 ## 1.2.0 - 2026-09-10
 
 This release focuses on Enrich: reusable profiles, predictable run settings,

@@ -624,13 +624,10 @@ export async function ensureImmichTagIds(immich, tags) {
   if (missing.length > 0) {
     Object.assign(existing, tagMap(await immich.upsertTags(missing)));
   }
-  for (const tag of tags.filter((candidate) => !(candidate in existing))) {
-    const created = await immich.createTag(tag);
-    const value = tagValue(created);
-    const identifier = tagId(created);
-    if (value && identifier) {
-      existing[value] = identifier;
-    }
+  if (tags.some((tag) => !(tag in existing))) {
+    // A successful upsert can leave IDs unresolved. Re-read once instead of
+    // using single-tag creation, which rejects hierarchical names in Immich 3.2.
+    Object.assign(existing, tagMap(await immich.listTags()));
   }
   const unresolved = tags.filter((tag) => !(tag in existing));
   if (unresolved.length > 0) {

@@ -49,10 +49,6 @@ class FakeImmich {
     return created;
   }
 
-  async createTag(tag) {
-    return { id: `tag-${tag}`, value: tag };
-  }
-
   async tagAssetsBulk({ assetIds, tagIds }) {
     this.calls.push(['tag', tagIds, assetIds]);
     for (const assetId of assetIds) {
@@ -248,6 +244,41 @@ test('legacy sync jobs reconcile remote work in bounded slices', async () => {
     assert.ok(bulkCalls.every(([, , ids]) => ids.length <= 50));
     assert.equal(immich.calls.filter(([kind]) => kind === 'getAsset').length, assetIds.length * 2);
     assert.equal(repo.pendingSyncJobCount(), 0);
+  });
+});
+
+test('Curate retains an unresolved tag job and completes it after tag-list recovery', async () => {
+  await withService(async ({ repo, immich, service }) => {
+    const waitForWorker = async condition => {
+      const deadline = Date.now() + 5000;
+      while (!condition()) {
+        assert.ok(Date.now() < deadline, 'sync worker did not reach the expected state within 5 seconds');
+        await new Promise(resolve => setTimeout(resolve, 5));
+      }
+    };
+    seedAsset(repo, DECISION_ID);
+    immich.tags = [];
+    immich.assetTags.set(DECISION_ID, new Set(['holiday']));
+    const upsert = immich.upsertTags.bind(immich);
+    immich.upsertTags = async () => [];
+    service.applyDecision({ action: 'approve', assetIds: [DECISION_ID] });
+    service.startSyncWorker();
+    try {
+      await waitForWorker(() => repo.nextSyncJob()?.attempts > 0);
+    } finally { await service.stopSyncWorker(); }
+    assert.equal(repo.nextSyncJob().attempts, 1);
+    assert.equal(repo.pendingSyncJobCount(), 1);
+    assert.deepEqual([...immich.assetTags.get(DECISION_ID)], ['holiday']);
+
+    immich.upsertTags = async tags => { await upsert(tags); return []; };
+    service.startSyncWorker();
+    try {
+      await waitForWorker(() => repo.pendingSyncJobCount() === 0);
+    } finally { await service.stopSyncWorker(); }
+    assert.equal(repo.pendingSyncJobCount(), 0);
+    assert.ok(immich.assetTags.get(DECISION_ID).has('frame/eligible'));
+    assert.ok(immich.assetTags.get(DECISION_ID).has('ai/quality/frame-worthy'));
+    assert.ok(immich.assetTags.get(DECISION_ID).has('holiday'));
   });
 });
 

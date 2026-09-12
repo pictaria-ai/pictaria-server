@@ -72,6 +72,12 @@ failure does not fail enrichment or repeat an AI call. Enable **Tags** under
 and retry there. Deleted photos are skipped. Turning Enrich off pauses this
 queue while preserving pending work; it does not block Curate sync.
 
+Enrich and Curate create missing tag hierarchies through Immich's bulk tag
+upsert. If a successful response omits requested tag IDs, Pictaria refreshes
+the tag list once. Any IDs still missing produce an **Unable to resolve
+Immich tag IDs** error and follow the existing sync retry behavior; requested
+tags are never silently dropped. Complete responses need no extra read.
+
 AI sync has a separate durable queue with one row per photo and no historical
 tag payload. Repeated enrichment coalesces to the newest local result. A
 processing-run generation prevents an older in-flight completion or failure
