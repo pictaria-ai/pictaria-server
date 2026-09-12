@@ -72,6 +72,33 @@ test('AI sync reconciles stale tags, preserves frame and user tags, and makes no
   });
 });
 
+test('unresolved tag IDs defer AI sync without removing tags and recover on retry', async () => {
+  await fixture(async ({ repo, immich, sync, seed }) => {
+    const assetId = seed(1);
+    const originalTags = ['ai/scene/old', 'frame/favorite', 'holiday'];
+    for (const tag of originalTags) immich.photos.get(assetId).add(tag);
+    const upsert = immich.upsertTags.bind(immich);
+    immich.upsertTags = async () => []; // Successful response, no IDs in the refresh either.
+    await sync.tick();
+    assert.deepEqual([...immich.photos.get(assetId)], originalTags);
+    assert.equal(immich.calls.filter(([kind]) => kind === 'list').length, 2);
+    assert.equal(repo.aiTagSync.status().pending, 1);
+    assert.equal(repo.aiTagSync.status().written, 0);
+    assert.match(repo.aiTagSync.status().lastError, /Unable to resolve Immich tag IDs/);
+    assert.ok(repo.aiTagSync.status().retryAfter > Date.now());
+    assert.equal(await sync.tick(), false);
+
+    // Immich creates the tags but omits them from its successful upsert response.
+    immich.upsertTags = async tags => { await upsert(tags); return []; };
+    sync.retry();
+    await sync.tick();
+    assert.equal(repo.aiTagSync.status().written, 1);
+    assert.equal(repo.aiTagSync.status().pending, 0);
+    assert.deepEqual([...immich.photos.get(assetId)].sort(), ['ai/scene/mountains', 'frame/favorite', 'holiday']);
+    assert.equal(repo.pendingSyncJobCount(), 0);
+  });
+});
+
 test('new enrichment during an HTTP write survives stale completion and converges to latest tags', async () => {
   await fixture(async ({ immich, sync, seed, repo }) => {
     const assetId = seed(1); const entered = deferred(); const release = deferred();

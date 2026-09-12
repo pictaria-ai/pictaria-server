@@ -1,6 +1,8 @@
 import crypto from 'node:crypto';
 
-import { UpstreamPaginationError, parseProgressingPage } from '../pagination.mjs';
+import { UpstreamPaginationError } from '../pagination.mjs';
+import { parseSmartAlbumSearchPage } from './searchPage.mjs';
+import { albumReadConfig, albumRead, readMetadataAssets, MAX_ALBUM_READ_REQUESTS } from './metadataSearch.mjs';
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 const ADD_BATCH_SIZE = 50;
@@ -13,8 +15,8 @@ export const MAX_SMART_ALBUM_ID_LENGTH = 200;
 export const MAX_SMART_ALBUM_VALUE_LENGTH = 200;
 export const MAX_SMART_ALBUM_QUERY_LENGTH = 1000;
 export const MAX_SMART_ALBUM_NAME_LENGTH = 200;
-export const MAX_SMART_ALBUM_UPSTREAM_REQUESTS = 500;
-const PARTIAL_TRAVERSAL_WARNING = 'Search reached the configured page limit. Results include only the matching photos found so far; existing album members will be preserved during reconciliation because the full result could not be confirmed.';
+export const MAX_SMART_ALBUM_UPSTREAM_REQUESTS = MAX_ALBUM_READ_REQUESTS;
+const PARTIAL_TRAVERSAL_WARNING = 'Search reached its reading limit. Results include only the matching photos found so far; existing album members will be preserved during reconciliation because the full result could not be confirmed.';
 
 export class SmartAlbumValidationError extends Error {
   constructor(message) {
@@ -159,6 +161,7 @@ export async function previewSearch({
 }
 
 export async function createSmartAlbumJob({ immich, store, config, enrichRepo = null, input }) {
+  config = albumReadConfig(config);
   assertBoundedString(String(input.query || '').trim(), 'Ranked search', MAX_SMART_ALBUM_QUERY_LENGTH);
   assertBoundedString(String(input.albumName || '').trim(), 'Album name', MAX_SMART_ALBUM_NAME_LENGTH);
   const filters = normalizeFilters(input.filters);
@@ -284,6 +287,7 @@ export async function runSmartAlbumJob({ immich, store, config, enrichRepo = nul
 }
 
 async function executeSmartAlbumJob({ immich, store, config, enrichRepo, job }) {
+  config = albumReadConfig(config);
   const jobId = job.id;
   const startedAt = new Date();
 
@@ -355,6 +359,7 @@ async function executeSmartAlbumJob({ immich, store, config, enrichRepo, job }) 
 }
 
 export async function searchAllAssets({ immich, config, query = '', filters = {}, maxResults = DEFAULT_MAX_RESULTS }) {
+  config = albumReadConfig(config);
   const normalizedQuery = String(query || '').trim();
   assertBoundedString(normalizedQuery, 'Ranked search', MAX_SMART_ALBUM_QUERY_LENGTH);
   const normalizedFilters = normalizeFilters(filters);
@@ -387,6 +392,7 @@ async function resolveAlbumAssets({
   bestOf,
   includeAlbumRead = false,
 }) {
+  config = albumReadConfig(config);
   const normalizedFilters = normalizeFilters(filters);
   const normalizedQuery = String(query || '').trim();
   assertBoundedString(normalizedQuery, 'Ranked search', MAX_SMART_ALBUM_QUERY_LENGTH);
@@ -465,6 +471,7 @@ const BEST_OF_HEADROOM = 3; // collect up to 3×cap so rank-time drops (never-sh
 // the loop could underfill an album while eligible photos sat unread past the
 // point where collection stopped.
 export async function searchBestOfAssets({ immich, config, enrichRepo, query, filters = {}, maxResults = DEFAULT_MAX_RESULTS, excludedAssetIds = new Set() }) {
+  config = albumReadConfig(config);
   const normalizedQuery = String(query || '').trim();
   const normalizedFilters = normalizeFilters(filters);
   const cap = maxResults === null
@@ -489,7 +496,7 @@ export async function searchBestOfAssets({ immich, config, enrichRepo, query, fi
   const pageSize = config.searchPageSize;
 
   while (pagesScanned < config.maxSearchPages) {
-    const response = await immich.searchSmart({
+    const response = await albumRead(config, () => immich.searchSmart({
       ...buildSearchFilters(normalizedFilters),
       query: normalizedQuery,
       page,
@@ -497,7 +504,7 @@ export async function searchBestOfAssets({ immich, config, enrichRepo, query, fi
       type: 'IMAGE',
       visibility: 'timeline',
       withExif: false,
-    });
+    }));
     const { items, nextPage } = parseSmartAlbumSearchPage(response, page, pageSize, {
       label: 'Immich Best of search',
       seenAssetIds: seenPageAssetIds,
@@ -842,33 +849,37 @@ async function searchPagedAssets({
   let page = 1;
   const normalizedQuery = String(query || '').trim();
   const normalizedFilters = normalizeFilters(filters);
-  const searchMethod = normalizedQuery ? 'searchSmart' : 'searchMetadata';
   const shouldFilterPeopleOnly = !normalizedQuery && normalizedFilters.peopleOnly;
+  if (!normalizedQuery) {
+    const result = await readMetadataAssets({ immich, config,
+      filters: { ...buildSearchFilters(normalizedFilters), visibility: 'timeline',
+        ...(shouldFilterPeopleOnly ? { withPeople: true } : {}) },
+      limit: resultLimit, accept: asset => assetMatchesPeopleOnly(asset, normalizedFilters),
+      requirePeople: shouldFilterPeopleOnly, allowPartial: allowPartialTraversal });
+    return toSearchResult(new Map(result.assets.map(asset => [asset.id, asset])), result.truncated, result.complete);
+  }
   const seenPageAssetIds = new Set();
   // Immich page numbers are relative to the requested size, so the size must stay
   // constant across pages of one search or later requests re-read earlier windows.
-  const pageSize = shouldFilterPeopleOnly || includeAllResults
+  const pageSize = includeAllResults
     ? config.searchPageSize
     : Math.max(1, Math.min(config.searchPageSize, resultLimit));
 
   for (let pagesFetched = 0; pagesFetched < config.maxSearchPages && assetMap.size < resultLimit; pagesFetched += 1) {
-    const response = await immich[searchMethod]({
+    const response = await albumRead(config, () => immich.searchSmart({
       ...buildSearchFilters(normalizedFilters),
-      ...(normalizedQuery ? { query: normalizedQuery } : { order: 'desc' }),
+      query: normalizedQuery,
       page,
       size: pageSize,
       type: 'IMAGE',
       visibility: 'timeline',
       withExif: false,
-      ...(shouldFilterPeopleOnly ? { withPeople: true } : {}),
-    });
+    }));
     const { items, nextPage } = parseSmartAlbumSearchPage(response, page, pageSize, {
-      label: `Immich ${normalizedQuery ? 'smart' : 'metadata'} search`,
-      requirePeople: shouldFilterPeopleOnly,
+      label: 'Immich smart search',
       seenAssetIds: seenPageAssetIds,
     });
-    const rawAssets = items.filter(isImageAsset);
-    const assets = rawAssets.filter((asset) => assetMatchesPeopleOnly(asset, normalizedFilters));
+    const assets = items.filter(isImageAsset);
 
     for (const asset of assets) {
       if (assetMap.size < resultLimit) {
@@ -890,50 +901,20 @@ async function searchPagedAssets({
     return toSearchResult(assetMap, true, false);
   }
   throw new UpstreamPaginationError(
-    `Immich ${normalizedQuery ? 'smart' : 'metadata'} search exceeded its ${config.maxSearchPages}-page traversal limit.`,
+    `Immich smart search exceeded its ${config.maxSearchPages}-page traversal limit.`,
   );
 }
 
 async function searchAlbumAssetIds({ immich, config, albumId }) {
-  const assetIds = new Set();
-  const seenPageAssetIds = new Set();
-  let page = 1;
-
-  for (let pagesFetched = 0; pagesFetched < config.maxSearchPages; pagesFetched += 1) {
-    const response = await immich.searchMetadata({
-      albumIds: [albumId],
-      order: 'desc',
-      page,
-      size: config.searchPageSize,
-      type: 'IMAGE',
-      withExif: false,
-    });
-    const { items, nextPage } = parseSmartAlbumSearchPage(response, page, config.searchPageSize, {
-      label: 'Immich Smart Album membership search',
-      seenAssetIds: seenPageAssetIds,
-    });
-    const assets = items.filter(isImageAsset);
-
-    for (const asset of assets) {
-      assetIds.add(asset.id);
-    }
-
-    if (nextPage === null) {
-      return assetIds;
-    }
-
-    page = nextPage;
-  }
-
-  throw new UpstreamPaginationError(
-    `Immich Smart Album membership search exceeded its ${config.maxSearchPages}-page traversal limit.`,
-  );
+  const result = await readMetadataAssets({ immich, config, filters: { albumIds: [albumId] },
+    label: 'Immich Smart Album membership search' });
+  return new Set(result.assets.map(asset => asset.id));
 }
 
 // Deliberately no visibility filter here: blanket-excluded assets should be
 // found and excluded/removed regardless of archive/hidden status.
 async function searchExcludedAssetIds({ immich, config, filters }) {
-  const { tagIds, unresolvedValues } = await resolveExclusionTagIds(immich, filters);
+  const { tagIds, unresolvedValues } = await resolveExclusionTagIds(immich, filters, config);
   const warnings = unresolvedValues.map(
     (value) => `Blanket exclusion tag not found in Immich, so it is not excluding anything: ${value}`,
   );
@@ -945,46 +926,15 @@ async function searchExcludedAssetIds({ immich, config, filters }) {
   const assetIds = new Set();
 
   for (const tagId of tagIds) {
-    let page = 1;
-    const seenPageAssetIds = new Set();
-
-    for (let pagesFetched = 0; pagesFetched < config.maxSearchPages; pagesFetched += 1) {
-      const response = await immich.searchMetadata({
-        tagIds: [tagId],
-        order: 'desc',
-        page,
-        size: config.searchPageSize,
-        type: 'IMAGE',
-        withExif: false,
-      });
-      const { items, nextPage } = parseSmartAlbumSearchPage(response, page, config.searchPageSize, {
-        label: 'Immich blanket-exclusion search',
-        seenAssetIds: seenPageAssetIds,
-      });
-      const assets = items.filter(isImageAsset);
-
-      for (const asset of assets) {
-        assetIds.add(asset.id);
-      }
-
-      if (nextPage === null) {
-        break;
-      }
-
-      page = nextPage;
-
-      if (pagesFetched === config.maxSearchPages - 1) {
-        throw new UpstreamPaginationError(
-          `Immich blanket-exclusion search exceeded its ${config.maxSearchPages}-page traversal limit.`,
-        );
-      }
-    }
+    const result = await readMetadataAssets({ immich, config, filters: { tagIds: [tagId] },
+      label: 'Immich blanket-exclusion search' });
+    for (const asset of result.assets) assetIds.add(asset.id);
   }
 
   return { assetIds, warnings };
 }
 
-async function resolveExclusionTagIds(immich, filters) {
+async function resolveExclusionTagIds(immich, filters, config) {
   if (filters.excludeTagsConfigured && filters.excludeTagIds.length === 0 && filters.excludeTagValues.length === 0) {
     return { tagIds: [], unresolvedValues: [] };
   }
@@ -994,7 +944,7 @@ async function resolveExclusionTagIds(immich, filters) {
   const unresolvedValues = [];
 
   if (values.length > 0 && typeof immich.listTags === 'function') {
-    const tags = await immich.listTags({ strict: true });
+    const tags = await albumRead(config, () => immich.listTags({ strict: true }));
     if (!Array.isArray(tags) || tags.some((tag) => (
       !tag
       || typeof tag !== 'object'
@@ -1479,90 +1429,6 @@ function describeFilters(filters) {
   }
 
   return parts.join('; ');
-}
-
-function parseSmartAlbumSearchPage(response, currentPage, pageSize, {
-  label,
-  requirePeople = false,
-  seenAssetIds = new Set(),
-} = {}) {
-  const responseObject = response && typeof response === 'object' && !Array.isArray(response)
-    ? response
-    : null;
-  const assetsObject = responseObject?.assets
-    && typeof responseObject.assets === 'object'
-    && !Array.isArray(responseObject.assets)
-    ? responseObject.assets
-    : null;
-  const representations = [
-    ...(Array.isArray(response) ? [{ kind: 'array', items: response }] : []),
-    ...(Array.isArray(responseObject?.assets) ? [{ kind: 'assets', items: responseObject.assets }] : []),
-    ...(Array.isArray(assetsObject?.items) ? [{ kind: 'assets.items', items: assetsObject.items }] : []),
-    ...(Array.isArray(responseObject?.items) ? [{ kind: 'items', items: responseObject.items }] : []),
-    ...(Array.isArray(responseObject?.data) ? [{ kind: 'data', items: responseObject.data }] : []),
-  ];
-  if (representations.length !== 1 || representations[0].items.length > pageSize) {
-    throw new UpstreamPaginationError(`${label} returned an invalid or oversized item page.`);
-  }
-  const [{ kind, items }] = representations;
-  if (items.some((asset) => (
-    !asset
-    || typeof asset !== 'object'
-    || Array.isArray(asset)
-    || typeof asset.id !== 'string'
-    || !asset.id.trim()
-    || (Object.hasOwn(asset, 'type') && (
-      typeof asset.type !== 'string'
-      || asset.type.trim().toUpperCase() !== 'IMAGE'
-    ))
-    || (requirePeople && (
-      !Array.isArray(asset.people)
-      || asset.people.some((person) => !validAssetPerson(person))
-    ))
-  ))) {
-    throw new UpstreamPaginationError(`${label} returned an invalid asset entry.`);
-  }
-
-  const pageIds = items.map((asset) => asset.id);
-  const uniquePageIds = new Set(pageIds);
-  if (uniquePageIds.size !== pageIds.length || pageIds.some((assetId) => seenAssetIds.has(assetId))) {
-    throw new UpstreamPaginationError(`${label} returned repeated asset entries.`);
-  }
-
-  const hasNestedCursor = Boolean(assetsObject && Object.hasOwn(assetsObject, 'nextPage'));
-  const hasTopLevelCursor = Boolean(responseObject && Object.hasOwn(responseObject, 'nextPage'));
-  if (hasNestedCursor && hasTopLevelCursor) {
-    throw new UpstreamPaginationError(`${label} returned conflicting next-page fields.`);
-  }
-  if (kind === 'assets.items' && !hasNestedCursor && !hasTopLevelCursor) {
-    throw new UpstreamPaginationError(`${label} omitted its next-page field.`);
-  }
-  if (kind !== 'assets.items' && hasNestedCursor) {
-    throw new UpstreamPaginationError(`${label} returned pagination for a different item container.`);
-  }
-  const nextPage = parseProgressingPage(
-    hasNestedCursor ? assetsObject.nextPage : hasTopLevelCursor ? responseObject.nextPage : null,
-    currentPage,
-    { label },
-  );
-  if (nextPage !== null && nextPage !== currentPage + 1) {
-    throw new UpstreamPaginationError(`${label} returned a non-sequential next page.`);
-  }
-  if (items.length === 0 && nextPage !== null) {
-    throw new UpstreamPaginationError(`${label} returned an empty page with a continuation.`);
-  }
-  for (const assetId of pageIds) {
-    seenAssetIds.add(assetId);
-  }
-  return { items, nextPage };
-}
-
-function validAssetPerson(person) {
-  if (!person || typeof person !== 'object' || Array.isArray(person)) {
-    return false;
-  }
-  const id = person.id ?? person.personId ?? person.person?.id;
-  return typeof id === 'string' && Boolean(id.trim());
 }
 
 function cleanOptionalString(value) {

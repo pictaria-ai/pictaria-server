@@ -266,10 +266,6 @@ export class ImmichClient {
     return isPlainObject(response) && Array.isArray(response.tags) ? response.tags : [];
   }
 
-  async createTag(tag) {
-    return this.requestJson('/tags', { method: 'POST', body: { name: tag } });
-  }
-
   async tagAssetsBulk({ assetIds, tagIds }) {
     if (!assetIds.length || !tagIds.length) {
       return { count: 0 };

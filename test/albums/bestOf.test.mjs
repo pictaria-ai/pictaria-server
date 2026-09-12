@@ -257,6 +257,7 @@ test('previewSearch fills the cap when exclusions cover the leading pages', asyn
   const all = pages.flat();
   const excludedIds = ids('x', 20);
   const immich = fakeImmichPages(pages);
+  immich.getServerVersion = async () => ({ major: 3, minor: 1, patch: 0 });
   immich.listTags = async () => [{ id: 'tag-never-show', value: 'frame/never-show' }];
   immich.searchMetadata = async (body) => {
     if (Array.isArray(body.tagIds) && body.tagIds.includes('tag-never-show')) {
