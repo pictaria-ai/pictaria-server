@@ -49,7 +49,27 @@ The Frame and Server use separate Immich API keys with different permissions:
 Granting Immich's **All** option works, but grants more access than either
 product needs.
 
-## Known compatibility caveat
+## Smart Album metadata pagination
+
+Immich before 3.1 can reorder equal capture timestamps across metadata-search
+pages. Smart Album matching, exclusions, and existing-membership reads use a
+legacy compatibility traversal on those versions (and when the version is
+unknown). Known stable 3.1+ versions retain ordinary pagination. Network and
+permission failures do not serve as version detection.
+
+Legacy reads use complete date windows and an independent count check, with
+one bounded retry on a count mismatch. More than 1,000 photos in an indivisible
+millisecond interval cannot be verified through that older API; the run leaves
+the album unchanged and explains why. Incomplete exclusion or membership reads
+also leave the album unchanged. A count check cannot detect every concurrent
+library change, such as an equal-count swap. See [Smart Albums](ALBUMS.md) for
+partial matching, visibility coverage, and work limits.
+
+This workaround is confined to Smart Album metadata reads. It does not change
+ranked search, Enrich inventory discovery, Insights collection, or Pictaria
+Frame's own pagination; those consumers are tracked separately.
+
+## Other compatibility caveat
 
 Optional Enrich caption writeback currently uses Immich's deprecated but still
 supported `PUT /assets/:id` endpoint. Immich 3.1.0 stages a `PATCH` replacement,

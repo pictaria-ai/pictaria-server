@@ -18,6 +18,8 @@ import {
   validateJobPatch,
 } from '../../src/albums/smartAlbums.mjs';
 
+const getServerVersion = async () => ({ major: 3, minor: 1, patch: 0 });
+
 function createMemoryStore() {
   return {
     jobs: [],
@@ -298,7 +300,7 @@ test('validateJobPatch allows enable and interval changes', () => {
 
 test('searchAllAssets fetches only requested top ranked assets', async () => {
   const calls = [];
-  const immich = {
+  const immich = { getServerVersion,
     async searchSmart(body) {
       calls.push(body);
       return {
@@ -331,7 +333,7 @@ test('searchAllAssets fetches only requested top ranked assets', async () => {
 
 test('searchAllAssets can fetch all result pages up to the safety page cap', async () => {
   const calls = [];
-  const immich = {
+  const immich = { getServerVersion,
     async searchSmart(body) {
       calls.push(body);
       return {
@@ -365,7 +367,7 @@ test('searchAllAssets can fetch all result pages up to the safety page cap', asy
 
 test('searchAllAssets uses metadata search when query is empty', async () => {
   const calls = [];
-  const immich = {
+  const immich = { getServerVersion,
     async searchMetadata(body) {
       calls.push(body);
       return {
@@ -403,7 +405,7 @@ test('searchAllAssets uses metadata search when query is empty', async () => {
 
 test('searchAllAssets keeps the page size constant across capped multi-page searches', async () => {
   const calls = [];
-  const immich = {
+  const immich = { getServerVersion,
     async searchSmart(body) {
       calls.push(body);
       return {
@@ -436,7 +438,7 @@ test('searchAllAssets keeps the page size constant across capped multi-page sear
 
 test('searchAllAssets filters to photos with only the selected person', async () => {
   const calls = [];
-  const immich = {
+  const immich = { getServerVersion,
     async searchMetadata(body) {
       calls.push(body);
       return {
@@ -477,7 +479,7 @@ test('searchAllAssets filters to photos with only the selected person', async ()
 
 test('searchAllAssets preserves supported data-array responses', async () => {
   const result = await searchAllAssets({
-    immich: {
+    immich: { getServerVersion,
       async searchSmart() {
         return { data: [{ id: 'asset-1', type: 'IMAGE' }] };
       },
@@ -509,7 +511,7 @@ test('searchAllAssets rejects malformed pages and non-progressing cursors', asyn
     await context.test(name, async () => {
       await assert.rejects(
         searchAllAssets({
-          immich: { async searchSmart() { return response; } },
+          immich: { getServerVersion, async searchSmart() { return response; } },
           config: { searchPageSize: 10, maxSearchPages: 2 },
           query: 'landscapes',
           maxResults: null,
@@ -521,7 +523,7 @@ test('searchAllAssets rejects malformed pages and non-progressing cursors', asyn
 });
 
 test('searchAllAssets distinguishes a trustworthy All-results prefix from a complete Top N', async () => {
-  const immich = {
+  const immich = { getServerVersion,
     async searchSmart() {
       return { assets: { items: [{ id: 'asset-1', type: 'IMAGE' }], nextPage: 2 } };
     },
@@ -542,7 +544,7 @@ test('searchAllAssets distinguishes a trustworthy All-results prefix from a comp
 test('people-only search rejects missing people metadata', async () => {
   await assert.rejects(
     searchAllAssets({
-      immich: {
+      immich: { getServerVersion,
         async searchMetadata() {
           return { assets: { items: [{ id: 'asset-1', type: 'IMAGE' }], nextPage: null } };
         },
@@ -558,7 +560,7 @@ test('people-only search rejects missing people metadata', async () => {
 test('people-only search rejects malformed people metadata', async () => {
   await assert.rejects(
     searchAllAssets({
-      immich: {
+      immich: { getServerVersion,
         async searchMetadata() {
           return {
             assets: {
@@ -579,7 +581,7 @@ test('people-only search rejects malformed people metadata', async () => {
 test('searchAllAssets rejects repeated asset IDs across pages', async () => {
   await assert.rejects(
     searchAllAssets({
-      immich: {
+      immich: { getServerVersion,
         async searchSmart({ page }) {
           return page === 1
             ? { assets: { items: [{ id: 'repeated', type: 'IMAGE' }], nextPage: 2 } }
@@ -596,7 +598,7 @@ test('searchAllAssets rejects repeated asset IDs across pages', async () => {
 
 test('searchAllAssets supports OR people metadata searches', async () => {
   const calls = [];
-  const immich = {
+  const immich = { getServerVersion,
     async searchMetadata(body) {
       calls.push(body);
       const personId = body.personIds[0];
@@ -642,7 +644,7 @@ test('searchAllAssets supports OR people metadata searches', async () => {
 
 test('searchAllAssets supports multi-city OR metadata searches', async () => {
   const calls = [];
-  const immich = {
+  const immich = { getServerVersion,
     async searchMetadata(body) {
       calls.push(body);
       return {
@@ -672,7 +674,7 @@ test('searchAllAssets supports multi-city OR metadata searches', async () => {
 
 test('single city stays a plain filter and legacy jobs round-trip', async () => {
   const calls = [];
-  const immich = {
+  const immich = { getServerVersion,
     async searchMetadata(body) {
       calls.push(body);
       return { assets: { nextPage: null, items: [{ id: 'a1', type: 'IMAGE' }] } };
@@ -693,7 +695,7 @@ test('single city stays a plain filter and legacy jobs round-trip', async () => 
 
 test('searchAllAssets supports multi-country OR metadata searches', async () => {
   const calls = [];
-  const immich = {
+  const immich = { getServerVersion,
     async searchMetadata(body) {
       calls.push(body);
       return {
@@ -722,7 +724,7 @@ test('searchAllAssets supports multi-country OR metadata searches', async () => 
 
 test('single country stays a plain filter and legacy jobs round-trip', async () => {
   const calls = [];
-  const immich = {
+  const immich = { getServerVersion,
     async searchMetadata(body) {
       calls.push(body);
       return { assets: { nextPage: null, items: [{ id: 'a1', type: 'IMAGE' }] } };
@@ -774,7 +776,7 @@ test('multiple countries reject queries, cities, and states', () => {
 
 test('searchAllAssets supports OR tag metadata searches', async () => {
   const calls = [];
-  const immich = {
+  const immich = { getServerVersion,
     async searchMetadata(body) {
       calls.push(body);
       const tagId = body.tagIds[0];
@@ -819,7 +821,7 @@ test('searchAllAssets supports OR tag metadata searches', async () => {
 });
 
 test('searchAllAssets propagates incomplete All-results traversal through OR tags', async () => {
-  const immich = {
+  const immich = { getServerVersion,
     async searchMetadata(body) {
       return {
         assets: {
@@ -847,7 +849,7 @@ test('searchAllAssets propagates incomplete All-results traversal through OR tag
 
 test('searchAllAssets supports AND tag metadata searches', async () => {
   const calls = [];
-  const immich = {
+  const immich = { getServerVersion,
     async searchMetadata(body) {
       calls.push(body);
       const tagId = body.tagIds[0];
@@ -894,7 +896,7 @@ test('searchAllAssets supports AND tag metadata searches', async () => {
 });
 
 test('bounded AND-tag searches reject a capped internal full traversal', async () => {
-  const immich = {
+  const immich = { getServerVersion,
     async searchMetadata(body) {
       return {
         assets: {
@@ -922,7 +924,7 @@ test('bounded AND-tag searches reject a capped internal full traversal', async (
 test('searchAllAssets rejects OR people with ranked search', async () => {
   await assert.rejects(
     () => searchAllAssets({
-      immich: {},
+      immich: { getServerVersion,},
       config: {
         searchPageSize: 1000,
         maxSearchPages: 25,
@@ -940,7 +942,7 @@ test('searchAllAssets rejects OR people with ranked search', async () => {
 test('searchAllAssets rejects OR tags with ranked search', async () => {
   await assert.rejects(
     () => searchAllAssets({
-      immich: {},
+      immich: { getServerVersion,},
       config: {
         searchPageSize: 1000,
         maxSearchPages: 25,
@@ -958,7 +960,7 @@ test('searchAllAssets rejects OR tags with ranked search', async () => {
 test('searchAllAssets rejects people only with ranked search', async () => {
   await assert.rejects(
     () => searchAllAssets({
-      immich: {},
+      immich: { getServerVersion,},
       config: {
         searchPageSize: 1000,
         maxSearchPages: 25,
@@ -975,7 +977,7 @@ test('searchAllAssets rejects people only with ranked search', async () => {
 
 test('searchAllAssets applies structured filters to smart search', async () => {
   const calls = [];
-  const immich = {
+  const immich = { getServerVersion,
     async searchSmart(body) {
       calls.push(body);
       return {
@@ -1011,7 +1013,7 @@ test('searchAllAssets applies structured filters to smart search', async () => {
 
 test('createSmartAlbumJob adds all assets in conservative batches', async () => {
   const addCalls = [];
-  const immich = {
+  const immich = { getServerVersion,
     async searchSmart() {
       return {
         assets: {
@@ -1057,7 +1059,7 @@ test('createSmartAlbumJob adds all assets in conservative batches', async () => 
 
 test('createSmartAlbumJob safely fills a new album from a capped All-results prefix', async () => {
   const addCalls = [];
-  const immich = {
+  const immich = { getServerVersion,
     async searchSmart() {
       return {
         assets: {
@@ -1103,7 +1105,7 @@ test('createSmartAlbumJob safely fills a new album from a capped All-results pre
 });
 
 test('createSmartAlbumJob stores the job before adding so add failures leave no orphan album', async () => {
-  const immich = {
+  const immich = { getServerVersion,
     async searchSmart() {
       return {
         assets: {
@@ -1149,7 +1151,7 @@ test('createSmartAlbumJob stores the job before adding so add failures leave no 
 
 test('createSmartAlbumJob deletes the just-created album when job persistence fails', async () => {
   const deleteCalls = [];
-  const immich = {
+  const immich = { getServerVersion,
     async searchSmart() {
       return {
         assets: {
@@ -1213,7 +1215,7 @@ test('runSmartAlbumJob checks existing assets with album metadata search', async
     includeAllResults: true,
     maxResults: null,
   };
-  const immich = {
+  const immich = { getServerVersion,
     async searchSmart() {
       return {
         assets: {
@@ -1285,7 +1287,7 @@ test('runSmartAlbumJob removes album assets tagged frame/never-show', async () =
     includeAllResults: true,
     maxResults: null,
   };
-  const immich = {
+  const immich = { getServerVersion,
     async searchSmart() {
       return {
         assets: {
@@ -1375,7 +1377,7 @@ test('runSmartAlbumJob never adds assets tagged frame/never-show', async () => {
     includeAllResults: true,
     maxResults: null,
   };
-  const immich = {
+  const immich = { getServerVersion,
     async searchSmart() {
       return {
         assets: {
@@ -1459,7 +1461,7 @@ test('runSmartAlbumJob applies configured blanket exclusion tags', async () => {
     includeAllResults: true,
     maxResults: null,
   };
-  const immich = {
+  const immich = { getServerVersion,
     async searchSmart() {
       return {
         assets: {
@@ -1540,7 +1542,7 @@ test('runSmartAlbumJob removes assets that no longer match the rule', async () =
     includeAllResults: true,
     maxResults: null,
   };
-  const immich = {
+  const immich = { getServerVersion,
     async searchSmart() {
       return {
         assets: {
@@ -1634,7 +1636,7 @@ test('runSmartAlbumJob adds a capped All-results prefix without removing unconfi
       return stored;
     },
   };
-  const immich = {
+  const immich = { getServerVersion,
     async searchSmart() {
       return {
         assets: {
@@ -1711,7 +1713,7 @@ test('runSmartAlbumJob still reconciles a complete Top-N selection reached at th
       return { ...currentJob, ...updater(currentJob) };
     },
   };
-  const immich = {
+  const immich = { getServerVersion,
     async searchSmart() {
       return {
         assets: {
@@ -1841,7 +1843,7 @@ test('runSmartAlbumJob fails before any membership mutation when an upstream tra
           return stored;
         },
       };
-      const immich = {
+      const immich = { getServerVersion,
         searchSmart: scenario.searchSmart,
         searchMetadata: scenario.searchMetadata,
         ...(scenario.listTags ? { listTags: scenario.listTags } : {}),
@@ -1896,7 +1898,7 @@ test('runSmartAlbumJob still removes every member for a valid terminal empty res
       return { ...currentJob, ...updater(currentJob) };
     },
   };
-  const immich = {
+  const immich = { getServerVersion,
     async searchSmart() {
       return { assets: { items: [], nextPage: null } };
     },
@@ -1941,7 +1943,7 @@ test('runSmartAlbumJob rejects a second concurrent run of the same job', async (
     includeAllResults: true,
     maxResults: null,
   };
-  const immich = {
+  const immich = { getServerVersion,
     async searchSmart() {
       await gate;
       return { assets: { nextPage: null, items: [] } };
@@ -2089,7 +2091,7 @@ test('runSmartAlbumJob applies the never-show default to jobs stored without exc
     includeAllResults: true,
     maxResults: null,
   };
-  const immich = {
+  const immich = { getServerVersion,
     async searchSmart() {
       return { assets: { nextPage: null, items: [{ id: 'new-1', type: 'IMAGE' }] } };
     },
@@ -2135,7 +2137,7 @@ test('runSmartAlbumJob surfaces unresolved blanket exclusion tags as warnings', 
     includeAllResults: true,
     maxResults: null,
   };
-  const immich = {
+  const immich = { getServerVersion,
     async searchSmart() {
       return { assets: { nextPage: null, items: [{ id: 'new-1', type: 'IMAGE' }] } };
     },
