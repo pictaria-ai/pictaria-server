@@ -25,6 +25,8 @@ setup; you can use it as-is or customize it in Settings.
 
 - [Enrichment profiles](#enrichment-profiles): create or edit prompts and tags,
   and understand which settings new runs use.
+- [Tags and Immich automations](#tags-and-immich-automations): keep personal
+  tags separate from Pictaria's managed tags.
 - [Run history](#run-history): inspect saved run settings, retry failures, and
   choose how much history to retain.
 - [Performance and photo details](#performance-comparison-and-photo-details):
@@ -102,6 +104,40 @@ snapshot. Queue state is included in normal database backup/restore and
 resumes idempotently. Upgrade does **not** backfill tags for older enriched
 photos. Those photos sync on a subsequent successful enrichment or Curate
 decision; a bulk historical-sync action is not included.
+
+## Tags and Immich automations
+
+### Keep managed tag names intact
+
+Use a separate prefix such as `personal/*` for tags you want to manage yourself.
+AI-tag sync preserves those tags. It reconciles `ai/*` against the photo's
+saved enrichment result, including removing manually added `ai/*` tags that
+are not in that result. To change future enrichment vocabulary, edit the
+[profile's taxonomy](#enrichment-profiles).
+
+Keep the names of `ai/*` and the [Curate decision tags](#human-tags)
+(`frame/eligible`, `frame/favorite`, `frame/never-show`, `frame/reviewed`)
+intact in Immich. They carry meaning for Pictaria's synchronization and
+name-based matching. In Immich 3.2, renaming a parent also renames its
+descendants: changing `ai` to `My AI`, for example, changes
+`ai/scene/mountains` to `My AI/scene/mountains`. A later sync can recreate
+the original tag. Pictaria does not automatically clean up the renamed tag
+definitions; copies moved outside `ai/*` also remain on photos during AI sync.
+
+### Let workflows write their own tags
+
+[Immich 3.2 workflows](https://github.com/immich-app/immich/releases/tag/v3.2.0#workflow-tags-trigger-and-actions)
+can react when an asset receives a tag, including one written by Pictaria,
+and can add tags themselves. A workflow could react to `ai/scene/mountains`
+and add `personal/hiking-candidate`, which AI sync preserves.
+
+Prefer workflow output outside `ai/*` and the Curate decision tags. A workflow
+that adds an `ai/*` tag absent from Pictaria's saved result can have that tag
+removed on a subsequent sync; writing `frame/eligible` can contradict a Curate
+rejection. Depending on timing, conflicting writes may also cause tag
+verification errors and retries. Test your workflow on a few disposable photos
+first; these potential conflicts do not mean every workflow is incompatible
+or that it necessarily creates a continuous loop.
 
 ## Providers
 

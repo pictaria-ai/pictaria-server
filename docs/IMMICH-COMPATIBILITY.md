@@ -49,6 +49,28 @@ The Frame and Server use separate Immich API keys with different permissions:
 Granting Immich's **All** option works, but grants more access than either
 product needs.
 
+### Replacing or rotating an API key
+
+After replacing or rotating the Server's key in Immich, save the new value in
+**Pictaria Settings → Server**, with the required permissions, and check the
+home page for **Immich connected**. Update any other client using the replaced
+key separately; changing the Server's key does not update Frame's own key.
+
+The next Enrich library-discovery run rebuilds its local inventory when the
+saved key changes, even if the new key belongs to the same Immich account.
+Pictaria treats the server address and key together as the source identity,
+because another key may expose a different collection. The first sweep can
+therefore take longer. This refresh preserves enrichment history and Curate
+decisions and does **not** automatically re-enrich every photo. Use Enrich's
+**Retry sync** if pending AI-tag writes still need attention after reconnecting.
+
+## Managed tags and workflows
+
+Pictaria relies on `ai/*` and its specific Curate decision tags. Renaming them
+or having another automation write conflicting values can change matching or
+sync behavior. See [Tags and Immich automations](ENRICH.md#tags-and-immich-automations)
+for naming guidance and an example of a workflow that writes personal tags.
+
 ## Smart Album metadata pagination
 
 Immich before 3.1 can reorder equal capture timestamps across metadata-search
@@ -84,6 +106,24 @@ Neither tested Immich generation exposes an ETag, version precondition, or
 expected-description field for this asset update. Pictaria therefore reads the
 description at the final safe decision point before writing, but cannot make
 that read and the upstream update atomic.
+
+## Recognition resets and saved person filters
+
+Immich 3.2's normal person migration preserves existing person IDs. Simply
+upgrading Immich does not require resetting recognition to keep using Pictaria.
+The optional reset for shared recognition groups is a separate operation:
+the [Immich 3.2 notes](https://github.com/immich-app/immich/releases/tag/v3.2.0#view-own-people-in-shared-assets)
+explain that applying group recognition retroactively requires a reset for
+all users in the group. Names and birth dates for machine-recognized people
+are lost, and recognition results can change.
+
+If you deliberately reset recognition, back up Immich first and wait for its
+recognition jobs to finish. Recheck saved person selections in Smart Albums
+before resuming their schedules; replace selections that no longer identify
+the intended person. Refresh Insights to update cached people data, and
+recheck person-based selections in Frame where used. A cache refresh does not
+repair a saved filter pointing at an obsolete person ID. Pictaria's backup
+does not restore Immich's recognition data.
 
 ## Before upgrading Immich
 

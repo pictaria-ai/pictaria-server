@@ -5,6 +5,12 @@ All notable changes to Pictaria Server are documented here. This project follows
 
 ## Unreleased
 
+### Documentation
+
+- Added guidance for managed tags and Immich workflows, API-key rotation and
+  the resulting inventory refresh, and rechecking person filters after an
+  optional Immich recognition reset.
+
 ### Fixed
 
 - **Smart Albums on Immich before 3.1** now read metadata through complete

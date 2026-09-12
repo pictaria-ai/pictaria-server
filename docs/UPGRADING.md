@@ -21,6 +21,13 @@ upgrade.
    `Pictaria Server v<version>`. You need it to roll back, or to report a
    problem.
 
+If you are also changing Immich, see its separate
+[upgrade checks](IMMICH-COMPATIBILITY.md#before-upgrading-immich). That guide explains
+[API-key rotation](IMMICH-COMPATIBILITY.md#replacing-or-rotating-an-api-key)
+and the distinction between a normal upgrade and an optional
+[recognition reset](IMMICH-COMPATIBILITY.md#recognition-resets-and-saved-person-filters).
+Pictaria backups do not include Immich's data.
+
 ## Upgrade — Docker
 
 ```sh
