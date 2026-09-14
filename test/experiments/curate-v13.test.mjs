@@ -264,8 +264,8 @@ test('receipt, conditional Undo and pending intent survive reopening SQLite', ()
 test('visual evaluation reports grouping errors separately from keeper agreement', () => {
   const expected = { groups: [{ ids: ['p0', 'p1'], keepers: ['p0'], reason: 'Alternatives.' }, { ids: ['p2'], keepers: ['p2'], reason: 'Different.' }] };
   const actual = { groups: [{ ids: ['p0', 'p1', 'p2'], keepers: ['p0', 'p2'], reason: 'Wrong merge, same keepers.' }] };
-  assert.deepEqual(compareLabels(['p0', 'p1', 'p2'], actual, expected), { humanLabelsProvided: true, falseMergePairs: 2, missedAlternativePairs: 0, exactPartition: false, exactKeeperSet: true });
-  assert.deepEqual(compareLabels(['p0', 'p1', 'p2'], actual), { humanLabelsProvided: false });
+  assert.deepEqual(compareLabels(['p0', 'p1', 'p2'], actual, expected), { referenceLabelsProvided: true, falseMergePairs: 2, missedAlternativePairs: 0, exactPartition: false, exactKeeperSet: true });
+  assert.deepEqual(compareLabels(['p0', 'p1', 'p2'], actual), { referenceLabelsProvided: false });
   assert.ok(!visionPrompt(['p0', 'p1'], 'check').jsonSchema.properties.groups.items.properties.keepers);
 });
 

@@ -25,7 +25,7 @@ export function visionPrompt(ids, role) {
 }
 
 export function compareLabels(ids, actual, expected) {
-  if (!expected) return { humanLabelsProvided: false };
+  if (!expected) return { referenceLabelsProvided: false };
   const role = expected.groups.every(g => Array.isArray(g.keepers)) ? 'keeper' : 'check';
   validateAdvice(ids, expected, role);
   const pairs = groups => {
@@ -37,7 +37,7 @@ export function compareLabels(ids, actual, expected) {
   const falseMergePairs = [...predicted].filter(p => !labelled.has(p)).length;
   const missedAlternativePairs = [...labelled].filter(p => !predicted.has(p)).length;
   const keepers = value => value.groups.flatMap(g => g.keepers ?? []).sort().join(',');
-  return { humanLabelsProvided: true, falseMergePairs, missedAlternativePairs,
+  return { referenceLabelsProvided: true, falseMergePairs, missedAlternativePairs,
     exactPartition: falseMergePairs === 0 && missedAlternativePairs === 0,
     ...(role === 'keeper' && actual.groups.every(g => Array.isArray(g.keepers)) ? { exactKeeperSet: keepers(actual) === keepers(expected) } : {}) };
 }

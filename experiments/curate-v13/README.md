@@ -123,9 +123,10 @@ made about a global order spanning direct external Immich edits.
 
 ## Measurements and initial budgets
 
-Measured on Node **25.9.0**, Apple M5 Pro, macOS. Production/CI validation on Node
-22 and the target host remains necessary. Each prototype case ran in a fresh
-process: one cold build, 20 rebuilds, 100 cached page serializations and 100
+Measured on Node **25.9.0**, Apple M5 Pro, macOS. The initial draft also passed
+Node 22 CI tests, upgrade checks and container build/boot smoke. Target-host
+measurements remain necessary. Each prototype case ran in a fresh process:
+one cold build, 20 rebuilds, 100 cached page serializations and 100
 30-photo SQLite operations. p95 is the observed sample percentile, not a service
 level guarantee. No real Enrich traffic ran inside the benchmark process.
 
@@ -240,7 +241,9 @@ Use only owner-approved renditions and the approved provider. Keep every image,
 filename, source identifier, manifest and raw answer outside Git and Linear.
 Public evidence should contain aggregate counts and failure categories only.
 First label expected alternative groups separately from acceptable keeper sets;
-do not derive the expected answer from the model being measured.
+do not derive the expected answer from the model being measured. Record whether
+reference labels are owner-reviewed or provisional visual judgments. Authorization
+to use a library does not mean its owner supplied or endorsed those labels.
 
 `visual.mjs` defaults to a local dry run. A private manifest has this shape:
 
@@ -309,8 +312,8 @@ Simple Curate usability issues can follow once these boundaries are stable.
 
 Before PIC-366 can be complete:
 
-1. Approve and label the private visual set, including incomplete recognition,
-   scene/composition changes, real expression alternatives and a legitimate
+1. Label and evaluate the owner-authorized private visual set, including incomplete
+   recognition, scene/composition changes, real expression alternatives and a legitimate
    30-photo group. Run the prototype prompt against the selected real provider.
 2. Use those results to adopt/reject semantic vetoes and validate the request
    envelope; document any narrowly necessary strategy change.
