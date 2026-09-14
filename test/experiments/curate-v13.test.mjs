@@ -6,6 +6,7 @@ import { createServer } from 'node:http';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { createHash } from 'node:crypto';
 import { groupPhotos, planRequest, validateAdvice } from '../../experiments/curate-v13/grouping.mjs';
 import { DecisionSpike } from '../../experiments/curate-v13/decisions.mjs';
 import { fixtures, photo } from '../../experiments/curate-v13/fixtures.mjs';
@@ -331,6 +332,47 @@ test('visual evaluation reports grouping errors separately from keeper agreement
   assert.ok(!visionPrompt(['p0', 'p1'], 'check').jsonSchema.properties.groups.items.properties.keepers);
 });
 
+test('Venice keeps image/prose order independent of both schema enum orders', async () => {
+  const ids = ['p0', 'p1'], reverse = [...ids].reverse();
+  const imagesById = { p0: { data: Buffer.from('invented image A'), mimeType: 'image/jpeg' },
+    p1: { data: Buffer.from('different invented image B'), mimeType: 'image/jpeg' } };
+  const output = { groups: [{ ids, keepers: ['p0'], reason: 'Synthetic fixed-photo answer.' }] };
+  assert.deepEqual(visionPrompt(ids, 'keeper'), visionPrompt(ids, 'keeper', { enumOrder: ids }));
+  let calls = 0;
+  for (const imageOrder of [ids, reverse]) for (const enumOrder of [ids, reverse]) {
+    let submitted;
+    const provider = new VeniceProvider({ apiKey: 'synthetic-test-key', modelName: 'synthetic-model',
+      baseUrl: 'https://provider.invalid/v1', fetchImpl: async (_url, request) => {
+        calls++; submitted = JSON.parse(request.body);
+        return { ok: true, headers: { get: () => null }, text: async () => JSON.stringify({ choices: [{ message: { content: JSON.stringify(output) } }] }) };
+      } });
+    const prompt = visionPrompt(imageOrder, 'keeper', { enumOrder });
+    const result = await evaluateImages(provider, imageOrder.map(id => imagesById[id]), imageOrder, 'keeper', output, { enumOrder });
+    const content = submitted.messages[1].content;
+    assert.equal(content[0].text.startsWith(prompt.userPrompt), true);
+    assert.equal(prompt.userPrompt, visionPrompt(imageOrder, 'keeper').userPrompt, 'enum-only changes preserve prose');
+    assert.equal(prompt.systemPrompt, visionPrompt(ids, 'keeper').systemPrompt);
+    assert.deepEqual(content.slice(1).map(p => p.image_url.url), imageOrder.map(id => `data:image/jpeg;base64,${imagesById[id].data.toString('base64')}`));
+    const embedded = JSON.parse(content[0].text.split('\n').at(-1));
+    for (const schema of [submitted.response_format.json_schema.schema, embedded]) {
+      assert.deepEqual(schema.properties.groups.items.properties.ids.items.enum, enumOrder);
+      assert.deepEqual(schema.properties.groups.items.properties.keepers.items.enum, enumOrder);
+    }
+    assert.equal(result.status, 'valid');
+    assert.deepEqual(result.output.groups[0].keepers, ['p0'], 'fixed aliases keep the physical-photo mapping');
+  }
+  assert.equal(calls, 4);
+});
+
+test('invalid enum controls fail before any provider call', async () => {
+  let calls = 0;
+  const provider = { analyzeImages: async () => { calls++; } };
+  for (const enumOrder of [null, 'p0,p1', [], ['p0'], ['p0', 'p0'], ['p0', 'p2'], ['p0', 'p1', 'p2']]) {
+    await assert.rejects(evaluateImages(provider, [], ['p0', 'p1'], 'keeper', undefined, { enumOrder }), /invalid prompt IDs or enum order/);
+  }
+  assert.equal(calls, 0);
+});
+
 test('an HTTP-success-shaped answer with duplicate groups is rejected, retained privately, and never retried', async () => {
   let calls = 0;
   const output = { groups: [{ ids: ['p0', 'p1'], reason: 'private response text' }, { ids: ['p0', 'p1'], reason: 'another grouping' }] };
@@ -359,18 +401,23 @@ test('provider failures expose bounded diagnostics and preserve zero/one/multipl
 
 test('visual CLI writes invalid model output only to the private report and exits unsuccessfully', async () => {
   const dir = mkdtempSync(join(tmpdir(), 'curate-visual-failure-'));
-  let calls = 0;
+  let calls = 0, submitted;
   const output = { groups: [{ ids: ['p0', 'p1'], reason: 'private answer' }, { ids: ['p0', 'p1'], reason: 'duplicate grouping' }] };
   const server = createServer((req, res) => {
-    calls++; req.resume();
-    res.writeHead(200, { 'content-type': 'application/json' });
-    res.end(JSON.stringify({ choices: [{ message: { content: JSON.stringify(output) } }] }));
+    calls++; const chunks = [];
+    req.on('data', chunk => chunks.push(chunk));
+    req.on('end', () => {
+      submitted = JSON.parse(Buffer.concat(chunks));
+      res.writeHead(200, { 'content-type': 'application/json' });
+      res.end(JSON.stringify({ choices: [{ message: { content: JSON.stringify(output) } }] }));
+    });
   });
   await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
   try {
-    writeFileSync(join(dir, 'invented.jpg'), Buffer.alloc(32));
+    const bytes = [Buffer.from('invented image A'), Buffer.from('different invented image B')];
+    bytes.forEach((data, i) => writeFileSync(join(dir, `invented-${i}.jpg`), data));
     const manifest = join(dir, 'case.json'), out = join(dir, 'report.json');
-    writeFileSync(manifest, JSON.stringify({ photos: ['p0', 'p1'].map(id => ({ id, file: 'invented.jpg', mimeType: 'image/jpeg' })) }));
+    writeFileSync(manifest, JSON.stringify({ enumOrder: ['p1', 'p0'], photos: ['p0', 'p1'].map((id, i) => ({ id, file: `invented-${i}.jpg`, mimeType: 'image/jpeg' })) }));
     const command = fileURLToPath(new URL('../../experiments/curate-v13/visual.mjs', import.meta.url));
     const child = spawn(process.execPath, [command, `--manifest=${manifest}`, '--role=check', '--submit', `--out=${out}`], { env: {
       CURATE_EVAL_PROVIDER: 'venice', CURATE_EVAL_MODEL: 'synthetic-model', CURATE_EVAL_API_KEY: 'synthetic-test-key',
@@ -386,6 +433,14 @@ test('visual CLI writes invalid model output only to the private report and exit
     const report = JSON.parse(readFileSync(out, 'utf8'));
     assert.deepEqual(report.output, output);
     assert.equal(report.promptVersion, 'curate_prototype_check_v2');
+    assert.equal(report.enumOrderMatchesImages, false);
+    assert.deepEqual(report.requestPlan.enumOrder, ['p1', 'p0']);
+    assert.deepEqual(report.requestPlan.images.map(p => p.id), ['p0', 'p1']);
+    assert.deepEqual(report.requestPlan.images.map(p => p.sha256), bytes.map(data => createHash('sha256').update(data).digest('hex')));
+    assert.deepEqual(submitted.messages[1].content.slice(1).map(p => p.image_url.url), bytes.map(data => `data:image/jpeg;base64,${data.toString('base64')}`));
+    assert.deepEqual(submitted.response_format.json_schema.schema.properties.groups.items.properties.ids.items.enum, ['p1', 'p0']);
+    assert.equal(JSON.parse(stdout).requestPlan, undefined);
+    for (const photo of report.requestPlan.images) assert.ok(!stdout.includes(photo.sha256));
     assert.equal(statSync(out).mode & 0o777, 0o600);
   } finally { server.closeAllConnections(); await new Promise(resolve => server.close(resolve)); rmSync(dir, { recursive: true, force: true }); }
 });
@@ -400,6 +455,13 @@ test('visual CLI is offline by default and rejects unsupported request sizes', (
     const run = () => spawnSync(process.execPath, [command, `--manifest=${path}`], { env: {}, encoding: 'utf8' });
     const result = run(); assert.equal(result.status, 0, result.stderr);
     assert.equal(JSON.parse(result.stdout).requests, 0);
+    assert.equal(JSON.parse(result.stdout).enumOrderMatchesImages, true);
+    for (const enumOrder of [null, ['p0'], ['p0', 'p0'], ['p0', 'p2']]) {
+      writeFileSync(path, JSON.stringify({ ...manifest, enumOrder })); assert.equal(run().status, 1);
+    }
+    writeFileSync(path, JSON.stringify({ ...manifest, enumOrder: ['p1', 'p0'] }));
+    const reversed = run(); assert.equal(reversed.status, 0, reversed.stderr);
+    assert.equal(JSON.parse(reversed.stdout).enumOrderMatchesImages, false);
     manifest.photos = Array.from({ length: 31 }, (_, i) => ({ ...manifest.photos[0], id: `p${i}` }));
     writeFileSync(path, JSON.stringify(manifest)); assert.equal(run().status, 1);
   } finally { rmSync(dir, { recursive: true, force: true }); }

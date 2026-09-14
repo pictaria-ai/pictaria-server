@@ -42,8 +42,9 @@ transaction failure, lost-response retries, conditional Undo, Frame writes,
 restart, fair turns, coalescing and provider cooldowns.
 
 The second pass adds an opt-in, whole-candidate lookback experiment and prompt
-version 2. Its local tests are structural; new real-photo results are still needed.
-The first private evaluation and the specific second-pass questions are below.
+version 2. Two private evaluations and a saved-order audit are summarized below.
+The harness now supports independent schema enum order for a controlled follow-up;
+local serializer tests establish the controls, not model quality.
 
 ## What to retain and replace
 
@@ -313,6 +314,12 @@ not library identifiers. Omit `keepers` for a grouping-only expected answer.
 Missing labels produce no quality score. Use a manifest per case, including a
 legitimate 30-photo alternative set with at least two worthwhile keepers.
 
+An optional `"enumOrder": ["p1", "p0"]` controls allowed-ID order in both the
+explicit schema and the schema embedded by Venice. It must contain exactly the
+photo IDs once each; invalid values fail before submission. Omitting it preserves
+the original behavior (photo order). It never changes image order, the prose ID
+mapping, or the alias-to-photo relationship. The prompt remains version 2.
+
 ```sh
 node experiments/curate-v13/visual.mjs --manifest=/private/evaluation/case.json --role=keeper
 ```
@@ -332,11 +339,22 @@ timeout flags when available, without raw error text. Both failure statuses exit
 unsuccessfully and make no automatic retry. Pre-submission/file errors can still
 leave an empty report; use a new filename for a deliberate subsequent request.
 
+Controlled-order reports also include `evaluationFormat: independent-enum-1`
+and a public `enumOrderMatchesImages` flag. Only the private report contains
+`requestPlan`: ordered aliases, hashes of the prepared image buffers, enum order
+and prompt fingerprint. This records pre-submission inputs, **not outgoing wire
+contents**. Independently capture and compare actual outgoing bodies when wire
+order is part of the evaluation; never publish those bodies or their private
+image fingerprints. Existing private response-capture tooling must be checked
+explicitly for outgoing-body capture, not merely byte counts.
+
 Record grouping false-merge/missed-alternative pairs separately from keeper-set
 agreement, schema failures, elapsed time and bytes. The scorer compares an exact
 label set; a human should adjudicate legitimate alternative keeper answers rather
-than treating subjective disagreement as a technical failure. Repeat selected
-cases with input order changed and fresh aliases to detect positional bias.
+than treating subjective disagreement as a technical failure. To investigate
+order effects, vary image/prose order and schema enum order independently, keep
+photo aliases fixed, and include identical-request repeats. Fresh aliases would
+introduce another variable. A few changed choices do not establish model bias.
 
 ## First private pass and second-pass experiments
 
@@ -378,9 +396,9 @@ complete mixed-load or incremental-memory gates. Loop values are maxima, not p95
 Prompt version 2 removes the target-count wording, asks for distinct worthwhile
 expressions/gestures as well as technical quality, and preserves rejection of
 redundant alternatives. It reiterates exhaustive membership across all groups.
-The response contract is unchanged. Evaluate against both a meaningful-expression
-pair and a redundant-portrait control, in both orders, to avoid merely increasing
-keeper counts. Owner adjudication of the expressive pair is still needed.
+The response contract is unchanged. The second pass evaluated both an expression
+pair and a redundant-portrait control in both orders; its results and owner
+adjudication are below.
 
 Longer-gap discovery is a separate **opt-in calibration experiment**, not a fix
 proven on the private case. `groupPhotos(rows, { lookbackDistance: 0.05 })` may
@@ -402,6 +420,69 @@ check bypass or AI-confirmed stack. Matching the same count/IDs/descriptor can
 still join different compositions. This does not promise distant-revisit search,
 recognition-free lookback, or recovery of the actual 62-second case. Re-evaluate
 whole-collection grouping and check demand as well as isolated cases.
+
+## Second private results and request-order audit
+
+The owner forwarded a second test-machine evaluation and saved-artifact audit
+for `0b07004` on 2026-09-14. The private raw artifacts remain on that machine;
+the following is reported evidence, not a local independent replay.
+
+* All six version-2 requests passed membership/keeper validation. Grouping
+  matched the locked labels for those small comparisons, including the case
+  rejected for duplicate membership in the first pass. One later success does
+  not establish a reliability improvement.
+* The owner tentatively preferred one photo in the expressive pair. The earlier
+  agent preference for both remains separately recorded; omission of a second
+  keeper is **not an owner-confirmed failure**. Multiple-keeper quality still
+  needs an appropriate natural case.
+* The four keeper calls selected the first manifest-listed image and the first
+  reconstructed schema enum option. One reversed choice differed from the
+  owner's tentative preference; another selected an already-acceptable alternative.
+  Exact-set disagreement alone is not poor advice.
+* The saved-artifact audit found no indexing, alias, duplicate-rendition, or
+  raw/normalized-summary mapping discrepancy. It did **not** have captured
+  outgoing bodies: reconstruction and matching byte counts cannot prove
+  historical wire order. Image order, prose ID order, fresh aliases, and schema
+  enum order changed together. These four calls do not establish model bias.
+* Lookback 0.10 recovered the labeled 62-second comparison in isolation and the
+  frozen 213-photo review collection, but not in the 1,432-photo full-library
+  projection. Nearby members without producing-schema evidence caused the
+  whole-candidate rule to withhold the extension. Thresholds 0.025/0.05 did not
+  recover it. The full-library projection hypothetically treated non-review
+  photos as pending; it is not observed queue demand. No threshold is adopted.
+* The test host reported 41/41 focused tests on Node 22.23.2. Its six-case
+  benchmark measured ordinary 30k grouping at 53.89 ms cold / 57.26 ms rebuild
+  p95, and gapped triples at 97.05 ms / 83.46 ms. Gapped triples reached
+  107.74 ms maximum loop delay and 257.58 MiB process RSS. Synchronous work still
+  exceeds the slice target; full-server mixed-load and incremental memory remain
+  unmeasured. No deployment or application mutations were issued. Five additional
+  live undecided photos appeared relative to the older baseline; offline analysis
+  used the frozen first-pass inputs throughout.
+
+### Bounded controlled-order follow-up
+
+Keep prompt version 2, provider/model, rendition bytes and fixed per-photo IDs.
+Prefer one natural repeated-shot pair with a clear technical-quality contrast,
+labeled before inference. Record acceptable alternatives separately. If the
+retained authorized set lacks that control, report the gap before more paid
+calls; do not keep tuning toward subjective ties.
+
+For two images A/B, run all four combinations of image/prose order (AB/BA) and
+enum order (AB/BA), then repeat each identical request once: **eight calls total,
+including failures**, without adaptive retries. Use the fixed sequence
+AB/AB, BA/BA, AB/BA, BA/AB, then BA/AB, AB/BA, BA/BA, AB/AB (image/enum).
+This separates enum order from the combined image/prose-order factor; it does
+not isolate visual position from the necessary textual ID mapping or every
+possible alias effect. Preflight all manifests, both schema representations and
+actual outgoing-body capture against a local mock before submitting. Capture
+bodies privately without authorization headers/keys; compare image digests,
+ordered IDs, enums and repeated-body equality after each submission.
+
+Report physical-photo choices, first-image and first-enum choices, repeat
+agreement, validation failures and label agreement separately. Mixed results
+should remain inconclusive; do not add calls or rewrite the prompt to obtain a
+preferred result. This follow-up addresses one diagnostic question, not the
+30-photo, genuine multiple-keeper, long-chain, or production-runtime gates.
 
 ## Migration, sequence and remaining acceptance
 
