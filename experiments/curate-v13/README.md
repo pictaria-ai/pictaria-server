@@ -89,10 +89,14 @@ Custom taxonomies do not authorize interpreting arbitrary tag names using the
 currently selected profile. Unsupported producing contracts contribute no facts.
 
 The prototype's opt-in contradiction heuristic uses differing known people
-counts, non-conflicting recognition observations and a thumbnail-distance signal.
+counts corroborated by non-conflicting recognition observations. It does not
+require different thumbnail colors: a landscape, couple and solo portrait can
+share the same backdrop. Same-descriptor and missing-thumbnail fixtures cover
+this case alongside missed recognition, conflicting counts and unknown profiles.
 It is **not calibrated and defaults off**. Its descriptor fixtures are invented
-bytes, not decoded perceptual hashes. It misses different subjects with equal
-people counts; recognition misses and correlated mistakes remain possible.
+bytes, not decoded perceptual hashes. Recognition is corroboration, not proof
+of completeness. Different subjects with equal people counts, recognition misses
+and correlated mistakes remain possible.
 Keep this heuristic out of production until real positive/negative labels justify
 it. Matching broad facts alone never earns an AI-confirmed label.
 
@@ -132,23 +136,28 @@ level guarantee. No real Enrich traffic ran inside the benchmark process.
 
 | Synthetic collection | Cold grouping | Rebuild p95 | Cached page p95 | 30-photo decision p95 | Peak RSS |
 | --- | ---: | ---: | ---: | ---: | ---: |
-| 1k pending | 3.15 ms | 1.07 ms | 0.02 ms | 2.04 ms | 82 MiB |
-| 10k pending | 14.41 ms | 9.27 ms | 0.06 ms | 1.27 ms | 148 MiB |
-| 30k pending | 33.43 ms | 28.53 ms | 0.06 ms | 1.23 ms | 307 MiB |
-| 100 pending + 30k decided | 32.55 ms | 27.84 ms | 0.01 ms | 1.21 ms | 308 MiB |
-| 30k tightly packed, conflicting counts/similar descriptors | 242.67 ms | 238.62 ms | 0.49 ms | 1.28 ms | 243 MiB |
+| 1k pending | 2.39 ms | 1.18 ms | 0.04 ms | 1.91 ms | 82 MiB |
+| 10k pending | 13.15 ms | 7.69 ms | 0.06 ms | 1.17 ms | 159 MiB |
+| 30k pending | 33.32 ms | 26.00 ms | 0.06 ms | 1.12 ms | 321 MiB |
+| 100 pending + 30k decided | 31.93 ms | 25.67 ms | 0.01 ms | 1.14 ms | 310 MiB |
+| 30k tightly packed, alternating counts/similar descriptors | 22.30 ms | 20.82 ms | 0.46 ms | 1.17 ms | 243 MiB |
 
 The first four fixtures use cheap compatible facts and 30-photo candidate bursts.
-The dense case exercises expensive comparisons and becomes one **unconfirmed,
-manual-only** group when its evidence limit is reached. It is a resource stress
+The dense case now separates the two corroborated count compositions, leaving
+two **unconfirmed, manual-only** groups when their evidence limits are reached.
+It is a resource stress
 case, not a claim that such a huge group is good UX or visually correct.
 
 At 30k, the normal fixture performs 60,472 candidate visits and 435,000 pair
 comparisons; serialized grouping is 1.24 MB. The decided-heavy case still scans
 30,100 inputs (not yet an incremental index), but exposes only four pending
-groups. The dense case performs 1,917,920 comparisons and blocks the event loop
-for up to 253 ms. This is evidence to run rebuilds in bounded background work,
-not synchronously on each dashboard request. SQLite sizes are 0.71–2.33 MB after
+groups. The dense case performs 1,930,840 comparisons with a 33 ms maximum
+event-loop delay; the normal 30k case reaches 46 ms. The first draft at `da7a53a`
+had 1,917,920 dense comparisons, one group and 253 ms maximum delay. Removing
+the inappropriate thumbnail veto gate changed both grouping and comparison cost;
+this is not a like-for-like speedup of the old workload. Even the corrected
+synchronous work exceeds the proposed 8 ms request-thread slices. Keep rebuilds
+in bounded background work. SQLite sizes are 0.71–2.33 MB after
 100 synthetic operations, excluding real enrichment records and images.
 
 For comparison, the **existing** full review-path benchmark (different fixtures,
@@ -169,8 +178,9 @@ Proposed gates for PIC-367/368/346/118, to measure on the target Node 22 host:
 * 30k collection rebuild <=500 ms total; warm list p95 <=30 ms; warm pending-work
   selection <=50 ms; local 30-photo decision p95 <=50 ms, excluding Immich latency.
 * Keep request-thread work slices <=8 ms where practical, with measured event-loop
-  p95 <=50 ms under mixed review/Enrich load. The synchronous spike does not meet
-  the dense-case responsiveness goal; publish background results atomically.
+  p95 <=50 ms under mixed review/Enrich load. The synchronous spike exceeds the
+  slice target, and mixed-load p95 remains unmeasured; publish background results
+  atomically.
 * <=800 MiB peak process RSS for the complete synthetic server matrix; <=128 MiB
   incremental Curate working memory measured relative to the same server baseline.
   Prototype RSS is not an incremental-memory measurement.
@@ -206,6 +216,35 @@ The real-provider 30-image quality test is still a completion gate. If the selec
 model cannot handle it, revisit rendition sizing or a strategy that preserves all
 candidate alternatives, with measured quality. Do not declare the synthetic
 transport test sufficient or quietly reduce the required product envelope.
+
+### Selective checks: unresolved calibration gate
+
+The current prototype bypasses a dedicated check only for an exact recorded
+checksum match. All other eligible groups remain uncertain; **it does not yet
+implement the spec's broader strong-evidence route**. This is an open PIC-366
+evaluation decision, then production work in PIC-367/PIC-370. Keep both the
+bypass accuracy and the frequency of additional AI calls in the evaluation.
+
+The existing `THUMBHASH_NEAR_DUP = 0.025` rule in `reviewService.mjs` is a useful
+candidate: its source comment documents pair-level calibration against
+Immich-confirmed duplicates and unrelated same-day pairs. That does not by itself
+validate whole-stack subject/composition equivalence. Evaluate an all-pairs
+near-duplicate rule with compatible known people/composition facts and no human
+constraint or contradictory evidence; never substitute adjacent-link chaining or
+an incomplete comparison budget for all required pair checks. Similar backdrops,
+different subjects with equal people counts and missed recognition belong in
+the negative set. Missing facts remain uncertain. Do not enable this bypass
+until its mixed-group admission rate and calls avoided are measured.
+
+Until then, use the conservative cost baseline: one initial check for each
+uncertain group that fits the request envelope, followed by keeper work for
+eligible resulting partitions. The regular 30k synthetic fixture has 1,000 such
+groups: 1,000 initial checks, plus 1,000 initial keeper calls if every check leaves
+its group intact. Splitting can increase keeper demand; singles need no keeper
+call. Retries and revision changes add attempts, while the scheduling budgets
+below can defer work. These counts describe demand, not a promise that every
+request fits the automatic allowance or a measured real-library cost. Report
+requested/deferred calls separately and do not assume an unmeasured bypass rate.
 
 `scheduling.mjs` exercises the proposed policy with an explicit clock:
 

@@ -24,9 +24,11 @@ for (const fixture of fixtures) test(`experimental grouping: ${fixture.name}`, (
 });
 
 test('unknown evidence stays uncertain; semantic veto is opt-in pending visual validation', () => {
-  const result = groupPhotos(fixtures[0].photos);
-  assert.equal(result.groups.length, 1);
-  assert.equal(result.groups[0].route, 'uncertain');
+  for (const fixture of fixtures.filter(f => f.name.startsWith('landscape-couple-solo'))) {
+    const result = groupPhotos(fixture.photos);
+    assert.equal(result.groups.length, 1);
+    assert.equal(result.groups[0].route, 'uncertain');
+  }
 });
 
 test('human separation survives a time/hash bridge and a limited evidence budget', () => {

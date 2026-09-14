@@ -1,18 +1,11 @@
 // Offline experiment, deliberately not imported by the server. The semantic
 // veto is a calibration candidate, not a validated production classifier.
 import { createHash } from 'node:crypto';
-import { thumbhashDistance } from '../../src/enrich/reviewService.mjs';
 
 export function fingerprint(value) {
   const canonical = v => Array.isArray(v) ? v.map(canonical) : v && typeof v === 'object'
     ? Object.fromEntries(Object.keys(v).sort().map(k => [k, canonical(v[k])])) : v;
   return createHash('sha256').update(JSON.stringify(canonical(value))).digest('hex');
-}
-
-function hash(value) {
-  if (typeof value !== 'string' || !/^[A-Za-z0-9+/]{1,86}={0,2}$/.test(value)) return null;
-  const bytes = Buffer.from(value, 'base64');
-  return bytes.length && bytes.length <= 64 ? bytes : null;
 }
 
 function count(row) {
@@ -31,8 +24,11 @@ function candidateContradiction(a, b) {
   // conflict (e.g. a couple with only one recognized face).
   if (!Array.isArray(a.personIds) || !Array.isArray(b.personIds)
     || a.personIds.length !== ac || b.personIds.length !== bc) return false;
-  const ah = hash(a.thumbhash), bh = hash(b.thumbhash);
-  return Boolean(ah && bh && thumbhashDistance(ah, bh) >= 0.15);
+  // Composition can change against an identical backdrop. Requiring a
+  // different thumbnail would suppress the people/landscape and couple/solo
+  // candidate vetoes we are evaluating. Corroboration is still not proof:
+  // this rule stays opt-in until positive AND missed-detection cases pass.
+  return true;
 }
 
 export function groupPhotos(rows, {
