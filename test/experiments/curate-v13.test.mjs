@@ -1,7 +1,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
-import { spawnSync } from 'node:child_process';
+import { mkdtempSync, rmSync, writeFileSync, readFileSync, statSync } from 'node:fs';
+import { spawnSync, spawn } from 'node:child_process';
+import { createServer } from 'node:http';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -10,7 +11,7 @@ import { DecisionSpike } from '../../experiments/curate-v13/decisions.mjs';
 import { fixtures, photo } from '../../experiments/curate-v13/fixtures.mjs';
 import { OpenAiProvider, OpenAiCompatibleProvider, VeniceProvider } from '../../src/enrich/providers.mjs';
 import { backendKey, nextTurn, freshLineage, supersede, reserve, finish } from '../../experiments/curate-v13/scheduling.mjs';
-import { visionPrompt, compareLabels } from '../../experiments/curate-v13/visual.mjs';
+import { visionPrompt, compareLabels, evaluateImages, publicEvaluationSummary } from '../../experiments/curate-v13/visual.mjs';
 
 const partition = groups => groups.map(g => [...g].sort().join(',')).sort();
 for (const fixture of fixtures) test(`experimental grouping: ${fixture.name}`, () => {
@@ -28,6 +29,65 @@ test('unknown evidence stays uncertain; semantic veto is opt-in pending visual v
     const result = groupPhotos(fixture.photos);
     assert.equal(result.groups.length, 1);
     assert.equal(result.groups[0].route, 'uncertain');
+  }
+});
+
+const portrait = (id, seconds, options = {}) => photo(id, seconds, { people: 1, recognized: ['person'], ...options });
+
+test('optional lookback recovers a supported 62-second gap without bypassing the AI check', () => {
+  const rows = [portrait('a', 0), portrait('b', 5), portrait('c', 67)];
+  assert.equal(groupPhotos(rows).groups.length, 2);
+  const result = groupPhotos(rows, { lookbackDistance: 0.025 });
+  assert.equal(result.groups.length, 1);
+  assert.equal(result.groups[0].route, 'uncertain');
+  assert.equal(result.metrics.lookbackJoins, 1);
+  assert.equal(result.metrics.lookbackPairComparisons, 3);
+  assert.equal(planRequest(result.groups[0], { a: 1, b: 1, c: 1 }, { role: 'check', check: true }).state, 'ready');
+});
+
+test('lookback withholds unsupported, conflicting, mismatched or malformed positive evidence', () => {
+  for (const changed of [
+    { facts: null }, { facts: { contract: 'unknown', peopleCount: 1 } },
+    { personIds: null }, { personIds: [] }, { personIds: ['other-person'] }, { personIds: [null] },
+    { thumbhash: null }, { thumbhash: '!!!' }, { thumbhash: Buffer.alloc(24, 80).toString('base64') },
+    { thumbhash: Buffer.alloc(25, 160).toString('base64') },
+    { facts: { contract: 'curate-facts-prototype-1', peopleCount: 2 }, personIds: ['person', 'person'] },
+  ]) {
+    const result = groupPhotos([portrait('a', 0), portrait('b', 62, changed)], { lookbackDistance: 0.025 });
+    assert.equal(result.groups.length, 2, JSON.stringify(changed));
+    assert.equal(result.metrics.lookbackJoins, 0);
+  }
+  for (const distance of [-1, NaN, Infinity, 2, '0.025']) assert.throws(() => groupPhotos([], { lookbackDistance: distance }));
+});
+
+test('lookback validates old member pairs and later short-gap arrivals; no similarity chaining', () => {
+  const rows = [portrait('a', 0, { tone: 0 }), portrait('b', 5, { tone: 20 }), portrait('c', 67, { tone: 10 })];
+  // c is close to BOTH old members, but those members are not close to each other.
+  assert.equal(groupPhotos(rows, { lookbackDistance: 0.05 }).groups.length, 2);
+  const extended = [portrait('a', 0, { tone: 0 }), portrait('b', 62, { tone: 10 }), portrait('c', 67, { tone: 20 })];
+  const result = groupPhotos(extended, { lookbackDistance: 0.05 });
+  assert.deepEqual(partition(result.groups.map(g => g.ids)), partition([['a', 'b'], ['c']]));
+});
+
+test('lookback keeps span, candidate and human-separation bounds', () => {
+  assert.equal(groupPhotos([portrait('a', 0), portrait('b', 181)], { lookbackDistance: 0.025 }).groups.length, 2);
+  const rows = [portrait('a', 0), portrait('b', 62)];
+  assert.equal(groupPhotos(rows, { lookbackDistance: 0.025, separations: [{ id: 'split', partitions: [['a'], ['b']] }] }).groups.length, 2);
+  const crowded = [portrait('a', 0), ...Array.from({ length: 33 }, (_, i) => portrait(`different-${i}`, i + 1,
+    { recognized: [`different-${i}`] })), portrait('return', 100)];
+  const separations = [{ id: 'separate', partitions: crowded.slice(0, -1).map(p => [p.id]) }];
+  const result = groupPhotos(crowded, { lookbackDistance: 0.025, candidateLimit: 32, separations });
+  assert.ok(result.groups.every(g => !(g.ids.includes('a') && g.ids.includes('return'))));
+});
+
+test('lookback never admits a partially checked group when either comparison budget is spent', () => {
+  const rows = [portrait('a', 0), portrait('b', 5), portrait('c', 67)];
+  for (const limits of [{ pairsPerCandidate: 2 }, { comparisonBudget: 2 }, { comparisonBudget: 0 }]) {
+    const result = groupPhotos(rows, { lookbackDistance: 0.025, ...limits });
+    assert.equal(result.groups.length, 2);
+    assert.equal(result.metrics.lookbackJoins, 0);
+    assert.equal(result.metrics.lookbackLimitedCandidates, 1);
+    assert.ok(result.metrics.pairComparisons <= 2);
   }
 });
 
@@ -269,6 +329,65 @@ test('visual evaluation reports grouping errors separately from keeper agreement
   assert.deepEqual(compareLabels(['p0', 'p1', 'p2'], actual, expected), { referenceLabelsProvided: true, falseMergePairs: 2, missedAlternativePairs: 0, exactPartition: false, exactKeeperSet: true });
   assert.deepEqual(compareLabels(['p0', 'p1', 'p2'], actual), { referenceLabelsProvided: false });
   assert.ok(!visionPrompt(['p0', 'p1'], 'check').jsonSchema.properties.groups.items.properties.keepers);
+});
+
+test('an HTTP-success-shaped answer with duplicate groups is rejected, retained privately, and never retried', async () => {
+  let calls = 0;
+  const output = { groups: [{ ids: ['p0', 'p1'], reason: 'private response text' }, { ids: ['p0', 'p1'], reason: 'another grouping' }] };
+  const report = await evaluateImages({ analyzeImages: async () => { calls++; return { normalizedOutput: output }; } }, [], ['p0', 'p1'], 'check');
+  assert.equal(calls, 1);
+  assert.equal(report.status, 'invalid-answer');
+  assert.equal(report.failure.reason, 'invalid membership');
+  assert.deepEqual(report.output, output);
+  assert.equal(report.scores, undefined);
+  assert.ok(!JSON.stringify(publicEvaluationSummary(report)).includes('private response text'));
+});
+
+test('provider failures expose bounded diagnostics and preserve zero/one/multiple valid keeper answers', async () => {
+  const failure = await evaluateImages({ analyzeImages: async () => { throw Object.assign(new Error('private provider details'), { status: 429 }); } }, [], ['p0', 'p1'], 'keeper');
+  assert.equal(failure.status, 'provider-error');
+  assert.equal(failure.failure.httpStatus, 429);
+  assert.ok(!JSON.stringify(failure).includes('private provider details'));
+  for (const keepers of [[], ['p0'], ['p0', 'p1']]) {
+    const output = { groups: [{ ids: ['p0', 'p1'], keepers, reason: 'Synthetic explicit selection.' }] };
+    const result = await evaluateImages({ analyzeImages: async () => ({ normalizedOutput: output }) }, [], ['p0', 'p1'], 'keeper', output);
+    assert.equal(result.status, 'valid');
+    assert.deepEqual(result.output.groups[0].keepers, keepers);
+    assert.equal(result.scores.exactKeeperSet, true);
+  }
+});
+
+test('visual CLI writes invalid model output only to the private report and exits unsuccessfully', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'curate-visual-failure-'));
+  let calls = 0;
+  const output = { groups: [{ ids: ['p0', 'p1'], reason: 'private answer' }, { ids: ['p0', 'p1'], reason: 'duplicate grouping' }] };
+  const server = createServer((req, res) => {
+    calls++; req.resume();
+    res.writeHead(200, { 'content-type': 'application/json' });
+    res.end(JSON.stringify({ choices: [{ message: { content: JSON.stringify(output) } }] }));
+  });
+  await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
+  try {
+    writeFileSync(join(dir, 'invented.jpg'), Buffer.alloc(32));
+    const manifest = join(dir, 'case.json'), out = join(dir, 'report.json');
+    writeFileSync(manifest, JSON.stringify({ photos: ['p0', 'p1'].map(id => ({ id, file: 'invented.jpg', mimeType: 'image/jpeg' })) }));
+    const command = fileURLToPath(new URL('../../experiments/curate-v13/visual.mjs', import.meta.url));
+    const child = spawn(process.execPath, [command, `--manifest=${manifest}`, '--role=check', '--submit', `--out=${out}`], { env: {
+      CURATE_EVAL_PROVIDER: 'venice', CURATE_EVAL_MODEL: 'synthetic-model', CURATE_EVAL_API_KEY: 'synthetic-test-key',
+      CURATE_EVAL_BASE_URL: `http://127.0.0.1:${server.address().port}/v1`,
+    } });
+    let stdout = '', stderr = '';
+    child.stdout.on('data', chunk => { stdout += chunk; }); child.stderr.on('data', chunk => { stderr += chunk; });
+    const exit = await new Promise((resolve, reject) => { child.on('error', reject); child.on('close', resolve); });
+    assert.equal(exit, 1, stderr);
+    assert.equal(calls, 1);
+    assert.equal(JSON.parse(stdout).status, 'invalid-answer');
+    assert.ok(!stdout.includes('private answer'));
+    const report = JSON.parse(readFileSync(out, 'utf8'));
+    assert.deepEqual(report.output, output);
+    assert.equal(report.promptVersion, 'curate_prototype_check_v2');
+    assert.equal(statSync(out).mode & 0o777, 0o600);
+  } finally { server.closeAllConnections(); await new Promise(resolve => server.close(resolve)); rmSync(dir, { recursive: true, force: true }); }
 });
 
 test('visual CLI is offline by default and rejects unsupported request sizes', () => {

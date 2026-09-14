@@ -11,7 +11,7 @@ import { groupPhotos } from './grouping.mjs';
 import { dataset, photo } from './fixtures.mjs';
 import { DecisionSpike } from './decisions.mjs';
 
-const cases = [[1000, 0], [10000, 0], [30000, 0], [100, 30000], [30000, 0, 'dense']];
+const cases = [[1000, 0], [10000, 0], [30000, 0], [100, 30000], [30000, 0, 'dense'], [30000, 0, 'gapped-triples']];
 const arg = process.argv.find(a => a.startsWith('--case='));
 if (!arg) {
   const results = cases.map((_, i) => {
@@ -26,15 +26,19 @@ if (!arg) {
   const [pending, decided, distribution = '30-photo-bursts'] = cases[index];
   const photos = distribution === 'dense'
     ? Array.from({ length: pending }, (_, i) => photo(`dense-${i}`, i / 1000, { people: i % 2, recognized: i % 2 ? ['p'] : [], tone: 80 }))
+    : distribution === 'gapped-triples'
+      ? Array.from({ length: pending }, (_, i) => photo(`gapped-${i}`, Math.floor(i / 3) * 240 + [0, 5, 67][i % 3],
+        { people: 1, recognized: ['synthetic-person'] }))
     : dataset(pending, decided);
+  const groupingOptions = { semanticVeto: true, ...(distribution === 'gapped-triples' ? { lookbackDistance: 0.05 } : {}) };
   const ms = fn => { const start = performance.now(); const value = fn(); return { value, ms: performance.now() - start }; };
   const p95 = samples => [...samples].sort((a, b) => a - b)[Math.ceil(samples.length * 0.95) - 1];
   const loop = monitorEventLoopDelay({ resolution: 10 });
   loop.enable(); await setTimeout(20);
   // First build includes sorting, candidate work and result materialization.
-  const cold = ms(() => groupPhotos(photos, { semanticVeto: true }));
+  const cold = ms(() => groupPhotos(photos, groupingOptions));
   const rebuilds = [];
-  for (let i = 0; i < 20; i++) { await setImmediate(); rebuilds.push(ms(() => groupPhotos(photos, { semanticVeto: true })).ms); }
+  for (let i = 0; i < 20; i++) { await setImmediate(); rebuilds.push(ms(() => groupPhotos(photos, groupingOptions)).ms); }
   await setTimeout(20); loop.disable();
   // Warm means a prebuilt pending-group index, not the production HTTP path.
   const cache = cold.value.groups.filter(g => g.pendingIds.length);
@@ -51,7 +55,7 @@ if (!arg) {
     bytes = statSync(path).size;
   } finally { db.close(); rmSync(dir, { recursive: true, force: true }); }
   const round = n => Math.round(n * 100) / 100;
-  console.log(JSON.stringify({ pending, decided, distribution, groups: cold.value.groups.length, pendingGroups: cache.length,
+  console.log(JSON.stringify({ pending, decided, distribution, groupingOptions, groups: cold.value.groups.length, pendingGroups: cache.length,
     coldGroupingMs: round(cold.ms), rebuildP95Ms: round(p95(rebuilds)), cached50GroupsP95Ms: round(p95(pages)),
     decision30PhotosP95Ms: round(p95(decisions)), groupingLoopMaxMs: round(loop.max / 1e6),
     peakRssMiB: round(process.resourceUsage().maxRSS / 1024), sqliteBytesAfter100Decisions: bytes,

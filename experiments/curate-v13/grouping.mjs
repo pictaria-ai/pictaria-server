@@ -1,6 +1,7 @@
 // Offline experiment, deliberately not imported by the server. The semantic
 // veto is a calibration candidate, not a validated production classifier.
 import { createHash } from 'node:crypto';
+import { thumbhashDistance } from '../../src/enrich/reviewService.mjs';
 
 export function fingerprint(value) {
   const canonical = v => Array.isArray(v) ? v.map(canonical) : v && typeof v === 'object'
@@ -31,11 +32,34 @@ function candidateContradiction(a, b) {
   return true;
 }
 
+function descriptor(row) {
+  const value = row.thumbhash;
+  if (typeof value !== 'string' || !value.length || value.length > 128
+    || value.length % 4 === 1 || !/^[A-Za-z0-9+/]*={0,2}$/.test(value)) return null;
+  const bytes = Buffer.from(value, 'base64');
+  return bytes.length > 0 && bytes.length <= 64 ? bytes : null;
+}
+
+function lookbackCompatible(a, b, distance) {
+  const ac = count(a), bc = count(b);
+  // Positive support is deliberately stricter than the ordinary time fallback.
+  // Unknown facts withhold this optional merge; recognition never proves that
+  // subjects match. Even a supported lookback remains an unconfirmed candidate.
+  if (ac === null || ac > 100 || ac !== bc || !Array.isArray(a.personIds) || !Array.isArray(b.personIds)
+    || a.personIds.length !== ac || b.personIds.length !== bc
+    || [...a.personIds, ...b.personIds].some(id => typeof id !== 'string' || !id.length)
+    || new Set(a.personIds).size !== ac || new Set(b.personIds).size !== bc
+    || a.personIds.some(id => !b.personIds.includes(id))) return false;
+  const ah = descriptor(a), bh = descriptor(b);
+  return ah !== null && bh !== null && ah.length === bh.length && thumbhashDistance(ah, bh) <= distance;
+}
+
 export function groupPhotos(rows, {
   semanticVeto = false, maxSpanMs = 180000, maxGapMs = 15000,
   candidateLimit = 32, pairsPerCandidate = 64, comparisonBudget = 2000000,
-  separations = [],
+  separations = [], lookbackDistance = null,
 } = {}) {
+  if (lookbackDistance !== null && (!Number.isFinite(lookbackDistance) || lookbackDistance < 0 || lookbackDistance > 1)) throw Error('invalid lookback distance');
   if (new Set(rows.map(r => r.id)).size !== rows.length) throw Error('duplicate photo ID');
   const labels = new Map();
   for (const correction of separations) {
@@ -51,7 +75,8 @@ export function groupPhotos(rows, {
     });
   }
   const groups = [], exact = new Map();
-  const metrics = { candidateVisits: 0, pairComparisons: 0, limitedGroups: 0, sourcePhotos: rows.length };
+  const metrics = { candidateVisits: 0, pairComparisons: 0, limitedGroups: 0, sourcePhotos: rows.length,
+    lookbackJoins: 0, lookbackPairComparisons: 0, lookbackLimitedCandidates: 0 };
   const sorted = rows.map(row => ({ row, time: Date.parse(row.capturedAt) }))
     .sort((a, b) => (Number.isFinite(a.time) ? a.time : Infinity)
       - (Number.isFinite(b.time) ? b.time : Infinity) || a.row.id.localeCompare(b.row.id));
@@ -69,9 +94,36 @@ export function groupPhotos(rows, {
       // evidence budget is exhausted. A bridge cannot reunite a split.
       if ([...ownLabels].some(([key, part]) => group.labels.has(key) && group.labels.get(key) !== part)) continue;
       const sameBytes = row.checksum && group.checksum === row.checksum;
-      if (!sameBytes && !(Number.isFinite(time) && time - group.first <= maxSpanMs && time - group.last <= maxGapMs)) continue;
+      if (!sameBytes && !(Number.isFinite(time) && time - group.first <= maxSpanMs)) continue;
+      const longerGap = !sameBytes && time - group.last > maxGapMs;
+      const needsLookback = !sameBytes && (longerGap || group.lookback);
+      if (needsLookback) {
+        if (lookbackDistance === null || group.limited) continue;
+        // The first extension checks the WHOLE candidate, including pairs in
+        // the existing time group. Later additions must preserve that invariant,
+        // even if they arrive within the ordinary short-gap window.
+        let checked = 0, supported = true, exhausted = false;
+        const pair = (a, b) => {
+          if (checked >= pairsPerCandidate || metrics.pairComparisons >= comparisonBudget) {
+            exhausted = true; return false;
+          }
+          checked++; metrics.pairComparisons++; metrics.lookbackPairComparisons++;
+          return lookbackCompatible(a, b, lookbackDistance);
+        };
+        if (!group.lookback) {
+          for (let i = 0; i < group.members.length && supported; i++) {
+            for (let j = 0; j < i && supported; j++) supported = pair(group.members[i], group.members[j]);
+          }
+        }
+        for (const member of group.members) {
+          if (!supported) break;
+          supported = pair(member, row);
+        }
+        if (exhausted) metrics.lookbackLimitedCandidates++;
+        if (!supported) continue; // never infer support from an unfinished check
+      }
       let conflict = false, limited = false;
-      if (semanticVeto && !sameBytes) {
+      if (semanticVeto && !sameBytes && !needsLookback) {
         for (let i = 0; i < group.members.length; i++) {
           if (i >= pairsPerCandidate || metrics.pairComparisons >= comparisonBudget) { limited = true; break; }
           metrics.pairComparisons++;
@@ -80,6 +132,8 @@ export function groupPhotos(rows, {
       }
       if (conflict) continue;
       group.limited ||= limited;
+      if (needsLookback) group.lookback = true;
+      if (longerGap) metrics.lookbackJoins++;
       selected = group;
       break;
     }
@@ -102,6 +156,7 @@ export function groupPhotos(rows, {
       keptContextIds: group.members.filter(r => r.state === 'kept').map(r => r.id),
       route: group.limited ? 'manual-budget' : group.checksum && ids.length > 1 ? 'checksum-bypass' : 'uncertain',
       reasons: [group.checksum ? 'same recorded checksum' : 'bounded capture-time candidate',
+        ...(group.lookback ? ['whole-candidate evidence supports longer-gap comparison; grouping unconfirmed'] : []),
         ...(group.limited ? ['evidence comparison budget exhausted; grouping unconfirmed'] : []),
         ...(group.labels.size ? ['human separation constraints applied'] : [])],
     };

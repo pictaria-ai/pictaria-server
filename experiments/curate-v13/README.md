@@ -1,6 +1,6 @@
 # Curate v1.3 contract prototype (PIC-366)
 
-**Status: experimental; visual validation is outstanding.** This directory is
+**Status: experimental; visual acceptance is outstanding.** This directory is
 not imported by the server or included in its container. It does not change
 Curate, migrate a database, or authorize automatic decisions. The SQL in
 `decisions.mjs` is a disposable contract experiment, not a production migration.
@@ -40,6 +40,10 @@ context. Other tests cover missing/correlated facts, human separation through a
 bridge, long chains, invalid partitions, stale advice, unrelated enrichment,
 transaction failure, lost-response retries, conditional Undo, Frame writes,
 restart, fair turns, coalescing and provider cooldowns.
+
+The second pass adds an opt-in, whole-candidate lookback experiment and prompt
+version 2. Its local tests are structural; new real-photo results are still needed.
+The first private evaluation and the specific second-pass questions are below.
 
 ## What to retain and replace
 
@@ -136,11 +140,12 @@ level guarantee. No real Enrich traffic ran inside the benchmark process.
 
 | Synthetic collection | Cold grouping | Rebuild p95 | Cached page p95 | 30-photo decision p95 | Peak RSS |
 | --- | ---: | ---: | ---: | ---: | ---: |
-| 1k pending | 2.39 ms | 1.18 ms | 0.04 ms | 1.91 ms | 82 MiB |
-| 10k pending | 13.15 ms | 7.69 ms | 0.06 ms | 1.17 ms | 159 MiB |
-| 30k pending | 33.32 ms | 26.00 ms | 0.06 ms | 1.12 ms | 321 MiB |
-| 100 pending + 30k decided | 31.93 ms | 25.67 ms | 0.01 ms | 1.14 ms | 310 MiB |
-| 30k tightly packed, alternating counts/similar descriptors | 22.30 ms | 20.82 ms | 0.46 ms | 1.17 ms | 243 MiB |
+| 1k pending | 2.96 ms | 0.90 ms | 0.02 ms | 2.00 ms | 87 MiB |
+| 10k pending | 13.51 ms | 8.53 ms | 0.05 ms | 1.21 ms | 149 MiB |
+| 30k pending | 31.66 ms | 24.96 ms | 0.06 ms | 1.17 ms | 308 MiB |
+| 100 pending + 30k decided | 32.47 ms | 25.02 ms | 0.01 ms | 1.16 ms | 307 MiB |
+| 30k tightly packed, alternating counts/similar descriptors | 22.50 ms | 21.41 ms | 0.49 ms | 1.13 ms | 252 MiB |
+| 30k in gapped triples, experimental lookback enabled | 59.71 ms | 60.31 ms | 0.01 ms | 1.12 ms | 517 MiB |
 
 The first four fixtures use cheap compatible facts and 30-photo candidate bursts.
 The dense case now separates the two corroborated count compositions, leaving
@@ -152,13 +157,20 @@ At 30k, the normal fixture performs 60,472 candidate visits and 435,000 pair
 comparisons; serialized grouping is 1.24 MB. The decided-heavy case still scans
 30,100 inputs (not yet an incremental index), but exposes only four pending
 groups. The dense case performs 1,930,840 comparisons with a 33 ms maximum
-event-loop delay; the normal 30k case reaches 46 ms. The first draft at `da7a53a`
+event-loop delay; the normal 30k case reaches 43 ms. The first draft at `da7a53a`
 had 1,917,920 dense comparisons, one group and 253 ms maximum delay. Removing
 the inappropriate thumbnail veto gate changed both grouping and comparison cost;
 this is not a like-for-like speedup of the old workload. Even the corrected
 synchronous work exceeds the proposed 8 ms request-thread slices. Keep rebuilds
 in bounded background work. SQLite sizes are 0.71–2.33 MB after
 100 synthetic operations, excluding real enrichment records and images.
+
+The new gapped-triples fixture enables `lookbackDistance: 0.05`, recovering
+10,000 invented three-photo candidates across 62-second gaps with 30,000 lookback
+pair checks (40,000 total evidence comparisons). It produces 10,000 unconfirmed
+groups, 3.50 MB serialized output, and a 78 ms maximum loop delay. Its larger
+group count and 517 MiB peak RSS reinforce the pending full-server/memory gates;
+this is neither calibrated vision nor an incremental-memory measurement.
 
 For comparison, the **existing** full review-path benchmark (different fixtures,
 80% pending) measured:
@@ -312,13 +324,84 @@ arguments, reports or chat. Then add `--submit` and
 `--out=/private/evaluation/result.json`. Each invocation makes one request, with
 no automatic retry or fallback. It never calls Immich or changes photo decisions.
 The output must be outside this checkout, is created with mode 600 and is never
-overwritten. A failure can leave an empty report; use a new filename on retry.
+overwritten. Reports record `promptVersion` and `status` (`valid`,
+`invalid-answer`, or `provider-error`). A normalized but invalid model answer is
+retained only in the private report, without quality scores; stdout contains its
+bounded failure category, never model text. Provider failures retain safe status/
+timeout flags when available, without raw error text. Both failure statuses exit
+unsuccessfully and make no automatic retry. Pre-submission/file errors can still
+leave an empty report; use a new filename for a deliberate subsequent request.
 
 Record grouping false-merge/missed-alternative pairs separately from keeper-set
 agreement, schema failures, elapsed time and bytes. The scorer compares an exact
 label set; a human should adjudicate legitimate alternative keeper answers rather
 than treating subjective disagreement as a technical failure. Repeat selected
 cases with input order changed and fresh aliases to detect positional bias.
+
+## First private pass and second-pass experiments
+
+The owner forwarded a test-machine report for `1e503a7` on 2026-09-14. Aggregate
+findings are recorded on [PIC-366](https://linear.app/aedr/issue/PIC-366); private
+artifacts have not been independently inspected by the lead. The agent reported
+33/33 focused tests on Node 22.23.2 and no application mutations or restarts.
+
+Seven real Venice / qwen3-vl-235b-a22b requests used 11 distinct photos across
+four natural comparisons. Six answers passed partition validation and matched
+the provisional grouping labels; one repeated IDs across groups and was rejected.
+A repeated-portrait keeper choice survived reversed image order. A two-photo
+expression comparison selected one good keeper but omitted a second provisionally
+worthwhile alternative. These are provisional agent labels, not owner judgments,
+and seven calls do not establish a reliability rate. No legitimate 30-photo set
+or long-chain visual set was found; those tests remain unperformed.
+
+Across 12 labeled offline comparisons, the semantic veto reduced false-merge
+pairs from 18 to 3; two missed-alternative pairs persisted because a roughly
+62-second gap broke a valid comparison. The sample favors count-contrast negatives.
+The raw 0.025 all-pairs bypass admitted only one of 28 eligible pending groups,
+and withholding its conflicting recognition evidence left all 28 needing checks.
+This pass does not justify a broader check bypass.
+
+Reported target-host baseline measurements (Linux / Core Ultra 5 225H / Node
+22.23.2, before the second-pass changes):
+
+| Fixture | Cold grouping | Rebuild p95 | 30-photo decision p95 | Max loop delay | Peak RSS |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| 1k pending | 4.41 ms | 2.29 ms | 6.46 ms | 16.02 ms | 78.05 MiB |
+| 10k pending | 36.07 ms | 14.54 ms | 4.81 ms | 77.14 ms | 145.27 MiB |
+| 30k pending | 60.88 ms | 57.74 ms | 11.03 ms | 104.20 ms | 172.73 MiB |
+| 100 pending + 30k decided | 58.66 ms | 58.77 ms | 4.48 ms | 100.20 ms | 174.94 MiB |
+| Dense 30k | 54.13 ms | 38.89 ms | 5.81 ms | 101.52 ms | 173.21 MiB |
+
+This satisfies the initial target-runtime prototype measurement task, not the
+complete mixed-load or incremental-memory gates. Loop values are maxima, not p95.
+
+Prompt version 2 removes the target-count wording, asks for distinct worthwhile
+expressions/gestures as well as technical quality, and preserves rejection of
+redundant alternatives. It reiterates exhaustive membership across all groups.
+The response contract is unchanged. Evaluate against both a meaningful-expression
+pair and a redundant-portrait control, in both orders, to avoid merely increasing
+keeper counts. Owner adjudication of the expressive pair is still needed.
+
+Longer-gap discovery is a separate **opt-in calibration experiment**, not a fix
+proven on the private case. `groupPhotos(rows, { lookbackDistance: 0.05 })` may
+extend beyond the ordinary 15-second gap while retaining the 180-second full
+span and 32-candidate search. It requires matching known producing people counts,
+matching non-conflicting recognized-ID observations, and thumbnail distance at or
+below the supplied threshold for **every pair**. Missing evidence withholds the
+extra merge. Recognition completeness remains unknown even when observations agree.
+The first extension validates existing member pairs as well; all later arrivals
+must preserve compatibility, including those within 15 seconds. Human separations
+always apply. Exhausting the 64-pair candidate or shared two-million-pair budget
+withholds the extension and increments `lookbackLimitedCandidates`.
+
+The option defaults to `null` (off). Evaluate `null`, 0.025, 0.05 and 0.10 on the
+same locked cases as an exploratory recall/false-merge comparison; none is an
+adopted production threshold. Report withheld cases and missing evidence, not just
+successful recoveries. Every admitted extension remains `uncertain`, never a
+check bypass or AI-confirmed stack. Matching the same count/IDs/descriptor can
+still join different compositions. This does not promise distant-revisit search,
+recognition-free lookback, or recovery of the actual 62-second case. Re-evaluate
+whole-collection grouping and check demand as well as isolated cases.
 
 ## Migration, sequence and remaining acceptance
 
@@ -356,7 +439,8 @@ Before PIC-366 can be complete:
    30-photo group. Run the prototype prompt against the selected real provider.
 2. Use those results to adopt/reject semantic vetoes and validate the request
    envelope; document any narrowly necessary strategy change.
-3. Validate target-host/Node 22 timings and the full mixed-load/context budgets;
+3. Extend the reported target-host/Node 22 measurements to the new experiment
+   and the full mixed-load/context budgets;
    finalize lineage reconciliation, retained context and record lifetime choices.
 4. Review these contracts and estimates, then link the accepted revision from
    the spec/plan. Production implementation remains in the follow-on issues.
