@@ -111,8 +111,8 @@ export class ImmichClient {
     return assets.slice(0, limit);
   }
 
-  async getAsset(assetId) {
-    const response = await this.requestJson(`/assets/${encodeURIComponent(assetId)}`);
+  async getAsset(assetId, { signal, maxBytes } = {}) {
+    const response = await this.requestJson(`/assets/${encodeURIComponent(assetId)}`, { signal, maxBytes });
     return isPlainObject(response) ? response : { id: assetId };
   }
 
@@ -284,8 +284,8 @@ export class ImmichClient {
     return Array.isArray(response) ? response : [];
   }
 
-  async requestJson(path, { method = 'GET', body = null } = {}) {
-    const { buffer } = await this.#request(path, { method, body, accept: 'application/json' });
+  async requestJson(path, { method = 'GET', body = null, signal, maxBytes = DEFAULT_MAX_RESPONSE_BYTES } = {}) {
+    const { buffer } = await this.#request(path, { method, body, accept: 'application/json', signal, maxBytes });
     const text = buffer.toString('utf8');
     return text ? JSON.parse(text) : null;
   }
@@ -308,7 +308,7 @@ export class ImmichClient {
   // of hanging the caller forever. The body is consumed here, inside the
   // timer's window, bounded by maxBytes (a runaway body aborts instead of
   // exhausting process memory), and returned fully buffered.
-  async #request(path, { method, body, accept, maxBytes = DEFAULT_MAX_RESPONSE_BYTES }) {
+  async #request(path, { method, body, accept, maxBytes = DEFAULT_MAX_RESPONSE_BYTES, signal }) {
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), this.timeoutMs);
     const url = appendHttpUrlPath(this.baseUrl, `/api/${String(path).replace(/^\/+/, '')}`);
@@ -316,7 +316,7 @@ export class ImmichClient {
       const response = await this.fetchImpl(url, {
         method,
         redirect: 'error',
-        signal: controller.signal,
+        signal: signal ? AbortSignal.any([signal, controller.signal]) : controller.signal,
         headers: {
           Accept: accept,
           'Content-Type': 'application/json',
@@ -341,7 +341,7 @@ export class ImmichClient {
       if (error instanceof ImmichApiError || error instanceof ResponseTooLargeError) {
         throw error;
       }
-      const reason = error?.name === 'AbortError'
+      const reason = signal?.aborted ? 'cancelled' : error?.name === 'AbortError'
         ? `timed out after ${this.timeoutMs}ms`
         : errorMessageWithCause(error);
       throw new ImmichApiError(`Immich request failed: ${sanitizeDiagnostic(reason, { secrets: [this.apiKey] })}`);

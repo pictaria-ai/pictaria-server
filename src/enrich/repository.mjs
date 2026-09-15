@@ -1,3 +1,5 @@
+import { CURATE_SCHEMA, installCurateTriggers } from '../curate/schema.mjs';
+import { CurateRepository } from '../curate/repository.mjs';
 import { copyFileSync, mkdirSync, readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -511,6 +513,10 @@ const ENRICH_MIGRATIONS = [
   },
   { version: 11, up(db) { db.exec(DISCOVERY_SCHEMA); } },
   { version: 12, up(db) { db.exec(AI_TAG_SYNC_SCHEMA); } },
+  { version: 13, up(db) {
+    db.exec(CURATE_SCHEMA);
+    db.exec('INSERT OR IGNORE INTO curate_dirty(asset_id) SELECT asset_id FROM review_list');
+  } },
 ];
 
 // The review projection of a normalized output: exactly the fields the
@@ -595,6 +601,7 @@ export class Repository {
     this.db = new DatabaseSync(this.databasePath);
     this.timings = new EnrichTimingStore(this.db);
     this.aiTagSync = new AiTagSyncStore(this.db);
+    this.curate = new CurateRepository(this);
     this.historyRetention = historyRetention();
     this.db.exec('PRAGMA journal_mode = WAL');
     // Decisions, tags, and captions are personal data: keep the DB (and its
@@ -608,7 +615,7 @@ export class Repository {
   }
 
   initSchema() {
-    const schemaSql = readFileSync(SCHEMA_PATH, 'utf8') + TIMING_SCHEMA + DISCOVERY_SCHEMA + AI_TAG_SYNC_SCHEMA;
+    const schemaSql = readFileSync(SCHEMA_PATH, 'utf8') + TIMING_SCHEMA + DISCOVERY_SCHEMA + AI_TAG_SYNC_SCHEMA + CURATE_SCHEMA;
     const result = migrateDatabase(this.db, {
       schema: schemaSql,
       migrations: ENRICH_MIGRATIONS,
@@ -625,6 +632,10 @@ export class Repository {
       if (tableHasColumns(this.db, index.table, index.columns)) {
         this.db.exec(index.sql);
       }
+    }
+    installCurateTriggers(this.db);
+    for (const [column, expression] of [['file_created_at','julianday(file_created_at)'], ['checksum','checksum'], ['duplicate_id','duplicate_id']]) {
+      if (tableHasColumns(this.db,'assets',[column])) this.db.exec(`CREATE INDEX IF NOT EXISTS idx_curate_source_${column} ON assets(${expression})`);
     }
     return result;
   }
@@ -693,48 +704,58 @@ export class Repository {
   }
 
   upsertAsset(asset) {
-    this.#reviewStateChanged();
-    const now = utcNow();
-    const exif = asset.exifInfo ?? {};
-    this.db
-      .prepare(
-        `
-        INSERT INTO assets (
-          asset_id, original_path, checksum, file_created_at, file_modified_at,
-          width, height, mime_type, immich_updated_at, thumbhash, duplicate_id,
-          first_seen_at, last_seen_at
+    const observe = this.curate.shouldObserve(asset);
+    const write = () => {
+      this.#reviewStateChanged();
+      const now = utcNow();
+      const exif = asset.exifInfo ?? {};
+      this.db
+        .prepare(
+          `
+          INSERT INTO assets (
+            asset_id, original_path, checksum, file_created_at, file_modified_at,
+            width, height, mime_type, immich_updated_at, thumbhash, duplicate_id,
+            first_seen_at, last_seen_at
+          )
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+          ON CONFLICT(asset_id) DO UPDATE SET
+            original_path=excluded.original_path,
+            checksum=excluded.checksum,
+            file_created_at=excluded.file_created_at,
+            file_modified_at=excluded.file_modified_at,
+            width=excluded.width,
+            height=excluded.height,
+            mime_type=excluded.mime_type,
+            immich_updated_at=excluded.immich_updated_at,
+            thumbhash=CASE WHEN ? THEN excluded.thumbhash ELSE assets.thumbhash END,
+            duplicate_id=CASE WHEN ? THEN excluded.duplicate_id ELSE assets.duplicate_id END,
+            missing_since=NULL,
+            last_seen_at=excluded.last_seen_at
+          `,
         )
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-        ON CONFLICT(asset_id) DO UPDATE SET
-          original_path=excluded.original_path,
-          checksum=excluded.checksum,
-          file_created_at=excluded.file_created_at,
-          file_modified_at=excluded.file_modified_at,
-          width=excluded.width,
-          height=excluded.height,
-          mime_type=excluded.mime_type,
-          immich_updated_at=excluded.immich_updated_at,
-          thumbhash=COALESCE(excluded.thumbhash, assets.thumbhash),
-          duplicate_id=COALESCE(excluded.duplicate_id, assets.duplicate_id),
-          missing_since=NULL,
-          last_seen_at=excluded.last_seen_at
-        `,
-      )
-      .run(
-        asset.id,
-        asset.originalPath ?? null,
-        asset.checksum ?? null,
-        asset.fileCreatedAt ?? null,
-        asset.fileModifiedAt ?? null,
-        exif.exifImageWidth ?? asset.width ?? exif.imageWidth ?? null,
-        exif.exifImageHeight ?? asset.height ?? exif.imageHeight ?? null,
-        asset.mimeType ?? null,
-        asset.updatedAt ?? null,
-        asset.thumbhash ?? null,
-        asset.duplicateId ?? null,
-        now,
-        now,
-      );
+        .run(
+          asset.id,
+          asset.originalPath ?? null,
+          asset.checksum ?? null,
+          asset.fileCreatedAt ?? null,
+          asset.fileModifiedAt ?? null,
+          exif.exifImageWidth ?? asset.width ?? exif.imageWidth ?? null,
+          exif.exifImageHeight ?? asset.height ?? exif.imageHeight ?? null,
+          asset.mimeType ?? null,
+          asset.updatedAt ?? null,
+          asset.thumbhash ?? null,
+          asset.duplicateId ?? null,
+          now,
+          now,
+          Number(Object.hasOwn(asset, 'thumbhash')),
+          Number(Object.hasOwn(asset, 'duplicateId')),
+        );
+      if (observe) this.curate.observe(asset);
+    };
+    // Most discovery rows have no extra Curate evidence. The source write and
+    // dirty trigger are already atomic; only a second evidence write needs a
+    // wrapping transaction. Existing caller transactions remain reentrant.
+    return observe ? this.transaction(write) : write();
   }
 
   // Visual descriptors (thumbhash + Immich duplicate group) for near-dup

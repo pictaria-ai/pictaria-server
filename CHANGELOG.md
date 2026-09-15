@@ -5,6 +5,34 @@ All notable changes to Pictaria Server are documented here. This project follows
 
 ## Unreleased
 
+### Development
+
+- Added the first Curate v1.3 foundation: conservative standard grouping,
+  producing-configuration evidence, persistent separation constraints and bounded
+  comparison APIs. The current Curate page and keeper recommendations are unchanged;
+  the UI and decision cutover follow separately. See [Curate foundation](docs/CURATE-FOUNDATION.md).
+- Curate foundation views share compact stable snapshots and replace comparisons
+  as users browse. Separation retries retain their receipts after scope expiry.
+  Unchanged discovery updates skip Curate recalculation; extra evidence is stored
+  only for review-listed photos.
+- Saved Curate foundation views now trigger bounded background Immich metadata
+  refresh, with durable freshness/retry state and protection against stale responses.
+  Pending photos and requested kept context receive available people/edit evidence
+  without blocking page reads. This becomes user-facing with the later UI cutover.
+- Enrichment schema 13 / persistent-state contract 16 adds Curate records without
+  rewriting decisions or tags. Upgrade creates the normal recovery snapshot;
+  rollback requires restoring that snapshot.
+- Curate's foundation API can explicitly replace a previous view during refresh
+  or filtering, releasing its snapshot budget while preserving other tabs' views.
+  Retrying after a lost replacement response resolves the current successor,
+  including after restart, so abandoned views do not retain obsolete snapshots.
+
+### Fixed
+
+- Immich metadata ingestion now clears cached thumbnail and duplicate-group
+  fields when Immich explicitly returns `null`, preventing stale grouping evidence.
+  Fields absent from a partial response still preserve their cached values.
+
 ## 1.2.1 - 2026-09-12
 
 This patch improves Smart Album compatibility with older Immich versions and

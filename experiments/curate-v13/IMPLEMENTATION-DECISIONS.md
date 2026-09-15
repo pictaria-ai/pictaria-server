@@ -109,17 +109,42 @@ Use cached/batched Immich metadata. Normal page reads make no per-card metadata
 fetches. Refresh missing/changed evidence in background batches of at most 500
 asset observations, with at most two concurrent metadata calls, yielding between
 batches. API-specific page caps may lower these numbers. Unavailable evidence
-stays unknown while refresh is pending. These bounds require real-adapter tests.
+stays unknown while refresh is pending. PIC-367 now integrates this read lane with
+live foundation views: initially due pending photos, 24-hour refresh, a durable
+30-second minimum on earlier rechecks, and at most eight due kept-context photos
+when a comparison opens. Decided history is not a polling queue. Per-request
+bounds are 30 seconds and 1 MiB; connection failures back off from 30 seconds to
+15 minutes and recover with one probe. Stacks off and shutdown cancel requests;
+Enrich being off does not. Freshness, claims and retry timing survive restart.
+Responses revalidate source evidence/membership/connection before applying. This
+lane has no paid-call accounting: cohort admission remains PIC-346. Synthetic
+real-HTTP, restart, failure and concurrency tests cover the adapter; integrated
+resource and live-version acceptance remain separate.
 
 | Data | Chosen lifetime / bound |
 | --- | --- |
 | Current projection/index | One current projection/index plus one replacement; publish atomically. Full provenance stays cold. |
-| Comparison/action leases | 30 minutes; deliberate refresh issues a new lease for the verified scope. At most 200 live leases and 5 MiB encoded scope data per installation. Refuse new lease allocation clearly at capacity; do not silently evict a live scope or truncate membership. |
+| Comparison/action leases | 30 minutes; deliberate refresh issues a new lease for the verified scope. PIC-367 review clarification: at most 200 views and 200 comparisons, with one current comparison per view. Reopening an identical comparison reuses its ID; navigating within that view supersedes only its prior comparison. Immutable membership snapshots can be shared across views, and all retained snapshots, scopes and replacement records count toward the same 5 MiB installation bound. Refuse new allocation clearly at capacity; do not evict another view or truncate membership. |
 | Immediate Undo | 30 minutes from the operation, and only while all target revisions are still current. The receipt states its deadline. Decided review remains available for later choices. No new history browser is required. |
 | Completed operation receipts | 30 days after settling, then a minimal ID/payload/expiry tombstone for 30 more days. Store only authorized decision-tag before-state, not descriptive tags or original metadata. |
 | Pending/failed sync and live Undo dependencies | Retain until resolved/superseded or the dependency expires. Age/space cleanup cannot discard them. Keep one latest merged scoped intent per photo. |
 | Human separation constraints | Keep while active and their photos exist; deliberate reset deactivates them. Expired Undo/history does not reset a correction. |
 | AI jobs/advice | Current applicable result and exact-input attempt state, active request, and one current queued replacement per overlapping scope/role. No raw-response history. Retire obsolete inactive records after their comparison/Undo references and recent budget window expire. |
+
+PIC-367's view API accepts `replacesViewId` on POST opens. PIC-369 must pass
+the current tab's prior ID on refresh/filter changes, including refresh after
+decisions, and retain that ID across reload/history navigation. Only that view
+and its current comparison are superseded; another tab starts/retains its own
+scope. Capacity rejection preserves the old scope. Distinct unreleased views
+still consume the shared 5 MiB budget; this is explicit replacement, not eviction
+of another view or an increase in the bound.
+
+A lost replacement response can be retried with the old view ID until that ID's
+original expiry. Retired IDs resolve through a stable family key to the current
+successor, which is replaced without retaining an orphan view. Persist this across
+restart; do not extend old-ID lifetimes or follow aliases for paging/actions/close.
+Replacement records count toward the same 5 MiB bound and expire independently.
+Capacity refusal rolls their changes back with the view/comparison release.
 
 An operation is settled when its relevant writes are acknowledged or its intent
 is explicitly superseded by later durable intent that retains all unfinished tag
