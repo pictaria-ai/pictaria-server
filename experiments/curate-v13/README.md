@@ -68,6 +68,16 @@ Repository helpers are implementation boundaries, not extra user actions.
 PIC-368 must repeat this writer search when wiring production changes; new
 routes must not bypass it.
 
+**Keeper-quality baseline:** extensive owner use reports generally useful
+released recommendations inside genuinely similar stacks. Prioritize improved
+stack formation and retain the released referee's concrete quality criteria
+unless comparison evidence justifies changing them. Rewriting the surrounding
+contracts does not require reinventing keeper judgment. The released single-star
+UI and repaired ranks are not the new output contract: explicit zero/one/multiple
+recommendations, validation and faithful human actions remain required. The
+[released-prompt comparison](RELEASED-BASELINE.md) tests the existing judgment
+before further tuning the experimental keeper prompt.
+
 ## Proposed data and action boundary
 
 Choose explicit fields rather than relying on today's in-memory per-photo ranks:

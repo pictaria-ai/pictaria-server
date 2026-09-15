@@ -6,6 +6,11 @@ import { fileURLToPath } from 'node:url';
 import { createHash } from 'node:crypto';
 import { createProvider } from '../../src/enrich/providers.mjs';
 import { planRequest, validateAdvice, fingerprint } from './grouping.mjs';
+import { releasedPrompt, inspectReleasedAnswer, RELEASED_BASELINE } from './released-baseline.mjs';
+
+async function evaluationPrompt(ids, role, options) {
+  return role === 'released-keeper' ? releasedPrompt(ids, options.photos) : visionPrompt(ids, role, options);
+}
 
 export function visionPrompt(ids, role, { enumOrder = ids } = {}) {
   if (!['check', 'keeper'].includes(role) || !Array.isArray(ids) || !ids.length
@@ -38,7 +43,8 @@ export function visionPrompt(ids, role, { enumOrder = ids } = {}) {
 // paying for a repeat. Public output contains only bounded failure categories;
 // provider/model text belongs solely in the outside-checkout report.
 export async function evaluateImages(provider, images, ids, role, expected, options = {}) {
-  const prompt = visionPrompt(ids, role, options); // reject bad controls before a request
+  const prompt = await evaluationPrompt(ids, role, options); // reject bad controls before a request
+  if (role === 'released-keeper' && expected !== undefined) throw Error('released baseline uses separate owner labels');
   const started = performance.now();
   let result;
   try {
@@ -50,6 +56,12 @@ export async function evaluateImages(provider, images, ids, role, expected, opti
     } };
   }
   const elapsedMs = Math.round(performance.now() - started);
+  if (role === 'released-keeper') {
+    const inspected = inspectReleasedAnswer(ids, result.normalizedOutput);
+    return { status: inspected.valid ? 'valid' : 'invalid-answer', elapsedMs,
+      ...(inspected.valid ? { scores: { referenceLabelsProvided: false } }
+        : { failure: { stage: 'validation', reason: 'invalid released ranking' } }), output: inspected.output };
+  }
   let output;
   try {
     output = validateAdvice(ids, result.normalizedOutput, role);
@@ -89,23 +101,27 @@ export function compareLabels(ids, actual, expected) {
 async function main() {
   const option = name => process.argv.find(a => a.startsWith(`--${name}=`))?.slice(name.length + 3);
   const manifestPath = resolve(option('manifest') ?? ''), role = option('role') ?? 'keeper';
-  if (!option('manifest') || !['check', 'keeper'].includes(role)) throw Error('invalid options');
+  if (!option('manifest') || !['check', 'keeper', 'released-keeper'].includes(role)) throw Error('invalid options');
   const manifest = JSON.parse(readFileSync(manifestPath, 'utf8'));
   if (!Array.isArray(manifest.photos) || manifest.photos.length < 2 || manifest.photos.length > 30
     || manifest.photos.some(p => !/^p[0-9]+$/.test(p.id) || typeof p.file !== 'string' || !['image/jpeg', 'image/png', 'image/webp'].includes(p.mimeType))) throw Error('invalid manifest');
   const ids = manifest.photos.map(p => p.id);
   if (new Set(ids).size !== ids.length) throw Error('duplicate IDs');
-  const promptOptions = { enumOrder: manifest.enumOrder === undefined ? ids : manifest.enumOrder };
-  const prompt = visionPrompt(ids, role, promptOptions);
+  const baseline = role === 'released-keeper';
+  if (baseline && (manifest.enumOrder !== undefined || manifest.expected !== undefined)) throw Error('unsupported released baseline controls');
+  const promptOptions = baseline ? { photos: manifest.photos }
+    : { enumOrder: manifest.enumOrder === undefined ? ids : manifest.enumOrder };
+  const prompt = await evaluationPrompt(ids, role, promptOptions);
   const files = manifest.photos.map(p => resolve(dirname(manifestPath), p.file));
   const sizes = Object.fromEntries(ids.map((id, i) => { const stat = statSync(files[i]); if (!stat.isFile()) throw Error('not a file'); return [id, stat.size]; }));
-  const envelope = planRequest({ ids, pendingIds: ids, route: 'uncertain' }, sizes, { role, check: role === 'check', referee: role === 'keeper' });
+  const envelope = planRequest({ ids, pendingIds: ids, route: 'uncertain' }, sizes, { role: baseline ? 'keeper' : role, check: role === 'check', referee: role !== 'check' });
   if (envelope.state !== 'ready') throw Error('outside request envelope');
   if (manifest.expected) validateAdvice(ids, manifest.expected, role);
   const { CURATE_EVAL_PROVIDER: providerName, CURATE_EVAL_MODEL: modelName, CURATE_EVAL_API_KEY: apiKey, CURATE_EVAL_BASE_URL: baseUrl } = process.env;
   const summary = { mode: 'dry-run', photos: ids.length, rawBytes: envelope.rawBytes, base64Bytes: envelope.base64Bytes,
     provider: providerName, model: modelName, role, promptVersion: prompt.schemaName,
-    evaluationFormat: 'independent-enum-1', enumOrderMatchesImages: ids.every((id, i) => id === promptOptions.enumOrder[i]),
+    ...(baseline ? { evaluationFormat: RELEASED_BASELINE }
+      : { evaluationFormat: 'independent-enum-1', enumOrderMatchesImages: ids.every((id, i) => id === promptOptions.enumOrder[i]) }),
     labelled: Boolean(manifest.expected), requests: 0 };
   if (!process.argv.includes('--submit')) { console.log(JSON.stringify(summary)); return; }
   if (!['venice', 'cloud_openai', 'openai_compatible'].includes(providerName) || !modelName || !apiKey || !option('out')) throw Error('missing provider/output configuration');
@@ -132,7 +148,7 @@ async function main() {
     const provider = createProvider(providerName, { apiKey, modelName, ...(baseUrl ? { baseUrl } : {}) });
     // These are pre-submission inputs, not proof of historical wire contents.
     // Retain hashes/mappings privately so a wire capture can be checked later.
-    const requestPlan = { enumOrder: promptOptions.enumOrder, promptFingerprint: fingerprint(prompt),
+    const requestPlan = { ...(baseline ? { prompt } : { enumOrder: promptOptions.enumOrder }), promptFingerprint: fingerprint(prompt),
       images: images.map((image, i) => ({ id: ids[i], bytes: image.data.length, mimeType: image.mimeType,
         sha256: createHash('sha256').update(image.data).digest('hex') })) };
     const report = { ...summary, mode: 'submitted', requests: 1, requestPlan,

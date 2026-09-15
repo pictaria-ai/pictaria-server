@@ -13,6 +13,113 @@ import { fixtures, photo } from '../../experiments/curate-v13/fixtures.mjs';
 import { OpenAiProvider, OpenAiCompatibleProvider, VeniceProvider } from '../../src/enrich/providers.mjs';
 import { backendKey, nextTurn, freshLineage, supersede, reserve, finish } from '../../experiments/curate-v13/scheduling.mjs';
 import { visionPrompt, compareLabels, evaluateImages, publicEvaluationSummary } from '../../experiments/curate-v13/visual.mjs';
+import { releasedPrompt, inspectReleasedAnswer } from '../../experiments/curate-v13/released-baseline.mjs';
+import { buildRefereeUserPrompt, refereeJsonSchema } from '../../src/enrich/refereeService.mjs';
+
+test('released baseline captures the pinned service contract without fetching or recording anything', async () => {
+  const photos = [{ id: 'p10', capturedAt: '2026-01-01T12:00:00Z', aiTags: ['ai/people/one'] }, { id: 'p11' }];
+  const prompt = await releasedPrompt(photos.map(p => p.id), photos);
+  assert.equal(prompt.schemaName, 'pictaria_group_referee');
+  assert.equal(prompt.userPrompt, buildRefereeUserPrompt(photos));
+  assert.deepEqual(prompt.jsonSchema, refereeJsonSchema(2));
+  assert.match(prompt.systemPrompt, /everyone sharp, eyes open, and natural expressions/);
+  assert.match(prompt.userPrompt, /Photo 1: taken 2026-01-01 12:00:00 · 1 person detected/);
+  assert.match(prompt.userPrompt, /Photo 2: people unknown/);
+  assert.ok(!prompt.userPrompt.includes('p10'));
+  await assert.rejects(releasedPrompt(['p10', 'p11'], [...photos].reverse()));
+  const many = Array.from({ length: 11 }, (_, i) => ({ id: `p${i}` }));
+  await assert.rejects(releasedPrompt(many.map(p => p.id), many));
+});
+
+test('released baseline separates rank highlights, keep flags and singles; repaired answers are not scored', () => {
+  const ids = ['p10', 'p11', 'p12'];
+  const answer = { same_subject: false, photos: [
+    { photo: 1, rank: 2, keep: true, eyes_closed: 'no', note: 'Alternate', subject_group: 1 },
+    { photo: 2, rank: 1, keep: false, eyes_closed: 'no', note: 'Best', subject_group: 1 },
+    { photo: 3, rank: 3, keep: true, eyes_closed: 'unsure', note: 'Different', subject_group: 2 },
+  ] };
+  const result = inspectReleasedAnswer(ids, answer);
+  assert.equal(result.valid, true);
+  assert.deepEqual(result.output.stackHighlights, ['p11']);
+  assert.deepEqual(result.output.keepIds, ['p10', 'p12']);
+  assert.deepEqual(result.output.singlePhotoIds, ['p12']);
+  assert.equal(result.output.bestRankedId, 'p11');
+  for (const change of [p => { p.rank = 1; }, p => { p.photo = 2; }, p => { p.rank = '2'; },
+    p => { delete p.keep; }, p => { p.subject_group = 0; }, p => { p.eyes_closed = 'maybe'; }]) {
+    const bad = structuredClone(answer); change(bad.photos[0]);
+    const inspected = inspectReleasedAnswer(ids, bad);
+    assert.equal(inspected.valid, false);
+    assert.equal(inspected.output.normalizedPicks.length, 3);
+    assert.equal(inspected.output.stackHighlights, undefined);
+    assert.deepEqual(inspected.output.modelAnswer, bad);
+  }
+  assert.equal(inspectReleasedAnswer(ids, { same_subject: true, photos: [] }).valid, false);
+});
+
+test('released baseline CLI preserves the actual Venice payload and private index mapping', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'curate-released-baseline-'));
+  let calls = 0, submitted;
+  const output = { same_subject: true, photos: [
+    { photo: 1, rank: 2, keep: false, eyes_closed: 'yes', note: 'Private blink', subject_group: 1 },
+    { photo: 2, rank: 1, keep: true, eyes_closed: 'no', note: 'Private best', subject_group: 1 },
+  ] };
+  const server = createServer((req, res) => {
+    calls++; const chunks = [];
+    req.on('data', chunk => chunks.push(chunk));
+    req.on('end', () => {
+      submitted = JSON.parse(Buffer.concat(chunks));
+      res.writeHead(200, { 'content-type': 'application/json' });
+      res.end(JSON.stringify({ choices: [{ message: { content: JSON.stringify(output) } }] }));
+    });
+  });
+  await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
+  try {
+    const bytes = [Buffer.from('synthetic baseline A'), Buffer.from('synthetic baseline B')];
+    bytes.forEach((data, i) => writeFileSync(join(dir, `image-${i}.jpg`), data));
+    const manifest = join(dir, 'case.json'), out = join(dir, 'report.json');
+    const photos = ['p10', 'p11'].map((id, i) => ({ id, file: `image-${i}.jpg`, mimeType: 'image/jpeg' }));
+    writeFileSync(manifest, JSON.stringify({ photos }));
+    const command = fileURLToPath(new URL('../../experiments/curate-v13/visual.mjs', import.meta.url));
+    const args = [command, `--manifest=${manifest}`, '--role=released-keeper'];
+    const dry = spawnSync(process.execPath, args, { env: {}, encoding: 'utf8' });
+    assert.equal(dry.status, 0, dry.stderr);
+    assert.equal(JSON.parse(dry.stdout).evaluationFormat, 'v1.2.1-referee-v2');
+    assert.equal(JSON.parse(dry.stdout).requests, 0);
+    assert.equal(calls, 0);
+    for (const controls of [{ enumOrder: ['p10', 'p11'] }, { expected: {} }]) {
+      writeFileSync(manifest, JSON.stringify({ photos, ...controls }));
+      assert.equal(spawnSync(process.execPath, args, { env: {}, encoding: 'utf8' }).status, 1);
+    }
+    writeFileSync(manifest, JSON.stringify({ photos }));
+    const child = spawn(process.execPath, [...args, '--submit', `--out=${out}`], { env: {
+      CURATE_EVAL_PROVIDER: 'venice', CURATE_EVAL_MODEL: 'synthetic-model', CURATE_EVAL_API_KEY: 'synthetic-test-key',
+      CURATE_EVAL_BASE_URL: `http://127.0.0.1:${server.address().port}/v1`,
+    } });
+    let stdout = '', stderr = '';
+    child.stdout.on('data', chunk => { stdout += chunk; }); child.stderr.on('data', chunk => { stderr += chunk; });
+    const exit = await new Promise((resolve, reject) => { child.on('error', reject); child.on('close', resolve); });
+    assert.equal(exit, 0, stderr);
+    assert.equal(calls, 1);
+    const report = JSON.parse(readFileSync(out, 'utf8'));
+    assert.equal(report.status, 'valid');
+    assert.deepEqual(report.output.stackHighlights, ['p11']);
+    assert.deepEqual(report.output.modelAnswer, output);
+    const prompt = await releasedPrompt(photos.map(p => p.id), photos);
+    assert.deepEqual(report.requestPlan.prompt, prompt);
+    assert.equal(submitted.messages[0].content, prompt.systemPrompt);
+    assert.ok(submitted.messages[1].content[0].text.startsWith(prompt.userPrompt));
+    assert.deepEqual(submitted.response_format.json_schema.schema, prompt.jsonSchema);
+    const embedded = submitted.messages[1].content[0].text;
+    assert.deepEqual(JSON.parse(embedded.slice(embedded.indexOf('{'))), prompt.jsonSchema);
+    assert.deepEqual(submitted.messages[1].content.slice(1).map(p => p.image_url.url), bytes.map(b => `data:image/jpeg;base64,${b.toString('base64')}`));
+    assert.deepEqual(report.requestPlan.images.map(p => p.id), ['p10', 'p11']);
+    assert.deepEqual(report.requestPlan.images.map(p => p.sha256), bytes.map(b => createHash('sha256').update(b).digest('hex')));
+    assert.equal(JSON.parse(stdout).output, undefined);
+    assert.equal(JSON.parse(stdout).requestPlan, undefined);
+    assert.ok(!stdout.includes('Private best'));
+    assert.equal(statSync(out).mode & 0o777, 0o600);
+  } finally { server.closeAllConnections(); await new Promise(resolve => server.close(resolve)); rmSync(dir, { recursive: true, force: true }); }
+});
 
 const partition = groups => groups.map(g => [...g].sort().join(',')).sort();
 for (const fixture of fixtures) test(`experimental grouping: ${fixture.name}`, () => {
