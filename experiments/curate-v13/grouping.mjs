@@ -1,6 +1,7 @@
 // Offline experiment, deliberately not imported by the server. The semantic
 // veto is a calibration candidate, not a validated production classifier.
 import { createHash } from 'node:crypto';
+import { setImmediate } from 'node:timers/promises';
 import { thumbhashDistance } from '../../src/enrich/reviewService.mjs';
 
 export function fingerprint(value) {
@@ -54,7 +55,7 @@ function lookbackCompatible(a, b, distance) {
   return ah !== null && bh !== null && ah.length === bh.length && thumbhashDistance(ah, bh) <= distance;
 }
 
-export function groupPhotos(rows, {
+function* groupingSteps(rows, {
   semanticVeto = false, maxSpanMs = 180000, maxGapMs = 15000,
   candidateLimit = 32, pairsPerCandidate = 64, comparisonBudget = 2000000,
   separations = [], lookbackDistance = null,
@@ -74,25 +75,29 @@ export function groupPhotos(rows, {
       }
     });
   }
-  const groups = [], exact = new Map();
+  const groups = [], exact = new Map(), emptyLabels = new Map();
   const metrics = { candidateVisits: 0, pairComparisons: 0, limitedGroups: 0, sourcePhotos: rows.length,
     lookbackJoins: 0, lookbackPairComparisons: 0, lookbackLimitedCandidates: 0 };
   const sorted = rows.map(row => ({ row, time: Date.parse(row.capturedAt) }))
     .sort((a, b) => (Number.isFinite(a.time) ? a.time : Infinity)
       - (Number.isFinite(b.time) ? b.time : Infinity) || a.row.id.localeCompare(b.row.id));
   for (const { row, time } of sorted) {
-    const ownLabels = labels.get(row.id) ?? new Map();
+    const ownLabels = labels.get(row.id) ?? emptyLabels;
     const previous = exact.get(row.checksum);
-    const candidates = [...new Set([
-      ...(row.checksum && previous ? [previous] : []),
-      ...groups.slice(-candidateLimit).reverse(),
-    ])];
     let selected;
-    for (const group of candidates) {
+    // Exact match first, then the same bounded recent window as before. Avoid
+    // rebuilding arrays and a Set for every photo in every background pass.
+    for (let ci = groups.length; ci >= Math.max(0, groups.length - candidateLimit); ci--) {
+      const group = ci === groups.length ? (row.checksum ? previous : null) : groups[ci];
+      if (!group || (ci !== groups.length && row.checksum && group === previous)) continue;
       metrics.candidateVisits++;
       // Hard human constraints cover ALL members, even when the softer
       // evidence budget is exhausted. A bridge cannot reunite a split.
-      if ([...ownLabels].some(([key, part]) => group.labels.has(key) && group.labels.get(key) !== part)) continue;
+      let separated = false;
+      for (const [key, part] of ownLabels) {
+        if (group.labels.has(key) && group.labels.get(key) !== part) { separated = true; break; }
+      }
+      if (separated) continue;
       const sameBytes = row.checksum && group.checksum === row.checksum;
       if (!sameBytes && !(Number.isFinite(time) && time - group.first <= maxSpanMs)) continue;
       const longerGap = !sameBytes && time - group.last > maxGapMs;
@@ -146,11 +151,13 @@ export function groupPhotos(rows, {
     if (selected.checksum !== row.checksum) selected.checksum = null;
     for (const [key, part] of ownLabels) selected.labels.set(key, part);
     if (row.checksum) exact.set(row.checksum, selected);
+    yield; // bounded candidate work can yield without publishing partial groups
   }
-  const result = groups.map(group => {
+  const result = [];
+  for (const group of groups) {
     const ids = group.members.map(r => r.id).sort();
     if (group.limited) metrics.limitedGroups++;
-    return {
+    result.push({
       id: fingerprint(ids), ids,
       pendingIds: group.members.filter(r => r.state !== 'kept').map(r => r.id),
       keptContextIds: group.members.filter(r => r.state === 'kept').map(r => r.id),
@@ -159,27 +166,61 @@ export function groupPhotos(rows, {
         ...(group.lookback ? ['whole-candidate evidence supports longer-gap comparison; grouping unconfirmed'] : []),
         ...(group.limited ? ['evidence comparison budget exhausted; grouping unconfirmed'] : []),
         ...(group.labels.size ? ['human separation constraints applied'] : [])],
-    };
-  });
+    });
+    yield;
+  }
   return { groups: result, metrics };
+}
+
+export function groupPhotos(rows, options) {
+  const steps = groupingSteps(rows, options);
+  let step;
+  do { step = steps.next(); } while (!step.done);
+  return step.value;
+}
+
+// The caller supplies an immutable prepared snapshot, never live mutable rows.
+// Sorting and one candidate/member operation remain indivisible; report actual
+// slices rather than claiming this timer imposes a hard latency bound on them.
+export async function groupPhotosInBackground(rows, options, {
+  sliceMs = 4, signal, yieldNow = setImmediate, onSlice = () => {},
+} = {}) {
+  if (!Number.isFinite(sliceMs) || sliceMs < 0) throw Error('invalid slice budget');
+  const steps = groupingSteps(rows, options);
+  let started = performance.now();
+  try {
+    for (;;) {
+      signal?.throwIfAborted();
+      const step = steps.next();
+      const elapsed = performance.now() - started;
+      if (step.done || elapsed >= sliceMs) {
+        onSlice(elapsed);
+        if (step.done) return step.value;
+        await yieldNow();
+        started = performance.now();
+      }
+    }
+  } finally { steps.return(); }
 }
 
 // No request chunk becomes a stack, and no per-chunk winner is discarded.
 // This envelope is a PROPOSED starting point; actual provider quality and
 // realistic renditions still require the authorized visual evaluation.
-export function planRequest(group, sizes, { role, stacks = true, check = false, referee = false, checkState = 'pending' }) {
+export function planRequest(group, sizes, { role, stacks = true, check = false, referee = false, checkState = 'pending', maxImages = 30 }) {
   if (!['check', 'keeper'].includes(role)) throw Error('invalid role');
   if (!stacks || !(role === 'check' ? check : referee)) return { state: 'disabled' };
   if (group.pendingIds.length < 2) return { state: 'manual-context' };
   if (role === 'keeper' && check && !['valid', 'bypass'].includes(checkState)) return { state: 'waiting-for-check' };
   if (group.route === 'manual-budget') return { state: 'manual-budget' };
   if (role === 'check' && group.route === 'checksum-bypass') return { state: 'bypass' };
+  if (!Number.isSafeInteger(maxImages) || maxImages < 2) return { state: 'unsupported-provider' };
   const bytes = group.ids.map(id => sizes[id]);
   if (bytes.some(n => !Number.isSafeInteger(n) || n <= 0)) return { state: 'unavailable-image' };
   const rawBytes = bytes.reduce((sum, n) => sum + n, 0);
   if (group.ids.length > 30 || bytes.some(n => n > 2 * 1024 * 1024) || rawBytes > 24 * 1024 * 1024) {
     return { state: 'manual-size', members: group.ids.length, rawBytes };
   }
+  if (group.ids.length > maxImages) return { state: 'manual-provider', members: group.ids.length, maxImages };
   return { state: 'ready', requests: [group.ids], rawBytes, base64Bytes: bytes.reduce((n, size) => n + 4 * Math.ceil(size / 3), 0) };
 }
 

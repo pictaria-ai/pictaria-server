@@ -28,16 +28,20 @@ export function supersede(state, revision, now) {
   if (state.queued === revision) return;
   state.queued = revision; state.changedAt = now; // one latest replacement
 }
-export function reserve(state, backend, now, { enabled = true, paused = false, explicit = false } = {}) {
+export function reserve(state, backend, now, { enabled = true, paused = false, explicit = false, requestCount = 1 } = {}) {
+  if (!Number.isSafeInteger(requestCount) || requestCount < 1 || requestCount > 3) throw Error('invalid request count');
   if (!enabled || paused) return 'paused';
   if (state.active || !state.queued) return 'idle';
   if (backend.blocked || now < (backend.cooldownUntil ?? 0)) return 'provider-paused';
   if (now - state.changedAt < 30000) return 'settling';
   state.submissions = state.submissions.filter(t => now - t < 30 * 60000);
   const attempts = state.attempts[state.queued] ?? 0;
-  if (!explicit && (attempts >= 2 || state.submissions.length >= 3)) return 'manual-recheck';
+  if (!explicit && (attempts >= 2 || state.submissions.length + requestCount > 3)) return 'manual-recheck';
   state.active = state.queued; state.queued = null;
-  state.attempts[state.active] = attempts + 1; state.submissions.push(now);
+  // Reserve the complete plan before starting it. These are conservative budget
+  // reservations, not measured/billed requests; real transport counts stay separate.
+  state.attempts[state.active] = attempts + 1;
+  for (let i = 0; i < requestCount; i++) state.submissions.push(now);
   return 'reserved';
 }
 export function finish(state, backend, now, { success, permanent = false, retryAfterMs = 0 }) {

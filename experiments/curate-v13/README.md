@@ -1,6 +1,7 @@
 # Curate v1.3 contract prototype (PIC-366)
 
-**Status: experimental; visual acceptance is outstanding.** This directory is
+**Status: experimental; released keeper baseline accepted by the owner.**
+Grouping, large-group and resource acceptance are still incomplete. This directory is
 not imported by the server or included in its container. It does not change
 Curate, migrate a database, or authorize automatic decisions. The SQL in
 `decisions.mjs` is a disposable contract experiment, not a production migration.
@@ -16,6 +17,12 @@ is the [functional specification](https://linear.app/aedr/document/curate-v13-fu
 Numbers below are proposed implementation budgets, subject to the remaining
 measurements. Passing synthetic fixtures does not establish visual accuracy.
 
+The current [engineering boundaries](ENGINEERING-BOUNDARIES.md) distinguish the
+accepted keeper criteria, conservative grouping direction, provider-sized
+requests, background publication experiment and outstanding production checks.
+They supersede earlier pending keeper-evaluation wording in this historical
+record; the earlier measurements remain evidence, not current acceptance claims.
+
 ## Run the experiment
 
 Requires the repository's supported Node runtime; no npm dependencies.
@@ -23,6 +30,7 @@ Requires the repository's supported Node runtime; no npm dependencies.
 ```sh
 node --test test/experiments/curate-v13.test.mjs
 node experiments/curate-v13/bench.mjs
+node experiments/curate-v13/background-bench.mjs
 node bin/scale-bench.mjs --assets=1000
 node bin/scale-bench.mjs --assets=10000
 node bin/scale-bench.mjs --assets=30000
@@ -76,7 +84,9 @@ contracts does not require reinventing keeper judgment. The released single-star
 UI and repaired ranks are not the new output contract: explicit zero/one/multiple
 recommendations, validation and faithful human actions remain required. The
 [released-prompt comparison](RELEASED-BASELINE.md) tests the existing judgment
-before further tuning the experimental keeper prompt.
+against the experimental keeper prompt. The owner has now accepted the released
+judgment as better and good enough to proceed; further broad taste tuning is not
+a prerequisite. Optional personal guidance is tracked separately in PIC-375.
 
 ## Proposed data and action boundary
 
