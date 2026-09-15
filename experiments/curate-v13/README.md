@@ -22,13 +22,17 @@ accepted keeper criteria, conservative grouping direction, provider-sized
 requests, background publication experiment and outstanding production checks.
 They supersede earlier pending keeper-evaluation wording in this historical
 record; the earlier measurements remain evidence, not current acceptance claims.
+The [target-host Node 22 runtime pass](TARGET-RUNTIME.md) is complete: standalone
+response/build targets passed, three individual slices exceeded 8 ms, and
+production memory acceptance remains open. No repeat or new vision test is
+requested for that pass.
 
 ## Run the experiment
 
 Requires the repository's supported Node runtime; no npm dependencies.
 
 ```sh
-node --test test/experiments/curate-v13.test.mjs
+node --test test/experiments/curate-v13.test.mjs test/experiments/curate-background.test.mjs
 node experiments/curate-v13/bench.mjs
 node experiments/curate-v13/background-bench.mjs
 node bin/scale-bench.mjs --assets=1000
@@ -36,8 +40,10 @@ node bin/scale-bench.mjs --assets=10000
 node bin/scale-bench.mjs --assets=30000
 ```
 
-The benchmark uses invented metadata and temporary SQLite files. It reads no
-deployment configuration, sends no requests, and removes its temporary database.
+The benchmarks use invented metadata and temporary SQLite files. They read no
+deployment configuration and remove their temporary databases. `bench.mjs` sends
+no requests; `background-bench.mjs` calls only its own temporary loopback HTTP
+server, never a configured application or provider.
 The provider tests inject fake responses into the real OpenAI, Venice and
 OpenAI-compatible transports. Their 30-image result proves serialization and
 contract handling, **not provider acceptance, image comprehension or quality**.

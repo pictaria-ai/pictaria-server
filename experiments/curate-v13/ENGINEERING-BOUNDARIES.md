@@ -140,7 +140,15 @@ behavior, not solely retained Curate records. Input creation and database seedin
 are excluded; GC runs once before the baseline, never during the measured campaign.
 Do not turn standalone RSS into complete-server or incremental Curate acceptance.
 Removing repeated candidate-array/Set allocation improved the discovery path,
-but it did not settle the memory budget. Node 22 target-host evidence is next.
+but it did not settle the memory budget.
+
+**Target-host Node 22 pass received:** [measurements and disposition](TARGET-RUNTIME.md)
+at `84219d7` report 54/54 focused tests and all six standalone response/build
+latency targets passing. Three individual slices exceeded 8 ms (maximum 16.34 ms).
+Observed RSS increases were 21.20–79.92 MiB for standard/dense cases and 138.45 MiB
+for the optional gapped-lookback case. Keep the slice and production memory gates
+open. The pass supports this implementation direction without establishing
+full-server acceptance; do not infer a Node-version effect from different hosts.
 
 ## 6. Persistence and retention boundaries to implement
 
@@ -167,13 +175,16 @@ part of the engineering closeout.
 
 ## 7. Next evidence and work sequence
 
-The test-machine handoff is now an **offline Node 22 runtime pass**, not another
-keeper-selection experiment: run both focused suites and `background-bench.mjs`
-once, retain JSON and host context, report failures without retuning thresholds.
-No private library or configured application is needed.
+The requested **offline Node 22 runtime pass is complete**; its scoped findings
+are linked above. No repeat or new private-photo/provider exercise is requested
+now. Production integration must still measure the actual input projection,
+bounded context/history and full server alongside Enrich; the standalone pass
+cannot supply those measurements before that implementation exists.
 
-After target-host results, resolve the remaining resource/large-group/retention
-decisions and update the PIC-366 acceptance record. Then PIC-367 implements the
+Resolve the remaining large-group/context/lineage/retention decisions locally
+and update the PIC-366 acceptance record. Preserve the resource targets and
+explicit missed/unmeasured checks in the implementation handoff; do not claim
+all budgets passed. Then PIC-367 implements the
 grouping/evidence foundation, PIC-368 the coherent human operation, and PIC-369
 the first usable comparison/correction flow. AI roles and final resource/migration
 checks remain with their named issues. Keep PR #49 draft until the prototype's
