@@ -11,6 +11,8 @@ import { ImmichApiError, ImmichClient } from './immich.mjs';
 import { configuredSecrets, sanitizeDiagnostic } from './diagnostics.mjs';
 import { isImmichVersionSupported, parseImmichVersion } from './immichCompatibility.mjs';
 import { Repository } from './enrich/repository.mjs';
+import { CurateService } from './curate/service.mjs';
+import { createCurateRoutes } from './routes/curate.mjs';
 import { ReviewService } from './enrich/reviewService.mjs';
 import { backfillAssetVisuals } from './enrich/visualBackfill.mjs';
 import { TagWriteCoordinator } from './enrich/tagWriteCoordinator.mjs';
@@ -182,6 +184,7 @@ const immich = new ImmichClient({
 });
 const tagWrites = new TagWriteCoordinator();
 const review = new ReviewService({ repo, immich, taxonomy, config, tagWrites, log: (message) => console.log(`[Pictaria] ${message}`) });
+const curate = new CurateService({ repo, config, immich });
 const captionWriteback = new CaptionWritebackService({ repo, immich, config, log: (message) => console.log(`[Pictaria] ${message}`) });
 const aiTagSync = new AiTagSyncService({ repo, immich, review, tagWrites, config, log: message => console.log(`[Pictaria] ${message}`) });
 const enrichRunner = new EnrichJobRunner({ repo, immich, taxonomy, config, profiles, onTagsQueued: () => aiTagSync.wake() });
@@ -286,6 +289,7 @@ lifecycle.setTimeout(scheduleBackupTick, 60000);
 // budget its drain deserves. Budgets run in parallel and must all fit under
 // the 5s force-exit guard in shutdown(). stop(timeoutMs) resolves within its
 // budget; false means "gave up waiting" and gets warned by name.
+lifecycle.register('curate-groups', 3000, () => curate.close());
 lifecycle.register('review-sync', 3000, (timeoutMs) => review.stopSyncWorker(timeoutMs));
 lifecycle.register('ai-tag-sync', 3000, timeoutMs => aiTagSync.stop(timeoutMs));
 lifecycle.register('caption-writeback', 3000, (timeoutMs) => captionWriteback.stop(timeoutMs));
@@ -303,6 +307,7 @@ lifecycle.register('backup', 3000, (timeoutMs) => awaitDrain(backupDrain, timeou
 lifecycle.register('thumbhash-backfill', 3000, (timeoutMs) => awaitDrain(thumbhashBackfill, timeoutMs));
 
 const features = [
+  createCurateRoutes({ curate }),
   createActivityRoutes({ activityHistory }),
   createEnrichRoutes({ review, aiTagSync, enrichRunner, taxonomy, profiles, repo, requireImmich, config, immich, captionWriteback, referee, activityLog }),
   createAlbumsRoutes({ immich, store: albumStore, config, requireImmich, enrichRepo: repo }),

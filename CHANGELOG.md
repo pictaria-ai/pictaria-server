@@ -5,6 +5,16 @@ All notable changes to Pictaria Server are documented here. This project follows
 
 ## Unreleased
 
+### Development
+
+- Added the first Curate v1.3 foundation: conservative standard grouping,
+  producing-configuration evidence, persistent separation constraints and bounded
+  comparison APIs. The current Curate page and keeper recommendations are unchanged;
+  the UI and decision cutover follow separately. See [Curate foundation](docs/CURATE-FOUNDATION.md).
+- Enrichment schema 13 / persistent-state contract 16 adds Curate records without
+  rewriting decisions or tags. Upgrade creates the normal recovery snapshot;
+  rollback requires restoring that snapshot.
+
 ## 1.2.1 - 2026-09-12
 
 This patch improves Smart Album compatibility with older Immich versions and

@@ -32,7 +32,9 @@ src/
   http.mjs          shared HTTP helpers (JSON body, errors, static files, SSE)
   immich.mjs        the one shared Immich API client (union of all feature needs)
   routes/           one router file per feature (thin: parse/validate → service)
-  enrich/           enrichment pipeline + review service
+  enrich/           enrichment pipeline + current review service
+  curate/           v1.3 grouping/evidence foundation, read-only worker and
+                    leased comparisons; see CURATE-FOUNDATION.md
   activity/         fail-open structured operational events + merged read model;
                     operational events retained for 90 days
   albums/           smart-album jobs, store (JSON file), scheduler; Best-of
@@ -63,6 +65,9 @@ data/               all persistent state (gitignored): enrichment.sqlite,
                     frame.db, smart-albums.json, settings.json,
                     insights.sqlite, wake-word-models/, backups/
 ```
+
+The staged Curate v1.3 replacement is described in [Curate foundation](CURATE-FOUNDATION.md).
+Its API and schema can be reviewed before the decision and comparison UI cutover.
 
 ## Conventions
 
