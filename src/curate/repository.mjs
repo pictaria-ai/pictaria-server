@@ -340,7 +340,7 @@ export class CurateRepository {
       ? { id: `single:${GROUPING_METHOD}:${row.id}`, ids: [row.id], route: row.route }
       : { id: row.id, ids: JSON.parse(row.ids_json), route: row.route };
   }
-  async createView(current, groups) {
+  async createView(current, groups, { replacesViewId = null } = {}) {
     // Identical ordered memberships share an immutable SQLite snapshot across
     // tabs, retries and filters. They never page a moving current index. Hashing
     // and persistence yield, and all retained snapshot bytes count toward 5 MiB.
@@ -363,6 +363,16 @@ export class CurateRepository {
     const { lease, fresh } = this.repo.transaction(() => {
       // Cleanup before testing existence: the last owner might just have expired.
       this.prepare('DELETE FROM curate_leases WHERE expires_at<=?').run(Date.now());
+      if (replacesViewId !== null) {
+        const previous = this.prepare('SELECT kind FROM curate_leases WHERE id=?').get(replacesViewId);
+        if (previous && previous.kind !== 'view')
+          throw new CurateError('Only a Curate view can be replaced.', 'invalid_curate_query', 400);
+        // Explicit replacement relinquishes this caller's old scope before
+        // reserving the new one. Capacity rejection rolls this transaction back,
+        // preserving the old view/comparison. Other snapshot owners are untouched.
+        // An already expired/released view needs no further cleanup.
+        if (previous) this.releaseLease(replacesViewId);
+      }
       const fresh = !this.prepare('SELECT 1 FROM curate_view_snapshots WHERE id=?').get(snapshotId);
       const lease = this.lease('view', scope, Date.now(), fresh ? bytes : 0);
       if (fresh) this.prepare('INSERT INTO curate_view_snapshots(id,bytes) VALUES(?,?)').run(snapshotId, bytes);

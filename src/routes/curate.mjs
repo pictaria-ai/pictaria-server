@@ -11,6 +11,8 @@ export function createCurateRoutes({ curate }) {
       const path = url.pathname.slice('/api/review/curate/'.length);
       let result;
       if (request.method === 'GET' && path === 'groups') {
+        if (url.searchParams.has('replacesViewId'))
+          throw new CurateError('Use POST to replace a Curate view.', 'invalid_curate_query', 400);
         result = url.searchParams.has('viewId')
           ? curate.page(
               url.searchParams.get('viewId'),
@@ -21,6 +23,13 @@ export function createCurateRoutes({ curate }) {
               kind: url.searchParams.get('kind') ?? 'all',
               search: url.searchParams.get('q') ?? '',
             });
+      } else if (request.method === 'POST' && path === 'groups') {
+        const body = await readObject(request, { maxBytes: 4096 });
+        result = await curate.openView({
+          kind: body.kind,
+          search: body.search,
+          replacesViewId: body.replacesViewId,
+        });
       } else if (request.method === 'POST' && path === 'comparisons') {
         const body = await readObject(request, { maxBytes: 4096 });
         await curate.refresh();

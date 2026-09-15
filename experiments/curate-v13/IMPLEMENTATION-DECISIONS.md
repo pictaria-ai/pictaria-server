@@ -121,6 +121,14 @@ stays unknown while refresh is pending. These bounds require real-adapter tests.
 | Human separation constraints | Keep while active and their photos exist; deliberate reset deactivates them. Expired Undo/history does not reset a correction. |
 | AI jobs/advice | Current applicable result and exact-input attempt state, active request, and one current queued replacement per overlapping scope/role. No raw-response history. Retire obsolete inactive records after their comparison/Undo references and recent budget window expire. |
 
+PIC-367's view API accepts `replacesViewId` on POST opens. PIC-369 must pass
+the current tab's prior ID on refresh/filter changes, including refresh after
+decisions, and retain that ID across reload/history navigation. Only that view
+and its current comparison are superseded; another tab starts/retains its own
+scope. Capacity rejection preserves the old scope. Distinct unreleased views
+still consume the shared 5 MiB budget; this is explicit replacement, not eviction
+of another view or an increase in the bound.
+
 An operation is settled when its relevant writes are acknowledged or its intent
 is explicitly superseded by later durable intent that retains all unfinished tag
 scope. Do not infer settlement merely from a missing historical queue row.

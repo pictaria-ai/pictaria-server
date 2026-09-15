@@ -18,6 +18,14 @@ All notable changes to Pictaria Server are documented here. This project follows
 - Enrichment schema 13 / persistent-state contract 16 adds Curate records without
   rewriting decisions or tags. Upgrade creates the normal recovery snapshot;
   rollback requires restoring that snapshot.
+- Curate's foundation API can explicitly replace a previous view during refresh
+  or filtering, releasing its snapshot budget while preserving other tabs' views.
+
+### Fixed
+
+- Immich metadata ingestion now clears cached thumbnail and duplicate-group
+  fields when Immich explicitly returns `null`, preventing stale grouping evidence.
+  Fields absent from a partial response still preserve their cached values.
 
 ## 1.2.1 - 2026-09-12
 

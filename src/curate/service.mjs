@@ -73,9 +73,14 @@ export class CurateService {
     this.metrics.rebuildMs = performance.now() - start;
     return this.current;
   }
-  async openView({ kind = 'all', search = '' } = {}) {
+  async openView({ kind = 'all', search = '', replacesViewId = null } = {}) {
     if (!['all', 'stacks', 'singles'].includes(kind) || typeof search !== 'string' || search.length > 200)
       throw new CurateError('Invalid Curate filter.', 'invalid_curate_query', 400);
+    if (
+      replacesViewId !== null &&
+      (typeof replacesViewId !== 'string' || !replacesViewId || replacesViewId.length > 128)
+    )
+      throw new CurateError('Invalid previous Curate view.', 'invalid_curate_query', 400);
     const current = await this.refresh();
     if (!this.timer) {
       this.timer = setInterval(() => {
@@ -104,7 +109,7 @@ export class CurateService {
     }
     // Paging stores order/whole memberships, not expanded photos/provenance.
     // Capacity failure is explicit; no page silently drops part of a stack.
-    const lease = await this.store.createView(current, groups);
+    const lease = await this.store.createView(current, groups, { replacesViewId });
     return this.page(lease.id);
   }
   page(viewId, offset = 0, limit = 50) {

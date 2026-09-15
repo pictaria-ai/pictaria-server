@@ -87,10 +87,14 @@ comparison; automatic newcomer-versus-kept keeper evaluation is not introduced.
 These authenticated endpoints support the upcoming interface, not a second public
 Curate page. They inherit the server's existing password/session/origin checks.
 
-- `GET /api/review/curate/groups`: open a saved view; optional `kind` is `all`,
-  `stacks`, or `singles`, and `q` searches through members without shrinking a stack.
-- The same endpoint with `viewId`, `offset`, and `limit` pages up to 50 group
+- `POST /api/review/curate/groups`: open a saved view. Optional `kind` is `all`,
+  `stacks`, or `singles`; `search` matches through members without shrinking a stack.
+  Supply `replacesViewId` to relinquish this caller's previous view and comparison
+  when opening the new view. Other tabs' scopes and snapshot ownership stay intact.
+- `GET /api/review/curate/groups` with `viewId`, `offset`, and `limit` pages up to 50 group
   summaries in the original order. `updatesAvailable` does not mutate that view.
+  The earlier GET-based open (`kind`, `q`) remains available for staging callers;
+  replacement requires POST so a prefetched link cannot close an existing scope.
 - `POST /api/review/curate/comparisons` with `viewId` and `groupId` returns the
   full pending ID scope, a comparison ID, bounded photo details, and separate
   read-only context. Details beyond 50 photos are retrieved using
@@ -103,10 +107,27 @@ Curate page. They inherit the server's existing password/session/origin checks.
   idempotent even after its lease expires or is removed. A later reset does not
   prevent receipt replay or reactivate the separation. Changed payloads cannot
   reuse the correction ID, and an unknown ID still needs its original live lease.
+  The receipt is an immutable acknowledgement, not the correction's current active
+  state or revision; PIC-369 must read current correction state separately.
 - `POST /api/review/curate/separations/reset` supplies correction `id` and expected
   `revision`; `undo: true` additionally enforces its Undo deadline.
 - `DELETE /api/review/curate/leases` releases an `id` when its view closes,
   including that view's current comparison. Other owners keep shared snapshots.
+
+PIC-369 must pass the current tab's `replacesViewId` on deliberate refresh,
+post-decision refresh and filter changes. Retain the tab's current view ID across
+reload/history navigation, serialize its view-opening requests, and save each
+returned ID. A separate tab must establish its own view rather than replace
+another tab's ID. Without explicit replacement/release, distinct old memberships
+remain valid until expiry and still consume the 5 MiB budget. This backend support
+does not waive the UI integration requirement or enlarge that budget.
+
+Filter/rebuild failures leave the old view available. Capacity admission and
+release of the old view share one transaction, so capacity rejection also
+preserves the old view/comparison. After admission, the old view is relinquished;
+if writing the new snapshot fails, its reservation is cleaned up and the caller
+can retry with the prior ID even if it has already expired or been released.
+No replacement changes a human decision or saved separation receipt.
 
 Comparison scopes bind inspected IDs and per-photo material/human signatures.
 Related dirty candidates and new group members prevent a stale correction;
@@ -120,7 +141,8 @@ PIC-368 must consume these scopes inside its actual atomic decision operation.
 The focused suite exercises producing-schema provenance, positive and missing-face
 cases, complete 30-photo stacks, bounded long chains, hard separations, stale
 inputs and membership, related versus unrelated updates, read-only context,
-capacity/expiry, three simultaneous views of 30k UUID singles, browsing 250 stacks,
+capacity/expiry, three simultaneous views of 30k UUID singles, ten successive
+decision/view replacements at capacity with other tabs retained, browsing 250 stacks,
 receipt replay after expiry/reset/restart, unchanged ingestion, real worker/HTTP
 paths, schema-12 migration, SQLite restart, and online backup/restore. Interrupted
 snapshot builds are discarded on restart rather than serving partial membership.
