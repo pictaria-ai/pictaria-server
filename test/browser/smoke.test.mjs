@@ -1763,8 +1763,10 @@ test('admin UI smoke: gate, Insights lens, Curate, Smart Albums', { timeout: 120
     );
     // The following Settings subtests intentionally share one loaded page.
     await page.navigate(`${server.base}/settings.html`);
+    // The static TTS button can exist before async settings fields render.
+    // Wait for the provider option we assert below, not just the page shell.
     await page.waitFor(
-      'document.getElementById("ttsSpeak") && !document.querySelector(".gate-backdrop")',
+      `document.getElementById('ttsSpeak') && document.querySelector('#f2-curate-refereeProvider option[value=""]') && !document.querySelector('.gate-backdrop')`,
       { label: 'settings restored for subsequent tests' },
     );
     assert.equal(
