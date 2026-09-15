@@ -334,12 +334,13 @@ export class CurateRepository {
     const json = canonicalJson(scope),
       bytes = Buffer.byteLength(json);
     return this.repo.transaction(() => {
-      this.prepare('DELETE FROM curate_leases WHERE expires_at<=?').run(now);
+      this.pruneScopes(now);
       const count = this.prepare('SELECT COUNT(*) count FROM curate_leases WHERE kind=?').get(kind).count;
       const used = this.prepare(
         `SELECT
         (SELECT COALESCE(SUM(bytes),0) FROM curate_leases) +
-        (SELECT COALESCE(SUM(bytes),0) FROM curate_view_snapshots) bytes`,
+        (SELECT COALESCE(SUM(bytes),0) FROM curate_view_snapshots) +
+        (SELECT COALESCE(SUM(bytes),0) FROM curate_view_replacements) bytes`,
       ).get().bytes;
       if (count >= (kind === 'view' ? MAX_VIEW_LEASES : MAX_LEASES) || used + bytes + reservedBytes > MAX_LEASE_BYTES)
         throw new CurateError(
@@ -386,6 +387,27 @@ export class CurateRepository {
       ? { id: `single:${GROUPING_METHOD}:${row.id}`, ids: [row.id], route: row.route }
       : { id: row.id, ids: JSON.parse(row.ids_json), route: row.route };
   }
+  pruneScopes(now) {
+    this.prepare('DELETE FROM curate_leases WHERE expires_at<=?').run(now);
+    this.prepare('DELETE FROM curate_view_replacements WHERE expires_at<=?').run(now);
+  }
+  viewReplacement(id, now) {
+    if (id === null) return {};
+    const direct = this.prepare('SELECT * FROM curate_leases WHERE id=? AND expires_at>?').get(id, now);
+    if (direct) {
+      if (direct.kind !== 'view')
+        throw new CurateError('Only a Curate view can be replaced.', 'invalid_curate_query', 400);
+      return { previous: direct, rootId: JSON.parse(direct.json).replacementRootId ?? id };
+    }
+    const alias = this.prepare('SELECT root_id FROM curate_view_replacements WHERE id=? AND expires_at>?').get(id, now);
+    if (!alias) return {};
+    // Every retired ID points to a stable root. One indexed lookup finds the
+    // current successor, without walking or rewriting a growing alias chain.
+    const previous = this.prepare(
+      "SELECT * FROM curate_leases WHERE kind='view' AND json_extract(json,'$.replacementRootId')=? AND expires_at>?",
+    ).get(alias.root_id, now);
+    return { previous, rootId: alias.root_id };
+  }
   async createView(current, groups, { replacesViewId = null } = {}) {
     // Identical ordered memberships share an immutable SQLite snapshot across
     // tabs, retries and filters. They never page a moving current index. Hashing
@@ -405,22 +427,41 @@ export class CurateRepository {
     const snapshotId = hash.digest('hex');
     const inFlight = this.viewBuilds.get(snapshotId);
     if (inFlight) await inFlight;
-    const scope = { generation: current.generation, stacks: current.stacks, total: groups.length, snapshotId };
+    // A retry with different filters may arrive while its successor snapshot is
+    // still being written. Drain that build before superseding its reservation.
+    for (;;) {
+      const { previous } = this.viewReplacement(replacesViewId, Date.now());
+      const work = previous && this.viewBuilds.get(JSON.parse(previous.json).snapshotId);
+      if (!work) break;
+      await work.catch(() => {});
+    }
     const { lease, fresh } = this.repo.transaction(() => {
       // Cleanup before testing existence: the last owner might just have expired.
-      this.prepare('DELETE FROM curate_leases WHERE expires_at<=?').run(Date.now());
-      if (replacesViewId !== null) {
-        const previous = this.prepare('SELECT kind FROM curate_leases WHERE id=?').get(replacesViewId);
-        if (previous && previous.kind !== 'view')
-          throw new CurateError('Only a Curate view can be replaced.', 'invalid_curate_query', 400);
+      const now = Date.now();
+      this.pruneScopes(now);
+      const { previous, rootId } = this.viewReplacement(replacesViewId, now);
+      if (previous) {
+        const alias = { id: previous.id, rootId, expiresAt: previous.expires_at };
+        this.prepare('INSERT INTO curate_view_replacements VALUES(?,?,?,?)').run(
+          alias.id,
+          rootId,
+          alias.expiresAt,
+          Buffer.byteLength(canonicalJson(alias)),
+        );
         // Explicit replacement relinquishes this caller's old scope before
         // reserving the new one. Capacity rejection rolls this transaction back,
         // preserving the old view/comparison. Other snapshot owners are untouched.
-        // An already expired/released view needs no further cleanup.
-        if (previous) this.releaseLease(replacesViewId);
+        this.releaseLease(previous.id);
       }
+      const scope = {
+        generation: current.generation,
+        stacks: current.stacks,
+        total: groups.length,
+        snapshotId,
+        ...(rootId ? { replacementRootId: rootId } : {}),
+      };
       const fresh = !this.prepare('SELECT 1 FROM curate_view_snapshots WHERE id=?').get(snapshotId);
-      const lease = this.lease('view', scope, Date.now(), fresh ? bytes : 0);
+      const lease = this.lease('view', scope, now, fresh ? bytes : 0);
       if (fresh) this.prepare('INSERT INTO curate_view_snapshots(id,bytes) VALUES(?,?)').run(snapshotId, bytes);
       return { lease, fresh };
     });

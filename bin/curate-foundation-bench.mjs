@@ -74,7 +74,8 @@ if (!selected) {
       .prepare(
         `SELECT
       (SELECT COALESCE(SUM(bytes),0) FROM curate_leases) +
-      (SELECT COALESCE(SUM(bytes),0) FROM curate_view_snapshots) n`,
+      (SELECT COALESCE(SUM(bytes),0) FROM curate_view_snapshots) +
+      (SELECT COALESCE(SUM(bytes),0) FROM curate_view_replacements) n`,
       )
       .get().n;
     const list = [];

@@ -522,6 +522,10 @@ test('foundation HTTP routes return complete groups and reject malformed or stal
       assert.equal((await fetch(base + 'groups?viewId=' + v.viewId)).status, 200);
       const replacement = await (await post('groups', { replacesViewId: v.viewId, kind: 'singles' })).json();
       assert.equal(replacement.total, 2);
+      const retry = await (await post('groups', { replacesViewId: v.viewId, kind: 'singles' })).json();
+      assert.equal(retry.total, 2);
+      assert.equal((await fetch(base + 'groups?viewId=' + replacement.viewId)).status, 409);
+      assert.equal((await fetch(base + 'groups?viewId=' + retry.viewId)).status, 200);
       assert.equal((await fetch(base + 'groups?viewId=' + v.viewId)).status, 409);
       assert.equal((await fetch(base + 'groups?viewId=' + second.viewId)).status, 200);
       assert.equal((await post('separations', { comparisonId: c.id, partitions: [['a'], ['b']] })).status, 200);
@@ -893,6 +897,16 @@ test('30k-photo decisions can replace their view at capacity without releasing o
       if (i > 2) decide(i);
       const oldId = current.viewId;
       current = await service.openView({ replacesViewId: oldId, kind: 'singles' });
+      if (i === 2) {
+        // The replacement succeeded, but its response never reached the client.
+        // Retrying the old ID must supersede that successor, not retain an orphan.
+        const lostId = current.viewId;
+        current = await service.openView({ replacesViewId: oldId, kind: 'singles' });
+        assert.throws(
+          () => service.page(lostId),
+          (error) => error.code === 'curate_expired',
+        );
+      }
       assert.equal(current.total, 30000 - i - 1);
       assert.throws(
         () => service.page(oldId),
@@ -904,7 +918,10 @@ test('30k-photo decisions can replace their view at capacity without releasing o
       assert.equal(service.page(secondTab.viewId).total, 29999);
       assert.equal(service.page(current.viewId, current.total - 1, 1).groups[0].id, `single:standard-1:${ids.at(-1)}`);
       const used = repo.db
-        .prepare(`SELECT (SELECT SUM(bytes) FROM curate_leases) + (SELECT SUM(bytes) FROM curate_view_snapshots) n`)
+        .prepare(
+          `SELECT (SELECT SUM(bytes) FROM curate_leases) + (SELECT SUM(bytes) FROM curate_view_snapshots)
+          + (SELECT COALESCE(SUM(bytes),0) FROM curate_view_replacements) n`,
+        )
         .get().n;
       assert.ok(used <= MAX_LEASE_BYTES);
     }
@@ -944,6 +961,123 @@ test('replacement capacity rejection rolls back its old view, comparison and sha
     );
     assert.equal(service.page(other.viewId).total, 1);
     assert.equal(repo.db.prepare('SELECT COUNT(*) n FROM manual_overrides').get().n, 0);
+  }));
+
+test('replacement retries resolve the latest successor after restart without extending old IDs', async () =>
+  fixture(async ({ repo, service, add, path }) => {
+    add('a');
+    add('b', 1);
+    const original = await service.openView(),
+      other = await service.openView();
+    const first = await service.openView({ replacesViewId: original.viewId });
+    const second = await service.openView({ replacesViewId: first.viewId });
+    const comparison = service.comparison(second.viewId, second.groups[0].id);
+    const alias = repo.db.prepare('SELECT * FROM curate_view_replacements WHERE id=?').get(original.viewId);
+    assert.equal(alias.expires_at, original.expiresAt);
+    const plan = repo.db
+      .prepare(
+        "EXPLAIN QUERY PLAN SELECT * FROM curate_leases WHERE kind='view' AND json_extract(json,'$.replacementRootId')=? AND expires_at>?",
+      )
+      .all(alias.root_id, Date.now());
+    assert.match(JSON.stringify(plan), /idx_curate_view_replacement_root/);
+    const reader = new Repository(path);
+    reader.initSchema();
+    const restarted = new CurateService({ repo: reader });
+    try {
+      const retry = await restarted.openView({ replacesViewId: original.viewId });
+      assert.equal(retry.total, 1);
+      assert.equal(restarted.page(other.viewId).total, 1);
+      for (const id of [original.viewId, first.viewId, second.viewId])
+        assert.throws(
+          () => restarted.page(id),
+          (error) => error.code === 'curate_expired',
+        );
+      assert.throws(
+        () => restarted.comparisonPhotos(comparison.id),
+        (error) => error.code === 'curate_expired',
+      );
+      assert.equal(reader.db.prepare("SELECT COUNT(*) n FROM curate_leases WHERE kind='view'").get().n, 2);
+      assert.deepEqual(
+        repo.db.prepare('SELECT * FROM curate_view_replacements WHERE id=?').get(original.viewId),
+        alias,
+      );
+      const again = await restarted.openView({ replacesViewId: first.viewId });
+      assert.throws(
+        () => restarted.page(retry.viewId),
+        (error) => error.code === 'curate_expired',
+      );
+      assert.equal(again.total, 1);
+    } finally {
+      await restarted.close();
+      reader.close();
+    }
+  }));
+
+test('replacement aliases expire independently, count against capacity and roll back with stale-ID rejection', async () =>
+  fixture(async ({ repo, service, add }) => {
+    add('a');
+    const old = await service.openView();
+    const live = await service.openView({ replacesViewId: old.viewId });
+    const comparison = service.comparison(live.viewId, live.groups[0].id);
+    const aliasBytes = repo.db.prepare('SELECT SUM(bytes) n FROM curate_view_replacements').get().n;
+    assert.ok(aliasBytes > 0);
+    const used = repo.db
+      .prepare(
+        `SELECT (SELECT SUM(bytes) FROM curate_leases)
+      + (SELECT SUM(bytes) FROM curate_view_snapshots) + (SELECT SUM(bytes) FROM curate_view_replacements) n`,
+      )
+      .get().n;
+    const paddingBytes = MAX_LEASE_BYTES - used - Buffer.byteLength(JSON.stringify({ padding: '' }));
+    assert.throws(
+      () => repo.curate.lease('comparison', { padding: 'x'.repeat(paddingBytes + 1) }),
+      (error) => error.code === 'curate_capacity',
+    );
+    const padding = repo.curate.lease('comparison', { padding: 'x'.repeat(paddingBytes) });
+    for (let i = 0; i < 10; i++) add('far' + i, 10000 + i * 60);
+    await assert.rejects(service.openView({ replacesViewId: old.viewId }), (error) => error.code === 'curate_capacity');
+    assert.equal(service.page(live.viewId).total, 1);
+    assert.equal(service.comparisonPhotos(comparison.id).total, 1);
+    assert.equal(repo.db.prepare('SELECT COUNT(*) n FROM curate_view_replacements').get().n, 1);
+    repo.curate.releaseLease(padding.id);
+    repo.db.prepare('UPDATE curate_view_replacements SET expires_at=0 WHERE id=?').run(old.viewId);
+    const fresh = await service.openView({ replacesViewId: old.viewId });
+    // An expired historical handle no longer authorizes replacing its successor.
+    assert.equal(service.page(live.viewId).total, 1);
+    assert.equal(fresh.total, 11);
+    assert.equal(repo.db.prepare('SELECT COUNT(*) n FROM curate_view_replacements').get().n, 0);
+  }));
+
+test('a concurrent retry with different filters waits for its successor snapshot before replacing it', async () =>
+  fixture(async ({ repo, service, add }) => {
+    add('a');
+    const old = await service.openView();
+    add('b', 60);
+    const started = Promise.withResolvers(),
+      release = Promise.withResolvers();
+    const write = repo.curate.writeViewSnapshot.bind(repo.curate);
+    let writes = 0;
+    repo.curate.writeViewSnapshot = async (...args) => {
+      if (++writes === 1) {
+        started.resolve();
+        await release.promise;
+      }
+      return write(...args);
+    };
+    const first = service.openView({ replacesViewId: old.viewId });
+    await started.promise;
+    const retry = service.openView({ replacesViewId: old.viewId, kind: 'stacks' });
+    await new Promise((resolve) => setImmediate(resolve));
+    assert.equal(writes, 1);
+    release.resolve();
+    const [lost, next] = await Promise.all([first, retry]);
+    assert.equal(next.total, 0);
+    assert.throws(
+      () => service.page(lost.viewId),
+      (error) => error.code === 'curate_expired',
+    );
+    assert.equal(repo.db.prepare("SELECT COUNT(*) n FROM curate_leases WHERE kind='view'").get().n, 1);
+    assert.equal(repo.db.prepare('SELECT COUNT(*) n FROM curate_view_snapshots').get().n, 1);
+    assert.equal(repo.db.prepare('SELECT COUNT(*) n FROM curate_view_groups').get().n, 0);
   }));
 
 test('failed replacement snapshot writes release their reservation and allow retry with the prior ID', async () =>

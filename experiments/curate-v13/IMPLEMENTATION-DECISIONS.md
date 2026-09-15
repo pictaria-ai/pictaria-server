@@ -124,7 +124,7 @@ resource and live-version acceptance remain separate.
 | Data | Chosen lifetime / bound |
 | --- | --- |
 | Current projection/index | One current projection/index plus one replacement; publish atomically. Full provenance stays cold. |
-| Comparison/action leases | 30 minutes; deliberate refresh issues a new lease for the verified scope. PIC-367 review clarification: at most 200 views and 200 comparisons, with one current comparison per view. Reopening an identical comparison reuses its ID; navigating within that view supersedes only its prior comparison. Immutable membership snapshots can be shared across views, and all retained snapshots and scopes count toward the same 5 MiB installation bound. Refuse new allocation clearly at capacity; do not evict another view or truncate membership. |
+| Comparison/action leases | 30 minutes; deliberate refresh issues a new lease for the verified scope. PIC-367 review clarification: at most 200 views and 200 comparisons, with one current comparison per view. Reopening an identical comparison reuses its ID; navigating within that view supersedes only its prior comparison. Immutable membership snapshots can be shared across views, and all retained snapshots, scopes and replacement records count toward the same 5 MiB installation bound. Refuse new allocation clearly at capacity; do not evict another view or truncate membership. |
 | Immediate Undo | 30 minutes from the operation, and only while all target revisions are still current. The receipt states its deadline. Decided review remains available for later choices. No new history browser is required. |
 | Completed operation receipts | 30 days after settling, then a minimal ID/payload/expiry tombstone for 30 more days. Store only authorized decision-tag before-state, not descriptive tags or original metadata. |
 | Pending/failed sync and live Undo dependencies | Retain until resolved/superseded or the dependency expires. Age/space cleanup cannot discard them. Keep one latest merged scoped intent per photo. |
@@ -138,6 +138,13 @@ and its current comparison are superseded; another tab starts/retains its own
 scope. Capacity rejection preserves the old scope. Distinct unreleased views
 still consume the shared 5 MiB budget; this is explicit replacement, not eviction
 of another view or an increase in the bound.
+
+A lost replacement response can be retried with the old view ID until that ID's
+original expiry. Retired IDs resolve through a stable family key to the current
+successor, which is replaced without retaining an orphan view. Persist this across
+restart; do not extend old-ID lifetimes or follow aliases for paging/actions/close.
+Replacement records count toward the same 5 MiB bound and expire independently.
+Capacity refusal rolls their changes back with the view/comparison release.
 
 An operation is settled when its relevant writes are acknowledged or its intent
 is explicitly superseded by later durable intent that retains all unfinished tag

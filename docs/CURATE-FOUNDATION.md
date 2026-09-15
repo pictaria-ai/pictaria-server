@@ -61,7 +61,7 @@ queue, and their projection can resume after interruption.
 | `curate_metadata` / control | One durable refresh row per review photo, indexed due work, last observation result, claim cooldown and connection-wide retry state. No responses, credentials or provider prompts. Removing a review member removes its refresh row. |
 | `curate_dirty` | Transactional change tracking across assets, successful enrichment, tags, membership, overrides and observations. Asset updates queue work only when a grouping source column changes; an unchanged discovery sync does not re-project the collection. Unchanged projections do not increment the grouping generation. |
 | `curate_separations` / members | Durable active human constraints, conditional reset and 30-minute correction Undo. Neither writes photo decisions or Immich tags. |
-| `curate_leases` / view snapshots / view groups | Server-issued 30-minute scopes, at most 200 views and 200 comparisons, with one current comparison per view. Identical ordered memberships share immutable indexed snapshots; single-photo IDs are stored once per snapshot. The shared 5 MiB bound counts every retained snapshot and lease. Closing/expiring the last owner removes its snapshot. Capacity refuses new scopes instead of evicting another view. |
+| `curate_leases` / view snapshots / view groups / view replacements | Server-issued 30-minute scopes, at most 200 views and 200 comparisons, with one current comparison per view. Identical ordered memberships share immutable indexed snapshots; single-photo IDs are stored once per snapshot. The shared 5 MiB bound counts every retained snapshot, lease and replacement record. Closing/expiring the last owner removes its snapshot. Capacity refuses new scopes instead of evicting another view. |
 | `curate_advice` / members | Shared exhaustive-partition and keeper-set validation with producing schema/input metadata. New advice replaces overlapping current scope for that role; no raw-response history. Real provider calls and their lifecycle remain PIC-370/PIC-116/PIC-346 work. |
 
 Evidence projection uses bounded transactions with a 4 ms yielding target. One
@@ -147,6 +147,20 @@ another tab's ID. Without explicit replacement/release, distinct old memberships
 remain valid until expiry and still consume the 5 MiB budget. This backend support
 does not waive the UI integration requirement or enlarge that budget.
 
+If a replacement response is lost, retry with the same `replacesViewId`. Until
+that ID's original expiry, the server resolves it to this view family's current
+successor and replaces that successor. Retries do not retain an extra view or
+keep obsolete snapshots alive. This survives restart and multiple replacements;
+it does not replay an old response or extend a retired ID's expiry. Once that ID
+expires, it no longer identifies a successor for replacement. Paging, actions and
+explicit close still require their exact live scope IDs; they do not follow aliases.
+
+Replacement records hold an old ID, a stable family ID and the original expiry.
+One indexed lookup finds the current successor; there is no growing chain to walk
+or rewrite on each replacement. These records count toward the existing 5 MiB
+budget and expired records are pruned during scope admission. Concurrent retries
+wait for an in-progress successor snapshot before superseding its reservation.
+
 Filter/rebuild failures leave the old view available. Capacity admission and
 release of the old view share one transaction, so capacity rejection also
 preserves the old view/comparison. After admission, the old view is relinquished;
@@ -171,6 +185,9 @@ decision/view replacements at capacity with other tabs retained, browsing 250 st
 receipt replay after expiry/reset/restart, unchanged ingestion, real worker/HTTP
 paths, schema-12 migration, SQLite restart, and online backup/restore. Interrupted
 snapshot builds are discarded on restart rather than serving partial membership.
+Replacement tests reproduce a lost response at 30k-photo capacity, retry across
+multiple successors and restart, and cover expiry, alias byte accounting,
+capacity rollback and a concurrent retry with different filters.
 Metadata tests additionally cover actual HTTP background dispatch/cancellation and
 response bounds, 500/two request limits, 1,000 decided photos with eight requested
 context members, persistent freshness/backoff, single-probe recovery, changed

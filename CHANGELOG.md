@@ -24,6 +24,8 @@ All notable changes to Pictaria Server are documented here. This project follows
   rollback requires restoring that snapshot.
 - Curate's foundation API can explicitly replace a previous view during refresh
   or filtering, releasing its snapshot budget while preserving other tabs' views.
+  Retrying after a lost replacement response resolves the current successor,
+  including after restart, so abandoned views do not retain obsolete snapshots.
 
 ### Fixed
 

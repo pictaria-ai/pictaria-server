@@ -35,6 +35,12 @@ CREATE TABLE IF NOT EXISTS curate_leases (
 CREATE INDEX IF NOT EXISTS idx_curate_lease_expiry ON curate_leases(expires_at);
 CREATE INDEX IF NOT EXISTS idx_curate_lease_parent ON curate_leases(kind,json_extract(json,'$.viewId'));
 CREATE INDEX IF NOT EXISTS idx_curate_lease_snapshot ON curate_leases(json_extract(json,'$.snapshotId'));
+CREATE UNIQUE INDEX IF NOT EXISTS idx_curate_view_replacement_root
+ ON curate_leases(json_extract(json,'$.replacementRootId')) WHERE kind='view';
+CREATE TABLE IF NOT EXISTS curate_view_replacements (
+ id TEXT PRIMARY KEY, root_id TEXT NOT NULL, expires_at INTEGER NOT NULL, bytes INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_curate_view_replacement_expiry ON curate_view_replacements(expires_at);
 CREATE TABLE IF NOT EXISTS curate_view_snapshots (id TEXT PRIMARY KEY, bytes INTEGER NOT NULL, ready INTEGER NOT NULL DEFAULT 0);
 CREATE TABLE IF NOT EXISTS curate_view_groups (
  view_id TEXT NOT NULL, position INTEGER NOT NULL, group_id TEXT NOT NULL, ids_json TEXT NOT NULL, route TEXT NOT NULL,
