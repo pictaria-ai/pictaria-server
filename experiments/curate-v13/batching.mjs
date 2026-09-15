@@ -8,8 +8,10 @@ export function planKeeperBatches(group, sizes, { orderedIds, maxImages, ...opti
   if (!Number.isSafeInteger(maxImages) || maxImages < 2) return { state: 'unsupported-provider' };
   // Preserve the total logical-comparison byte/size budget as well as each
   // provider request limit. A batch does not authorize more total image memory.
-  const gate = planRequest(group, sizes, { ...options, role: 'keeper', maxImages: 30 });
-  if (gate.state !== 'ready') return gate;
+  const gate = planRequest(group, sizes, { ...options, role: 'keeper', maxImages });
+  // A full keeper request over the known cap may be planned as batches only
+  // after all role/check/availability/total-byte guards have passed.
+  if (!['ready', 'manual-provider'].includes(gate.state)) return gate;
   const requests = [], count = Math.ceil(orderedIds.length / Math.min(30, maxImages));
   if (count > 3) return { state: 'manual-request-budget' };
   const small = Math.floor(orderedIds.length / count), extra = orderedIds.length % count;
@@ -22,7 +24,7 @@ export function planKeeperBatches(group, sizes, { orderedIds, maxImages, ...opti
   // Do not fabricate comparative advice for a one-photo leftover. Production
   // routing must choose a supported layout or keep the comparison manual.
   if (requests.some(ids => ids.length < 2)) return { state: 'manual-batch-layout' };
-  return { ...gate, requests, groupId: group.id,
+  return { ...gate, state: 'ready', requests, groupId: group.id,
     coverage: requests.length === 1 ? 'whole-group' : 'within-batches' };
 }
 
@@ -38,6 +40,7 @@ export function collectKeeperBatches(plan, answers) {
   const complete = batches.every(b => b.status === 'valid');
   const mixedBatch = batches.some(b => b.output?.groups.length > 1);
   return { state: complete ? 'complete' : 'partial', coverage: plan.coverage, groupId: plan.groupId,
+    ...(plan.checkCoverage ? { checkCoverage: plan.checkCoverage, checkNotice: plan.checkNotice } : {}),
     wholeGroupCompared: complete && plan.coverage === 'whole-group',
     // A discovered split inside an independent batch cannot resolve the whole
     // group's partition. Show local proposals, but withhold apply-all advice.

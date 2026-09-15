@@ -258,6 +258,9 @@ The selected thirty-photo strategy uses up to three keeper batches, preserving
 all inputs and accepted keep flags. The owner accepted the released-baseline
 results on the natural thirty-photo set. Provider caps still apply to dedicated
 whole-input checks; no independent chunk partitions become a global check.
+For a confirmed provider image-count limit, keeper batches may run with a clear
+unchecked label even when checking is enabled. Pending/failed checks and other
+capability/configuration errors still block; all plan/byte limits remain in force.
 See the current role matrix, mixed-batch restriction and evidence limits in
 [implementation decisions](IMPLEMENTATION-DECISIONS.md).
 
@@ -551,7 +554,7 @@ The [implementation decisions](IMPLEMENTATION-DECISIONS.md) are ready for review
 large-stack role behavior, bounded context/evidence, action expiration and
 receipt retention, shared budget lineage and safe idle compaction. New offline
 contracts and a synthetic SQLite sizing pass support those choices. The full
-local suite passes 1,249 tests (62 experimental); existing target-host runtime
+local suite passes 1,252 tests (65 experimental); existing target-host runtime
 measurements remain scoped to their unchanged measured source.
 
 Independent review and owner merge approval remain. Production adapters,

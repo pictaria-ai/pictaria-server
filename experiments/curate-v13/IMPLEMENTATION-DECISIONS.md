@@ -45,14 +45,21 @@ other supported layouts require their ordinary implementation validation.
 | Both AI roles off | Standard grouping and manual review | Same |
 | Check on, keeper off | Full-input check or recorded bypass; human chooses | Check unavailable for this group; manual comparison remains available |
 | Check off, keeper on | Full-input keeper suggestions | Separate keeper comparisons, with their full union shown and coverage explained |
-| Both on; check pending, failed or unsupported | Wait for a valid check/bypass; manual comparison remains available | Same; batching cannot bypass the check |
+| Both on; check pending, failed or unsupported for another reason | Wait for a valid check/bypass; manual comparison remains available | Same; batching cannot bypass the check |
+| Both on; check exceeds the provider's confirmed image-count limit | Not a valid size exception if the input fits | Keeper batches may run, explicitly labeled Stack not checked: too large |
 | Both on; applicable full check/bypass already valid | Keeper suggestions for eligible resulting groups | Keeper batches may run if the resulting logical comparison still needs them |
 
 This explicitly limits **dedicated checking** above the provider's full-input
 limit. Check-only remains useful for supported groups. A future global checking
 strategy needs evidence; a union of independent partitions cannot stand in for it.
-This is a reviewable product limitation, not a claim that all thirty-photo AI
-combinations have been validated.
+The owner approved the narrow unchecked-keeper exception after review on
+September 15. It requires a recorded `unsupported-size` check state and an input
+that actually exceeds the resolved provider image-count limit. Pending/failed
+checks, unknown capacity, authentication/configuration errors and other unsupported
+states remain blocking. No retry, new feature permission or byte/plan-budget
+exception is implied. Preserve the unchecked notice with the saved suggestions;
+do not mark the check successful or call this a strong-evidence bypass.
+This is not a claim that all thirty-photo AI combinations have been validated.
 
 For batched keeper results:
 
@@ -128,16 +135,23 @@ conditional Undo ID/deadline with the receipt. Bind each to its immutable scope
 or undo target. Adapters for other Pictaria entry points establish the same
 durable identity at command acceptance. Clients reuse the ID for a retry.
 
-Within the action transaction, look for the saved receipt first. Same ID/payload
-returns it even after the comparison lease expires; different payload conflicts.
+Within the action transaction, fetch the receipt and lease by the submitted
+server-issued operation ID, never an unrelated live lease. Same ID/full canonical
+payload returns the receipt even after lease expiry; different payload conflicts.
 A tombstone returns an explicit expired result. With no saved record, require a
-live server-issued lease before applying anything. Once receipt and tombstone are
+live lease whose operation ID and scope fingerprint match the request. Derive the
+scope fingerprint from its decision mode and immutable snapshot, or its Undo
+target; decision outcome IDs must exactly cover that snapshot's actionable IDs.
+Do not trust a separately supplied scope hash. The normal decision handler still
+validates current material state, action values and user authorization atomically.
+Once receipt and tombstone are
 pruned, the expired/absent lease still prevents an old ID becoming a new operation.
 Never accept an arbitrary unknown client ID as a fresh action after pruning.
 An expired comparison requests Refresh; it never grows the inspected scope.
 
-The lifecycle tests exercise these decisions through SQLite serialization,
-restart and pruning. They do not implement production cleanup or lease issuance;
+The lifecycle tests exercise ID-indexed lookup, unrelated live scopes, changed
+photo sets/modes/Undo targets, full-payload replay, SQLite restart and pruning.
+They do not implement production cleanup or lease issuance;
 PIC-368 must wire it atomically into the actual operation/outbox transaction.
 
 ## 4. Shared AI budgets as groups change

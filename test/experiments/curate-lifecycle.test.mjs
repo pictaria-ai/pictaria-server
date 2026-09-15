@@ -5,13 +5,15 @@ import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { DAY, MINUTE, LIFETIME, selectKeptContext, freshCohorts, reconcileCohort,
-  reserveCohortBudget, pruneCohortReservations, receiptDisposition, inspectOperation } from '../../experiments/curate-v13/lifecycle.mjs';
+  reserveCohortBudget, pruneCohortReservations, receiptDisposition, inspectOperation, operationScopeHash } from '../../experiments/curate-v13/lifecycle.mjs';
 import { compactIdleCohort } from '../../experiments/curate-v13/lifecycle.mjs';
-import { groupPhotos, planRequest } from '../../experiments/curate-v13/grouping.mjs';
+import { groupPhotos, planRequest, fingerprint } from '../../experiments/curate-v13/grouping.mjs';
 import { planKeeperBatches, collectKeeperBatches } from '../../experiments/curate-v13/batching.mjs';
 import { dataset } from '../../experiments/curate-v13/fixtures.mjs';
 
 const photo = (id, seconds, state = 'kept') => ({ id, capturedAt: new Date(1700000000000 + seconds * 1000).toISOString(), state });
+const decisionPayload = (scopeId = 'comparison', ids = ['a', 'b']) => ({ kind: 'decision', mode: 'manual',
+  snapshot: { scopeId, ids, material: 'unchanged-input' }, outcomes: Object.fromEntries(ids.map(id => [id, 'approve'])) });
 
 test('kept context is bounded, deterministic, explicitly omitted and never actionable', () => {
   const pending = [photo('new', 0, 'pending')], candidates = Array.from({ length: 20 }, (_, i) => photo(`old-${i}`, i + 1));
@@ -84,33 +86,89 @@ test('expired/forgotten action IDs cannot become fresh operations after SQLite r
     db.exec('CREATE TABLE records(id TEXT PRIMARY KEY, data TEXT NOT NULL)');
     const save = (id, value) => db.prepare('INSERT OR REPLACE INTO records VALUES(?,?)').run(id, JSON.stringify(value));
     const read = id => { const row = db.prepare('SELECT data FROM records WHERE id=?').get(id); return row ? JSON.parse(row.data) : null; };
-    save('lease', { expiresAt: LIFETIME.lease });
-    assert.equal(inspectOperation({ lease: read('lease'), payload: 'p', now: 0 }), 'new');
-    save('operation', { payload: 'p', receipt: { requestId: 'operation' }, completedAt: 0 });
+    const operationId = 'issued-operation', payload = decisionPayload(), lookups = [];
+    const lookup = id => { lookups.push(id); return { lease: read(`lease:${id}`), saved: read(`receipt:${id}`) }; };
+    const inspect = (now, body = payload, id = operationId) => inspectOperation({ operationId: id, payload: body, now }, lookup);
+    save(`lease:${operationId}`, { operationId, scopeHash: operationScopeHash(payload), expiresAt: LIFETIME.lease });
+    assert.equal(inspect(0), 'new');
+    assert.equal(inspect(0, decisionPayload('another-comparison', ['c', 'd'])), 'conflict');
+    assert.equal(inspect(0, payload, 'unknown-operation'), 'expired');
+    assert.deepEqual(lookups, [operationId, operationId, 'unknown-operation']);
+    save(`receipt:${operationId}`, { operationId, payloadHash: fingerprint(payload), receipt: { requestId: operationId }, completedAt: 0 });
     db.close(); db = new DatabaseSync(path);
-    assert.equal(inspectOperation({ lease: read('lease'), saved: read('operation'), payload: 'p', now: DAY }), 'replay');
-    assert.equal(inspectOperation({ saved: read('operation'), payload: 'different', now: DAY }), 'conflict');
-    const full = read('operation'); assert.equal(receiptDisposition(full, 30 * DAY), 'tombstone');
-    save('operation', { ...full, receipt: null });
-    assert.equal(inspectOperation({ saved: read('operation'), payload: 'p', now: 30 * DAY }), 'expired');
-    assert.equal(receiptDisposition(read('operation'), 60 * DAY), 'forget');
+    assert.equal(inspect(DAY), 'replay');
+    assert.equal(inspect(DAY, { ...payload, outcomes: { a: 'reviewed', b: 'approve' } }), 'conflict');
+    const full = read(`receipt:${operationId}`); assert.equal(receiptDisposition(full, 30 * DAY), 'tombstone');
+    save(`receipt:${operationId}`, { ...full, receipt: null });
+    assert.equal(inspect(30 * DAY), 'expired');
+    assert.equal(receiptDisposition(read(`receipt:${operationId}`), 60 * DAY), 'forget');
     db.exec('DELETE FROM records');
-    assert.equal(inspectOperation({ lease: read('lease'), saved: read('operation'), payload: 'p', now: 60 * DAY }), 'expired');
+    assert.equal(inspect(60 * DAY), 'expired');
   } finally { db?.close(); rmSync(dir, { recursive: true, force: true }); }
 });
 
-test('large-group role matrix never bypasses an enabled unresolved check or hides excess requests', () => {
+test('a live lease cannot authorize a different operation ID, snapshot, mode or Undo target', () => {
+  const payload = decisionPayload(), request = { operationId: 'op-a', payload, now: 0 };
+  const lease = { operationId: 'op-a', scopeHash: operationScopeHash(payload), expiresAt: LIFETIME.lease };
+  const lookup = () => ({ lease });
+  assert.equal(inspectOperation(request, lookup), 'new');
+  assert.equal(inspectOperation({ ...request, operationId: 'op-b' }, lookup), 'conflict');
+  for (const body of [decisionPayload('another-comparison'), decisionPayload('comparison', ['c', 'd']),
+    { ...payload, snapshot: { ...payload.snapshot, material: 'changed-input' } },
+    { ...payload, outcomes: { c: 'approve', d: 'approve' } },
+    { ...payload, outcomes: { a: 'approve' } },
+    { ...payload, mode: 'advice' }, { kind: 'undo', targetOperationId: 'prior-op' }]) {
+    assert.equal(inspectOperation({ ...request, payload: body }, lookup), 'conflict');
+  }
+  const undo = { kind: 'undo', targetOperationId: 'prior-op' };
+  const undoLookup = () => ({ lease: { ...lease, scopeHash: operationScopeHash(undo) } });
+  assert.equal(inspectOperation({ ...request, payload: undo }, undoLookup), 'new');
+  assert.equal(inspectOperation({ ...request, payload: { ...undo, targetOperationId: 'other-op' } }, undoLookup), 'conflict');
+});
+
+test('receipt replay requires the requested operation identity and complete canonical payload', () => {
+  const payload = decisionPayload(), request = { operationId: 'op-a', payload, now: DAY };
+  const saved = { operationId: 'op-a', payloadHash: fingerprint(payload), receipt: { requestId: 'op-a' } };
+  assert.equal(inspectOperation(request, () => ({ saved })), 'replay');
+  assert.equal(inspectOperation({ ...request, operationId: 'op-b' }, () => ({ saved })), 'conflict');
+  assert.equal(inspectOperation({ ...request, payload: decisionPayload('different') }, () => ({ saved })), 'conflict');
+  assert.equal(inspectOperation({ ...request, payload: { ...payload, outcomes: { a: 'reviewed', b: 'approve' } } }, () => ({ saved })), 'conflict');
+});
+
+test('large-group role matrix distinguishes a known check size limit and never hides excess requests', () => {
   const ids = dataset(30).map(p => p.id), group = groupPhotos(dataset(30)).groups[0];
   const sizes = Object.fromEntries(ids.map(id => [id, 1000]));
   for (const stacks of [false, true]) for (const check of [false, true]) for (const referee of [false, true]) {
     const options = { stacks, check, referee, maxImages: 10, orderedIds: ids };
     const checking = planRequest(group, sizes, { ...options, role: 'check' });
-    const keeping = planKeeperBatches(group, sizes, options);
+    const keeping = planKeeperBatches(group, sizes, { ...options, checkState: checking.checkState ?? 'pending' });
     assert.equal(checking.state, stacks && check ? 'manual-provider' : 'disabled');
-    assert.equal(keeping.state, !stacks || !referee ? 'disabled' : check ? 'waiting-for-check' : 'ready');
+    assert.equal(keeping.state, !stacks || !referee ? 'disabled' : 'ready');
+    if (stacks && check && referee) assert.equal(keeping.checkCoverage, 'unchecked-size');
   }
   assert.equal(planKeeperBatches(group, sizes, { orderedIds: ids, maxImages: 10, referee: true, check: true, checkState: 'valid' }).state, 'ready');
   assert.equal(planKeeperBatches(group, sizes, { orderedIds: ids, maxImages: 8, referee: true }).state, 'manual-request-budget');
+});
+
+test('unchecked keeper batches require a confirmed size limit and retain their warning through collection', () => {
+  const ids = dataset(30).map(p => p.id), group = groupPhotos(dataset(30)).groups[0];
+  const sizes = Object.fromEntries(ids.map(id => [id, 1000]));
+  const options = { orderedIds: ids, maxImages: 10, referee: true, check: true, checkState: 'unsupported-size' };
+  const plan = planKeeperBatches(group, sizes, options);
+  assert.equal(plan.state, 'ready'); assert.equal(plan.checkNotice, 'Stack not checked: too large');
+  const answers = plan.requests.map(ids => ({ status: 'valid', output: { groups: [{ ids, keepers: [ids[0]], reason: 'Local alternatives.' }] } }));
+  const result = collectKeeperBatches(plan, answers);
+  assert.equal(result.canApplyAll, true); assert.equal(result.wholeGroupCompared, false);
+  assert.equal(result.checkCoverage, 'unchecked-size'); assert.equal(result.checkNotice, plan.checkNotice);
+  answers[0] = { status: 'provider-error' };
+  assert.equal(collectKeeperBatches(plan, answers).canApplyAll, false);
+  for (const checkState of ['pending', 'failed', 'unsupported', 'auth-error', 'unknown']) {
+    assert.equal(planKeeperBatches(group, sizes, { ...options, checkState }).state, 'waiting-for-check');
+  }
+  assert.equal(planKeeperBatches(group, sizes, { ...options, maxImages: null }).state, 'unsupported-provider');
+  assert.equal(planKeeperBatches(group, sizes, { ...options, maxImages: 30 }).state, 'waiting-for-check');
+  assert.equal(planKeeperBatches(group, { ...sizes, [ids[0]]: 3 * 1024 * 1024 }, options).state, 'manual-size');
+  assert.equal(planKeeperBatches(group, sizes, { ...options, stacks: false }).state, 'disabled');
 });
 
 test('mixed subjects within a keeper batch withhold full-group advice application', () => {

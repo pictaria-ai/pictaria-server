@@ -210,7 +210,9 @@ export function planRequest(group, sizes, { role, stacks = true, check = false, 
   if (!['check', 'keeper'].includes(role)) throw Error('invalid role');
   if (!stacks || !(role === 'check' ? check : referee)) return { state: 'disabled' };
   if (group.pendingIds.length < 2) return { state: 'manual-context' };
-  if (role === 'keeper' && check && !['valid', 'bypass'].includes(checkState)) return { state: 'waiting-for-check' };
+  const uncheckedSize = role === 'keeper' && check && checkState === 'unsupported-size'
+    && Number.isSafeInteger(maxImages) && maxImages >= 2 && group.ids.length > maxImages;
+  if (role === 'keeper' && check && !['valid', 'bypass'].includes(checkState) && !uncheckedSize) return { state: 'waiting-for-check' };
   if (group.route === 'manual-budget') return { state: 'manual-budget' };
   if (role === 'check' && group.route === 'checksum-bypass') return { state: 'bypass' };
   if (!Number.isSafeInteger(maxImages) || maxImages < 2) return { state: 'unsupported-provider' };
@@ -220,8 +222,11 @@ export function planRequest(group, sizes, { role, stacks = true, check = false, 
   if (group.ids.length > 30 || bytes.some(n => n > 2 * 1024 * 1024) || rawBytes > 24 * 1024 * 1024) {
     return { state: 'manual-size', members: group.ids.length, rawBytes };
   }
-  if (group.ids.length > maxImages) return { state: 'manual-provider', members: group.ids.length, maxImages };
-  return { state: 'ready', requests: [group.ids], rawBytes, base64Bytes: bytes.reduce((n, size) => n + 4 * Math.ceil(size / 3), 0) };
+  const totals = { rawBytes, base64Bytes: bytes.reduce((n, size) => n + 4 * Math.ceil(size / 3), 0) };
+  const unchecked = uncheckedSize ? { checkCoverage: 'unchecked-size', checkNotice: 'Stack not checked: too large' } : {};
+  if (group.ids.length > maxImages) return { state: 'manual-provider', members: group.ids.length, maxImages, ...totals, ...unchecked,
+    ...(role === 'check' ? { checkState: 'unsupported-size' } : {}) };
+  return { state: 'ready', requests: [group.ids], ...totals };
 }
 
 export function validateAdvice(inputIds, output, role = 'keeper') {

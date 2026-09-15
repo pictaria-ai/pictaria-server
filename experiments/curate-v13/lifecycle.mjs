@@ -91,15 +91,39 @@ export function receiptDisposition(record, now) {
   return 'forget';
 }
 
-export function inspectOperation({ lease, saved, payload, now }) {
+export function operationScopeHash(payload) {
+  // At issuance the adapter uses its authoritative snapshot/Undo target.
+  // At inspection derive the binding from the submitted payload, not a second
+  // client-supplied scope hash that could disagree with that payload.
+  if (payload?.kind === 'decision' && ['manual', 'advice'].includes(payload.mode)
+    && payload.snapshot && typeof payload.snapshot === 'object' && !Array.isArray(payload.snapshot)) {
+    const ids = payload.snapshot.ids;
+    if (!Array.isArray(ids) || !ids.length || ids.some(id => typeof id !== 'string' || !id)
+      || new Set(ids).size !== ids.length || !payload.outcomes || typeof payload.outcomes !== 'object' || Array.isArray(payload.outcomes)
+      || fingerprint(Object.keys(payload.outcomes).sort()) !== fingerprint([...ids].sort())) throw Error('outcomes outside operation scope');
+    return fingerprint({ kind: payload.kind, mode: payload.mode, snapshot: payload.snapshot });
+  }
+  if (payload?.kind === 'undo' && typeof payload.targetOperationId === 'string' && payload.targetOperationId) {
+    return fingerprint({ kind: payload.kind, targetOperationId: payload.targetOperationId });
+  }
+  throw Error('invalid operation scope');
+}
+
+export function inspectOperation({ operationId, payload, now }, lookup) {
+  if (typeof operationId !== 'string' || !operationId) return 'conflict';
+  let scopeHash;
+  try { scopeHash = operationScopeHash(payload); } catch { return 'conflict'; }
+  const { lease, saved } = lookup(operationId) ?? {};
+  const payloadHash = fingerprint(payload);
   // Look up an existing receipt before checking lease expiry: a lost response
   // remains recoverable without reapplying the operation.
   if (saved) {
-    if (saved.payload !== payload) return 'conflict';
+    if (saved.operationId !== operationId || saved.payloadHash !== payloadHash) return 'conflict';
     return saved.receipt == null ? 'expired' : 'replay';
   }
   // IDs are server-issued in a bounded lease, never accepted as a fresh action
   // merely because an arbitrary client ID is absent after history pruning.
   if (!lease || !Number.isSafeInteger(lease.expiresAt) || !Number.isSafeInteger(now) || now >= lease.expiresAt) return 'expired';
+  if (lease.operationId !== operationId || lease.scopeHash !== scopeHash) return 'conflict';
   return 'new';
 }

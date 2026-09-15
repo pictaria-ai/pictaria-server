@@ -77,9 +77,12 @@ winner quota.
 human comparison remains available. A dedicated grouping check must cover its
 whole input, so above the provider limit it remains explicitly unsupported/manual
 until a global checking strategy is validated. Batched keeper proposals may be
-available when checking is off or a whole-group check/bypass is already valid.
+available when checking is off, a whole-group check/bypass is already valid, or
+the check is specifically unsupported because of the confirmed provider image
+count limit. The owner approved that last exception with an explicit Stack not
+checked: too large notice; it does not apply to unknown capability or other errors.
 They must be presented as separate comparisons, with their complete union
-inspectable; an unfinished or blocked grouping check must not be bypassed by
+inspectable; a pending or failed grouping check must not be bypassed by
 batching keeper requests. The current prototype records this boundary but does
 not wire an application shortcut or establish production acceptance for it.
 
@@ -161,7 +164,8 @@ records and a small hot projection; at most eight read-only kept context photos
 from a bounded indexed query; 30-minute comparison/action and immediate-Undo
 leases; 30-day settled receipts plus 30-day tombstones. Pending sync and live Undo
 dependencies survive ordinary cleanup. Expired or forgotten IDs cannot authorize
-a fresh action without a live server-issued lease.
+a fresh action without a live server-issued lease fetched by that operation ID
+and matching the request's immutable scope/mode or Undo target.
 
 The new lifecycle model exercises cohort split/merge/restart and deduplicated
 reservations. Absent siblings inherit merged budgets. A complete stable cohort
