@@ -1,7 +1,9 @@
 # Curate v1.3 contract prototype (PIC-366)
 
-**Status: experimental; released keeper baseline accepted by the owner.**
-Grouping, large-group and resource acceptance are still incomplete. This directory is
+**Status: prototype decisions ready for review; production acceptance remains open.**
+The owner accepted the released keeper baseline. The current
+[implementation decisions](IMPLEMENTATION-DECISIONS.md) finalize the proposed
+large-group, context, lifecycle and budget boundaries for review. This directory is
 not imported by the server or included in its container. It does not change
 Curate, migrate a database, or authorize automatic decisions. The SQL in
 `decisions.mjs` is a disposable contract experiment, not a production migration.
@@ -32,9 +34,10 @@ requested for that pass.
 Requires the repository's supported Node runtime; no npm dependencies.
 
 ```sh
-node --test test/experiments/curate-v13.test.mjs test/experiments/curate-background.test.mjs
+node --test test/experiments/*.test.mjs
 node experiments/curate-v13/bench.mjs
 node experiments/curate-v13/background-bench.mjs
+node experiments/curate-v13/storage-bench.mjs
 node bin/scale-bench.mjs --assets=1000
 node bin/scale-bench.mjs --assets=10000
 node bin/scale-bench.mjs --assets=30000
@@ -251,18 +254,21 @@ keeper work; a sole newcomer with kept context remains manual. Oversized groups
 remain inspectable but receive an explicit manual/unsupported result. Do not
 discard a worthwhile second keeper through one-winner-per-chunk tournaments.
 
-The real-provider 30-image quality test is still a completion gate. If the selected
-model cannot handle it, revisit rendition sizing or a strategy that preserves all
-candidate alternatives, with measured quality. Do not declare the synthetic
-transport test sufficient or quietly reduce the required product envelope.
+The selected thirty-photo strategy uses up to three keeper batches, preserving
+all inputs and accepted keep flags. The owner accepted the released-baseline
+results on the natural thirty-photo set. Provider caps still apply to dedicated
+whole-input checks; no independent chunk partitions become a global check.
+See the current role matrix, mixed-batch restriction and evidence limits in
+[implementation decisions](IMPLEMENTATION-DECISIONS.md).
 
-### Selective checks: unresolved calibration gate
+### Selective checks: conservative implementation boundary
 
 The current prototype bypasses a dedicated check only for an exact recorded
 checksum match. All other eligible groups remain uncertain; **it does not yet
-implement the spec's broader strong-evidence route**. This is an open PIC-366
-evaluation decision, then production work in PIC-367/PIC-370. Keep both the
-bypass accuracy and the frequency of additional AI calls in the evaluation.
+implement the spec's broader strong-evidence route**. The evaluated thumbnail route saved essentially no calls, so do not expand it
+now. PIC-367/PIC-370 implement the conservative route and verify actual
+rendition identity for checksum reuse. Broader bypass calibration remains
+separate work rather than a prototype completion prerequisite.
 
 The existing `THUMBHASH_NEAR_DUP = 0.025` rule in `reviewService.mjs` is a useful
 candidate: its source comment documents pair-level calibration against
@@ -539,15 +545,18 @@ days**, not a calendar commitment. Re-estimate after the first slice and actual
 visual evaluation; poor grouping/model quality is the largest unresolved risk.
 Simple Curate usability issues can follow once these boundaries are stable.
 
-Before PIC-366 can be complete:
+## Review closeout
 
-1. Label and evaluate the owner-authorized private visual set, including incomplete
-   recognition, scene/composition changes, real expression alternatives and a legitimate
-   30-photo group. Run the prototype prompt against the selected real provider.
-2. Use those results to adopt/reject semantic vetoes and validate the request
-   envelope; document any narrowly necessary strategy change.
-3. Extend the reported target-host/Node 22 measurements to the new experiment
-   and the full mixed-load/context budgets;
-   finalize lineage reconciliation, retained context and record lifetime choices.
-4. Review these contracts and estimates, then link the accepted revision from
-   the spec/plan. Production implementation remains in the follow-on issues.
+The [implementation decisions](IMPLEMENTATION-DECISIONS.md) are ready for review:
+large-stack role behavior, bounded context/evidence, action expiration and
+receipt retention, shared budget lineage and safe idle compaction. New offline
+contracts and a synthetic SQLite sizing pass support those choices. The full
+local suite passes 1,249 tests (62 experimental); existing target-host runtime
+measurements remain scoped to their unchanged measured source.
+
+Independent review and owner merge approval remain. Production adapters,
+transactional cleanup/queue wiring, broader grouping/long-chain visual quality,
+and complete-server resource acceptance belong to the named follow-on issues;
+none is claimed complete by this prototype. Keep PIC-366 open until its review
+and acceptance disposition are agreed. No additional owner photo/provider
+exercise is required for this closeout.

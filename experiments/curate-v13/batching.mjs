@@ -11,6 +11,7 @@ export function planKeeperBatches(group, sizes, { orderedIds, maxImages, ...opti
   const gate = planRequest(group, sizes, { ...options, role: 'keeper', maxImages: 30 });
   if (gate.state !== 'ready') return gate;
   const requests = [], count = Math.ceil(orderedIds.length / Math.min(30, maxImages));
+  if (count > 3) return { state: 'manual-request-budget' };
   const small = Math.floor(orderedIds.length / count), extra = orderedIds.length % count;
   let offset = 0;
   for (let i = 0; i < count; i++) {
@@ -35,8 +36,12 @@ export function collectKeeperBatches(plan, answers) {
     } catch { return { index: i, status: 'invalid-answer' }; }
   });
   const complete = batches.every(b => b.status === 'valid');
+  const mixedBatch = batches.some(b => b.output?.groups.length > 1);
   return { state: complete ? 'complete' : 'partial', coverage: plan.coverage, groupId: plan.groupId,
     wholeGroupCompared: complete && plan.coverage === 'whole-group',
+    // A discovered split inside an independent batch cannot resolve the whole
+    // group's partition. Show local proposals, but withhold apply-all advice.
+    canApplyAll: complete && (plan.coverage === 'whole-group' || !mixedBatch),
     // A union of local partitions is not a global grouping answer. Keep this
     // diagnostic structure distinct from validateAdvice's accepted contract.
     keeperIds: batches.flatMap(b => b.output?.groups.flatMap(g => g.keepers) ?? []), batches };

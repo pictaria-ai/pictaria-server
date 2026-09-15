@@ -4,6 +4,8 @@ This is the current engineering direction after the private visual evaluations.
 It does not enable production behavior or mark the prototype complete. The
 [functional specification](https://linear.app/aedr/document/curate-v13-functional-specification-8e7497272bc6)
 remains the behavioral source of truth. Earlier experiments remain reproducible.
+The [implementation decisions](IMPLEMENTATION-DECISIONS.md) now settle the
+large-group and lifecycle choices for review and supersede proposals below.
 
 ## 1. Keeper judgment is settled enough to proceed
 
@@ -71,7 +73,7 @@ validated global partition. The evaluated union may retain repetition between
 batches; no final tournament is added and no candidate is discarded to force a
 winner quota.
 
-**Proposed initial large-group behavior to carry into PIC-370/PIC-116:** full
+**Selected initial large-group behavior for review in PIC-370/PIC-116:** full
 human comparison remains available. A dedicated grouping check must cover its
 whole input, so above the provider limit it remains explicitly unsupported/manual
 until a global checking strategy is validated. Batched keeper proposals may be
@@ -84,7 +86,9 @@ not wire an application shortcut or establish production acceptance for it.
 The accepted keeper example establishes useful local proposals over thirty
 photos. It does not establish global thirty-photo grouping, cross-batch
 deduplication, all check/referee combinations or an arbitrary larger envelope.
-Finalize that product limitation explicitly in the spec before closing PIC-366.
+The implementation decisions and updated spec record this product limitation.
+A mixed-subject batch or a missing batch withholds the full-group apply-advice
+action; more than three required keeper requests stays manual.
 
 ## 4. Background grouping and publication — executable now
 
@@ -150,43 +154,35 @@ for the optional gapped-lookback case. Keep the slice and production memory gate
 open. The pass supports this implementation direction without establishing
 full-server acceptance; do not infer a Node-version effect from different hosts.
 
-## 6. Persistence and retention boundaries to implement
+## 6. Persistence and retention boundaries
 
-Use the existing SQLite repository/transactions and the small record set in the
-README. Store group member IDs and bounded evidence, not copied full enrichment
-rows in each group/history record. Keep at most eight nearest decided-context
-photos per comparison; omitted context remains explicitly omitted and never
-actionable. Store full manual operation scope independently of display paging.
+The [implementation decisions](IMPLEMENTATION-DECISIONS.md) choose compact SQLite
+records and a small hot projection; at most eight read-only kept context photos
+from a bounded indexed query; 30-minute comparison/action and immediate-Undo
+leases; 30-day settled receipts plus 30-day tombstones. Pending sync and live Undo
+dependencies survive ordinary cleanup. Expired or forgotten IDs cannot authorize
+a fresh action without a live server-issued lease.
 
-Keep active human separation constraints. A changing group hash is not a fresh
-automatic-call allowance: splits inherit work lineage, and merges must preserve
-contributing recent budgets rather than reset them. The scheduler prototype
-demonstrates persistent serialized reservations, including multi-request plans;
-PIC-367/PIC-346 still need the real lineage lookup/merge wiring and tests.
+The new lifecycle model exercises cohort split/merge/restart and deduplicated
+reservations. Absent siblings inherit merged budgets. A complete stable cohort
+may regain separate budgets after a full quiet 30-minute window, with no active
+work or recent reservation; exact-input attempt/advice records do not reset.
+Real indexed transactions and queue coalescing remain PIC-367/PIC-346 work.
 
-The existing 30-minute comparison lease, 30-day completed receipt retention and
-additional 30-day request tombstone window remain proposed implementation values.
-Pending synchronization and a live Undo dependency cannot be pruned to meet a
-quota. Expiry must reject an old action explicitly, never reuse its ID as a new
-decision. Validate pruning/restart behavior with the production schema before
-calling this retention policy implemented. These boundaries require no new AI
-calls, but retained-size estimates and the final retention/Undo lifecycle remain
-part of the engineering closeout.
+A synthetic storage pass measures representative and maximum-provenance record
+shapes; its JSON/SQLite sizes are not a JavaScript-memory acceptance claim.
+Production lease limits, context queries, pruning and migration require their
+named implementation tests. The pure lifecycle model is not the production
+operation repository.
 
-## 7. Next evidence and work sequence
+## 7. Next work
 
-The requested **offline Node 22 runtime pass is complete**; its scoped findings
-are linked above. No repeat or new private-photo/provider exercise is requested
-now. Production integration must still measure the actual input projection,
-bounded context/history and full server alongside Enrich; the standalone pass
-cannot supply those measurements before that implementation exists.
+Prototype decisions and their evidence are ready for review. The requested Node
+22 runtime pass is complete; no repeat or new private-photo/provider exercise is
+requested now. Review the implementation decisions, role matrix and remaining
+production checks, then agree the PIC-366 acceptance disposition before merging.
 
-Resolve the remaining large-group/context/lineage/retention decisions locally
-and update the PIC-366 acceptance record. Preserve the resource targets and
-explicit missed/unmeasured checks in the implementation handoff; do not claim
-all budgets passed. Then PIC-367 implements the
-grouping/evidence foundation, PIC-368 the coherent human operation, and PIC-369
-the first usable comparison/correction flow. AI roles and final resource/migration
-checks remain with their named issues. Keep PR #49 draft until the prototype's
-remaining requirements and review are addressed; do not call a document update
-or the accepted keeper baseline completion of the whole issue.
+PIC-367 implements grouping/evidence, PIC-368 the coherent human operation, and
+PIC-369 the first comparison/correction flow. AI roles and final resource/migration
+checks remain with their named issues. Full production acceptance cannot be
+supplied by a standalone prototype before that implementation exists.
