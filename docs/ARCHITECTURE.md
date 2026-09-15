@@ -68,6 +68,9 @@ data/               all persistent state (gitignored): enrichment.sqlite,
 
 The staged Curate v1.3 replacement is described in [Curate foundation](CURATE-FOUNDATION.md).
 Its API and schema can be reviewed before the decision and comparison UI cutover.
+The [shared decision layer](CURATE-DECISIONS.md) now records Curate/Frame intent,
+operation receipts and conditional Undo in the same SQLite transaction as the
+existing durable sync queue. The multi-keeper comparison UI follows separately.
 
 ## Conventions
 

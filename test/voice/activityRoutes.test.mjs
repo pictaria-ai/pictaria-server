@@ -47,6 +47,11 @@ function makeHarness({ immich = {} } = {}) {
       activityLog,
       config,
       immich,
+      review: { async frameDecision(assetId, action) {
+        const tags = await immich.upsertTags([action === 'frame_favorite' ? 'frame/favorite' : 'frame/never-show']);
+        await immich.tagAssetsBulk({ assetIds:[assetId], tagIds:tags.map(t=>t.id) });
+        return { assetId };
+      } },
       requireImmich: () => true,
       voiceMetrics: { record: (label, context) => usage.push({ label, ...context }) },
     }),

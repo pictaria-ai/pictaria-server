@@ -327,18 +327,15 @@ test('successful sync slices advance durably before a later slice fails', async 
 
 test('startup parks a malformed restored sync head and continues with later valid work', async () => {
   await withService(async ({ repo, immich, service }) => {
+    const validId = syncAssetId(200);
+    repo.recordDecision({ assetIds:[validId], action:'approve', addTags:['frame/eligible'], removeTags:[] });
+    repo.db.exec('UPDATE pending_sync_jobs SET id=2');
     const secret = 'restored-secret-that-must-not-leak';
     const malformedId = Number(repo.db.prepare(`
       INSERT INTO pending_sync_jobs (
-        action, asset_ids_json, add_tags_json, remove_tags_json, attempts, created_at
-      ) VALUES ('approve', ?, '["frame/eligible"]', '[]', 0, ?)
+        id, action, asset_ids_json, add_tags_json, remove_tags_json, attempts, created_at
+      ) VALUES (1, 'approve', ?, '["frame/eligible"]', '[]', 0, ?)
     `).run(`["${secret}"`, new Date().toISOString()).lastInsertRowid);
-    const validId = syncAssetId(200);
-    repo.db.prepare(`
-      INSERT INTO pending_sync_jobs (
-        action, asset_ids_json, add_tags_json, remove_tags_json, attempts, created_at
-      ) VALUES ('approve', ?, '["frame/eligible"]', '[]', 0, ?)
-    `).run(JSON.stringify([validId]), new Date().toISOString());
 
     service.startSyncWorker();
     for (let attempt = 0; attempt < 100 && repo.pendingSyncJobCount() > 0; attempt += 1) {
@@ -386,11 +383,7 @@ test('status reads leave malformed scalars untouched until the worker parks and 
         '["frame/eligible"]', '[]', 9223372036854775807, ?)
     `).run(oversizedAction, new Date().toISOString()).lastInsertRowid);
     const validId = syncAssetId(201);
-    repo.db.prepare(`
-      INSERT INTO pending_sync_jobs (
-        action, asset_ids_json, add_tags_json, remove_tags_json, attempts, created_at
-      ) VALUES ('approve', ?, '["frame/eligible"]', '[]', 0, ?)
-    `).run(JSON.stringify([validId]), new Date().toISOString());
+    repo.recordDecision({ assetIds:[validId], action:'approve', addTags:['frame/eligible'], removeTags:[] });
 
     for (let read = 0; read < 3; read += 1) {
       const status = service.syncStatus();
@@ -501,6 +494,7 @@ test('a temporarily missing tag is detected by verification and repaired', async
     };
 
     const job = { id: 1, action: 'approve', assetIds: ['droppy'], add: ['frame/eligible'], remove: [], attempts: 0 };
+    repo.recordDecision({assetIds:job.assetIds, addTags:job.add, removeTags:job.remove, action:job.action});
     await service.pushDecisionToImmich(job);
 
     const finalTags = immich.assetTags.get('droppy');
@@ -537,6 +531,7 @@ test('a temporarily retained incompatible tag is detected and removed on repair'
       remove: ['frame/eligible', 'frame/favorite'],
       attempts: 0,
     };
+    repo.recordDecision({assetIds:job.assetIds, addTags:job.add, removeTags:job.remove, action:job.action});
     await service.pushDecisionToImmich(job);
 
     const finalTags = immich.assetTags.get('dropped-removal');
@@ -568,6 +563,7 @@ test('a persistent contradictory tag keeps the durable sync visible as failed', 
       remove: ['frame/never-show', 'frame/reviewed'],
       attempts: 0,
     };
+    repo.recordDecision({assetIds:job.assetIds, addTags:job.add, removeTags:job.remove, action:job.action});
     await assert.rejects(
       service.pushDecisionToImmich(job),
       /did not retain all requested tags.*Still present: contradictory-photo: frame\/never-show, frame\/reviewed/,
@@ -588,6 +584,7 @@ test('missing Immich tag data reports the feature and API-key checks', async () 
       remove: [],
       attempts: 0,
     };
+    repo.recordDecision({assetIds:job.assetIds, addTags:job.add, removeTags:job.remove, action:job.action});
     await assert.rejects(
       service.pushDecisionToImmich(job),
       /Enable Tags under Account Settings → Features.*tag\.read, tag\.create, and tag\.asset/,
@@ -612,6 +609,7 @@ test('persistent missing tags report asset writability as a possible cause', asy
       remove: [],
       attempts: 0,
     };
+    repo.recordDecision({assetIds:job.assetIds, addTags:job.add, removeTags:job.remove, action:job.action});
     await assert.rejects(
       service.pushDecisionToImmich(job),
       /did not retain all requested tags.*owned by or writable to that account.*Missing: read-only-photo: frame\/eligible/,

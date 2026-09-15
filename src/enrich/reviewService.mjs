@@ -5,7 +5,7 @@ import { tagId, tagValue } from '../immich.mjs';
 import { awaitDrain } from '../lifecycle.mjs';
 import { configuredSecrets, sanitizeDiagnostic } from '../diagnostics.mjs';
 import { AssetBatchError, validateAssetBatch } from './assetBatch.mjs';
-import { ACTION_RULES } from './reviewActions.mjs';
+import { ACTION_RULES, SYNC_ACTION_RULES } from './reviewActions.mjs';
 
 // Review workflow: serve the three-bucket queue, record human decisions
 // locally (source of truth), and push tag changes to Immich from a durable
@@ -36,6 +36,7 @@ export class ReviewService {
     this.tagWrites = tagWrites;
     this._syncWake = null;
     this._syncLastCompletedAt = null;
+    this._decisionPrunedAt = 0;
     this._syncWorkerRunning = false;
     this._syncStopRequested = false;
     this._syncLoopDone = null;
@@ -256,8 +257,8 @@ export class ReviewService {
     };
   }
 
-  applyDecision({ action, assetIds }) {
-    if (!(action in ACTION_RULES)) {
+  applyDecision({ action, assetIds, keepers = null }) {
+    if (action !== 'selection' && !Object.hasOwn(ACTION_RULES, action)) {
       throw new AssetBatchError(`Unsupported action: ${action}`, { code: 'invalid_decision_request' });
     }
     const cleanIds = validateAssetBatch(assetIds, { code: 'invalid_decision_request' });
@@ -268,10 +269,20 @@ export class ReviewService {
         status: 409,
       });
     }
-    const rule = ACTION_RULES[action];
-    this.repo.recordDecision({ assetIds: cleanIds, addTags: rule.add, removeTags: rule.remove, action });
+    let outcomes;
+    if (action === 'selection') {
+      if (!Array.isArray(keepers) || keepers.some(id=>!cleanIds.includes(id)) || new Set(keepers).size!==keepers.length)
+        throw new AssetBatchError('Keeper IDs must be a unique subset of the selected photos.', {code:'invalid_decision_request'});
+      // The legacy shortcut cannot revisit already-decided members. The new
+      // comparison API additionally checks inspected inputs and membership.
+      const tags = this.repo.loadAssetTagsFor(cleanIds);
+      if (cleanIds.some(id=>(tags[id]??[]).some(tag=>['frame/eligible','frame/favorite','frame/never-show','frame/reviewed'].includes(tag))))
+        throw new AssetBatchError('A selected photo has already been decided. Refresh Curate.', {code:'review_assets_not_current',status:409});
+      outcomes = Object.fromEntries(cleanIds.map(id=>[id,keepers.includes(id)?'approve':'reviewed']));
+    } else outcomes = Object.fromEntries(cleanIds.map(id=>[id,action]));
+    const receipt = this.repo.decisions.acceptCurrent(outcomes);
     this.wakeSyncWorker();
-    return { ok: true, action, assetCount: cleanIds.length, sync: this.syncStatus() };
+    return { ok: true, action, assetCount: cleanIds.length, sync: this.syncStatus(), receipt };
   }
 
   syncStatus() {
@@ -349,6 +360,10 @@ export class ReviewService {
       }
       let job;
       try {
+        if (Date.now() - this._decisionPrunedAt >= SYNC_IDLE_POLL_MS) {
+          this.repo.decisions.prune();
+          this._decisionPrunedAt = Date.now();
+        }
         job = this.repo.nextSyncJob();
       } catch (error) {
         const message = sanitizeDiagnostic(error instanceof Error ? error.message : error, {
@@ -384,7 +399,7 @@ export class ReviewService {
         const message = sanitizeDiagnostic(error instanceof Error ? error.message : error, {
           secrets: configuredSecrets(this.config, this.immich),
         });
-        if (job.attempts + 1 >= SYNC_MAX_ATTEMPTS) {
+        if (error.permanent || error.status === 404 || error.status === 410 || job.attempts + 1 >= SYNC_MAX_ATTEMPTS) {
           this.repo.deadLetterSyncJob(job.id, message);
           this.log(
             `immich sync dead-lettered after ${job.attempts + 1} attempts (${job.action}, ${job.assetIds.length} asset(s)): ${message}`,
@@ -423,26 +438,85 @@ export class ReviewService {
     if (job.assetIds.length > SYNC_ASSET_BATCH_SIZE) {
       throw new Error(`Review sync work exceeded the ${SYNC_ASSET_BATCH_SIZE}-asset worker slice.`);
     }
-    const existingTagIds = tagMap(await this.immich.listTags());
-    const tagIds = { ...existingTagIds };
-    if (job.add.length > 0) {
-      Object.assign(tagIds, await ensureImmichTagIds(this.immich, job.add));
-    }
-    const assetIds = job.assetIds;
-    for (const tag of job.remove) {
-      const immichTagId = existingTagIds[tag];
-      if (immichTagId) {
-        await this.immich.untagAssets({ tagId: immichTagId, assetIds });
+    const batches = new Map();
+    const aiOnly = [];
+    for (const id of job.assetIds) {
+      const rows = this.repo.decisions.pendingFor(id);
+      if (!rows.length) {
+        // Frame may have completed the human portion of older Curate work.
+        // Its separately owned AI projection must still reach Immich.
+        if (!job.action.startsWith('frame_') && this.repo.db.prepare('SELECT 1 FROM latest_success WHERE asset_id=?').get(id)) aiOnly.push(id);
+        continue; // completed/superseded work cannot reassert old human tags
       }
+      const add = rows.filter(r => r.present).map(r => r.tag);
+      const remove = rows.filter(r => !r.present).map(r => r.tag);
+      const key = JSON.stringify([add,remove]);
+      if (!batches.has(key)) batches.set(key, { assetIds: [], rows: [], add, remove });
+      batches.get(key).assetIds.push(id);
+      batches.get(key).rows.push(...rows);
     }
-    // One mutation event, not one per tag: Immich's per-mutation background
-    // jobs race each other and can drop tags applied in rapid succession.
-    const addIds = job.add.map((tag) => tagIds[tag]).filter(Boolean);
-    if (addIds.length > 0) {
-      await this.immich.tagAssetsBulk({ assetIds, tagIds: addIds });
+    for (const batch of batches.values()) {
+      // Availability is an observation, not cross-system atomicity. Refuse a
+      // known unavailable asset before mutations; failures after a partial
+      // remote write leave durable intent pending for explicit recovery.
+      const remoteAssets = await this.#readAvailableAssets(batch.assetIds);
+      const existingTagIds = tagMap(await this.immich.listTags());
+      const tagIds = { ...existingTagIds };
+      if (batch.add.length) Object.assign(tagIds, await ensureImmichTagIds(this.immich, batch.add));
+      for (const tag of batch.remove) if (existingTagIds[tag])
+        await this.immich.untagAssets({ tagId: existingTagIds[tag], assetIds: batch.assetIds });
+      if (batch.add.length) await this.immich.tagAssetsBulk({ assetIds: batch.assetIds, tagIds: batch.add.map(t=>tagIds[t]) });
+      // A Frame command owns only its decision patch; it cannot remove AI tags
+      // on photos Pictaria has never enriched. Curate keeps its prior AI-sync
+      // behavior, independently of the latest human patch above.
+      const includeAi = !job.action.startsWith('frame_');
+      if (includeAi) await this.syncAiTagsForAssets(batch.assetIds, tagIds, { remoteAssets });
+      await this.verifyAndRepairTags(batch, includeAi ? {} : { localTagsByAsset: {} });
+      this.repo.decisions.acknowledge(batch.rows);
     }
-    await this.syncAiTagsForAssets(assetIds, tagIds);
-    await this.verifyAndRepairTags(job);
+    if (aiOnly.length) {
+      const remoteAssets = await this.#readAvailableAssets(aiOnly);
+      await this.syncAiTagsForAssets(aiOnly, {}, { remoteAssets });
+      await this.verifyAndRepairTags({ assetIds:aiOnly, add:[], remove:[] });
+    }
+  }
+
+  async #readAvailableAssets(assetIds) {
+    try { this.repo.decisions.assertAvailable(assetIds); }
+    catch (error) { error.permanent = true; throw error; }
+    const assets = new Map();
+    for (const id of assetIds) {
+      const asset = await this.immich.getAsset(id);
+      if (asset?.isTrashed || asset?.isOffline) {
+        const error = new Error('A selected photo is trashed or unavailable in Immich.');
+        error.code = 'decision_asset_unavailable'; error.permanent = true; throw error;
+      }
+      assets.set(id, asset);
+    }
+    return assets;
+  }
+
+  async frameDecision(assetId, action) {
+    validateAssetBatch([assetId]);
+    if (!['frame_favorite','frame_hide'].includes(action)) throw new Error('Unsupported Frame action.');
+    const rule = SYNC_ACTION_RULES[action];
+    this.repo.decisions.assertAvailable([assetId]);
+    const jobId = this.repo.recordDecision({ assetIds:[assetId], addTags:rule.add, removeTags:rule.remove, action });
+    this.wakeSyncWorker();
+    try {
+      // Keep the existing Frame response semantics: success follows verified
+      // remote sync, while a transport failure retains the accepted work.
+      await this.pushDecisionToImmich({ id:jobId, assetIds:[assetId], action });
+      this.repo.completeSyncJob(jobId);
+      const tags = await this.immich.listTags();
+      const primary = tags.find(t => tagValue(t) === rule.add[0]);
+      const eligible = tags.find(t => tagValue(t) === 'frame/eligible') ?? null;
+      return action === 'frame_favorite' ? { assetId, tag:primary } : { assetId, addedTag:primary, removedTag:eligible };
+    } catch (error) {
+      this.repo.recordSyncJobFailure(jobId, sanitizeDiagnostic(error.message, { secrets:configuredSecrets(this.config,this.immich) }));
+      error.savedLocally = true;
+      throw error;
+    }
   }
 
   // Immich can report a successful mutation before every requested addition

@@ -441,8 +441,8 @@ async function keepBest(asset) {
   const assetIds = [best, ...rest];
   const decision = beginDecision(assetIds, true);
   try {
-    await api('/api/review/decision', { method: 'POST', body: JSON.stringify({ action: 'approve', asset_ids: [best] }) });
-    const payload = await api('/api/review/decision', { method: 'POST', body: JSON.stringify({ action: 'reviewed', asset_ids: rest }) });
+    const payload = await api('/api/review/decision', { method: 'POST', body: JSON.stringify({ action: 'selection', asset_ids: assetIds, keepers: [best] }) });
+    if (decision.undo) decision.undo.receipt = payload.receipt?.undo;
     removeDecided(assetIds);
     renderSync(payload.sync);
     showDecisionToast(`kept ★, skipped ${rest.length}`, decision);
@@ -492,6 +492,7 @@ async function decide(action, assetIds, { undoable = true, returnToLightboxId = 
   const decision = beginDecision(assetIds, undoable, { returnToLightboxId });
   try {
     const payload = await api('/api/review/decision', { method: 'POST', body: JSON.stringify({ action, asset_ids: assetIds }) });
+    if (decision.undo) decision.undo.receipt = payload.receipt?.undo;
     if (state.view === 'decided') {
       closeLightbox();
       loadAssetsFresh();
@@ -564,12 +565,15 @@ async function undoLastDecision() {
     // the decision was still applied settle before clearing it, so a stale
     // count cannot overwrite the restored queue moments later.
     while (state.loading) await state.loadingPromise;
-    const payload = await api('/api/review/decision', {
+    if (!undo.receipt) throw new Error('Undo receipt unavailable. Refresh Curate.');
+    const { expiresAt, ...operation } = undo.receipt;
+    await api('/api/review/curate/operations/apply', {
       method: 'POST',
-      body: JSON.stringify({ action: 'clear', asset_ids: undo.assetIds }),
+      body: JSON.stringify(operation),
     });
     await restoreUndecided(undo);
-    renderSync(payload.sync);
+    // A status refresh failure must not turn an accepted Undo into an error.
+    void api('/api/review/sync-status').then(renderSync).catch(() => {});
     if (generation === decisionGeneration) toast('Decision undone');
   } catch (error) {
     if (generation === decisionGeneration) toast(`Couldn’t undo: ${error?.message || String(error)}`, true);

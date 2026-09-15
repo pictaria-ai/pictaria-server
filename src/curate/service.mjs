@@ -205,6 +205,23 @@ export class CurateService {
     if (!this.closed) await this.refresh();
     return result;
   }
+  async issueDecision(comparisonId, mode = 'manual') {
+    await this.refresh();
+    const comparison = this.store.assertComparison(comparisonId);
+    this.assertDecisionScope(comparison.ids);
+    return this.repo.decisions.issue(comparison, mode);
+  }
+  assertDecisionScope(ids) {
+    this.assertMembership(ids);
+    if (this.store.pendingScopeChanges(ids)) throw new CurateError('This stack is updating. Refresh Curate.');
+  }
+  async applyDecision(input) {
+    const replay = this.repo.decisions.replay(input);
+    if (replay) return replay;
+    // Undo checks human state/availability, and need not rebuild groupings.
+    if (input.kind !== 'undo') await this.refresh();
+    return this.repo.decisions.apply(input, ids => this.assertDecisionScope(ids));
+  }
   start() {
     if (this.timer || this.closed) return;
     this.timer = setInterval(() => {

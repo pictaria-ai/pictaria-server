@@ -7,6 +7,16 @@ All notable changes to Pictaria Server are documented here. This project follows
 
 ### Development
 
+- Added coherent Curate keeper/remainder operations, exact retry receipts,
+  conditional Undo and synchronization status. The existing Keep best and Undo
+  controls use atomic/conditional operations without changing their layout;
+  the new multi-keeper comparison UI follows in PIC-369.
+- Curate and Frame Favorite/Hide now share durable decision-tag intent. Delayed
+  retries respect newer choices, and failed Frame writes remain recoverable.
+  Enrichment schema 14 / persistent-state contract 17 preserves existing decisions
+  and adopts pending jobs from current local intent. See
+  [Curate decisions](docs/CURATE-DECISIONS.md) for API, ownership and rollback details.
+
 - Added the first Curate v1.3 foundation: conservative standard grouping,
   producing-configuration evidence, persistent separation constraints and bounded
   comparison APIs. The current Curate page and keeper recommendations are unchanged;
