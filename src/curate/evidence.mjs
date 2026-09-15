@@ -7,10 +7,19 @@ const text = (v, max = 256) => (typeof v === 'string' && v.length <= max ? v : n
 const finite = (v) => (typeof v === 'number' && Number.isFinite(v) ? v : null);
 const has = (o, k) => Object.hasOwn(o, k);
 
+export const hasObservationFields = (asset) =>
+  ['people', 'isTrashed', 'isOffline', 'isEdited'].some((key) => has(asset, key)) ||
+  (asset.exifInfo && has(asset.exifInfo, 'orientation'));
+
 // Partial API responses replace only fields actually observed. An absent people
 // list is unknown; even an explicit empty list never proves detection complete.
 export function observeAsset(asset, previous = {}) {
-  const next = { ...previous, version: EVIDENCE_VERSION };
+  // Original identity, dimensions, duplicate ID and thumbnail already live in
+  // assets. Retain only evidence that table cannot represent (also drops keys
+  // duplicated by the first development format on the next observation).
+  const next = { version: EVIDENCE_VERSION };
+  for (const key of ['recognition', 'orientation', 'isTrashed', 'isOffline', 'isEdited'])
+    if (has(previous, key)) next[key] = previous[key];
   if (has(asset, 'people')) {
     const valid = Array.isArray(asset.people) && asset.people.every((p) => text(p?.id, 128));
     const ids = valid ? [...new Set(asset.people.map((p) => p.id))].sort() : null;
@@ -24,14 +33,9 @@ export function observeAsset(asset, previous = {}) {
   }
   // Exclude updatedAt: tags/descriptions also advance it. Actual observed image
   // edits below invalidate material input without treating every tag sync as an edit.
-  for (const key of ['fileModifiedAt', 'checksum', 'thumbhash', 'duplicateId'])
-    if (has(asset, key)) next[key] = text(asset[key]);
   for (const key of ['isTrashed', 'isOffline']) if (typeof asset[key] === 'boolean') next[key] = asset[key];
   const exif = asset.exifInfo;
-  if (exif && typeof exif === 'object') {
-    for (const key of ['orientation', 'exifImageWidth', 'exifImageHeight'])
-      if (has(exif, key)) next[key] = text(exif[key], 32) ?? finite(exif[key]);
-  }
+  if (exif && has(exif, 'orientation')) next.orientation = text(exif.orientation, 32) ?? finite(exif.orientation);
   if (has(asset, 'isEdited')) next.isEdited = typeof asset.isEdited === 'boolean' ? asset.isEdited : null;
   // Unknown revision fields are deliberately not interpreted. A stable ID, or
   // isEdited=true on both reads, cannot detect all successive Immich edits.
@@ -86,7 +90,7 @@ export function photoEvidence({ asset, observation = {}, output, schema, configu
     modified: asset.file_modified_at ?? null,
     width: asset.width ?? null,
     height: asset.height ?? null,
-    thumbhash: has(observation, 'thumbhash') ? observation.thumbhash : (asset.thumbhash ?? null),
+    thumbhash: asset.thumbhash ?? null,
     orientation: observation.orientation ?? null,
     isEdited: observation.isEdited ?? null,
   };

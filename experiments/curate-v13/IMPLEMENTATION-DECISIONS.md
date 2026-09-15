@@ -114,7 +114,7 @@ stays unknown while refresh is pending. These bounds require real-adapter tests.
 | Data | Chosen lifetime / bound |
 | --- | --- |
 | Current projection/index | One current projection/index plus one replacement; publish atomically. Full provenance stays cold. |
-| Comparison/action leases | 30 minutes; deliberate refresh issues a new lease for the verified scope. At most 200 live leases and 5 MiB encoded scope data per installation. Refuse new lease allocation clearly at capacity; do not silently evict a live scope or truncate membership. |
+| Comparison/action leases | 30 minutes; deliberate refresh issues a new lease for the verified scope. PIC-367 review clarification: at most 200 views and 200 comparisons, with one current comparison per view. Reopening an identical comparison reuses its ID; navigating within that view supersedes only its prior comparison. Immutable membership snapshots can be shared across views, and all retained snapshots and scopes count toward the same 5 MiB installation bound. Refuse new allocation clearly at capacity; do not evict another view or truncate membership. |
 | Immediate Undo | 30 minutes from the operation, and only while all target revisions are still current. The receipt states its deadline. Decided review remains available for later choices. No new history browser is required. |
 | Completed operation receipts | 30 days after settling, then a minimal ID/payload/expiry tombstone for 30 more days. Store only authorized decision-tag before-state, not descriptive tags or original metadata. |
 | Pending/failed sync and live Undo dependencies | Retain until resolved/superseded or the dependency expires. Age/space cleanup cannot discard them. Keep one latest merged scoped intent per photo. |

@@ -38,7 +38,7 @@ if (!selected) {
     );
     repo.transaction(() => {
       for (let i = 0; i < size; i++) {
-        const id = 'photo-' + String(i).padStart(6, '0');
+        const id = '00000000-0000-4000-8000-' + String(i).padStart(12, '0');
         assets.run(
           id,
           new Date(1700000000000 + i * (selected === 'dense' ? 1000 : 180000)).toISOString(),
@@ -66,6 +66,17 @@ if (!selected) {
     const open = performance.now();
     const view = await service.openView();
     const openViewMs = performance.now() - open;
+    const repeat = performance.now();
+    const secondView = await service.openView();
+    const repeatViewMs = performance.now() - repeat;
+    if (secondView.total !== view.total) throw Error('Repeated view lost photos.');
+    const scopeBytes = repo.db
+      .prepare(
+        `SELECT
+      (SELECT COALESCE(SUM(bytes),0) FROM curate_leases) +
+      (SELECT COALESCE(SUM(bytes),0) FROM curate_view_snapshots) n`,
+      )
+      .get().n;
     const list = [];
     for (let i = 0; i < 20; i++) {
       const before = performance.now();
@@ -75,6 +86,20 @@ if (!selected) {
     list.sort((a, b) => a - b);
     loop.disable();
     peakRss = Math.max(peakRss, process.memoryUsage().rss);
+    clearInterval(sampler);
+    // Separate diagnostic: an artificial whole-library ingestion transaction.
+    // Its duration/RSS are not part of the grouping/paging phase above.
+    const sync = performance.now();
+    repo.transaction(() => {
+      for (let i = 0; i < size; i++)
+        repo.upsertAsset({
+          id: '00000000-0000-4000-8000-' + String(i).padStart(12, '0'),
+          fileCreatedAt: new Date(1700000000000 + i * (selected === 'dense' ? 1000 : 180000)).toISOString(),
+        });
+    });
+    const unchangedIngestMs = performance.now() - sync;
+    const unchangedDirtyPhotos = repo.db.prepare('SELECT COUNT(*) n FROM curate_dirty').get().n;
+    const postIngestRssMiB = process.memoryUsage().rss / 1048576;
     console.log(
       JSON.stringify({
         fixture: selected,
@@ -83,6 +108,11 @@ if (!selected) {
         initialProjectionAndBuildMs: initialMs,
         rebuildMs,
         openViewMs,
+        repeatViewMs,
+        twoViewScopeBytes: scopeBytes,
+        unchangedIngestMs,
+        unchangedDirtyPhotos,
+        postIngestRssMiB,
         pageP95Ms: list[18],
         maxProjectionSliceMs: service.metrics.maxProjectionSliceMs,
         loopP95Ms: loop.percentile(95) / 1e6,

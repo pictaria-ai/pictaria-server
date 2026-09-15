@@ -8,7 +8,7 @@ import { CurateService } from '../../src/curate/service.mjs';
 import { groupPhotos } from '../../src/curate/grouping.mjs';
 import { observeAsset, producingPeopleFact, photoEvidence } from '../../src/curate/evidence.mjs';
 import { validateAdvice, fingerprint } from '../../src/curate/contracts.mjs';
-import { LEASE_MS, MAX_LEASES } from '../../src/curate/repository.mjs';
+import { LEASE_MS, MAX_LEASES, MAX_VIEW_LEASES, MAX_LEASE_BYTES } from '../../src/curate/repository.mjs';
 
 const schema = {
   properties: {
@@ -17,15 +17,15 @@ const schema = {
   },
 };
 const capture = (s) => new Date(Date.UTC(2026, 0, 1) + s * 1000).toISOString();
-async function fixture(work, { disk = false } = {}) {
+async function fixture(work) {
   const dir = mkdtempSync(join(tmpdir(), 'pictaria-curate-'));
   const path = join(dir, 'enrichment.sqlite');
   const repo = new Repository(path);
   repo.initSchema();
   const service = new CurateService({ repo });
   const add = (id, seconds = 0, extra = {}) => {
-    repo.upsertAsset({ id, fileCreatedAt: capture(seconds), ...extra });
     repo.reviewListAdd([id], 'test');
+    repo.upsertAsset({ id, fileCreatedAt: capture(seconds), ...extra });
   };
   const enrich = (id, count, options = {}) => {
     const config = options.config ?? {
@@ -256,32 +256,29 @@ test('equivalent Enrich provenance and metadata-only updatedAt changes do not in
     assert.equal(repo.curate.assertComparison(c.id).id, c.id);
   }));
 test('corrections persist across SQLite restart, are idempotent, and do not change decisions', async () =>
-  fixture(
-    async ({ repo, service, add, path }) => {
-      add('a');
-      add('b', 1);
-      add('bridge', 2);
-      const v = await service.openView();
-      const c = service.comparison(v.viewId, v.groups[0].id);
-      const correction = await service.separate(c.id, [['a', 'bridge'], ['b']]);
-      assert.deepEqual(await service.separate(c.id, [['a', 'bridge'], ['b']]), correction);
-      assert.throws(() => repo.curate.separate(c.id, [['a'], ['b', 'bridge']]), /already used/);
-      const reader = new Repository(path);
-      reader.initSchema();
-      const s2 = new CurateService({ repo: reader });
-      try {
-        const after = await s2.openView();
-        assert.equal(after.total, 2);
-        assert.equal(reader.db.prepare('SELECT COUNT(*) n FROM manual_overrides').get().n, 0);
-        await s2.reset(correction.id, correction.revision, { undo: true });
-        assert.equal((await s2.openView()).total, 1);
-      } finally {
-        await s2.close();
-        reader.close();
-      }
-    },
-    { disk: true },
-  ));
+  fixture(async ({ repo, service, add, path }) => {
+    add('a');
+    add('b', 1);
+    add('bridge', 2);
+    const v = await service.openView();
+    const c = service.comparison(v.viewId, v.groups[0].id);
+    const correction = await service.separate(c.id, [['a', 'bridge'], ['b']]);
+    assert.deepEqual(await service.separate(c.id, [['a', 'bridge'], ['b']]), correction);
+    assert.throws(() => repo.curate.separate(c.id, [['a'], ['b', 'bridge']]), /already used/);
+    const reader = new Repository(path);
+    reader.initSchema();
+    const s2 = new CurateService({ repo: reader });
+    try {
+      const after = await s2.openView();
+      assert.equal(after.total, 2);
+      assert.equal(reader.db.prepare('SELECT COUNT(*) n FROM manual_overrides').get().n, 0);
+      await s2.reset(correction.id, correction.revision, { undo: true });
+      assert.equal((await s2.openView()).total, 1);
+    } finally {
+      await s2.close();
+      reader.close();
+    }
+  }));
 test('capacity refuses new leases without evicting live scopes; expiry and scope lookup survive restart', async () =>
   fixture(async ({ repo }) => {
     const first = repo.curate.lease('comparison', { ids: ['a'] }, 0);
@@ -325,32 +322,29 @@ test('context is at most eight from 64 indexed kept candidates and never actiona
     assert.ok(plan.some((r) => r.detail.includes('idx_curate_state_time')));
   }));
 test('transaction rollback preserves source and dirty queue together; cold projection resumes on restart', async () =>
-  fixture(
-    async ({ repo, service, add, path }) => {
-      add('a');
-      await service.refresh();
-      const before = repo.curate.generation();
-      assert.throws(() =>
-        repo.transaction(() => {
-          repo.upsertAsset({ id: 'a', fileCreatedAt: capture(100) });
-          throw Error('rollback');
-        }),
-      );
-      await service.refresh();
-      assert.equal(repo.curate.generation(), before);
-      add('b', 1);
-      const reader = new Repository(path);
-      reader.initSchema();
-      const other = new CurateService({ repo: reader });
-      try {
-        assert.equal((await other.openView()).groups[0].memberCount, 2);
-      } finally {
-        await other.close();
-        reader.close();
-      }
-    },
-    { disk: true },
-  ));
+  fixture(async ({ repo, service, add, path }) => {
+    add('a');
+    await service.refresh();
+    const before = repo.curate.generation();
+    assert.throws(() =>
+      repo.transaction(() => {
+        repo.upsertAsset({ id: 'a', fileCreatedAt: capture(100) });
+        throw Error('rollback');
+      }),
+    );
+    await service.refresh();
+    assert.equal(repo.curate.generation(), before);
+    add('b', 1);
+    const reader = new Repository(path);
+    reader.initSchema();
+    const other = new CurateService({ repo: reader });
+    try {
+      assert.equal((await other.openView()).groups[0].memberCount, 2);
+    } finally {
+      await other.close();
+      reader.close();
+    }
+  }));
 test('metadata refresh is bounded to two calls, preserves unknown failures, and requires listed photos', async () =>
   fixture(async ({ repo, service, add }) => {
     for (let i = 0; i < 6; i++) add('p' + i, i);
@@ -443,7 +437,10 @@ test('comparison photo pages stay bounded while retaining all IDs and lease clea
     assert.equal(last.nextOffset, null);
     repo.curate.releaseLease(view.viewId);
     assert.equal(repo.db.prepare('SELECT COUNT(*) n FROM curate_view_groups').get().n, 0);
-    assert.equal(repo.curate.getLease(c.id, 'comparison').ids.length, 120);
+    assert.throws(
+      () => repo.curate.getLease(c.id, 'comparison'),
+      (error) => error.code === 'curate_expired',
+    );
   }));
 test('migration from schema 12 queues only review rows; corrections/evidence/views survive online backup and restore', async () =>
   fixture(async ({ repo, service, add, path }) => {
@@ -556,3 +553,297 @@ test('checksum bypass requires the real Immich isEdited field and complete obser
     null,
   );
 });
+
+test('30k UUID singles share compact immutable snapshots across tabs, retries and filters', async () =>
+  fixture(async ({ repo, service }) => {
+    const ids = Array.from({ length: 30000 }, (_, i) => `00000000-0000-4000-8000-${String(i).padStart(12, '0')}`);
+    const insert = repo.db.prepare(
+      'INSERT INTO assets(asset_id,file_created_at,first_seen_at,last_seen_at) VALUES(?,?,?,?)',
+    );
+    repo.transaction(() => {
+      ids.forEach((id, i) => insert.run(id, capture(i * 60), 'now', 'now'));
+      repo.reviewListAdd(ids, 'test');
+    });
+    // Concurrent opens cannot see a half-written shared snapshot.
+    const views = await Promise.all([service.openView(), service.openView(), service.openView({ kind: 'singles' })]);
+    for (const view of views) {
+      assert.equal(view.total, 30000);
+      const last = service.page(view.viewId, 29950);
+      assert.equal(last.groups.length, 50);
+      assert.equal(last.groups.at(-1).id, `single:standard-1:${ids.at(-1)}`);
+    }
+    assert.equal(repo.db.prepare('SELECT COUNT(*) n FROM curate_view_snapshots').get().n, 1);
+    assert.equal(repo.db.prepare('SELECT COUNT(*) n FROM curate_view_groups').get().n, 30000);
+    const bytes = repo.db
+      .prepare(`SELECT (SELECT SUM(bytes) FROM curate_view_snapshots) + (SELECT SUM(bytes) FROM curate_leases) n`)
+      .get().n;
+    assert.ok(bytes < 2 * 1024 * 1024);
+    assert.ok(bytes < MAX_LEASE_BYTES);
+    const compare = service.comparison(views[1].viewId, views[1].groups[0].id);
+    assert.deepEqual(compare.ids, [ids[0]]);
+    repo.curate.releaseLease(views[0].viewId);
+    assert.equal(service.page(views[1].viewId).total, 30000);
+    // A new generation gets its own snapshot; prior pages retain their order.
+    repo.recordDecision({ assetIds: [ids[0]], addTags: ['frame/eligible'], removeTags: [], action: 'approve' });
+    const next = await service.openView();
+    assert.equal(next.total, 29999);
+    assert.equal(service.page(views[1].viewId).groups[0].id, `single:standard-1:${ids[0]}`);
+    assert.equal(service.page(views[1].viewId).updatesAvailable, true);
+    for (const view of [...views, next]) repo.curate.releaseLease(view.viewId);
+    assert.equal(repo.db.prepare('SELECT COUNT(*) n FROM curate_view_snapshots').get().n, 0);
+    assert.equal(repo.db.prepare('SELECT COUNT(*) n FROM curate_view_groups').get().n, 0);
+    assert.equal(repo.db.prepare('SELECT COUNT(*) n FROM curate_leases').get().n, 0);
+  }));
+
+test('a long session replaces only its own comparison and repeated opens preserve the operation ID', async () =>
+  fixture(async ({ repo, service, add }) => {
+    repo.transaction(() => {
+      for (let i = 0; i < 250; i++) {
+        add(`a${i}`, i * 60);
+        add(`b${i}`, i * 60 + 1);
+      }
+    });
+    const first = await service.openView(),
+      other = await service.openView();
+    const otherComparison = service.comparison(other.viewId, other.groups[0].id);
+    let old;
+    for (let offset = 0; offset < first.total; offset += 50) {
+      for (const group of service.page(first.viewId, offset).groups) {
+        const comparison = service.comparison(first.viewId, group.id);
+        assert.equal(service.comparison(first.viewId, group.id).id, comparison.id);
+        if (old)
+          assert.throws(
+            () => repo.curate.getLease(old, 'comparison'),
+            (error) => error.code === 'curate_expired',
+          );
+        old = comparison.id;
+      }
+    }
+    assert.equal(repo.db.prepare("SELECT COUNT(*) n FROM curate_leases WHERE kind='comparison'").get().n, 2);
+    assert.equal(service.comparisonPhotos(otherComparison.id).total, 2);
+    repo.curate.releaseLease(first.viewId);
+    assert.equal(service.comparisonPhotos(otherComparison.id).total, 2);
+    assert.throws(
+      () => service.comparisonPhotos(old),
+      (error) => error.code === 'curate_expired',
+    );
+  }));
+
+test('view and comparison counts are separate but all scope bytes share the same bound', async () =>
+  fixture(async ({ repo }) => {
+    for (let i = 0; i < MAX_LEASES; i++) repo.curate.lease('comparison', { i }, 0);
+    for (let i = 0; i < MAX_VIEW_LEASES; i++) repo.curate.lease('view', { i }, 0);
+    assert.throws(
+      () => repo.curate.lease('view', {}, 0),
+      (error) => error.code === 'curate_capacity',
+    );
+    assert.throws(
+      () => repo.curate.lease('comparison', {}, 0),
+      (error) => error.code === 'curate_capacity',
+    );
+    // Expiry releases capacity, but oversized scopes are refused without evicting a live one.
+    const live = repo.curate.lease('view', { kept: true }, LEASE_MS);
+    assert.throws(
+      () => repo.curate.lease('comparison', { large: 'x'.repeat(MAX_LEASE_BYTES) }, LEASE_MS),
+      (error) => error.code === 'curate_capacity',
+    );
+    assert.equal(repo.curate.getLease(live.id, 'view', LEASE_MS).kept, true);
+  }));
+
+test('correction receipts replay after expiry, lease deletion, reset and restart without new mutations', async () =>
+  fixture(async ({ repo, service, add, path }) => {
+    add('a');
+    add('b', 1);
+    const view = await service.openView(),
+      comparison = service.comparison(view.viewId, view.groups[0].id);
+    const parts = [['a'], ['b']];
+    const receipt = await service.separate(comparison.id, parts);
+    repo.db.prepare('UPDATE curate_leases SET expires_at=0').run();
+    const generation = repo.curate.generation();
+    assert.deepEqual(await service.separate(comparison.id, parts), receipt);
+    assert.equal(repo.curate.generation(), generation);
+    repo.curate.releaseLease(view.viewId);
+    assert.deepEqual(await service.separate(comparison.id, parts), receipt);
+    await assert.rejects(service.separate(comparison.id, [['b'], ['a']]), /already used/);
+    await service.reset(receipt.id, receipt.revision);
+    const afterReset = repo.curate.generation();
+    assert.deepEqual(await service.separate(comparison.id, parts), receipt);
+    assert.equal(repo.curate.generation(), afterReset);
+    assert.equal(repo.curate.correction(receipt.id).active, 0);
+    const reader = new Repository(path);
+    reader.initSchema();
+    const restarted = new CurateService({ repo: reader });
+    try {
+      restarted.refresh = async () => {
+        throw Error('Receipt replay must not rebuild');
+      };
+      assert.deepEqual(await restarted.separate(comparison.id, parts), receipt);
+      assert.equal(reader.curate.correction(receipt.id).active, 0);
+      assert.equal(reader.db.prepare('SELECT COUNT(*) n FROM manual_overrides').get().n, 0);
+      assert.throws(
+        () => reader.curate.separate('unknown-id', parts),
+        (error) => error.code === 'curate_expired',
+      );
+    } finally {
+      await restarted.close();
+      reader.close();
+    }
+  }));
+
+test('interrupted snapshot writes are discarded on restart while published views survive', async () =>
+  fixture(async ({ repo, service, add, path }) => {
+    add('a');
+    const view = await service.openView();
+    const incomplete = repo.curate.lease('view', { snapshotId: 'unfinished', total: 5 });
+    repo.db.prepare('INSERT INTO curate_view_snapshots VALUES(?,?,0)').run('unfinished', 100);
+    repo.db.prepare('INSERT INTO curate_view_groups VALUES(?,?,?,?,?)').run('unfinished', 0, 'partial', '', 'single');
+    const reader = new Repository(path);
+    try {
+      reader.initSchema();
+      assert.throws(
+        () => reader.curate.getLease(incomplete.id, 'view'),
+        (error) => error.code === 'curate_expired',
+      );
+      assert.equal(reader.curate.viewGroups(view.viewId, 0, 50)[0].ids[0], 'a');
+      assert.equal(reader.db.prepare('SELECT COUNT(*) n FROM curate_view_snapshots WHERE ready=0').get().n, 0);
+      assert.equal(
+        reader.db.prepare("SELECT COUNT(*) n FROM curate_view_groups WHERE view_id='unfinished'").get().n,
+        0,
+      );
+    } finally {
+      reader.close();
+    }
+  }));
+
+test('discovery stores no extra rows for unlisted assets or duplicated source columns', async () =>
+  fixture(async ({ repo, service, add }) => {
+    const asset = {
+      id: 'unlisted',
+      fileCreatedAt: capture(0),
+      checksum: 'original',
+      thumbhash: 'thumb',
+      people: [{ id: 'person' }],
+      isEdited: false,
+      isTrashed: false,
+      isOffline: false,
+      exifInfo: { orientation: '1', exifImageWidth: 100, exifImageHeight: 200 },
+    };
+    repo.upsertAsset(asset);
+    assert.equal(repo.db.prepare('SELECT COUNT(*) n FROM curate_observations').get().n, 0);
+    add('listed', 1);
+    repo.upsertAsset({
+      id: 'listed',
+      fileCreatedAt: capture(1),
+      checksum: 'original',
+      thumbhash: 'thumb',
+      width: 100,
+      height: 200,
+    });
+    assert.equal(repo.db.prepare('SELECT COUNT(*) n FROM curate_observations').get().n, 0);
+    repo.reviewListAdd(['unlisted'], 'test');
+    repo.upsertAsset(asset);
+    const json = JSON.parse(
+      repo.db.prepare("SELECT json FROM curate_observations WHERE asset_id='unlisted'").get().json,
+    );
+    assert.deepEqual(
+      Object.keys(json).sort(),
+      ['version', 'recognition', 'orientation', 'isEdited', 'isTrashed', 'isOffline'].sort(),
+    );
+    await service.refresh();
+    assert.equal(repo.curate.photo('unlisted').recognizedCount, 1);
+    // Partial metadata leaves the recognition observation intact; visual refresh
+    // comes from the source columns rather than a stale duplicate JSON field.
+    repo.updateAssetVisuals('unlisted', { thumbhash: 'new-thumb', duplicateId: 'dup' });
+    await service.refresh();
+    assert.equal(repo.curate.details(['unlisted'])[0].evidence.image.thumbhash, 'new-thumb');
+    assert.equal(repo.curate.photo('unlisted').duplicateId, 'dup');
+    repo.upsertAsset({ ...asset, thumbhash: null, duplicateId: null });
+    await service.refresh();
+    assert.equal(repo.curate.details(['unlisted'])[0].evidence.image.thumbhash, null);
+    assert.equal(repo.curate.photo('unlisted').duplicateId, null);
+    assert.equal(repo.curate.photo('unlisted').renditionKey, null);
+    assert.equal(repo.curate.photo('unlisted').recognizedCount, 1);
+    repo.db.prepare("DELETE FROM review_list WHERE asset_id='unlisted'").run();
+    assert.equal(repo.db.prepare('SELECT COUNT(*) n FROM curate_observations').get().n, 0);
+  }));
+
+test('unchanged sync queues no work; every grouping source column still invalidates atomically', async () =>
+  fixture(async ({ repo, service, add }) => {
+    const assets = Array.from({ length: 200 }, (_, i) => ({
+      id: 'p' + i,
+      fileCreatedAt: capture(i * 60),
+      checksum: 'c' + i,
+      fileModifiedAt: capture(i),
+      width: 100,
+      height: 200,
+      thumbhash: 't',
+      duplicateId: 'd' + i,
+      people: [],
+      isEdited: false,
+    }));
+    repo.transaction(() => {
+      for (const asset of assets) add(asset.id, 0, asset);
+    });
+    await service.refresh();
+    const generation = repo.curate.generation(),
+      current = service.current;
+    repo.transaction(() => assets.forEach((asset) => repo.upsertAsset({ ...asset, updatedAt: capture(10000) })));
+    assert.equal(repo.db.prepare('SELECT COUNT(*) n FROM curate_dirty').get().n, 0);
+    await service.refresh();
+    assert.equal(repo.curate.generation(), generation);
+    assert.equal(service.current, current);
+    for (const column of [
+      'checksum',
+      'file_created_at',
+      'file_modified_at',
+      'width',
+      'height',
+      'thumbhash',
+      'duplicate_id',
+      'missing_since',
+    ]) {
+      repo.db.prepare(`UPDATE assets SET ${column}=NULL WHERE asset_id='p0'`).run();
+      if (column === 'missing_since')
+        repo.db.prepare("UPDATE assets SET missing_since='missing' WHERE asset_id='p0'").run();
+      assert.equal(repo.db.prepare("SELECT COUNT(*) n FROM curate_dirty WHERE asset_id='p0'").get().n, 1, column);
+      await service.refresh();
+    }
+    const before = repo.curate.photo('p1').materialKey;
+    assert.throws(
+      () =>
+        repo.transaction(() => {
+          repo.upsertAsset({ ...assets[1], checksum: 'changed', people: [{ id: 'new' }] });
+          throw Error('rollback');
+        }),
+      /rollback/,
+    );
+    assert.equal(repo.db.prepare('SELECT COUNT(*) n FROM curate_dirty').get().n, 0);
+    assert.equal(repo.curate.photo('p1').materialKey, before);
+  }));
+
+test('limited discovery leaves semantic evidence unknown until the explicit asset-detail adapter runs', async () =>
+  fixture(async ({ repo, service, add, enrich }) => {
+    add('land', 0);
+    add('solo', 1);
+    enrich('land', 0);
+    enrich('solo', 1);
+    assert.equal((await service.openView()).total, 1);
+    assert.equal(repo.curate.photo('land').recognizedCount, null);
+    let calls = 0;
+    service.immich = {
+      getAsset: async (id) => {
+        calls++;
+        return {
+          id,
+          fileCreatedAt: capture(id === 'land' ? 0 : 1),
+          people: id === 'land' ? [] : [{ id: 'person' }],
+          isEdited: false,
+        };
+      },
+    };
+    await service.refreshMetadata(['land', 'solo']);
+    assert.equal(calls, 2);
+    assert.equal((await service.openView()).total, 2);
+    assert.equal(repo.curate.photo('land').recognizedCount, 0);
+    assert.equal(repo.curate.photo('solo').recognizedCount, 1);
+  }));

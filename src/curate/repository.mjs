@@ -1,11 +1,13 @@
-import { randomUUID } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import { setImmediate } from 'node:timers/promises';
 import { deriveState } from '../enrich/reviewBuckets.mjs';
 import { CurateError, canonicalJson, fingerprint, validatePartition, validateAdvice } from './contracts.mjs';
-import { observeAsset, photoEvidence } from './evidence.mjs';
+import { hasObservationFields, observeAsset, photoEvidence } from './evidence.mjs';
+import { GROUPING_METHOD } from './grouping.mjs';
 
 export const LEASE_MS = 30 * 60_000;
 export const MAX_LEASES = 200;
+export const MAX_VIEW_LEASES = 200;
 export const MAX_LEASE_BYTES = 5 * 1024 * 1024;
 const HOT = `asset_id id,captured_ms time,checksum,duplicate_id duplicateId,rendition_key renditionKey,
  input_key inputKey,material_key materialKey,people_count peopleCount,recognized_count recognizedCount,availability`;
@@ -16,6 +18,7 @@ export class CurateRepository {
     this.db = repo.db;
     this.schemas = new Map();
     this.statements = new Map();
+    this.viewBuilds = new Map();
   }
   prepare(sql) {
     let statement = this.statements.get(sql);
@@ -35,6 +38,11 @@ export class CurateRepository {
     const old = this.prepare('SELECT json FROM curate_observations WHERE asset_id=?').get(asset.id);
     const json = JSON.stringify(observeAsset(asset, old ? JSON.parse(old.json) : {}));
     if (json !== old?.json) this.prepare('INSERT OR REPLACE INTO curate_observations VALUES(?,?)').run(asset.id, json);
+  }
+  shouldObserve(asset) {
+    return (
+      hasObservationFields(asset) && Boolean(this.prepare('SELECT 1 FROM review_list WHERE asset_id=?').get(asset.id))
+    );
   }
   schema(id) {
     if (!id) return null;
@@ -75,7 +83,7 @@ export class CurateRepository {
     }
     const observation = this.prepare('SELECT json FROM curate_observations WHERE asset_id=?').get(id);
     const observed = observation ? JSON.parse(observation.json) : {};
-    const duplicateId = Object.hasOwn(observed, 'duplicateId') ? observed.duplicateId : source.duplicate_id;
+    const duplicateId = source.duplicate_id;
     const projected = photoEvidence({
       asset: source,
       observation: observed,
@@ -278,13 +286,18 @@ export class CurateRepository {
   }
   lease(kind, scope, now = Date.now(), reservedBytes = 0) {
     const json = canonicalJson(scope),
-      bytes = Buffer.byteLength(json) + reservedBytes;
+      bytes = Buffer.byteLength(json);
     return this.repo.transaction(() => {
       this.prepare('DELETE FROM curate_leases WHERE expires_at<=?').run(now);
-      const used = this.prepare('SELECT COUNT(*) count,COALESCE(SUM(bytes),0) bytes FROM curate_leases').get();
-      if (used.count >= MAX_LEASES || used.bytes + bytes > MAX_LEASE_BYTES)
+      const count = this.prepare('SELECT COUNT(*) count FROM curate_leases WHERE kind=?').get(kind).count;
+      const used = this.prepare(
+        `SELECT
+        (SELECT COALESCE(SUM(bytes),0) FROM curate_leases) +
+        (SELECT COALESCE(SUM(bytes),0) FROM curate_view_snapshots) bytes`,
+      ).get().bytes;
+      if (count >= (kind === 'view' ? MAX_VIEW_LEASES : MAX_LEASES) || used + bytes + reservedBytes > MAX_LEASE_BYTES)
         throw new CurateError(
-          'Too many open Curate comparisons. Close or wait for older comparisons to expire.',
+          'Too many open Curate views or comparisons. Close an older view or wait for it to expire.',
           'curate_capacity',
           429,
         );
@@ -301,52 +314,110 @@ export class CurateRepository {
       return { id, expiresAt, ...scope };
     });
   }
+  comparisonLease(viewId, scope) {
+    return this.repo.transaction(() => {
+      this.getLease(viewId, 'view');
+      const completeScope = { ...scope, viewId };
+      const old = this.prepare(
+        "SELECT id,scope_hash,expires_at FROM curate_leases WHERE kind='comparison' AND json_extract(json,'$.viewId')=?",
+      ).get(viewId);
+      // Retrying the same open preserves its operation ID. Navigating within a
+      // view supersedes that view's prior comparison, never another tab's scope.
+      if (old?.scope_hash === fingerprint(completeScope) && old.expires_at > Date.now())
+        return this.getLease(old.id, 'comparison');
+      if (old) this.releaseLease(old.id);
+      return this.lease('comparison', completeScope);
+    });
+  }
+  encodedGroup(group) {
+    // Do not store a synthetic single group ID plus a second copy of its UUID.
+    return group.ids.length === 1 && group.id === `single:${GROUPING_METHOD}:${group.ids[0]}`
+      ? [group.ids[0], '', group.route]
+      : [group.id, JSON.stringify(group.ids), group.route];
+  }
+  decodedGroup(row) {
+    return row.ids_json === ''
+      ? { id: `single:${GROUPING_METHOD}:${row.id}`, ids: [row.id], route: row.route }
+      : { id: row.id, ids: JSON.parse(row.ids_json), route: row.route };
+  }
   async createView(current, groups) {
-    const bytes = groups.reduce(
-      (n, g) => n + Buffer.byteLength(JSON.stringify(g.ids)) + Buffer.byteLength(g.id) + Buffer.byteLength(g.route),
-      0,
-    );
-    const lease = this.lease(
-      'view',
-      { generation: current.generation, stacks: current.stacks, total: groups.length },
-      Date.now(),
-      bytes,
-    );
-    const insert = this.prepare('INSERT INTO curate_view_groups VALUES(?,?,?,?,?)');
-    try {
-      let position = 0;
-      while (position < groups.length) {
-        const started = performance.now();
-        this.repo.transaction(() => {
-          do {
-            const g = groups[position];
-            insert.run(lease.id, position, g.id, JSON.stringify(g.ids), g.route);
-            position++;
-          } while (position < groups.length && performance.now() - started < 4);
-        });
+    // Identical ordered memberships share an immutable SQLite snapshot across
+    // tabs, retries and filters. They never page a moving current index. Hashing
+    // and persistence yield, and all retained snapshot bytes count toward 5 MiB.
+    const hash = createHash('sha256').update(GROUPING_METHOD);
+    let bytes = 0,
+      started = performance.now();
+    for (const group of groups) {
+      const encoded = JSON.stringify(this.encodedGroup(group));
+      bytes += Buffer.byteLength(encoded) + 4;
+      hash.update(encoded).update('\n');
+      if (performance.now() - started >= 4) {
         await setImmediate();
+        started = performance.now();
       }
-      return lease;
-    } catch (error) {
-      this.releaseLease(lease.id);
-      throw error;
     }
+    const snapshotId = hash.digest('hex');
+    const inFlight = this.viewBuilds.get(snapshotId);
+    if (inFlight) await inFlight;
+    const scope = { generation: current.generation, stacks: current.stacks, total: groups.length, snapshotId };
+    const { lease, fresh } = this.repo.transaction(() => {
+      // Cleanup before testing existence: the last owner might just have expired.
+      this.prepare('DELETE FROM curate_leases WHERE expires_at<=?').run(Date.now());
+      const fresh = !this.prepare('SELECT 1 FROM curate_view_snapshots WHERE id=?').get(snapshotId);
+      const lease = this.lease('view', scope, Date.now(), fresh ? bytes : 0);
+      if (fresh) this.prepare('INSERT INTO curate_view_snapshots(id,bytes) VALUES(?,?)').run(snapshotId, bytes);
+      return { lease, fresh };
+    });
+    if (fresh) {
+      const work = this.writeViewSnapshot(snapshotId, groups);
+      this.viewBuilds.set(snapshotId, work);
+      try {
+        await work;
+      } catch (error) {
+        this.releaseLease(lease.id);
+        throw error;
+      } finally {
+        this.viewBuilds.delete(snapshotId);
+      }
+    }
+    return lease;
+  }
+  async writeViewSnapshot(snapshotId, groups) {
+    const insert = this.prepare('INSERT INTO curate_view_groups VALUES(?,?,?,?,?)');
+    let position = 0;
+    while (position < groups.length) {
+      const started = performance.now();
+      this.repo.transaction(() => {
+        do {
+          insert.run(snapshotId, position, ...this.encodedGroup(groups[position]));
+          position++;
+        } while (position < groups.length && performance.now() - started < 4);
+      });
+      await setImmediate();
+    }
+    this.prepare('UPDATE curate_view_snapshots SET ready=1 WHERE id=?').run(snapshotId);
   }
   viewGroups(id, offset, limit) {
+    const view = this.getLease(id, 'view');
     return this.prepare(
       'SELECT group_id id,ids_json,route FROM curate_view_groups WHERE view_id=? AND position>=? ORDER BY position LIMIT ?',
     )
-      .all(id, offset, limit)
-      .map((r) => ({ id: r.id, ids: JSON.parse(r.ids_json), route: r.route }));
+      .all(view.snapshotId ?? id, offset, limit)
+      .map((row) => this.decodedGroup(row));
   }
   viewGroup(id, groupId) {
+    const view = this.getLease(id, 'view');
+    const key =
+      view.snapshotId && typeof groupId === 'string' && groupId.startsWith(`single:${GROUPING_METHOD}:`)
+        ? groupId.slice(`single:${GROUPING_METHOD}:`.length)
+        : groupId;
     const row =
-      typeof groupId === 'string' &&
+      typeof key === 'string' &&
       this.prepare('SELECT group_id id,ids_json,route FROM curate_view_groups WHERE view_id=? AND group_id=?').get(
-        id,
-        groupId,
+        view.snapshotId ?? id,
+        key,
       );
-    return row ? { id: row.id, ids: JSON.parse(row.ids_json), route: row.route } : null;
+    return row ? this.decodedGroup(row) : null;
   }
   getLease(id, kind, now = Date.now()) {
     const row =
@@ -365,28 +436,35 @@ export class CurateRepository {
     return lease;
   }
   correction(id) {
-    return this.prepare('SELECT id,revision,active FROM curate_separations WHERE id=?').get(id);
+    return typeof id === 'string'
+      ? this.prepare('SELECT id,revision,active FROM curate_separations WHERE id=?').get(id)
+      : null;
   }
   separate(leaseId, partitions, now = Date.now()) {
     return this.repo.transaction(() => {
-      const lease = this.getLease(leaseId, 'comparison', now);
-      validatePartition(lease.ids, partitions);
-      if (partitions.length < 2)
-        throw new CurateError('A separation needs at least two parts.', 'invalid_curate_partition', 400);
       // Same lease is an idempotent correction ID. A different partition cannot
-      // silently overwrite an existing correction on retry.
-      const existing = this.prepare('SELECT * FROM curate_separations WHERE id=?').get(leaseId);
+      // silently overwrite an existing correction on retry. Receipts outlive
+      // their leases, including a later navigation, reset, or lease cleanup.
+      const existing =
+        typeof leaseId === 'string' && this.prepare('SELECT * FROM curate_separations WHERE id=?').get(leaseId);
       if (existing) {
         const saved = this.prepare(
           'SELECT asset_id,partition_no FROM curate_separation_members WHERE separation_id=? ORDER BY asset_id',
         ).all(leaseId);
+        validatePartition(
+          saved.map((row) => row.asset_id),
+          partitions,
+        );
         const expected = partitions
           .flatMap((p, i) => p.map((asset_id) => ({ asset_id, partition_no: i })))
           .sort((a, b) => a.asset_id.localeCompare(b.asset_id));
-        if (fingerprint(saved) !== fingerprint(expected) || !existing.active)
-          throw new CurateError('This correction ID was already used.');
-        return { id: leaseId, revision: existing.revision, undoUntil: existing.undo_until };
+        if (fingerprint(saved) !== fingerprint(expected)) throw new CurateError('This correction ID was already used.');
+        return { id: leaseId, revision: 1, undoUntil: existing.undo_until };
       }
+      const lease = this.getLease(leaseId, 'comparison', now);
+      validatePartition(lease.ids, partitions);
+      if (partitions.length < 2)
+        throw new CurateError('A separation needs at least two parts.', 'invalid_curate_partition', 400);
       this.assertComparison(leaseId, now);
       this.prepare('INSERT INTO curate_separations VALUES(?,1,1,?,?)').run(leaseId, now, now + LEASE_MS);
       const insert = this.prepare('INSERT INTO curate_separation_members VALUES(?,?,?)');

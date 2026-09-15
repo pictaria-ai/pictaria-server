@@ -11,6 +11,10 @@ All notable changes to Pictaria Server are documented here. This project follows
   producing-configuration evidence, persistent separation constraints and bounded
   comparison APIs. The current Curate page and keeper recommendations are unchanged;
   the UI and decision cutover follow separately. See [Curate foundation](docs/CURATE-FOUNDATION.md).
+- Curate foundation views share compact stable snapshots and replace comparisons
+  as users browse. Separation retries retain their receipts after scope expiry.
+  Unchanged discovery updates skip Curate recalculation; extra evidence is stored
+  only for review-listed photos. Background evidence-refresh integration is pending.
 - Enrichment schema 13 / persistent-state contract 16 adds Curate records without
   rewriting decisions or tags. Upgrade creates the normal recovery snapshot;
   rollback requires restoring that snapshot.

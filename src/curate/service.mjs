@@ -134,7 +134,7 @@ export class CurateService {
     const material = this.store.material(group.ids);
     if (this.store.pendingScopeChanges(group.ids)) throw new CurateError('This stack is updating. Refresh Curate.');
     const context = this.store.context(group.ids);
-    const lease = this.store.lease('comparison', {
+    const lease = this.store.comparisonLease(viewId, {
       groupId,
       ids: group.ids,
       material,
@@ -182,9 +182,12 @@ export class CurateService {
     }
   }
   async separate(leaseId, partitions) {
-    await this.refresh();
-    const lease = this.store.getLease(leaseId, 'comparison');
+    // A committed receipt is independent of lease expiry, current membership,
+    // and rebuild health. Replay must not require a new scope or remote work.
     if (this.store.correction(leaseId)) return this.store.separate(leaseId, partitions);
+    await this.refresh();
+    if (this.store.correction(leaseId)) return this.store.separate(leaseId, partitions);
+    const lease = this.store.getLease(leaseId, 'comparison');
     // A machine split of the same inspected set is fine; additions are not.
     // Current per-photo human/input checks still run inside the transaction.
     this.store.assertComparison(leaseId);

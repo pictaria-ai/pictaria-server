@@ -23,6 +23,16 @@ unsupported producing schemas stay unknown. Equal counts do not prove matching
 subjects. Empty recognition is never described as complete. This is a conservative
 initial rule with limited visual calibration, not a universal composition detector.
 
+**Evidence supply is not integrated yet.** Ordinary discovery does not request
+recognized people, and it does not supply the edit-state evidence needed for
+checksum bypasses. On a real installation this slice therefore does not yet
+deliver the landscape/couple/solo separation or checksum-bypass behavior just
+described. The explicit adapter is tested with asset-detail responses from
+`GET /assets/{id}` (`immich.getAsset`), including `people` and `isEdited` when
+available, but no route or scheduled job currently admits that refresh work.
+Connecting bounded background refresh is remaining PIC-367 work. Unfetched or
+unsupported fields stay unknown; list rendering must not fetch them per card.
+
 Saved human separations apply to every group member even when the soft comparison
 budget is exhausted. A new bridge cannot reunite separated photos. A removed photo
 may still join other compatible alternatives. The computation records its actual
@@ -48,11 +58,11 @@ queue, and their projection can resume after interruption.
 
 | Record | Purpose and bounds |
 | --- | --- |
-| `curate_observations` | Partial Immich observations; absent fields do not erase observed recognition. At most 4 KiB and 100 recognized IDs, with omissions explicit. |
+| `curate_observations` | Extra Immich evidence for review-listed photos only: recognition, orientation, edit state and availability flags. Identity, dimensions and visual descriptors stay in `assets`. Absent fields do not erase observed recognition. At most 4 KiB and 100 recognized IDs, with omissions explicit. Removing a review row removes its extra observations. |
 | `curate_photos` | Compact indexed projection plus cold bounded evidence. The worker reads only grouping columns, not prompts, captions or full normalized Enrich results. |
-| `curate_dirty` | Transactional change tracking across assets, successful enrichment, tags, membership, overrides and observations. Unchanged projections do not increment the grouping generation. |
+| `curate_dirty` | Transactional change tracking across assets, successful enrichment, tags, membership, overrides and observations. Asset updates queue work only when a grouping source column changes; an unchanged discovery sync does not re-project the collection. Unchanged projections do not increment the grouping generation. |
 | `curate_separations` / members | Durable active human constraints, conditional reset and 30-minute correction Undo. Neither writes photo decisions or Immich tags. |
-| `curate_leases` / view groups | Server-issued 30-minute scopes, at most 200 live leases and 5 MiB encoded scope data. Indexed view rows preserve order and full membership across pages. Expired leases delete their saved view rows. Capacity refuses new scopes instead of silently evicting live ones. |
+| `curate_leases` / view snapshots / view groups | Server-issued 30-minute scopes, at most 200 views and 200 comparisons, with one current comparison per view. Identical ordered memberships share immutable indexed snapshots; single-photo IDs are stored once per snapshot. The shared 5 MiB bound counts every retained snapshot and lease. Closing/expiring the last owner removes its snapshot. Capacity refuses new scopes instead of evicting another view. |
 | `curate_advice` / members | Shared exhaustive-partition and keeper-set validation with producing schema/input metadata. New advice replaces overlapping current scope for that role; no raw-response history. Real provider calls and their lifecycle remain PIC-370/PIC-116/PIC-346 work. |
 
 Evidence projection uses bounded transactions with a 4 ms yielding target. One
@@ -60,7 +70,9 @@ read-only worker loads a coherent SQLite snapshot and builds complete groups.
 Publication replaces the old index atomically, and the worker exits before another
 can start. A failed rebuild leaves the prior view usable. The source connection
 remains the only writer. Normal reads make no per-card Immich requests. Existing
-asset ingestion records observations it already fetched; an explicit metadata
+asset ingestion records additional observations it already fetched for listed
+photos. Unlisted library discovery stores no Curate observation rows; after a
+photo enters review, missing fields need the pending refresh integration. An explicit metadata
 refresh adapter accepts at most 500 listed photos and runs at most two requests
 at once. Authentication/transport failures do not become deletion evidence.
 Automatic refresh demand and admission belong to the upcoming integration.
@@ -83,13 +95,18 @@ Curate page. They inherit the server's existing password/session/origin checks.
   full pending ID scope, a comparison ID, bounded photo details, and separate
   read-only context. Details beyond 50 photos are retrieved using
   `POST /api/review/curate/comparisons/photos` with `comparisonId`, `offset`, `limit`.
+  Reopening the same scope reuses its comparison ID. Opening a different scope
+  replaces that view's previous comparison; comparisons in other views remain valid.
 - `POST /api/review/curate/separations` supplies `comparisonId` and an exhaustive
   disjoint `partitions` array. The UI will expose Remove from stack / Split into
   singles, not an arbitrary subgroup editor. A repeated identical request is
-  idempotent; changed payloads cannot reuse the correction ID.
+  idempotent even after its lease expires or is removed. A later reset does not
+  prevent receipt replay or reactivate the separation. Changed payloads cannot
+  reuse the correction ID, and an unknown ID still needs its original live lease.
 - `POST /api/review/curate/separations/reset` supplies correction `id` and expected
   `revision`; `undo: true` additionally enforces its Undo deadline.
-- `DELETE /api/review/curate/leases` releases an `id` when its view closes.
+- `DELETE /api/review/curate/leases` releases an `id` when its view closes,
+  including that view's current comparison. Other owners keep shared snapshots.
 
 Comparison scopes bind inspected IDs and per-photo material/human signatures.
 Related dirty candidates and new group members prevent a stale correction;
@@ -103,14 +120,21 @@ PIC-368 must consume these scopes inside its actual atomic decision operation.
 The focused suite exercises producing-schema provenance, positive and missing-face
 cases, complete 30-photo stacks, bounded long chains, hard separations, stale
 inputs and membership, related versus unrelated updates, read-only context,
-capacity/expiry, real worker/HTTP paths, schema-12 migration, SQLite restart, and
-online backup/restore. Fixtures contain synthetic photos and no credentials.
+capacity/expiry, three simultaneous views of 30k UUID singles, browsing 250 stacks,
+receipt replay after expiry/reset/restart, unchanged ingestion, real worker/HTTP
+paths, schema-12 migration, SQLite restart, and online backup/restore. Interrupted
+snapshot builds are discarded on restart rather than serving partial membership.
+Fixtures contain synthetic photos and no credentials.
 
 Run `node bin/curate-foundation-bench.mjs` for isolated 1k/10k/30k, decided-context,
-and dense fixtures. It reports initial evidence backfill separately from a
-persisted-projection rebuild and from opening/paging a view. RSS is a sampled
-whole-process delta for this harness, including SQLite/worker/GC effects, not
-complete-server acceptance or a retained-heap measurement. It does not load the
+and dense fixtures, using full-length UUIDs. It reports initial evidence backfill
+separately from a persisted-projection rebuild, opening/reopening/paging a view,
+retained bytes for two views, and an unchanged ingestion pass. RSS is a sampled
+whole-process delta for the grouping/paging phase, including SQLite/worker/GC
+effects, not complete-server acceptance or a retained-heap measurement. The
+subsequent whole-library ingestion diagnostic reports its duration, dirty count
+and ending RSS separately; it is an artificial single transaction, not a
+production scheduling or mixed-load measurement. It does not load the
 application environment, contact Immich, or invoke inference.
 
 Before PIC-367 is considered complete, finish integration of evidence-refresh

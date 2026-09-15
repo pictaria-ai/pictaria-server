@@ -704,7 +704,8 @@ export class Repository {
   }
 
   upsertAsset(asset) {
-    return this.transaction(() => {
+    const observe = this.curate.shouldObserve(asset);
+    const write = () => {
       this.#reviewStateChanged();
       const now = utcNow();
       const exif = asset.exifInfo ?? {};
@@ -726,8 +727,8 @@ export class Repository {
             height=excluded.height,
             mime_type=excluded.mime_type,
             immich_updated_at=excluded.immich_updated_at,
-            thumbhash=COALESCE(excluded.thumbhash, assets.thumbhash),
-            duplicate_id=COALESCE(excluded.duplicate_id, assets.duplicate_id),
+            thumbhash=CASE WHEN ? THEN excluded.thumbhash ELSE assets.thumbhash END,
+            duplicate_id=CASE WHEN ? THEN excluded.duplicate_id ELSE assets.duplicate_id END,
             missing_since=NULL,
             last_seen_at=excluded.last_seen_at
           `,
@@ -746,9 +747,15 @@ export class Repository {
           asset.duplicateId ?? null,
           now,
           now,
+          Number(Object.hasOwn(asset, 'thumbhash')),
+          Number(Object.hasOwn(asset, 'duplicateId')),
         );
-      this.curate.observe(asset);
-    });
+      if (observe) this.curate.observe(asset);
+    };
+    // Most discovery rows have no extra Curate evidence. The source write and
+    // dirty trigger are already atomic; only a second evidence write needs a
+    // wrapping transaction. Existing caller transactions remain reentrant.
+    return observe ? this.transaction(write) : write();
   }
 
   // Visual descriptors (thumbhash + Immich duplicate group) for near-dup
@@ -765,11 +772,6 @@ export class Repository {
         `,
       )
       .run(thumbhash, duplicateId, assetId);
-    if (result.changes) this.curate.observe({
-      id: assetId,
-      ...(thumbhash !== null ? { thumbhash } : {}),
-      ...(duplicateId !== null ? { duplicateId } : {}),
-    });
     return Number(result.changes);
   }
 
