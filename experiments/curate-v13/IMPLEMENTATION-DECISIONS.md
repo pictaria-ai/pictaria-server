@@ -109,7 +109,17 @@ Use cached/batched Immich metadata. Normal page reads make no per-card metadata
 fetches. Refresh missing/changed evidence in background batches of at most 500
 asset observations, with at most two concurrent metadata calls, yielding between
 batches. API-specific page caps may lower these numbers. Unavailable evidence
-stays unknown while refresh is pending. These bounds require real-adapter tests.
+stays unknown while refresh is pending. PIC-367 now integrates this read lane with
+live foundation views: initially due pending photos, 24-hour refresh, a durable
+30-second minimum on earlier rechecks, and at most eight due kept-context photos
+when a comparison opens. Decided history is not a polling queue. Per-request
+bounds are 30 seconds and 1 MiB; connection failures back off from 30 seconds to
+15 minutes and recover with one probe. Stacks off and shutdown cancel requests;
+Enrich being off does not. Freshness, claims and retry timing survive restart.
+Responses revalidate source evidence/membership/connection before applying. This
+lane has no paid-call accounting: cohort admission remains PIC-346. Synthetic
+real-HTTP, restart, failure and concurrency tests cover the adapter; integrated
+resource and live-version acceptance remain separate.
 
 | Data | Chosen lifetime / bound |
 | --- | --- |

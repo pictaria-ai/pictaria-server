@@ -138,6 +138,7 @@ settingsStore.onApplied = () => {
   enrichScheduler.settingsChanged();
   captionWriteback.wake();
   aiTagSync.wake();
+  curate.settingsChanged();
   // First-time setup: the moment Immich becomes reachable, populate
   // Insights instead of waiting for the hourly staleness check. A no-op
   // whenever the snapshot is fresh or Immich is still unconfigured.
@@ -214,6 +215,7 @@ review.startSyncWorker();
 captionWriteback.start();
 aiTagSync.start();
 referee.start();
+curate.start();
 // Near-dup grouping needs thumbhashes; fill rows that predate the columns
 // once Immich is reachable. No-op after the first complete pass. The pass
 // checks shouldStop between pages and its promise is drained at shutdown.

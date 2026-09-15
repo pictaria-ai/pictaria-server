@@ -23,15 +23,13 @@ unsupported producing schemas stay unknown. Equal counts do not prove matching
 subjects. Empty recognition is never described as complete. This is a conservative
 initial rule with limited visual calibration, not a universal composition detector.
 
-**Evidence supply is not integrated yet.** Ordinary discovery does not request
-recognized people, and it does not supply the edit-state evidence needed for
-checksum bypasses. On a real installation this slice therefore does not yet
-deliver the landscape/couple/solo separation or checksum-bypass behavior just
-described. The explicit adapter is tested with asset-detail responses from
-`GET /assets/{id}` (`immich.getAsset`), including `people` and `isEdited` when
-available, but no route or scheduled job currently admits that refresh work.
-Connecting bounded background refresh is remaining PIC-367 work. Unfetched or
-unsupported fields stay unknown; list rendering must not fetch them per card.
+The foundation now admits bounded background asset-detail refresh while a saved
+Curate view is live. `GET /assets/{id}` supplies `people`, `isEdited`, orientation
+and availability when Immich provides them; unsupported or unfetched fields stay
+unknown. Normal list/comparison responses never wait for these requests. Updated
+evidence can change the next view, while an already-open view keeps its membership.
+The released Curate page still uses the old path until PIC-369's cutover; it does
+not open these foundation views or start their refresh demand.
 
 Saved human separations apply to every group member even when the soft comparison
 budget is exhausted. A new bridge cannot reunite separated photos. A removed photo
@@ -60,6 +58,7 @@ queue, and their projection can resume after interruption.
 | --- | --- |
 | `curate_observations` | Extra Immich evidence for review-listed photos only: recognition, orientation, edit state and availability flags. Identity, dimensions and visual descriptors stay in `assets`. Absent fields do not erase observed recognition. At most 4 KiB and 100 recognized IDs, with omissions explicit. Removing a review row removes its extra observations. |
 | `curate_photos` | Compact indexed projection plus cold bounded evidence. The worker reads only grouping columns, not prompts, captions or full normalized Enrich results. |
+| `curate_metadata` / control | One durable refresh row per review photo, indexed due work, last observation result, claim cooldown and connection-wide retry state. No responses, credentials or provider prompts. Removing a review member removes its refresh row. |
 | `curate_dirty` | Transactional change tracking across assets, successful enrichment, tags, membership, overrides and observations. Asset updates queue work only when a grouping source column changes; an unchanged discovery sync does not re-project the collection. Unchanged projections do not increment the grouping generation. |
 | `curate_separations` / members | Durable active human constraints, conditional reset and 30-minute correction Undo. Neither writes photo decisions or Immich tags. |
 | `curate_leases` / view snapshots / view groups | Server-issued 30-minute scopes, at most 200 views and 200 comparisons, with one current comparison per view. Identical ordered memberships share immutable indexed snapshots; single-photo IDs are stored once per snapshot. The shared 5 MiB bound counts every retained snapshot and lease. Closing/expiring the last owner removes its snapshot. Capacity refuses new scopes instead of evicting another view. |
@@ -71,11 +70,35 @@ Publication replaces the old index atomically, and the worker exits before anoth
 can start. A failed rebuild leaves the prior view usable. The source connection
 remains the only writer. Normal reads make no per-card Immich requests. Existing
 asset ingestion records additional observations it already fetched for listed
-photos. Unlisted library discovery stores no Curate observation rows; after a
-photo enters review, missing fields need the pending refresh integration. An explicit metadata
-refresh adapter accepts at most 500 listed photos and runs at most two requests
-at once. Authentication/transport failures do not become deletion evidence.
-Automatic refresh demand and admission belong to the upcoming integration.
+photos. Unlisted library discovery stores no Curate observation rows.
+
+Metadata refresh is a separate Immich-read lane, not the AI job queue:
+
+- At most 500 photos per batch, two concurrent reads, a 30-second request deadline
+  and a 1 MiB response ceiling. Each result is applied in a short transaction,
+  with a yield before the next request. Unknown optional fields do not cause a loop.
+- Pending review photos are due initially, then after 24 hours while a live view
+  exists. Observed image/detail changes can request an earlier read, with a durable
+  30-second per-photo minimum. Enrich output and human decisions alone do not.
+  Reopening a page preserves these timestamps; restart preserves claims and retries.
+- Already-decided history is not scanned for refresh. Opening a comparison can
+  prioritize its at-most-eight read-only context photos when due. Context demand
+  expires after 30 minutes; expired work is retired in bounded indexed pages.
+- Authentication, rate-limit and connection failures pause the entire lane for
+  30 seconds, doubling up to 15 minutes. Recovery starts with one probe. Only
+  404/410 mark a photo unavailable; malformed/oversized responses retain prior
+  evidence and record `invalid-response` until another refresh is due.
+- Applying a response checks the current connection, review membership, claim and
+  source-image/detail fingerprint. A late response cannot overwrite a newer local
+  observation or restore removed membership. Human decisions are never rewritten.
+- Stacks off, no connection, or no live view stops new work. Stacks/connection
+  changes and shutdown cancel in-flight reads. Enrich and AI-provider settings do
+  not control this lane. A changed Immich connection resets its read/backoff state;
+  prior evidence remains explicitly last-observed until replaced.
+
+The shared Immich client accepts caller cancellation and a smaller response bound
+for this lane; other callers retain their existing defaults. Metadata refresh
+performs no image downloads, AI calls, tag writes, album changes or curation actions.
 
 Already-kept context comes from an indexed query of at most 64 candidates within
 the local time bounds, selects at most eight compatible photos, and reports
@@ -93,6 +116,8 @@ Curate page. They inherit the server's existing password/session/origin checks.
   when opening the new view. Other tabs' scopes and snapshot ownership stay intact.
 - `GET /api/review/curate/groups` with `viewId`, `offset`, and `limit` pages up to 50 group
   summaries in the original order. `updatesAvailable` does not mutate that view.
+  `metadata` reports refresh state and a bounded problem code/retry time. Photo
+  details carry the last `checkedAt` and `outcome`; absence is not proof of freshness.
   The earlier GET-based open (`kind`, `q`) remains available for staging callers;
   replacement requires POST so a prefetched link cannot close an existing scope.
 - `POST /api/review/curate/comparisons` with `viewId` and `groupId` returns the
@@ -146,7 +171,12 @@ decision/view replacements at capacity with other tabs retained, browsing 250 st
 receipt replay after expiry/reset/restart, unchanged ingestion, real worker/HTTP
 paths, schema-12 migration, SQLite restart, and online backup/restore. Interrupted
 snapshot builds are discarded on restart rather than serving partial membership.
-Fixtures contain synthetic photos and no credentials.
+Metadata tests additionally cover actual HTTP background dispatch/cancellation and
+response bounds, 500/two request limits, 1,000 decided photos with eight requested
+context members, persistent freshness/backoff, single-probe recovery, changed
+connections, newer local observations, membership removal, human decisions during
+refresh, and draining concurrent calls after storage failure. Fixtures contain
+synthetic photos and no credentials.
 
 Run `node bin/curate-foundation-bench.mjs` for isolated 1k/10k/30k, decided-context,
 and dense fixtures, using full-length UUIDs. It reports initial evidence backfill
@@ -159,9 +189,10 @@ and ending RSS separately; it is an artificial single transaction, not a
 production scheduling or mixed-load measurement. It does not load the
 application environment, contact Immich, or invoke inference.
 
-Before PIC-367 is considered complete, finish integration of evidence-refresh
-admission, validate the complete collection/resource gates, and reconcile the
-shared cohort/admission boundary with PIC-346. The first production slice does
+Before PIC-367 is considered complete, validate the complete collection/resource
+gates and reconcile the shared cohort/admission boundary with PIC-346. Metadata
+refresh supplies observed inputs; it does not reserve paid AI calls or implement
+AI cohort scheduling. The first production slice does
 not waive the 500 ms rebuild, 8 ms practical slice, 30 ms list p95, 50 ms local
 decision p95, 128 MiB incremental Curate or 800 MiB complete-server budgets.
 Broader real-photo and long-chain quality remains for integrated owner review;

@@ -14,7 +14,11 @@ All notable changes to Pictaria Server are documented here. This project follows
 - Curate foundation views share compact stable snapshots and replace comparisons
   as users browse. Separation retries retain their receipts after scope expiry.
   Unchanged discovery updates skip Curate recalculation; extra evidence is stored
-  only for review-listed photos. Background evidence-refresh integration is pending.
+  only for review-listed photos.
+- Saved Curate foundation views now trigger bounded background Immich metadata
+  refresh, with durable freshness/retry state and protection against stale responses.
+  Pending photos and requested kept context receive available people/edit evidence
+  without blocking page reads. This becomes user-facing with the later UI cutover.
 - Enrichment schema 13 / persistent-state contract 16 adds Curate records without
   rewriting decisions or tags. Upgrade creates the normal recovery snapshot;
   rollback requires restoring that snapshot.

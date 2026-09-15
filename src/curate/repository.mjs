@@ -4,6 +4,7 @@ import { deriveState } from '../enrich/reviewBuckets.mjs';
 import { CurateError, canonicalJson, fingerprint, validatePartition, validateAdvice } from './contracts.mjs';
 import { hasObservationFields, observeAsset, photoEvidence } from './evidence.mjs';
 import { GROUPING_METHOD } from './grouping.mjs';
+import { CurateMetadataStore } from './metadata.mjs';
 
 export const LEASE_MS = 30 * 60_000;
 export const MAX_LEASES = 200;
@@ -19,6 +20,7 @@ export class CurateRepository {
     this.schemas = new Map();
     this.statements = new Map();
     this.viewBuilds = new Map();
+    this.metadata = new CurateMetadataStore(this);
   }
   prepare(sql) {
     let statement = this.statements.get(sql);
@@ -43,6 +45,45 @@ export class CurateRepository {
     return (
       hasObservationFields(asset) && Boolean(this.prepare('SELECT 1 FROM review_list WHERE asset_id=?').get(asset.id))
     );
+  }
+  mergeMetadataAsset(asset) {
+    const row = this.prepare('SELECT * FROM assets WHERE asset_id=?').get(asset.id);
+    if (!row) throw new CurateError('Metadata photo is no longer available.');
+    // Detail responses can omit optional fields. Preserve source columns unless
+    // actually observed; a partial response must not erase known image identity.
+    const merged = { id: asset.id };
+    for (const [key, column] of Object.entries({
+      originalPath: 'original_path',
+      checksum: 'checksum',
+      fileCreatedAt: 'file_created_at',
+      fileModifiedAt: 'file_modified_at',
+      width: 'width',
+      height: 'height',
+      mimeType: 'mime_type',
+      updatedAt: 'immich_updated_at',
+      thumbhash: 'thumbhash',
+      duplicateId: 'duplicate_id',
+    }))
+      merged[key] = Object.hasOwn(asset, key) ? asset[key] : row[column];
+    for (const key of ['people', 'isEdited', 'isTrashed', 'isOffline'])
+      if (Object.hasOwn(asset, key)) merged[key] = asset[key];
+    const exif = asset.exifInfo;
+    if (exif === null) {
+      merged.width = merged.height = null;
+      merged.exifInfo = { orientation: null };
+    } else if (exif && typeof exif === 'object') {
+      // Normalize dimensions before upsert's fallback chain, preserving an
+      // explicitly cleared dimension and recognizing both Immich field forms.
+      for (const [target, primary, alternate] of [
+        ['width', 'exifImageWidth', 'imageWidth'],
+        ['height', 'exifImageHeight', 'imageHeight'],
+      ]) {
+        if (Object.hasOwn(exif, primary)) merged[target] = exif[primary];
+        else if (Object.hasOwn(exif, alternate)) merged[target] = exif[alternate];
+      }
+      if (Object.hasOwn(exif, 'orientation')) merged.exifInfo = { orientation: exif.orientation };
+    }
+    this.repo.upsertAsset(merged);
   }
   schema(id) {
     if (!id) return null;
@@ -79,6 +120,7 @@ export class CurateRepository {
     if (!source) {
       if (this.prepare('DELETE FROM curate_photos WHERE asset_id=?').run(id).changes) this.bump();
       this.prepare('DELETE FROM curate_dirty WHERE asset_id=?').run(id);
+      this.prepare('DELETE FROM curate_metadata WHERE asset_id=?').run(id);
       return;
     }
     const observation = this.prepare('SELECT json FROM curate_observations WHERE asset_id=?').get(id);
@@ -110,6 +152,7 @@ export class CurateRepository {
     });
     const materialKey = fingerprint({ inputKey, humanKey });
     const old = this.prepare('SELECT material_key FROM curate_photos WHERE asset_id=?').get(id);
+    const state = deriveState(new Set(tags));
     this.prepare(`INSERT OR REPLACE INTO curate_photos VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`).run(
       id,
       captured,
@@ -121,12 +164,13 @@ export class CurateRepository {
       inputKey,
       materialKey,
       humanKey,
-      deriveState(new Set(tags)),
+      state,
       projected.availability,
       projected.peopleCount,
       projected.recognizedCount,
       JSON.stringify(projected.evidence),
     );
+    this.metadata.project(id, source, state, observed);
     if (old?.material_key !== materialKey) this.bump();
     this.prepare('DELETE FROM curate_dirty WHERE asset_id=?').run(id);
   }
@@ -182,8 +226,9 @@ export class CurateRepository {
   details(ids) {
     return ids.map((id) => {
       const row = this.prepare(
-        `SELECT a.original_path,ls.short_caption,p.state,p.evidence_json FROM curate_photos p
-        JOIN assets a ON a.asset_id=p.asset_id LEFT JOIN latest_success ls ON ls.asset_id=p.asset_id WHERE p.asset_id=?`,
+        `SELECT a.original_path,ls.short_caption,p.state,p.evidence_json,m.checked_at,m.outcome FROM curate_photos p
+        JOIN assets a ON a.asset_id=p.asset_id LEFT JOIN latest_success ls ON ls.asset_id=p.asset_id
+        LEFT JOIN curate_metadata m ON m.asset_id=p.asset_id WHERE p.asset_id=?`,
       ).get(id);
       if (!row) throw new CurateError('Comparison membership changed. Refresh Curate.');
       return {
@@ -192,6 +237,7 @@ export class CurateRepository {
         caption: row.short_caption ?? '',
         state: row.state,
         evidence: JSON.parse(row.evidence_json),
+        metadata: { checkedAt: row.checked_at ?? null, outcome: row.outcome ?? 'pending' },
       };
     });
   }

@@ -361,17 +361,21 @@ test('metadata refresh is bounded to two calls, preserves unknown failures, and 
         return { id, fileCreatedAt: capture(Number(id.slice(1))), people: [] };
       },
     };
-    await service.refreshMetadata(['p0', 'p1', 'p2', 'p3']);
+    await service.openView();
+    await service.metadata.tick();
     assert.equal(max, 2);
-    assert.equal(calls, 4);
+    assert.equal(calls, 6);
     service.immich = {
       getAsset: async () => {
         throw Object.assign(Error('unauthorized'), { status: 401 });
       },
     };
-    await assert.rejects(service.refreshMetadata(['p4', 'p5']));
+    service.metadata.now = () => Date.now() + 31000;
+    service.requestMetadataRefresh(['p4', 'p5']);
+    await service.metadata.tick();
+    assert.equal(service.metadata.status().state, 'paused');
     assert.equal(repo.db.prepare("SELECT missing_since FROM assets WHERE asset_id='p4'").get().missing_since, null);
-    await assert.rejects(service.refreshMetadata(['not-listed']), /review photos/);
+    assert.throws(() => service.requestMetadataRefresh(['not-listed']), /review photos/);
   }));
 test('stale advice cannot be saved after a source change or human separation', async () =>
   fixture(async ({ repo, service, add }) => {
@@ -858,7 +862,8 @@ test('limited discovery leaves semantic evidence unknown until the explicit asse
         };
       },
     };
-    await service.refreshMetadata(['land', 'solo']);
+    service.requestMetadataRefresh(['land', 'solo']);
+    await service.metadata.tick();
     assert.equal(calls, 2);
     assert.equal((await service.openView()).total, 2);
     assert.equal(repo.curate.photo('land').recognizedCount, 0);

@@ -1,3 +1,5 @@
+import { METADATA_SCHEMA } from './metadata.mjs';
+
 // Additive schema on the existing enrichment DB. Detailed evidence stays cold;
 // the worker reads only compact grouping fields. No raw AI response history.
 export const CURATE_SCHEMA = `
@@ -17,6 +19,7 @@ CREATE TABLE IF NOT EXISTS curate_photos (
  evidence_json TEXT NOT NULL CHECK(length(CAST(evidence_json AS BLOB))<=4096)
 );
 CREATE INDEX IF NOT EXISTS idx_curate_state_time ON curate_photos(state,captured_ms,asset_id);
+${METADATA_SCHEMA}
 CREATE TABLE IF NOT EXISTS curate_separations (
  id TEXT PRIMARY KEY, active INTEGER NOT NULL, revision INTEGER NOT NULL, created_at INTEGER NOT NULL, undo_until INTEGER NOT NULL
 );

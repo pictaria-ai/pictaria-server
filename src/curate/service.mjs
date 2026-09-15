@@ -1,10 +1,10 @@
 import { Worker } from 'node:worker_threads';
 import { groupPhotos } from './grouping.mjs';
 import { CurateError } from './contracts.mjs';
-import { setImmediate } from 'node:timers/promises';
+import { CurateMetadataRefresher } from './metadata.mjs';
 
 export class CurateService {
-  constructor({ repo, config = {}, immich = null }) {
+  constructor({ repo, config = {}, immich = null, metadataOptions = {} }) {
     this.repo = repo;
     this.store = repo.curate;
     this.config = config;
@@ -15,6 +15,7 @@ export class CurateService {
     this.closed = false;
     this.metrics = { maxProjectionSliceMs: 0, rebuildMs: 0 };
     this.abort = new AbortController();
+    this.metadata = new CurateMetadataRefresher({ curate: this, ...metadataOptions });
   }
   async refresh() {
     if (this.closed) throw new CurateError('Curate is stopping.', 'curate_unavailable', 503);
@@ -82,14 +83,7 @@ export class CurateService {
     )
       throw new CurateError('Invalid previous Curate view.', 'invalid_curate_query', 400);
     const current = await this.refresh();
-    if (!this.timer) {
-      this.timer = setInterval(() => {
-        void this.refresh().catch(() => {
-          this.backgroundError = 'Curate refresh failed; the previous view is still available.';
-        });
-      }, 1000);
-      this.timer.unref();
-    }
+    this.start();
     let groups = current.groups.filter((g) => kind === 'all' || g.ids.length > 1 === (kind === 'stacks'));
     if (search.trim()) {
       const term =
@@ -110,6 +104,7 @@ export class CurateService {
     // Paging stores order/whole memberships, not expanded photos/provenance.
     // Capacity failure is explicit; no page silently drops part of a stack.
     const lease = await this.store.createView(current, groups, { replacesViewId });
+    this.metadata.wake();
     return this.page(lease.id);
   }
   page(viewId, offset = 0, limit = 50) {
@@ -121,6 +116,7 @@ export class CurateService {
       expiresAt: view.expiresAt,
       total: view.total,
       offset,
+      metadata: this.metadata.status(),
       updatesAvailable:
         view.generation !== this.store.generation() ||
         view.stacks !== (this.config.curateBurstGrouping !== false) ||
@@ -139,6 +135,8 @@ export class CurateService {
     const material = this.store.material(group.ids);
     if (this.store.pendingScopeChanges(group.ids)) throw new CurateError('This stack is updating. Refresh Curate.');
     const context = this.store.context(group.ids);
+    this.store.metadata.request(context.ids, this.metadata.now());
+    this.metadata.wake();
     const lease = this.store.comparisonLease(viewId, {
       groupId,
       ids: group.ids,
@@ -207,67 +205,35 @@ export class CurateService {
     if (!this.closed) await this.refresh();
     return result;
   }
-  // Explicit bounded background adapter for missing/re-check evidence. Ordinary
-  // list/page/comparison reads never perform remote per-card fetches. Existing
-  // Enrich/Curate ingestion automatically records metadata they already fetch.
-  async refreshMetadata(ids) {
-    if (this.metadataWork) throw new CurateError('A metadata refresh is already running.', 'curate_busy', 409);
-    const work = this.runMetadataRefresh(ids);
-    this.metadataWork = work;
-    try {
-      return await work;
-    } finally {
-      if (this.metadataWork === work) this.metadataWork = null;
-    }
+  start() {
+    if (this.timer || this.closed) return;
+    this.timer = setInterval(() => {
+      this.metadata.settingsChanged();
+      if (!this.metadata.demanded()) return;
+      void this.refresh()
+        .then(() => {
+          this.backgroundError = null;
+          this.metadata.wake();
+        })
+        .catch(() => {
+          this.backgroundError = 'Curate refresh failed; the previous view is still available.';
+        });
+    }, 1000);
+    this.timer.unref();
   }
-  async runMetadataRefresh(ids) {
-    if (
-      !Array.isArray(ids) ||
-      ids.length > 500 ||
-      new Set(ids).size !== ids.length ||
-      ids.some((id) => typeof id !== 'string' || !id || id.length > 128)
-    )
-      throw new CurateError('Metadata refresh needs at most 500 distinct photos.', 'invalid_curate_query', 400);
-    if (!this.immich) throw new CurateError('Immich is not configured.', 'curate_unavailable', 503);
-    const members = this.repo.reviewListMembership(ids);
-    if (members.size !== ids.length) throw new CurateError('Metadata refresh must target review photos.');
-    let cursor = 0,
-      failedBatch = false;
-    const result = { updated: 0, unavailable: 0 };
-    const work = async () => {
-      while (cursor < ids.length && !this.closed && !failedBatch) {
-        const id = ids[cursor++];
-        try {
-          const asset = await this.immich.getAsset(id);
-          if (asset?.id !== id) throw Error('Immich returned a different photo.');
-          if (this.closed) return;
-          this.repo.transaction(() => this.repo.upsertAsset(asset));
-          result.updated++;
-        } catch (error) {
-          if (this.closed) return;
-          if (error.status === 404 || error.status === 410) {
-            this.repo.db
-              .prepare('UPDATE assets SET missing_since=? WHERE asset_id=?')
-              .run(new Date().toISOString(), id);
-            result.unavailable++;
-          } else {
-            failedBatch = true;
-            throw error;
-          } // transport/auth failure is not evidence of deletion
-        }
-        await setImmediate();
-      }
-    };
-    const outcomes = await Promise.allSettled([work(), work()]);
-    const failed = outcomes.find((o) => o.status === 'rejected');
-    if (failed) throw failed.reason;
-    if (!this.closed) await this.refresh();
-    return result;
+  settingsChanged() {
+    this.metadata.settingsChanged();
+  }
+  requestMetadataRefresh(ids) {
+    this.store.metadata.request(ids, this.metadata.now(), { force: true });
+    this.metadata.wake();
+    return this.metadata.status();
   }
   async close() {
     clearInterval(this.timer);
     this.closed = true;
     this.abort.abort();
+    await this.metadata.close();
     if (this.worker) await this.worker.terminate();
     await this.building?.catch(() => {});
   }
