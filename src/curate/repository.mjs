@@ -425,11 +425,16 @@ export class CurateRepository {
       }
     }
     const snapshotId = hash.digest('hex');
-    const inFlight = this.viewBuilds.get(snapshotId);
-    if (inFlight) await inFlight;
     // A retry with different filters may arrive while its successor snapshot is
     // still being written. Drain that build before superseding its reservation.
+    // Recheck both builds after each await: another tab may have started the
+    // desired snapshot while we were waiting for this family's predecessor.
     for (;;) {
+      const inFlight = this.viewBuilds.get(snapshotId);
+      if (inFlight) {
+        await inFlight;
+        continue;
+      }
       const { previous } = this.viewReplacement(replacesViewId, Date.now());
       const work = previous && this.viewBuilds.get(JSON.parse(previous.json).snapshotId);
       if (!work) break;

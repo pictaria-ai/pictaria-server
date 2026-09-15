@@ -1097,3 +1097,52 @@ test('failed replacement snapshot writes release their reservation and allow ret
     assert.equal(next.total, 2);
     assert.equal(repo.db.prepare('SELECT COUNT(*) n FROM manual_overrides').get().n, 0);
   }));
+
+test("waiting for a predecessor cannot expose another tab's still-building target snapshot", async () =>
+  fixture(async ({ repo, service, add }) => {
+    add('a');
+    add('b', 1);
+    const old = await service.openView();
+    add('c', 60);
+    const predecessorStarted = Promise.withResolvers(),
+      targetStarted = Promise.withResolvers();
+    const predecessorRelease = Promise.withResolvers(),
+      targetRelease = Promise.withResolvers();
+    const write = repo.curate.writeViewSnapshot.bind(repo.curate);
+    let writes = 0;
+    repo.curate.writeViewSnapshot = async (...args) => {
+      if (++writes === 1) {
+        predecessorStarted.resolve();
+        await predecessorRelease.promise;
+      } else {
+        targetStarted.resolve();
+        await targetRelease.promise;
+      }
+      return write(...args);
+    };
+    const first = service.openView({ replacesViewId: old.viewId });
+    await predecessorStarted.promise;
+    let retrySettled = false;
+    const retry = service.openView({ replacesViewId: old.viewId, kind: 'singles' }).finally(() => {
+      retrySettled = true;
+    });
+    await new Promise((resolve) => setImmediate(resolve));
+    const other = service.openView({ kind: 'singles' });
+    await targetStarted.promise;
+    try {
+      predecessorRelease.resolve();
+      await first;
+      await new Promise((resolve) => setImmediate(resolve));
+      assert.equal(retrySettled, false);
+      targetRelease.resolve();
+      const [next, otherView] = await Promise.all([retry, other]);
+      assert.equal(next.total, 1);
+      assert.equal(next.groups.length, 1);
+      assert.equal(otherView.groups.length, 1);
+      assert.equal(service.page(next.viewId).groups[0].memberCount, 1);
+    } finally {
+      predecessorRelease.resolve();
+      targetRelease.resolve();
+      await Promise.allSettled([first, retry, other]);
+    }
+  }));
