@@ -1,7 +1,7 @@
 import { createHash, randomUUID } from 'node:crypto';
 import { setImmediate } from 'node:timers/promises';
 import { deriveState } from '../enrich/reviewBuckets.mjs';
-import { CurateError, canonicalJson, fingerprint, validatePartition, validateAdvice } from './contracts.mjs';
+import { CurateError, canonicalJson, fingerprint, validatePartition, validateAdvice, validateSeparationAction } from './contracts.mjs';
 import { hasObservationFields, observeAsset, photoEvidence } from './evidence.mjs';
 import { GROUPING_METHOD } from './grouping.mjs';
 import { CurateMetadataStore } from './metadata.mjs';
@@ -258,6 +258,7 @@ export class CurateRepository {
       WHERE active=1 ORDER BY created_at DESC,id LIMIT ? OFFSET ?`).all(limit + 1, offset);
     return {
       corrections: rows.slice(0, limit).map(row => ({ ...row, active: true,
+        action: this.correctionAction(row.id, { display: true }),
         memberCount: this.prepare('SELECT COUNT(*) n FROM curate_separation_members WHERE separation_id=?').get(row.id).n,
         photos: this.covers(this.prepare(`SELECT asset_id FROM curate_separation_members
           WHERE separation_id=? ORDER BY partition_no,asset_id LIMIT 3`).all(row.id).map(r => r.asset_id)),
@@ -566,7 +567,13 @@ export class CurateRepository {
       ? this.prepare('SELECT id,revision,active FROM curate_separations WHERE id=?').get(id)
       : null;
   }
-  separate(leaseId, partitions, now = Date.now()) {
+  correctionAction(id, { display = false } = {}) {
+    const row = this.prepare('SELECT kind,asset_id FROM curate_separation_actions WHERE separation_id=?').get(id);
+    if (!row) return null;
+    if (row.kind === 'split') return { kind: 'split' };
+    return { kind: 'remove', assetId: row.asset_id, ...(display ? { photo: this.covers([row.asset_id])[0] } : {}) };
+  }
+  separate(leaseId, partitions, now = Date.now(), action = null) {
     return this.repo.transaction(() => {
       // Same lease is an idempotent correction ID. A different partition cannot
       // silently overwrite an existing correction on retry. Receipts outlive
@@ -585,16 +592,20 @@ export class CurateRepository {
           .flatMap((p, i) => p.map((asset_id) => ({ asset_id, partition_no: i })))
           .sort((a, b) => a.asset_id.localeCompare(b.asset_id));
         if (fingerprint(saved) !== fingerprint(expected)) throw new CurateError('This correction ID was already used.');
+        if (fingerprint(this.correctionAction(leaseId)) !== fingerprint(validateSeparationAction(partitions, action)))
+          throw new CurateError('This correction ID was already used with a different action.');
         return { id: leaseId, revision: 1, undoUntil: existing.undo_until };
       }
       const lease = this.getLease(leaseId, 'comparison', now);
       validatePartition(lease.ids, partitions);
       if (partitions.length < 2)
         throw new CurateError('A separation needs at least two parts.', 'invalid_curate_partition', 400);
+      const intent = validateSeparationAction(partitions, action);
       this.assertComparison(leaseId, now);
       this.prepare('INSERT INTO curate_separations VALUES(?,1,1,?,?)').run(leaseId, now, now + LEASE_MS);
       const insert = this.prepare('INSERT INTO curate_separation_members VALUES(?,?,?)');
       partitions.forEach((part, i) => part.forEach((id) => insert.run(leaseId, id, i)));
+      if (intent) this.prepare('INSERT INTO curate_separation_actions VALUES(?,?,?)').run(leaseId, intent.kind, intent.assetId ?? null);
       this.bump();
       return { id: leaseId, revision: 1, undoUntil: now + LEASE_MS };
     });

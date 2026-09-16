@@ -12,7 +12,13 @@ All notable changes to Pictaria Server are documented here. This project follows
   persistent Remove from stack / Split into singles corrections, reset, conditional
   Undo and saved-versus-synced feedback. Interrupted actions can be retried safely
   after a reload. This is an implementation preview, not the v1.3 default-page or
-  AI cutover. See [preview scope and testing](docs/CURATE-PREVIEW.md).
+  AI cutover. Photos toggle Keep directly; large comparisons default to a compact
+  grid, and the large viewer supports Keep (K), Favorite and Never show. Singles
+  have simpler controls; zero-keeper saves are neutral; Undo and conflict messages
+  explain the current state. Correction history identifies the removed photo or
+  split action. Enrichment schema 15 / persistent-state contract 18 adds this
+  action history and requires checkpoint restoration for rollback. See
+  [preview scope and testing](docs/CURATE-PREVIEW.md).
 - Added coherent Curate keeper/remainder operations, exact retry receipts,
   conditional Undo and synchronization status. The existing Keep best and Undo
   controls use atomic/conditional operations without changing their layout;

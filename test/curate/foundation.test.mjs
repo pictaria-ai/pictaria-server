@@ -71,6 +71,44 @@ const row = (id, time, extra = {}) => ({
   ...extra,
 });
 
+test('correction action survives restart and replay; a two-photo Remove is not inferred to be Split', async () =>
+  fixture(async ({repo, service, add, path}) => {
+    add('a', 0, {originalPath:'/photos/A.jpg'}); add('b', 1);
+    const view = await service.openView(), c = service.comparison(view.viewId, view.groups[0].id);
+    const partitions = [['a'], ['b']];
+    await assert.rejects(service.separate(c.id, partitions, {kind:'remove',assetId:'b'}), /does not match/);
+    assert.equal(repo.curate.corrections().corrections.length, 0);
+    const receipt = await service.separate(c.id, partitions, {kind:'remove',assetId:'a'});
+    assert.deepEqual(await service.separate(c.id, partitions, {kind:'remove',assetId:'a'}), receipt);
+    await assert.rejects(service.separate(c.id, partitions, {kind:'split'}), /different action/);
+    await service.close();
+    const reopened = new Repository(path);
+    try {
+      reopened.initSchema();
+      const action = reopened.curate.corrections().corrections[0].action;
+      assert.equal(action.kind, 'remove'); assert.equal(action.photo.filename, 'A.jpg');
+      reopened.curate.resetSeparation(c.id, 1);
+      assert.deepEqual(reopened.curate.separate(c.id, partitions, Date.now(), {kind:'remove',assetId:'a'}), receipt);
+      assert.equal(reopened.curate.correction(c.id).active, 0);
+    } finally { reopened.close(); }
+  }));
+
+test('schema-14 corrections retain their original partitions without inventing action metadata', async () =>
+  fixture(async ({repo, service, add, path}) => {
+    add('a'); add('b', 1);
+    const view=await service.openView(), c=service.comparison(view.viewId,view.groups[0].id);
+    const receipt = await service.separate(c.id,[['a'],['b']]);
+    await service.close();
+    repo.db.exec('DROP TABLE curate_separation_actions; PRAGMA user_version=14');
+    const migrated = new Repository(path);
+    try {
+      assert.deepEqual(migrated.initSchema().applied,[15]);
+      assert.equal(migrated.curate.corrections().corrections[0].action, null);
+      assert.deepEqual(migrated.curate.separate(c.id,[['a'],['b']]),receipt);
+      assert.deepEqual(migrated.curate.separations()[0].partitions,[['a'],['b']]);
+    } finally { migrated.close(); }
+  }));
+
 test('producing evidence recognizes only supported, mutually consistent counts', () => {
   for (const [value, n] of [
     ['none', 0],
@@ -478,7 +516,7 @@ test('migration from schema 12 queues only review rows; corrections/evidence/vie
     db.close();
     const migrated = new Repository(legacy);
     try {
-      assert.deepEqual(migrated.initSchema().applied, [13, 14]);
+      assert.deepEqual(migrated.initSchema().applied, [13, 14, 15]);
       assert.equal(migrated.db.prepare('SELECT COUNT(*) n FROM curate_dirty').get().n, 2);
       await migrated.curate.flush();
       assert.equal(migrated.curate.photo('a').recognizedCount, null);

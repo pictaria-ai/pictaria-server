@@ -8,24 +8,27 @@ export const thumbnail = (id) => `/api/review/thumbnail/${encodeURIComponent(id)
 
 export function photoCard(
   photo,
-  { readOnly = false, outcome = () => 'reviewed', change, remove, open, imageState = () => {} },
+  { readOnly = false, outcome = () => 'reviewed', change, open, imageState = () => {} },
 ) {
   const card = node('article', undefined, 'photo-card');
   card.dataset.photoId = photo.id;
   const imageButton = node('button', undefined, 'photo-image');
   imageButton.type = 'button';
-  imageButton.setAttribute('aria-label', `View ${photo.filename}`);
   const img = node('img');
   img.src = thumbnail(photo.id);
   img.alt = photo.caption || photo.filename;
   img.loading = 'lazy';
-  imageButton.append(img);
-  imageButton.onclick = () => open(photo);
+  const badge = node('span', undefined, 'photo-outcome');
+  imageButton.append(img, badge);
   const info = node('div', undefined, 'photo-info');
   const file = node('strong', photo.filename, 'filename');
   file.title = photo.filename;
   info.append(file);
-  if (photo.caption) info.append(node('p', photo.caption, 'caption'));
+  const view = node('button', 'View larger', 'p-btn quiet');
+  view.dataset.view = photo.id;
+  view.setAttribute('aria-label', `View ${photo.filename} larger`);
+  view.onclick = () => open(photo);
+  info.append(view);
   const imageError = node('span', 'Preview unavailable. Try opening it in Immich.', 'p-muted');
   imageError.hidden = true;
   img.onerror = () => {
@@ -37,60 +40,25 @@ export function photoCard(
     imageState(true);
   };
   info.append(imageError);
-  const repaint = () => {};
-  if (readOnly) info.append(node('span', 'Already kept · reference only', 'p-muted'));
-  else {
-    const keep = node('input');
-    keep.type = 'checkbox';
-    keep.dataset.keeper = photo.id;
-    keep.setAttribute('aria-label', `Keep ${photo.filename}`);
-    const label = node('label');
-    label.append(keep, node('span', 'Keep this photo'));
-    const choice = node('select');
-    choice.dataset.outcome = photo.id;
-    choice.setAttribute('aria-label', `Decision for ${photo.filename}`);
-    const sync = () => {
-      const value = outcome(),
-        selected = ['approve', 'favorite'].includes(value);
-      keep.checked = selected;
-      card.classList.toggle('selected', selected);
-      choice.replaceChildren(
-        ...(selected
-          ? [
-              ['approve', 'Keep'],
-              ['favorite', 'Keep as favorite'],
-            ]
-          : [
-              ['reviewed', 'Mark reviewed'],
-              ['reject', 'Never show'],
-            ]
-        ).map(([value, text]) => {
-          const option = node('option', text);
-          option.value = value;
-          return option;
-        }),
-      );
-      choice.value = value;
-    };
-    keep.onchange = () => {
-      change(keep.checked ? 'approve' : 'reviewed');
-      sync();
-    };
-    choice.onchange = () => {
-      change(choice.value);
-      sync();
-    };
-    card.syncSelection = sync;
-    info.append(label, choice);
-    if (remove) {
-      const button = node('button', 'Remove from stack', 'p-btn quiet');
-      button.dataset.remove = photo.id;
-      button.onclick = remove;
-      info.append(button);
-    }
-    sync();
+  if (readOnly) {
+    imageButton.setAttribute('aria-label', `View ${photo.filename}`);
+    badge.textContent = 'Already kept';
+    imageButton.onclick = () => open(photo);
+  } else {
+    imageButton.dataset.keeper = photo.id;
+    imageButton.setAttribute('aria-label', `Keep ${photo.filename}`);
+    imageButton.onclick = () => change(['approve', 'favorite'].includes(outcome()) ? 'reviewed' : 'approve');
   }
-  card.syncSelection ||= repaint;
+  card.syncSelection = () => {
+    if (readOnly) return;
+    const selected = ['approve', 'favorite'].includes(outcome());
+    imageButton.setAttribute('aria-pressed', String(selected));
+    card.classList.toggle('selected', selected);
+    badge.textContent = { approve: '✓ Keep', favorite: '★ Favorite', reviewed: 'Click to keep', reject: 'Never show' }[
+      outcome()
+    ];
+  };
+  card.syncSelection();
   card.append(imageButton, info);
   return card;
 }

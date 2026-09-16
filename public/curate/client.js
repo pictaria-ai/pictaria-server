@@ -147,6 +147,8 @@ export function decisionSummary(outcomes) {
     keep = all.filter((v) => ['approve', 'favorite'].includes(v)).length;
   const never = all.filter((v) => v === 'reject').length,
     reviewed = all.length - keep - never;
+  if (all.length === 1)
+    return { approve: 'Keep', favorite: 'Keep as favorite', reviewed: 'Mark reviewed', reject: 'Never show' }[all[0]];
   if (!keep && !never) return `Mark all ${all.length} reviewed`;
   return [keep && `Keep ${keep}`, reviewed && `mark ${reviewed} reviewed`, never && `never show ${never}`]
     .filter(Boolean)

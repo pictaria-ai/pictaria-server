@@ -97,6 +97,7 @@
             <button id="select-all" class="p-btn">Select all</button
             ><button id="select-none" class="p-btn">Clear selection</button>
             <div class="p-grow"></div>
+            <label id="compact-label" hidden><input id="compact" type="checkbox" /> Compact grid</label>
             <button id="split" class="p-btn">Split into singles</button>
           </div>
           <section id="photos" class="photo-grid" aria-label="Comparison photos"></section>
@@ -118,17 +119,35 @@
     <dialog id="photo-view" aria-labelledby="photo-title">
       <div class="dialog-frame">
         <header class="dialog-head">
-          <h2 id="photo-title"></h2>
+          <div>
+            <h2 id="photo-title"></h2>
+            <span id="photo-position" class="p-muted"></span>
+          </div>
+          <a id="immich" class="p-btn" target="_blank" rel="noopener" hidden>Immich ↗</a>
           <button class="p-btn" data-close="photo-view">Close</button>
         </header>
         <div class="dialog-body photo-detail">
           <img id="photo-large" alt="" />
           <p id="photo-caption"></p>
           <div id="photo-tags" class="tags"></div>
-          <a id="immich" class="p-btn" target="_blank" rel="noopener" hidden>Open in Immich ↗</a>
+          <div id="photo-secondary" class="viewer-secondary">
+            <label
+              >Decision
+              <select id="photo-outcome">
+                <option value="reviewed">Mark reviewed</option>
+                <option value="approve">Keep</option>
+                <option value="favorite">Keep as favorite</option>
+                <option value="reject">Never show</option>
+              </select></label
+            >
+            <button id="photo-remove" class="p-btn">Remove from stack</button>
+          </div>
         </div>
         <footer class="dialog-foot">
-          <button id="photo-prev" class="p-btn">← Previous</button><button id="photo-next" class="p-btn">Next →</button>
+          <button id="photo-prev" class="p-btn">← Previous</button>
+          <button id="photo-keep" class="p-btn" aria-pressed="false">Keep (K)</button>
+          <span id="photo-readonly" class="p-muted" hidden>Already kept · reference only</span>
+          <button id="photo-next" class="p-btn">Next →</button>
         </footer>
       </div>
     </dialog>

@@ -19,6 +19,8 @@ const state = {
   photoIndex: 0,
   photoList: [],
   dialogGeneration: 0,
+  openFailed: false,
+  syncKind: null,
 };
 let failedPreviews = new Set();
 
@@ -30,6 +32,10 @@ function error(error) {
       : el('error');
   target.textContent = error.message || String(error);
   target.hidden = false;
+  if (el('comparison').open && !state.comparison) {
+    state.openFailed = true;
+    el('comparison-state').textContent = '';
+  }
   el('comparison-refresh').hidden = !el('comparison').open || Boolean(client.saved.pending);
   recovery();
 }
@@ -56,18 +62,22 @@ function recovery() {
   el('more').disabled = locked || state.loading;
   for (const button of document.querySelectorAll('#filters button, .group-card'))
     button.disabled = locked || state.loading;
-  for (const input of document.querySelectorAll(
-    '#photos input, #photos select, #photos button[data-remove], .compare-tools button',
-  ))
+  for (const input of document.querySelectorAll('#photos [data-keeper], .compare-tools button'))
     input.disabled = locked || !state.comparison || state.comparison.oversized;
   el('undo').disabled = locked;
   selection();
+  syncViewer();
 }
 function selection() {
   const values = Object.values(state.outcomes),
     keep = values.filter((v) => ['approve', 'favorite'].includes(v)).length;
-  el('selection-count').textContent = `${keep} of ${values.length} selected to keep`;
-  el('apply').textContent = state.comparison ? decisionSummary(state.outcomes) : 'Loading comparison…';
+  el('selection-count').textContent = values.length > 1 ? `${keep} of ${values.length} selected to keep` : '';
+  el('apply').textContent = state.comparison
+    ? decisionSummary(state.outcomes)
+    : state.openFailed
+      ? 'Refresh to continue'
+      : 'Loading comparison…';
+  el('apply').classList.toggle('primary', keep > 0);
   if (state.comparison?.oversized) el('apply').textContent = 'Comparison too large';
   el('apply').disabled =
     !state.comparison ||
@@ -139,11 +149,20 @@ async function compare(group) {
   const generation = ++state.dialogGeneration;
   state.comparison = null;
   state.outcomes = {};
+  state.openFailed = false;
   failedPreviews = new Set();
   el('preview-errors').hidden = true;
   el('comparison-title').textContent = group.memberCount > 1 ? 'Compare stack' : 'Review photo';
   el('comparison-subtitle').textContent =
     `${group.memberCount} ${group.memberCount === 1 ? 'photo' : 'photos'} in this comparison`;
+  el('comparison-help').textContent =
+    group.memberCount > 1
+      ? 'Click a photo to select it as a keeper. Use View larger to inspect details or choose Favorite / Never show. Unselected photos will be marked reviewed when you save.'
+      : 'Choose whether to keep this photo. Mark reviewed leaves it out of your keepers without deleting it or marking it Never show.';
+  el('select-all').hidden = el('select-none').hidden = el('split').hidden = group.memberCount < 2;
+  el('compact-label').hidden = group.memberCount <= 10;
+  el('compact').checked = group.memberCount > 10;
+  el('photos').classList.toggle('compact', el('compact').checked);
   el('comparison-state').textContent = 'Loading the complete comparison…';
   el('metadata-retry').hidden = true;
   el('photos').replaceChildren();
@@ -165,10 +184,7 @@ async function compare(group) {
     ...comparison.photos.map((photo) =>
       photoCard(photo, {
         outcome: () => state.outcomes[photo.id] || 'reviewed',
-        change: (value) => {
-          state.outcomes[photo.id] = value;
-          selection();
-        },
+        change: (value) => setOutcome(photo.id, value),
         imageState: (ok) => {
           if (state.comparison !== comparison) return;
           ok ? failedPreviews.delete(photo.id) : failedPreviews.add(photo.id);
@@ -176,10 +192,6 @@ async function compare(group) {
           selection();
         },
         open: showPhoto,
-        remove:
-          comparison.ids.length > 1
-            ? () => run(() => separate([[photo.id], comparison.ids.filter((id) => id !== photo.id)]))
-            : null,
       }),
     ),
   );
@@ -204,6 +216,42 @@ function showPhoto(photo) {
   el('photo-prev').disabled = state.photoIndex <= 0;
   el('photo-next').disabled = state.photoIndex >= state.photoList.length - 1;
   if (!el('photo-view').open) el('photo-view').showModal();
+  syncViewer();
+}
+function setOutcome(id, value) {
+  if (
+    state.busy ||
+    client.saved.pending ||
+    !state.comparison ||
+    state.comparison.oversized ||
+    !Object.hasOwn(state.outcomes, id)
+  )
+    return;
+  state.outcomes[id] = value;
+  repaintSelection();
+  syncViewer();
+}
+function syncViewer() {
+  const photo = state.photoList[state.photoIndex];
+  const actionable = Boolean(
+    state.comparison && !state.comparison.oversized && photo && Object.hasOwn(state.outcomes, photo.id),
+  );
+  el('photo-position').textContent =
+    `${state.photoIndex + 1} of ${state.photoList.length} · ← / → to browse${actionable ? ' · K to toggle Keep' : ''}`;
+  el('photo-secondary').hidden = el('photo-keep').hidden = !actionable;
+  el('photo-readonly').hidden = actionable;
+  el('photo-readonly').textContent =
+    photo?.state === 'approved' ? 'Already kept · reference only' : 'Decision unavailable for this comparison';
+  const locked = state.busy || Boolean(client.saved.pending) || state.comparison?.oversized;
+  for (const id of ['photo-keep', 'photo-outcome', 'photo-remove']) el(id).disabled = locked;
+  if (!actionable) return;
+  const value = state.outcomes[photo.id],
+    keep = ['approve', 'favorite'].includes(value);
+  el('photo-keep').setAttribute('aria-pressed', String(keep));
+  el('photo-keep').classList.toggle('primary', keep);
+  el('photo-keep').textContent = keep ? '✓ Keep (K)' : 'Keep (K)';
+  el('photo-outcome').value = value;
+  el('photo-remove').hidden = state.comparison.ids.length < 2;
 }
 async function action(work) {
   if (state.busy || client.saved.pending) return;
@@ -223,6 +271,7 @@ async function accepted({ kind, result }) {
   state.undo = null;
   let correctionMessage = 'Stack correction saved. Keeper decisions are unchanged.';
   state.syncId = result.operationId || null;
+  state.syncKind = kind;
   if (result.undo)
     state.undo = {
       kind: 'undo',
@@ -245,12 +294,16 @@ async function accepted({ kind, result }) {
       };
   }
   el('receipt-text').textContent = result.savedLocally
-    ? `Saved choices for ${result.assetCount} ${result.assetCount === 1 ? 'photo' : 'photos'}.`
+    ? `${kind === 'undo' ? 'Undid' : 'Saved'} choices for ${result.assetCount} ${result.assetCount === 1 ? 'photo' : 'photos'}.`
     : kind === 'separation'
       ? correctionMessage
       : 'Stack correction reset. Keeper decisions are unchanged.';
   el('receipt').hidden = false;
-  el('sync').textContent = result.savedLocally ? 'Syncing to Immich…' : '';
+  el('sync').textContent = result.savedLocally
+    ? kind === 'undo'
+      ? 'Syncing Undo to Immich…'
+      : 'Syncing to Immich…'
+    : '';
   el('retry-sync').hidden = true;
   el('undo').hidden = !state.undo || state.undo.until <= Date.now();
   // The accepted result is shown before refreshing, so a failed read cannot
@@ -258,8 +311,14 @@ async function accepted({ kind, result }) {
   state.busy = false;
   await refresh().catch(error);
 }
-function separate(partitions) {
-  return action(() => client.mutate('separations', { comparisonId: state.comparison.id, partitions }, 'separation'));
+function separate(partitions, actionDetails) {
+  return action(() =>
+    client.mutate(
+      'separations',
+      { comparisonId: state.comparison.id, partitions, action: actionDetails },
+      'separation',
+    ),
+  );
 }
 
 async function corrections(append = false) {
@@ -268,7 +327,14 @@ async function corrections(append = false) {
   for (const correction of page.corrections) {
     const row = node('div', undefined, 'correction-row');
     row.append(
-      node('strong', `${correction.memberCount} photos separated`),
+      node(
+        'strong',
+        correction.action?.kind === 'remove'
+          ? `${correction.action.photo.filename} removed from a stack of ${correction.memberCount}`
+          : correction.action?.kind === 'split'
+            ? `Split ${correction.memberCount} photos into singles`
+            : `${correction.memberCount} photos separated`,
+      ),
       node(
         'p',
         correction.photos.map((p) => p.filename).join(' · ') +
@@ -323,7 +389,14 @@ function repaintSelection() {
   for (const card of el('photos').children) card.syncSelection();
   selection();
 }
-el('split').onclick = () => run(() => separate(state.comparison.ids.map((id) => [id])));
+el('split').onclick = () =>
+  run(() =>
+    separate(
+      state.comparison.ids.map((id) => [id]),
+      { kind: 'split' },
+    ),
+  );
+el('compact').onchange = () => el('photos').classList.toggle('compact', el('compact').checked);
 el('apply').onclick = () => run(() => action(() => client.decide(state.comparison.id, { ...state.outcomes })));
 el('retry-action').onclick = () =>
   run(async () => {
@@ -373,13 +446,24 @@ el('undo').onclick = () =>
 el('retry-sync').onclick = () =>
   run(async () => {
     await request('operations/retry', { operationId: state.syncId });
-    el('sync').textContent = 'Syncing to Immich…';
+    el('sync').textContent = state.syncKind === 'undo' ? 'Syncing Undo to Immich…' : 'Syncing to Immich…';
     el('retry-sync').hidden = true;
   });
 el('corrections').onclick = () => run(() => corrections());
 el('correction-more').onclick = () => run(() => corrections(true));
 el('photo-prev').onclick = () => showPhoto(state.photoList[state.photoIndex - 1]);
 el('photo-next').onclick = () => showPhoto(state.photoList[state.photoIndex + 1]);
+el('photo-keep').onclick = () => {
+  const id = state.photoList[state.photoIndex]?.id;
+  if (id) setOutcome(id, ['approve', 'favorite'].includes(state.outcomes[id]) ? 'reviewed' : 'approve');
+};
+el('photo-outcome').onchange = () => setOutcome(state.photoList[state.photoIndex].id, el('photo-outcome').value);
+el('photo-remove').onclick = () =>
+  run(() => {
+    const id = state.photoList[state.photoIndex].id;
+    el('photo-view').close();
+    return separate([[id], state.comparison.ids.filter((member) => member !== id)], { kind: 'remove', assetId: id });
+  });
 for (const button of document.querySelectorAll('[data-close]')) button.onclick = () => el(button.dataset.close).close();
 for (const dialog of document.querySelectorAll('dialog'))
   dialog.addEventListener('click', (e) => {
@@ -391,10 +475,16 @@ for (const dialog of document.querySelectorAll('dialog'))
       dialog.close();
   });
 el('comparison').addEventListener('close', () => {
-  state.dialogGeneration++;
+  // A queued close event may arrive after a new comparison has opened.
+  if (!el('comparison').open) state.dialogGeneration++;
 });
 document.addEventListener('keydown', (event) => {
   if (!el('photo-view').open || event.target.closest('input,select,textarea')) return;
+  if (event.ctrlKey || event.metaKey || event.altKey || event.repeat) return;
+  if (event.key.toLowerCase() === 'k' && !el('photo-keep').hidden && !el('photo-keep').disabled) {
+    event.preventDefault();
+    el('photo-keep').click();
+  }
   if (event.key === 'ArrowRight' && !el('photo-next').disabled) {
     event.preventDefault();
     el('photo-next').click();
@@ -425,10 +515,13 @@ setInterval(async () => {
       const status = await request(`operations/status?operationId=${encodeURIComponent(id)}`);
       if (state.syncId === id) {
         el('sync').textContent = {
-          synced: 'Synced to Immich.',
+          synced: state.syncKind === 'undo' ? 'Undo synced to Immich.' : 'Synced to Immich.',
           superseded: 'A newer decision replaced this one.',
-          pending: `Syncing to Immich · ${status.pending} remaining`,
-          failed: 'Saved locally. Immich sync needs attention.',
+          pending: `Syncing ${state.syncKind === 'undo' ? 'Undo ' : ''}to Immich · ${status.pending} remaining`,
+          failed:
+            state.syncKind === 'undo'
+              ? 'Undone locally. Immich sync needs attention.'
+              : 'Saved locally. Immich sync needs attention.',
         }[status.sync];
         el('retry-sync').hidden = status.sync !== 'failed';
       }

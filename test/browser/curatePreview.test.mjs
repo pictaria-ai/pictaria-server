@@ -4,6 +4,75 @@ import { launchChrome, findChrome } from './harness.mjs';
 import { curatePreviewFixture } from './curatePreviewFixture.mjs';
 
 test(
+  'Curate preview singles, read-only viewer, open conflicts and immediate re-entry',
+  { timeout: 45000 },
+  async (t) => {
+    if (!findChrome()) return t.skip('Chrome required');
+    const fixture = await curatePreviewFixture({ stackSize: 3, singles: 2 });
+    const browser = await launchChrome(),
+      page = await browser.newPage();
+    t.after(async () => {
+      await browser.stop();
+      await fixture.stop();
+    });
+    const click = (selector) => page.evaluate(`document.querySelector(${JSON.stringify(selector)}).click()`);
+    await page.navigate(`${fixture.base}/curate-preview.html`);
+    await page.waitFor('document.querySelector(".gate-backdrop input")');
+    await page.evaluate(
+      'document.querySelector(".gate-backdrop input").value="smoke-secret";document.querySelector(".gate-backdrop button").click()',
+    );
+    await page.waitFor(
+      'document.querySelectorAll(".group-card").length===3 && !document.querySelector("#refresh").disabled',
+    );
+    await click('.group-card');
+    await page.waitFor(
+      'document.querySelectorAll("#photos .photo-card").length===3 && !document.querySelector("#apply").disabled',
+    );
+    await page.evaluate(
+      'document.querySelector("[data-close=comparison]").click();document.querySelector(".group-card").click()',
+    );
+    await page.waitFor(
+      'document.querySelectorAll("#photos .photo-card").length===3 && !document.querySelector("#apply").disabled',
+    );
+    await click('#context-photos [data-view]');
+    assert.equal(await page.evaluate('document.querySelector("#photo-keep").hidden'), true);
+    await page.send('Input.dispatchKeyEvent', { type: 'keyDown', key: 'k', code: 'KeyK' });
+    assert.equal(await page.evaluate('document.querySelectorAll("#photos [aria-pressed=true]").length'), 0);
+    await click('[data-close=photo-view]');
+    await click('[data-close=comparison]');
+    fixture.repo.setManualFrameTags({
+      assetIds: [fixture.id(1)],
+      addTags: ['frame/reviewed'],
+      removeTags: [],
+      action: 'reviewed',
+    });
+    await click('.group-card');
+    await page.waitFor('!document.querySelector("#comparison-error").hidden');
+    assert.equal(await page.evaluate('document.querySelector("#comparison-state").textContent'), '');
+    assert.equal(await page.evaluate('document.querySelector("#apply").textContent'), 'Refresh to continue');
+    await click('#comparison-refresh');
+    await page.waitFor('!document.querySelector("#refresh").disabled');
+    await click('[data-kind=singles]');
+    await page.waitFor(
+      'document.querySelectorAll(".group-card").length===2 && !document.querySelector("#refresh").disabled',
+    );
+    await click('.group-card');
+    await page.waitFor(
+      'document.querySelectorAll("#photos .photo-card").length===1 && !document.querySelector("#apply").disabled',
+    );
+    for (const id of ['select-all', 'select-none', 'split'])
+      assert.equal(await page.evaluate(`document.getElementById('${id}').hidden`), true);
+    assert.equal(await page.evaluate('document.querySelector("#apply").textContent'), 'Mark reviewed');
+    assert.equal(await page.evaluate('document.querySelector("#apply").classList.contains("primary")'), false);
+    await click('[data-keeper]');
+    assert.equal(await page.evaluate('document.querySelector("#apply").textContent'), 'Keep');
+    await click('#apply');
+    await page.waitFor('!document.querySelector("#comparison").open && !document.querySelector("#refresh").disabled');
+    assert.equal(fixture.repo.curate.photo(fixture.id(1001)).state, 'approved');
+  },
+);
+
+test(
   'Curate preview: complete scopes, stable selections, corrections, conflict and replay',
   { timeout: 90000 },
   async (t) => {
@@ -35,6 +104,8 @@ test(
       await wait(
         'document.querySelectorAll("#photos .photo-card").length===52 && !document.querySelector("#apply").disabled',
       );
+      assert.equal(await page.evaluate('document.querySelector("#photos").classList.contains("compact")'), true);
+      assert.equal(await page.evaluate('document.querySelector("#apply").classList.contains("primary")'), false);
       assert.equal(
         await page.evaluate('document.querySelectorAll("#context-photos input,#context-photos select").length'),
         0,
@@ -48,7 +119,10 @@ test(
       fixture.add(2000, 900000, 'new-unrelated');
       await wait('!document.querySelector("#updates").hidden');
       assert.equal(await page.evaluate('document.querySelectorAll("#photos .photo-card").length'), 52);
-      assert.equal(await page.evaluate('document.querySelectorAll("#photos input:checked").length'), 2);
+      assert.equal(
+        await page.evaluate('document.querySelectorAll("#photos [data-keeper][aria-pressed=true]").length'),
+        2,
+      );
     });
     await t.test(
       'lost acceptance response recovers after reload using the original payload, then conditional Undo',
@@ -72,6 +146,11 @@ test(
         await wait(
           'document.querySelectorAll(".group-card").length===1 && !document.querySelector("#refresh").disabled',
         );
+        assert.match(
+          await page.evaluate('document.querySelector("#receipt-text").textContent'),
+          /Undid choices for 52 photos/,
+        );
+        assert.match(await page.evaluate('document.querySelector("#sync").textContent'), /Undo/);
         await click('.group-card');
         await wait(
           'document.querySelectorAll("#photos .photo-card").length===52 && !document.querySelector("#apply").disabled',
@@ -99,9 +178,25 @@ test(
         windowsVirtualKeyCode: 32,
       });
       await page.send('Input.dispatchKeyEvent', { type: 'keyUp', key: ' ', code: 'Space', windowsVirtualKeyCode: 32 });
-      assert.equal(await page.evaluate('document.querySelector("[data-keeper]").checked'), true);
-      await click('#photos .photo-image');
+      assert.equal(await page.evaluate('document.querySelector("[data-keeper]").getAttribute("aria-pressed")'), 'true');
+      await click('#photos [data-view]');
       await wait('document.querySelector("#photo-view").open');
+      await page.evaluate('document.querySelector("#photo-keep").focus()');
+      await page.send('Input.dispatchKeyEvent', { type: 'keyDown', key: 'k', code: 'KeyK' });
+      assert.equal(await page.evaluate('document.querySelector("#photo-keep").getAttribute("aria-pressed")'), 'false');
+      await click('#photo-next');
+      await click('#photo-keep');
+      assert.equal(
+        await page.evaluate('document.querySelectorAll("#photos [data-keeper][aria-pressed=true]").length'),
+        1,
+      );
+      await page.evaluate(
+        'document.querySelector("#photo-outcome").value="favorite";document.querySelector("#photo-outcome").dispatchEvent(new Event("change"))',
+      );
+      assert.equal(
+        await page.evaluate('document.querySelectorAll("#photos .photo-outcome")[1].textContent'),
+        '★ Favorite',
+      );
       await page.send('Input.dispatchKeyEvent', {
         type: 'keyDown',
         key: 'Escape',
@@ -112,7 +207,8 @@ test(
       await page.send('Emulation.clearDeviceMetricsOverride');
     });
     await t.test('Remove from stack persists; reset is read from current correction state', async () => {
-      await click('[data-remove="' + fixture.id(1) + '"]');
+      await click('[data-view="' + fixture.id(1) + '"]');
+      await click('#photo-remove');
       await wait('!document.querySelector("#comparison").open && !document.querySelector("#refresh").disabled');
       assert.equal(fixture.repo.curate.corrections().corrections.length, 1);
       assert.equal(fixture.repo.curate.photo(fixture.id(1)).state, 'undecided');
@@ -120,6 +216,10 @@ test(
       await wait('document.querySelectorAll(".group-card").length===1 && !document.querySelector("#refresh").disabled');
       await click('#corrections');
       await wait('document.querySelector(".correction-row button")');
+      assert.match(
+        await page.evaluate('document.querySelector(".correction-row strong").textContent'),
+        /target-portrait.jpg removed from a stack of 52/,
+      );
       await click('.correction-row button');
       await wait('!document.querySelector("#correction-dialog").open && !document.querySelector("#refresh").disabled');
       assert.equal(fixture.repo.curate.corrections().corrections.length, 0);
@@ -130,6 +230,7 @@ test(
       await click('#split');
       await wait('!document.querySelector("#comparison").open && !document.querySelector("#refresh").disabled');
       assert.equal(fixture.repo.curate.corrections().corrections[0].memberCount, 52);
+      assert.equal(fixture.repo.curate.corrections().corrections[0].action.kind, 'split');
       await click('#undo');
       await wait('!document.querySelector("#refresh").disabled && document.querySelectorAll(".group-card").length===1');
     });

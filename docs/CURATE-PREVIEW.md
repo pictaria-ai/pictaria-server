@@ -19,23 +19,34 @@ legacy grouping, rather than leaving both implementations active indefinitely.
 - All, Stacks and Singles show pending comparisons. Search can match one member
   but opens the **whole** saved stack. Grid pagination does not limit decisions.
 - Open a stack, inspect its members and select zero, one or several keepers.
+  Click an image to toggle Keep; **View larger** opens its detailed viewer.
   The action states the complete result, for example **Keep 2, mark 3 reviewed**.
   Unselected photos default to reviewed; this is neither deletion nor Never show.
-  A kept photo can be a favorite; an unselected photo can explicitly be Never show.
-- A larger viewer shows the caption, tags and optional Immich link. Arrow keys
-  navigate; Escape closes the innermost dialog. Native dialog focus trapping,
-  checkbox keyboard controls and backdrop dismissal work on narrow screens.
+  Zero-keeper saves have neutral styling. Singles use **Keep** or **Mark reviewed**
+  without bulk selection controls.
+- Comparisons with more than ten photos open in a compact grid; **Compact grid**
+  can be turned off for larger images.
+- The larger viewer shows caption, tags, a header Immich link and a sticky Keep
+  control. **K** toggles Keep and arrow keys navigate; Escape closes the innermost
+  dialog. Favorite, Never show and Remove from stack are available in this viewer.
+  Keeper, Favorite and Never show choices remain a draft until the complete
+  comparison is saved. Stack corrections save immediately. Native dialog focus
+  trapping, keyboard buttons and backdrop dismissal work on narrow screens.
 - Already-kept nearby photos are bounded reference context. They have no decision
   controls and are excluded from every outcome/correction payload.
 - Remove from stack separates that member from its current peers. Split into
   singles separates all current members. The photos remain pending. These
   constraints persist across refreshes and restarts. Stack corrections lists
-  active corrections with explicit affected counts and a reset action; resetting
+  active corrections with the removed photo or explicit split action and a reset
+  action. Older records without action metadata use a generic partition summary
+  instead of guessing which action created them. Resetting
   does not undo human decisions or promise that grouping will recreate a stack.
 - Immediate Undo is conditional on no newer human decision on any affected photo.
   The last action remains undoable until its server deadline (30 minutes).
   The visible Undo affordance does not survive a page reload; saved decisions and
-  corrections do. Older decisions remain accessible from the current Curate page.
+  corrections do. Undo feedback says **Undid choices** and separately reports
+  whether the restored tags have synchronized. Older decisions remain accessible
+  from the current Curate page.
 - Save acceptance and Immich synchronization are separate. A failed sync can be
   retried without repeating the human decision or invoking AI.
 
@@ -72,8 +83,17 @@ block Save until the previews can be retried.
   expansion. Comparison details remain paged at 50. `GET .../separations` lists up
   to 50 active corrections; `?id=…` reads current state. The metadata retry route
   takes a saved comparison ID and bounded offset, never arbitrary client IDs.
-- No provider, settings defaults, grouping threshold or schema-version changes.
-  An additive index supports the active-correction list.
+- Provider, settings defaults and grouping thresholds are unchanged.
+- Enrichment schema **15** / persistent-state contract **18** adds optional
+  correction-action metadata without rewriting existing partitions or decisions.
+  The action is saved atomically with the separation; exact retries must preserve
+  both the partition and its action. Existing records remain readable without
+  fabricated history. An additive index supports the active-correction list.
+- Startup creates the normal pre-migration recovery checkpoint. Downgrading to a
+  binary using contract 17 or earlier requires restoring the **complete** matching
+  pre-upgrade checkpoint (including state metadata and databases); changing only
+  the application image is blocked by the downgrade guard. See
+  [upgrade and recovery](UPGRADING.md).
 
 ## Validation and remaining work
 
@@ -81,8 +101,10 @@ Automated coverage includes a filtered 52-photo comparison spanning API pages,
 multi/zero keeper operations, read-only kept context, background stability,
 lost-response recovery across reload, conflicting newer human intent, Undo,
 persistent Remove/Split/reset, duplicated tabs, keyboard interaction and a
-390-pixel viewport. Protocol tests cover serialized replacement, rejected requests,
-unavailable storage, exact retry and oversized-group admission. Existing foundation
+390-pixel viewport. Viewer keyboard selection, compact grids, single-photo
+controls, correction action history and failed-open recovery are also covered.
+Protocol tests cover serialized replacement, rejected requests, unavailable
+storage, exact retry and oversized-group admission. Existing foundation
 and decision tests cover server restarts, input changes and atomicity.
 
 The preview deliberately contains no actionable AI recommendations: old per-photo

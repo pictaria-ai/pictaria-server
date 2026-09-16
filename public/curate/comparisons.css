@@ -192,7 +192,7 @@ dialog::backdrop {
 }
 .photo-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(275px, 1fr));
+  grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
   gap: 16px;
   align-items: start;
 }
@@ -216,53 +216,85 @@ dialog::backdrop {
 .photo-image img {
   display: block;
   width: 100%;
-  height: 260px;
+  height: 320px;
   object-fit: contain;
 }
-.photo-image::after {
-  content: 'View larger';
+.photo-outcome {
   position: absolute;
-  right: 8px;
-  bottom: 8px;
-  padding: 3px 7px;
+  left: 8px;
+  top: 8px;
+  padding: 5px 9px;
   border-radius: 5px;
-  background: rgb(0 0 0 / 0.7);
+  background: rgb(0 0 0 / 0.78);
   color: white;
-  font-size: 12px;
+  font-size: 13px;
+}
+.selected .photo-outcome {
+  background: var(--p-accent);
+  color: var(--p-accent-ink);
+}
+.photo-image:focus-visible {
+  outline: 3px solid var(--p-accent);
+  outline-offset: -4px;
 }
 .photo-info {
-  padding: 12px;
-  display: grid;
-  gap: 10px;
-  min-width: 0;
+  padding: 8px;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
 }
-.photo-info label {
+.photo-info .filename {
+  flex: 1 1 100px;
+  font-size: 12px;
+}
+.photo-info .p-muted {
+  flex-basis: 100%;
+}
+.photo-info .p-btn {
+  min-height: 44px;
+}
+.photo-grid.compact {
+  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  gap: 12px;
+}
+.photo-grid.compact .photo-image img {
+  height: 220px;
+}
+#compact-label {
   display: flex;
   align-items: center;
   gap: 8px;
-  font-weight: 600;
+  min-height: 44px;
 }
-.photo-info input {
-  width: 18px;
-  height: 18px;
+#compact {
   accent-color: var(--p-accent);
 }
-.photo-info select {
-  max-width: 100%;
-  width: 100%;
-  background: var(--p-panel);
+.viewer-secondary {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-wrap: wrap;
+  gap: 12px;
+  margin-top: 16px;
+}
+.viewer-secondary select {
+  background: var(--p-panel-2);
   color: var(--p-ink);
   border: 1px solid var(--p-line);
   border-radius: 5px;
-  padding: 7px;
+  padding: 8px;
+  min-height: 44px;
 }
-.photo-info .p-btn {
-  justify-self: start;
+#photo-view .dialog-head h2 {
+  font-size: 15px;
 }
-.photo-info .caption {
-  margin: 0;
-  color: var(--p-muted);
-  font-size: 13px;
+#photo-view .dialog-head > div {
+  flex: 1;
+  min-width: 0;
+}
+#photo-view .dialog-foot .p-btn {
+  min-height: 44px;
 }
 .context-grid {
   grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
@@ -378,5 +410,38 @@ dialog::backdrop {
   }
   .photo-image img {
     height: 300px;
+  }
+}
+
+@media (max-width: 600px) {
+  .photo-grid.compact {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 8px;
+  }
+  .photo-grid.compact .photo-image img {
+    height: 180px;
+  }
+  .photo-grid.compact .photo-info {
+    gap: 0;
+  }
+  .photo-grid.compact .photo-info .filename {
+    flex-basis: 100%;
+  }
+  .photo-grid.compact .photo-info .p-btn {
+    width: 100%;
+  }
+  #photo-view .dialog-head {
+    flex-wrap: wrap;
+  }
+  #photo-view .dialog-head > div {
+    flex-basis: 100%;
+  }
+  #photo-view .dialog-foot {
+    flex-wrap: nowrap;
+    gap: 6px;
+  }
+  #photo-view .dialog-foot .p-btn {
+    font-size: 12px;
+    padding: 8px;
   }
 }

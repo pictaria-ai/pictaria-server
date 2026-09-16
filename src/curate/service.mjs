@@ -186,19 +186,19 @@ export class CurateService {
       throw new CurateError('Comparison membership changed. Refresh Curate.');
     }
   }
-  async separate(leaseId, partitions) {
+  async separate(leaseId, partitions, action = null) {
     // A committed receipt is independent of lease expiry, current membership,
     // and rebuild health. Replay must not require a new scope or remote work.
-    if (this.store.correction(leaseId)) return this.store.separate(leaseId, partitions);
+    if (this.store.correction(leaseId)) return this.store.separate(leaseId, partitions, Date.now(), action);
     await this.refresh();
-    if (this.store.correction(leaseId)) return this.store.separate(leaseId, partitions);
+    if (this.store.correction(leaseId)) return this.store.separate(leaseId, partitions, Date.now(), action);
     const lease = this.store.getLease(leaseId, 'comparison');
     // A machine split of the same inspected set is fine; additions are not.
     // Current per-photo human/input checks still run inside the transaction.
     this.store.assertComparison(leaseId);
     this.assertMembership(lease.ids);
     if (this.store.pendingScopeChanges(lease.ids)) throw new CurateError('This stack is updating. Refresh Curate.');
-    const result = this.store.separate(leaseId, partitions);
+    const result = this.store.separate(leaseId, partitions, Date.now(), action);
     if (!this.closed) await this.refresh();
     return result;
   }

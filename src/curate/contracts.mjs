@@ -46,6 +46,18 @@ export function validatePartition(ids, partitions) {
   if (seen.size !== expected.size) throw new CurateError('Incomplete partition.', 'invalid_curate_partition', 400);
   return partitions.map((p) => [...p]);
 }
+export function validateSeparationAction(partitions, action = null) {
+  if (action === null) return null; // Earlier clients did not record intent.
+  if (!action || typeof action !== 'object' || Array.isArray(action))
+    throw new CurateError('Invalid correction action.', 'invalid_curate_partition', 400);
+  if (action.kind === 'split' && Object.keys(action).length === 1 && partitions.every(p => p.length === 1))
+    return { kind: 'split' };
+  if (action.kind === 'remove' && Object.keys(action).length === 2 &&
+      typeof action.assetId === 'string' && partitions.length === 2 &&
+      partitions[0].length === 1 && partitions[0][0] === action.assetId)
+    return { kind: 'remove', assetId: action.assetId };
+  throw new CurateError('Correction action does not match its photos.', 'invalid_curate_partition', 400);
+}
 export function validateAdvice(ids, output, role) {
   if (
     !['check', 'keeper'].includes(role) ||

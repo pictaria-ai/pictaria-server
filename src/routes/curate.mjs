@@ -62,7 +62,7 @@ export function createCurateRoutes({ curate, review = null }) {
         result = curate.requestMetadataRefresh([...comparison.ids, ...comparison.contextIds].slice(offset, offset + 500));
       } else if (request.method === 'POST' && path === 'separations') {
         const body = await readObject(request, { maxBytes: 5 * 1024 * 1024 });
-        result = await curate.separate(body.comparisonId, body.partitions);
+        result = await curate.separate(body.comparisonId, body.partitions, body.action ?? null);
       } else if (request.method === 'POST' && path === 'separations/reset') {
         const body = await readObject(request, { maxBytes: 4096 });
         if (
