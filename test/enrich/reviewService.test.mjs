@@ -247,6 +247,36 @@ test('legacy sync jobs reconcile remote work in bounded slices', async () => {
   });
 });
 
+test('unavailable photos across slice boundaries leave all healthy photos synchronized', async () => {
+  await withService(async ({ repo, immich, service }) => {
+    const assetIds = Array.from({ length: 101 }, (_, index) => syncAssetId(index));
+    const missing = new Set([assetIds[49], assetIds[50], assetIds[100]]);
+    const read = immich.getAsset.bind(immich);
+    immich.getAsset = async id => {
+      if (missing.has(id)) throw Object.assign(new Error('Photo missing'), { status: 404 });
+      return read(id);
+    };
+    repo.recordDecision({ action:'approve', assetIds, addTags:['frame/eligible'], removeTags:[] });
+    service.startSyncWorker();
+    try {
+      const deadline = Date.now() + 5000;
+      while (repo.pendingSyncJobCount()) {
+        assert.ok(Date.now() < deadline, 'sync worker did not finish healthy photos');
+        await new Promise(resolve => setTimeout(resolve, 5));
+      }
+    } finally { await service.stopSyncWorker(); }
+    assert.equal(repo.deadSyncJobCount(), 3);
+    assert.ok(repo.deadSyncJobs().every(job => job.assetIds.length === 1 && missing.has(job.assetIds[0])));
+    const bulk = immich.calls.filter(([kind]) => kind === 'tag');
+    assert.ok(bulk.every(([, , ids]) => ids.length <= 50 && ids.every(id => !missing.has(id))));
+    assert.equal(immich.assetTags.size, 98);
+    for (const id of assetIds.filter(id => !missing.has(id))) {
+      assert.ok(immich.assetTags.get(id).has('frame/eligible'));
+      assert.equal(repo.decisions.pendingFor(id).length, 0);
+    }
+  });
+});
+
 test('Curate retains an unresolved tag job and completes it after tag-list recovery', async () => {
   await withService(async ({ repo, immich, service }) => {
     const waitForWorker = async condition => {

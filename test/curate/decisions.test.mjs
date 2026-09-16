@@ -43,6 +43,10 @@ async function fixture(work) {
 }
 const undoPayload = receipt => {const {expiresAt,...payload}=receipt.undo;return payload;};
 const local = (f,assetId)=>f.repo.loadAssetTagsFor([assetId])[assetId]??[];
+async function waitFor(condition) {
+ const deadline=Date.now()+5000;
+ while(!condition()) { assert.ok(Date.now()<deadline,'worker did not reach expected state');await new Promise(r=>setTimeout(r,5)); }
+}
 
 test('one operation commits multiple keepers/remainder, sync and prior state; zero keepers is reviewed, never deletion',async()=>{
  await fixture(async f=>{f.seed();const input=await f.operation({[IDS[0]]:'approve',[IDS[1]]:'favorite',[IDS[2]]:'reviewed'});const receipt=await f.curate.applyDecision(input);
@@ -116,7 +120,7 @@ test('Undo ID cannot authorize a different target and expired Undo cannot become
  });
 });
 test('old queued/dead approval uses current scoped intent, preserves custom tags, and never reapplies after completion',async()=>{
- await fixture(async f=>{f.seed();const old=f.accept('approve',IDS[0]);f.repo.deadLetterSyncJob(old,'test outage');await f.review.frameDecision(IDS[0],'frame_hide');
+ await fixture(async f=>{f.seed();const old=f.accept('approve',IDS[0]);f.repo.deadLetterSyncJob(old,'test outage');await f.review.frameDecision(IDS[0],'frame_hide');await f.drain();
  f.immich.assets.get(IDS[0]).add('family/holiday');f.immich.assets.get(IDS[0]).delete('frame/never-show'); // later direct Immich edit
  const calls=f.immich.calls.length;f.repo.retryDeadSyncJobs(old);await f.drain();assert.equal(f.immich.calls.length,calls);assert.deepEqual([...f.immich.assets.get(IDS[0])],['family/holiday']);
  });
@@ -140,6 +144,43 @@ test('Frame Favorite/Hide on an unlisted photo retain narrow semantics and do no
  await fixture(async f=>{const assetId=id(90);f.immich.assets.set(assetId,new Set(['ai/scene/beach','personal/trip']));
  const result=await f.review.frameDecision(assetId,'frame_favorite');assert.equal(result.tag.value,'frame/favorite');assert.deepEqual(local(f,assetId),['frame/favorite']);assert.equal(f.repo.reviewListMembership([assetId]).size,0);
  await f.review.frameDecision(assetId,'frame_hide');assert.deepEqual(local(f,assetId),['frame/favorite','frame/never-show']);assert.deepEqual([...f.immich.assets.get(assetId)].sort(),['ai/scene/beach','frame/favorite','frame/never-show','personal/trip']);
+});
+});
+test('Frame replies after mutation while verification is blocked; the background worker still repairs and acknowledges',async()=>{
+ for(const action of ['frame_favorite','frame_hide'])await fixture(async f=>{
+  const assetId=id(90), rule=SYNC_ACTION_RULES[action];
+  f.immich.assets.set(assetId,new Set(['frame/eligible']));
+  const verify=f.review.verifyAndRepairTags.bind(f.review);
+  let release, verifying=false, replied=false, result, failure;
+  const gate=new Promise(resolve=>{release=resolve;});
+  f.review.verifyAndRepairTags=async(...args)=>{verifying=true;await gate;return verify(...args);};
+  // Immich accepts the write but initially drops it. The response must not
+  // wait for the repair; success is still followed by real verification.
+  const add=f.immich.tagAssetsBulk.bind(f.immich);let mutations=0;
+  f.immich.tagAssetsBulk=async p=>{mutations++;if(mutations<=2)return;return add(p);};
+  f.review.startSyncWorker();
+  const request=f.review.frameDecision(assetId,action).then(r=>{result=r;replied=true;},e=>{failure=e;});
+  try {
+   await waitFor(()=>replied||failure);
+   assert.equal(failure,undefined);assert.equal((result.tag??result.addedTag).value,rule.add[0]);
+   await waitFor(()=>verifying);
+   assert.equal(mutations,2,'one inline mutation and one worker attempt; no inline verification');
+   assert.equal(f.repo.pendingSyncJobCount(),1);assert.ok(f.repo.decisions.pendingFor(assetId).length>0);
+  } finally {release();await request;}
+  await waitFor(()=>f.repo.pendingSyncJobCount()===0);
+  assert.equal(f.repo.decisions.pendingFor(assetId).length,0);
+  assert.ok(f.immich.assets.get(assetId).has(rule.add[0]));
+  if(action==='frame_hide')assert.equal(f.immich.assets.get(assetId).has('frame/eligible'),false);
+ });
+});
+test('failed inline Frame work wakes the worker after the attempt and remains recoverable',async()=>{
+ await fixture(async f=>{
+  const add=f.immich.tagAssetsBulk.bind(f.immich);let first=true;
+  f.immich.tagAssetsBulk=async p=>{if(first){first=false;throw Error('temporary connection failure');}return add(p);};
+  f.review.startSyncWorker();
+  await assert.rejects(f.review.frameDecision(IDS[0],'frame_favorite'),e=>e.savedLocally===true);
+  await waitFor(()=>f.repo.pendingSyncJobCount()===0);
+  assert.ok(f.immich.assets.get(IDS[0]).has('frame/favorite'));assert.equal(f.repo.decisions.pendingFor(IDS[0]).length,0);
  });
 });
 test('failed synchronization reports failure and retries current work without new human revision or AI',async()=>{
@@ -151,7 +192,67 @@ test('failed synchronization reports failure and retries current work without ne
 test('deleted or trashed remote photos never produce a synced receipt; permanent errors park once',async()=>{
  await fixture(async f=>{f.seed();const receipt=await f.curate.applyDecision(await f.operation());f.immich.getAsset=async()=>({isTrashed:true,tags:[]});f.review.startSyncWorker();
  for(let i=0;i<100&&f.repo.pendingSyncJobCount();i++)await new Promise(r=>setImmediate(r));await f.review.stopSyncWorker();
- assert.equal(f.repo.pendingSyncJobCount(),0);assert.equal(f.repo.deadSyncJobCount(),2);assert.equal(f.repo.decisions.status(receipt.operationId).sync,'failed');assert.equal(f.immich.calls.length,0);
+ assert.equal(f.repo.pendingSyncJobCount(),0);assert.equal(f.repo.deadSyncJobCount(),3);assert.equal(f.repo.decisions.status(receipt.operationId).sync,'failed');assert.equal(f.immich.calls.length,0);
+});
+});
+test('unavailable photos are isolated; healthy siblings sync, and ordinary failed-job retry recovers after restart',async()=>{
+ for(const mode of ['trashed','offline','404','410','local','verification','bulk-race'])await fixture(async f=>{
+  f.seed();const receipt=f.review.applyDecision({action:'reviewed',assetIds:IDS}).receipt;
+  const human=IDS.map(assetId=>f.repo.decisions.humanId(assetId));
+  const get=f.immich.getAsset.bind(f.immich), add=f.immich.tagAssetsBulk.bind(f.immich);
+  let broken=true, readCount=0, writeStarted=false;
+  if(mode==='local')f.repo.curate.observe({id:IDS[1],isOffline:true});
+  f.immich.getAsset=async assetId=>{
+   if(assetId!==IDS[1]||!broken||mode==='local')return get(assetId);
+   if(mode==='verification'&&++readCount===1)return get(assetId);
+   if(mode==='bulk-race'&&!writeStarted)return get(assetId);
+   if(['404','410','bulk-race'].includes(mode))throw Object.assign(Error('Photo gone'),{status:Number(mode==='bulk-race'?404:mode)});
+   return {...await get(assetId),[mode==='offline'?'isOffline':'isTrashed']:true};
+  };
+  if(mode==='bulk-race')f.immich.tagAssetsBulk=async p=>{
+   await add(p);writeStarted=true;
+   if(broken&&p.assetIds.includes(IDS[1]))throw Object.assign(Error('Photo vanished during mutation'),{status:404});
+  };
+  f.review.startSyncWorker();await waitFor(()=>f.repo.pendingSyncJobCount()===0);await f.review.stopSyncWorker();
+  const [failed]=f.repo.deadSyncJobs();assert.equal(f.repo.deadSyncJobCount(),1,mode);assert.deepEqual(failed.assetIds,[IDS[1]]);
+  assert.equal(failed.attempts,1);assert.equal(f.repo.decisions.status(receipt.operationId).sync,'failed');
+  assert.equal(f.repo.decisions.status(receipt.operationId).synced,2);assert.equal(f.repo.decisions.status(receipt.operationId).pending,1);
+  for(const assetId of [IDS[0],IDS[2]])assert.ok(f.immich.assets.get(assetId).has('frame/reviewed'));
+  assert.deepEqual(IDS.map(assetId=>f.repo.decisions.humanId(assetId)),human);
+  await f.restart();assert.equal(f.repo.decisions.status(receipt.operationId).synced,2);
+  // Retry once while still unavailable: healthy photos are not rewritten.
+  const calls=f.immich.calls.length;
+  f.review.retryDeadSyncJobs(failed.id);f.review.startSyncWorker();await waitFor(()=>f.repo.pendingSyncJobCount()===0);await f.review.stopSyncWorker();
+  assert.equal(f.immich.calls.length,calls);assert.equal(f.repo.deadSyncJobCount(),1);
+  broken=false;if(mode==='local')f.repo.curate.observe({id:IDS[1],isOffline:false});
+  f.repo.decisions.retry(receipt.operationId);await f.drain();
+  assert.equal(f.repo.decisions.status(receipt.operationId).sync,'synced');assert.equal(f.repo.deadSyncJobCount(),0);
+  assert.deepEqual(IDS.map(assetId=>f.repo.decisions.humanId(assetId)),human);
+ });
+});
+test('isolating unavailable jobs is atomic, preserves operation links and does not consume backlog capacity',async()=>{
+ await fixture(async f=>{
+  f.seed();const receipt=f.review.applyDecision({action:'reviewed',assetIds:IDS}).receipt;
+  const job=f.repo.nextSyncJob();
+  f.repo.db.exec("CREATE TRIGGER fail_split BEFORE INSERT ON decision_sync_links BEGIN SELECT RAISE(ABORT,'split fault'); END;");
+  assert.throws(()=>f.repo.deadLetterSyncJobAssets(job.id,[IDS[1]],'unavailable'),/split fault/);
+  assert.deepEqual(f.repo.nextSyncJob().assetIds,IDS);assert.equal(f.repo.deadSyncJobCount(),0);
+  assert.equal(f.repo.decisions.status(receipt.operationId).pending,3);f.repo.db.exec('DROP TRIGGER fail_split');
+  const padding=Array.from({length:1000},(_,i)=>id(i+100));
+  for(let i=0;i<10;i++)f.repo.enqueueDecisionSync({assetIds:i===9?padding.slice(3):padding,action:'approve',addTags:['frame/eligible'],removeTags:[]});
+  const refs=()=>f.repo.db.prepare('SELECT SUM(json_array_length(asset_ids_json)) n FROM pending_sync_jobs').get().n;
+  assert.equal(refs(),10000);f.repo.deadLetterSyncJobAssets(job.id,[IDS[1]],'unavailable');assert.equal(refs(),10000);
+  assert.deepEqual(f.repo.nextSyncJob().assetIds,[IDS[0],IDS[2]]);assert.equal(f.repo.decisions.status(receipt.operationId).pending,3);
+  assert.equal(f.repo.decisions.status(receipt.operationId).sync,'failed');
+ });
+});
+test('shared tag-service 404 and permission failures do not classify healthy photos as unavailable',async()=>{
+ for(const status of [403,404])await fixture(async f=>{
+  f.seed();f.review.applyDecision({action:'reviewed',assetIds:IDS});
+  const list=f.immich.listTags.bind(f.immich);f.immich.listTags=async()=>{throw Object.assign(Error('tag service failure'),{status});};
+  f.review.startSyncWorker();await waitFor(()=>f.repo.nextSyncJob()?.attempts===1);await f.review.stopSyncWorker();
+  assert.equal(f.repo.deadSyncJobCount(),0);assert.deepEqual(f.repo.nextSyncJob().assetIds,IDS);
+  f.immich.listTags=list;await f.drain();assert.equal(f.repo.pendingSyncJobCount(),0);
  });
 });
 test('retention pins pending work, then keeps receipts and tombstones for successive 30-day windows',async()=>{
@@ -202,7 +303,7 @@ test('Frame routes use the shared writer, retain response fields and report save
   try{
    let response=await fetch(base+id(90)+'/favorite',{method:'POST'});assert.equal(response.status,200);assert.equal((await response.json()).tag.value,'frame/favorite');
    response=await fetch(base+id(90)+'/never-show',{method:'POST'});assert.equal(response.status,200);const body=await response.json();assert.equal(body.addedTag.value,'frame/never-show');assert.equal(body.removedTag.value,'frame/eligible');
-   f.immich.tagAssetsBulk=async()=>{throw Error('PRIVATE credential from remote');};
+   await f.drain();f.immich.tagAssetsBulk=async()=>{throw Error('PRIVATE credential from remote');};
    response=await fetch(base+id(91)+'/favorite',{method:'POST'});assert.equal(response.status,502);const fail=await response.json();assert.equal(fail.savedLocally,true);assert.equal(fail.sync,'pending');assert.doesNotMatch(JSON.stringify(fail),/PRIVATE/);assert.equal(f.repo.pendingSyncJobCount(),1);
    assert.equal((await fetch(base+'bad-id/favorite',{method:'POST'})).status,400);
   }finally{await new Promise(r=>server.close(r));}
@@ -246,7 +347,9 @@ test('hundreds of accepted decisions issue indexed Undo IDs without exhausting c
 test('a Frame action settling older human work does not drop the older Curate AI-tag synchronization',async()=>{
  await fixture(async f=>{f.seed();f.repo.recordProcessingRun({assetId:IDS[0],provider:'test',model:'test',promptVersion:'v1',taxonomyVersion:'v1',status:'succeeded',normalizedOutput:{}});
  f.repo.db.prepare("INSERT INTO asset_tags(asset_id,tag,source,created_at) VALUES(?,'ai/scene/landscape','ai','now')").run(IDS[0]);
- f.accept('approve',IDS[0]);await f.review.frameDecision(IDS[0],'frame_hide');assert.equal(f.immich.assets.get(IDS[0]).has('ai/scene/landscape'),false);
+ f.accept('approve',IDS[0]);await f.review.frameDecision(IDS[0],'frame_hide');
+ await f.review.pushDecisionToImmich({assetIds:[IDS[0]],action:'frame_hide'});
+ assert.equal(f.repo.decisions.pendingFor(IDS[0]).length,0);assert.equal(f.immich.assets.get(IDS[0]).has('ai/scene/landscape'),false);
  await f.drain();assert.ok(f.immich.assets.get(IDS[0]).has('ai/scene/landscape'));assert.ok(f.immich.assets.get(IDS[0]).has('frame/never-show'));assert.equal(f.immich.assets.get(IDS[0]).has('frame/eligible'),false);
  });
 });
@@ -255,7 +358,9 @@ test('remaining AI-tag work keeps operation sync/status/retry/retention honest a
  await fixture(async f=>{f.seed();f.repo.recordProcessingRun({assetId:IDS[0],provider:'test',model:'test',promptVersion:'v1',taxonomyVersion:'v1',status:'succeeded',normalizedOutput:{}});
  f.repo.db.prepare("INSERT INTO asset_tags(asset_id,tag,source,created_at) VALUES(?,'ai/scene/landscape','ai','now')").run(IDS[0]);
  const receipt=f.review.applyDecision({action:'approve',assetIds:[IDS[0]]}).receipt;
- await f.review.frameDecision(IDS[0],'frame_hide');assert.equal(f.repo.decisions.status(receipt.operationId).sync,'pending');
+ await f.review.frameDecision(IDS[0],'frame_hide');
+ await f.review.pushDecisionToImmich({assetIds:[IDS[0]],action:'frame_hide'});
+ assert.equal(f.repo.decisions.pendingFor(IDS[0]).length,0);assert.equal(f.repo.decisions.status(receipt.operationId).sync,'pending');
  const original=f.immich.tagAssetsBulk.bind(f.immich);f.immich.tagAssetsBulk=async()=>{throw Error('tag permission failure');};
  const job=f.repo.nextSyncJob();await assert.rejects(f.review.pushDecisionToImmich(job));f.repo.deadLetterSyncJob(job.id,'tag permission failure');
  assert.equal(f.repo.decisions.status(receipt.operationId).sync,'failed');f.repo.decisions.prune(Date.now()+100*RECEIPT_MS);assert.equal(f.repo.decisions.status(receipt.operationId).sync,'failed');

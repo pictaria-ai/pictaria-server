@@ -18,7 +18,7 @@ PIC-370 work; the new advice operation currently fails closed.
 | --- | --- | --- |
 | New `/api/review/curate/operations` API | Explicit per-photo outcomes over the inspected pending set | Issued scope → atomic operation and receipt → shared queue |
 | Existing `/api/review/decision`, including reopen after re-enrichment | Explicit current selection; approve, Curate Favorite, Never show, reviewed/Skip or clear | Atomic operation and receipt → shared queue |
-| Frame/voice `/api/assets/:id/favorite` | Add `frame/favorite` only | Accept intent before network work → shared queue and immediate verified sync |
+| Frame/voice `/api/assets/:id/favorite` | Add `frame/favorite` only | Accept intent → immediate remote mutation → queued verification/repair |
 | Frame/voice `/api/assets/:id/never-show` | Add `frame/never-show`, remove `frame/eligible` | Same shared boundary, including photos outside Curate |
 | Conditional Undo | Restore the operation's prior owned tags if no affected photo has a newer human decision | New compensating operation → shared queue |
 | Enrich / AI tag sync | AI-owned tags only | Existing separate AI queue under the same tag-write coordinator |
@@ -34,9 +34,14 @@ The legacy decision endpoint captures current state at command acceptance. It
 cannot infer which historical photo inputs a browser inspected, or distinguish a
 repeated old client request from a new command without a supplied issued scope.
 PIC-369 replaces that interaction with the new operation protocol below. Existing
-Frame success response fields remain compatible; a remote failure after local
-acceptance reports `savedLocally: true` and pending synchronization. No Frame
-client changes are required for the current Favorite/Hide calls.
+Frame success response fields remain compatible. Success follows the remote
+mutation without waiting for the background verification delay; the durable job
+stays pending until verification/repair completes. A remote failure after local
+acceptance reports HTTP 502 with `savedLocally: true` and pending synchronization.
+Existing Frame clients display that as a failure; presenting the saved/pending
+distinction in Frame is separate client work. Frame calls do not currently issue
+their own operation receipt or Undo. Their accepted human revision still protects
+them from an older Curate operation's Undo.
 
 ## Scoped operation protocol
 
@@ -91,8 +96,13 @@ Ordinary/custom tags remain untouched. Curate retains its existing AI-tag-sync
 behavior, independently of decision-tag ownership.
 
 Known missing/trashed/offline assets prevent a successful new operation. A remote
-404/410 or observed unavailable photo parks synchronization rather than retrying
-forever. Other failures retain bounded attempts and the existing failed-job UI.
+404/410 on an asset read or an observed unavailable photo parks only that photo in
+a separately retryable failed job; healthy photos in the batch continue. This
+also handles photos disappearing during mutation or verification. Splitting a
+job preserves its operation links and queue capacity, so status shows the healthy
+photos as synchronized and the unavailable photos as pending/failed. Shared tag
+service errors are not classified as missing photos. Other failures retain
+bounded attempts and the existing failed-job UI.
 Permission failures and partial writes never become successful receipts by dropping
 photos. Retry does not change the local decision. Dismissing a failed queue entry
 is not proof of synchronization; an operation with remaining intent stays pending

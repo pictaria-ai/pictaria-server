@@ -1855,6 +1855,39 @@ export class Repository {
       .run(sanitizeDiagnostic(error), utcNow(), jobId);
   }
 
+  // Move unavailable photos out of a batch without losing its healthy work
+  // or operation links. Each parked photo can be retried independently. The
+  // transaction preserves the total queued asset references (including at cap).
+  deadLetterSyncJobAssets(jobId, assetIds, error) {
+    return this.transaction(() => {
+      const row = this.db.prepare('SELECT asset_ids_json FROM pending_sync_jobs WHERE id = ?').get(jobId);
+      if (!row) return;
+      const ids = JSON.parse(row.asset_ids_json);
+      const failed = new Set(assetIds);
+      if (!failed.size || [...failed].some(id => !ids.includes(id))) throw new Error('Invalid unavailable sync asset scope.');
+      if (ids.length === 1) {
+        this.deadLetterSyncJob(jobId, error);
+        return;
+      }
+      const insert = this.db.prepare(`INSERT INTO pending_sync_jobs
+        (action,asset_ids_json,add_tags_json,remove_tags_json,attempts,created_at,last_error,dead_at)
+        SELECT action,?,add_tags_json,remove_tags_json,attempts+1,created_at,?,?
+        FROM pending_sync_jobs WHERE id=?`);
+      const link = this.db.prepare(`INSERT INTO decision_sync_links(job_id,operation_id)
+        SELECT ?,operation_id FROM decision_sync_links WHERE job_id=?`);
+      const message = sanitizeDiagnostic(error), now = utcNow();
+      for (const id of failed) {
+        const parkedId = Number(insert.run(JSON.stringify([id]), message, now, jobId).lastInsertRowid);
+        link.run(parkedId, jobId);
+      }
+      const remaining = ids.filter(id => !failed.has(id));
+      if (remaining.length) {
+        this.db.prepare(`UPDATE pending_sync_jobs SET asset_ids_json=?,attempts=0,last_error=NULL WHERE id=?`)
+          .run(JSON.stringify(remaining), jobId);
+      } else this.completeSyncJob(jobId);
+    });
+  }
+
   deadSyncJobs() {
     return this.db
       .prepare(`

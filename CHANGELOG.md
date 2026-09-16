@@ -13,6 +13,9 @@ All notable changes to Pictaria Server are documented here. This project follows
   the new multi-keeper comparison UI follows in PIC-369.
 - Curate and Frame Favorite/Hide now share durable decision-tag intent. Delayed
   retries respect newer choices, and failed Frame writes remain recoverable.
+  Frame replies after the remote mutation while verification/repair continues in
+  the background. Unavailable photos become individually retryable failed jobs,
+  allowing healthy photos from the same decision to finish synchronizing.
   Enrichment schema 14 / persistent-state contract 17 preserves existing decisions
   and adopts pending jobs from current local intent. See
   [Curate decisions](docs/CURATE-DECISIONS.md) for API, ownership and rollback details.

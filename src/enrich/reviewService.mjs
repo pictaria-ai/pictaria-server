@@ -399,7 +399,12 @@ export class ReviewService {
         const message = sanitizeDiagnostic(error instanceof Error ? error.message : error, {
           secrets: configuredSecrets(this.config, this.immich),
         });
-        if (error.permanent || error.status === 404 || error.status === 410 || job.attempts + 1 >= SYNC_MAX_ATTEMPTS) {
+        if (error.code === 'decision_asset_unavailable' && error.assetIds?.length) {
+          this.repo.deadLetterSyncJobAssets(job.id, error.assetIds, message);
+          this.log(`immich sync parked ${error.assetIds.length} unavailable photo(s); remaining photos will continue: ${message}`);
+          continue;
+        }
+        if (error.permanent || job.attempts + 1 >= SYNC_MAX_ATTEMPTS) {
           this.repo.deadLetterSyncJob(job.id, message);
           this.log(
             `immich sync dead-lettered after ${job.attempts + 1} attempts (${job.action}, ${job.assetIds.length} asset(s)): ${message}`,
@@ -430,11 +435,22 @@ export class ReviewService {
   }
 
   async pushDecisionToImmich(job) {
-    if (this.tagWrites) return this.tagWrites.run(() => this.#pushDecisionToImmich(job), { priority: 2 });
-    return this.#pushDecisionToImmich(job);
+    const push = async () => {
+      try { return await this.#pushDecisionToImmich(job); }
+      catch (error) {
+        // A photo may disappear between the availability read and a bulk
+        // mutation. Identify it before parking; a tag endpoint's own 404 is
+        // not evidence that every photo in this batch is unavailable.
+        if ([404,410].includes(error.status) && error.code !== 'decision_asset_unavailable')
+          await this.#readAvailableAssets(job.assetIds);
+        throw error;
+      }
+    };
+    if (this.tagWrites) return this.tagWrites.run(push, { priority: 2 });
+    return push();
   }
 
-  async #pushDecisionToImmich(job) {
+  async #pushDecisionToImmich(job, { verify = true } = {}) {
     if (job.assetIds.length > SYNC_ASSET_BATCH_SIZE) {
       throw new Error(`Review sync work exceeded the ${SYNC_ASSET_BATCH_SIZE}-asset worker slice.`);
     }
@@ -471,29 +487,42 @@ export class ReviewService {
       // behavior, independently of the latest human patch above.
       const includeAi = !job.action.startsWith('frame_');
       if (includeAi) await this.syncAiTagsForAssets(batch.assetIds, tagIds, { remoteAssets });
-      await this.verifyAndRepairTags(batch, includeAi ? {} : { localTagsByAsset: {} });
-      this.repo.decisions.acknowledge(batch.rows);
+      if (verify) {
+        await this.verifyAndRepairTags(batch, { checkAvailability:true, ...(includeAi ? {} : { localTagsByAsset: {} }) });
+        this.repo.decisions.acknowledge(batch.rows);
+      }
     }
     if (aiOnly.length) {
       const remoteAssets = await this.#readAvailableAssets(aiOnly);
       await this.syncAiTagsForAssets(aiOnly, {}, { remoteAssets });
-      await this.verifyAndRepairTags({ assetIds:aiOnly, add:[], remove:[] });
+      await this.verifyAndRepairTags({ assetIds:aiOnly, add:[], remove:[] }, { checkAvailability:true });
     }
   }
 
   async #readAvailableAssets(assetIds) {
-    try { this.repo.decisions.assertAvailable(assetIds); }
-    catch (error) { error.permanent = true; throw error; }
     const assets = new Map();
+    const unavailable = [];
     for (const id of assetIds) {
-      const asset = await this.immich.getAsset(id);
-      if (asset?.isTrashed || asset?.isOffline) {
-        const error = new Error('A selected photo is trashed or unavailable in Immich.');
-        error.code = 'decision_asset_unavailable'; error.permanent = true; throw error;
+      try { assets.set(id, await this.#readAvailableAsset(id)); }
+      catch (error) {
+        if (error.code !== 'decision_asset_unavailable') throw error;
+        unavailable.push(id);
       }
-      assets.set(id, asset);
     }
+    if (unavailable.length) throw unavailablePhotos(unavailable);
     return assets;
+  }
+
+  async #readAvailableAsset(id) {
+    try {
+      this.repo.decisions.assertAvailable([id]);
+      const asset = await this.immich.getAsset(id);
+      if (asset?.isTrashed || asset?.isOffline) throw unavailablePhotos([id]);
+      return asset;
+    } catch (error) {
+      if (error.code === 'curate_unavailable' || [404,410].includes(error.status)) throw unavailablePhotos([id]);
+      throw error;
+    }
   }
 
   async frameDecision(assetId, action) {
@@ -502,20 +531,24 @@ export class ReviewService {
     const rule = SYNC_ACTION_RULES[action];
     this.repo.decisions.assertAvailable([assetId]);
     const jobId = this.repo.recordDecision({ assetIds:[assetId], addTags:rule.add, removeTags:rule.remove, action });
-    this.wakeSyncWorker();
     try {
-      // Keep the existing Frame response semantics: success follows verified
-      // remote sync, while a transport failure retains the accepted work.
-      await this.pushDecisionToImmich({ id:jobId, assetIds:[assetId], action });
-      this.repo.completeSyncJob(jobId);
-      const tags = await this.immich.listTags();
-      const primary = tags.find(t => tagValue(t) === rule.add[0]);
-      const eligible = tags.find(t => tagValue(t) === 'frame/eligible') ?? null;
-      return action === 'frame_favorite' ? { assetId, tag:primary } : { assetId, addedTag:primary, removedTag:eligible };
+      // Frame success follows the remote mutation, not the settle/verification
+      // sleep. Keep durable intent pending until the worker verifies it. Do not
+      // wake that worker ahead of this inline attempt for the same photo.
+      const push = async () => {
+        await this.#pushDecisionToImmich({ id:jobId, assetIds:[assetId], action }, { verify:false });
+        const tags = await this.immich.listTags();
+        const primary = tags.find(t => tagValue(t) === rule.add[0]);
+        const eligible = tags.find(t => tagValue(t) === 'frame/eligible') ?? null;
+        return action === 'frame_favorite' ? { assetId, tag:primary } : { assetId, addedTag:primary, removedTag:eligible };
+      };
+      return await (this.tagWrites ? this.tagWrites.run(push, { priority:3 }) : push());
     } catch (error) {
       this.repo.recordSyncJobFailure(jobId, sanitizeDiagnostic(error.message, { secrets:configuredSecrets(this.config,this.immich) }));
       error.savedLocally = true;
       throw error;
+    } finally {
+      this.wakeSyncWorker();
     }
   }
 
@@ -524,7 +557,7 @@ export class ReviewService {
   // a short settle and repair once; if it is still inconsistent, throw so the
   // durable queue retries the whole (idempotent) job. A never-show decision
   // must not complete while the remote photo is still eligible.
-  async verifyAndRepairTags(job, { localTagsByAsset = this.repo.loadAssetTagsFor(job.assetIds, { prefix: 'ai/' }), verifyAiRemovals = false } = {}) {
+  async verifyAndRepairTags(job, { localTagsByAsset = this.repo.loadAssetTagsFor(job.assetIds, { prefix: 'ai/' }), verifyAiRemovals = false, checkAvailability = false } = {}) {
     const expectedByAsset = new Map(
       job.assetIds.map((assetId) => [assetId, [...(localTagsByAsset[assetId] ?? []), ...job.add]]),
     );
@@ -535,7 +568,7 @@ export class ReviewService {
       const retainedByAsset = new Map();
       const retainedTagIdsByAsset = new Map();
       for (const assetId of job.assetIds) {
-        const remoteAsset = await this.immich.getAsset(assetId);
+        const remoteAsset = checkAvailability ? await this.#readAvailableAsset(assetId) : await this.immich.getAsset(assetId);
         if (!Array.isArray(remoteAsset?.tags)) {
           throw new Error(
             'Immich did not expose asset tags. Enable Tags under Account Settings → Features for the API-key account, confirm the key includes tag.read, tag.create, and tag.asset, then retry.',
@@ -657,6 +690,13 @@ export class ReviewService {
       await this.immich.tagAssetsBulk({ assetIds: ids, tagIds: JSON.parse(signature) });
     }
   }
+}
+
+function unavailablePhotos(assetIds) {
+  const error = new Error('A selected photo is missing, trashed or unavailable in Immich.');
+  error.code = 'decision_asset_unavailable';
+  error.assetIds = assetIds;
+  return error;
 }
 
 // "Same moment" grouping, three signals united into one group per photo set:
