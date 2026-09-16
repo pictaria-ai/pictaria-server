@@ -1,0 +1,157 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Pictaria — Curate preview</title>
+    <link rel="icon" type="image/png" sizes="32x32" href="/brand/favicon-32.png" />
+    <script src="/theme.js"></script>
+    <script src="/auth-gate.js" defer></script>
+    <script src="/nav.js" defer></script>
+    <link rel="stylesheet" href="/pictaria.css" />
+    <link rel="stylesheet" href="/curate/comparisons.css" />
+  </head>
+  <body>
+    <header class="p-topbar">
+      <a class="p-brand" href="/"><img class="p-brand-word" src="/brand/wordmark.png" alt="Pictaria" /></a>
+      <span class="p-supporter-slot" aria-live="polite"></span>
+      <nav class="p-nav">
+        <a href="/insights.html">Insights</a><a href="/enrich.html">Enrich</a
+        ><a href="/curate.html" class="active">Curate</a><a href="/albums.html">Albums</a>
+      </nav>
+      <div class="p-grow"></div>
+      <a class="p-gear" href="/settings.html" aria-label="Settings">⚙</a>
+    </header>
+    <main>
+      <div class="heading">
+        <div>
+          <h1>Curate <span class="p-chip">Preview</span></h1>
+          <p class="p-muted">Choose good photos without keeping every repeat.</p>
+        </div>
+        <a class="p-btn" href="/curate.html">Current Curate &amp; decided photos</a>
+      </div>
+      <p class="preview-note">
+        Try the new manual comparison flow. Choices here are saved to your library. AI recommendations will be added in
+        a later preview.
+      </p>
+      <div class="toolbar">
+        <nav id="filters" class="p-tabs" aria-label="Photo groups">
+          <button class="p-tab active" data-kind="all">All</button
+          ><button class="p-tab" data-kind="stacks">Stacks</button
+          ><button class="p-tab" data-kind="singles">Singles</button>
+        </nav>
+        <label class="search-label"
+          ><span class="sr-only">Search pending photos</span
+          ><input id="search" class="p-input" type="search" maxlength="200" placeholder="Search photos"
+        /></label>
+        <div class="p-grow"></div>
+        <button id="corrections" class="p-btn">Stack corrections</button
+        ><button id="refresh" class="p-btn">Refresh</button>
+      </div>
+      <div class="view-status">
+        <span id="count" class="p-muted" aria-live="polite">Loading photos…</span
+        ><span id="updates" hidden>Updates available — refresh when you’re ready.</span>
+      </div>
+      <p id="metadata" class="p-muted"></p>
+      <div id="error" role="alert" hidden></div>
+      <div id="recovery" class="notice" hidden role="status">
+        <span>The last action’s response is uncertain. Retry it safely before continuing.</span
+        ><button id="retry-action" class="p-btn">Retry last action</button>
+      </div>
+      <div id="receipt" class="notice" hidden role="status">
+        <span id="receipt-text"></span><span id="sync" class="p-muted"></span
+        ><button id="retry-sync" class="p-btn" hidden>Retry sync</button
+        ><button id="undo" class="p-btn" hidden>Undo</button>
+      </div>
+      <section id="groups" class="group-grid" aria-label="Photos to curate"></section>
+      <p id="empty" class="empty" hidden>No pending photos match this view.</p>
+      <div class="load-row"><button id="more" class="p-btn" hidden>Load more</button></div>
+    </main>
+    <dialog id="comparison" aria-labelledby="comparison-title">
+      <div class="dialog-frame">
+        <header class="dialog-head">
+          <div>
+            <h2 id="comparison-title">Compare photos</h2>
+            <p id="comparison-subtitle" class="p-muted"></p>
+          </div>
+          <button class="p-btn" data-close="comparison">Close</button>
+        </header>
+        <div class="dialog-body">
+          <p id="comparison-help">
+            Select the photos you want to keep. The rest will be marked reviewed. Reviewed photos are not deleted or
+            marked Never show.
+          </p>
+          <p id="comparison-state" class="p-muted" aria-live="polite"></p>
+          <button id="metadata-retry" class="p-btn quiet" hidden>Retry photo information refresh</button>
+          <div id="comparison-error" role="alert" hidden></div>
+          <div id="comparison-recovery" class="notice" hidden>
+            <span>Retry the same action safely, or close this window and retry later.</span
+            ><button id="comparison-retry" class="p-btn">Retry last action</button>
+          </div>
+          <button id="comparison-refresh" class="p-btn" hidden>Close and refresh</button>
+          <div id="preview-errors" class="notice" hidden>
+            <span>Some previews couldn’t load. Retry them before saving.</span
+            ><button id="preview-retry" class="p-btn">Retry previews</button>
+          </div>
+          <div class="compare-tools">
+            <button id="select-all" class="p-btn">Select all</button
+            ><button id="select-none" class="p-btn">Clear selection</button>
+            <div class="p-grow"></div>
+            <button id="split" class="p-btn">Split into singles</button>
+          </div>
+          <section id="photos" class="photo-grid" aria-label="Comparison photos"></section>
+          <section id="context" hidden>
+            <h3>Already kept nearby</h3>
+            <p class="p-muted">For reference only. Your choices above won’t change these photos.</p>
+            <div id="context-photos" class="photo-grid context-grid"></div>
+            <p id="context-omitted" class="p-muted" hidden>
+              More kept photos may be nearby. This is a limited reference selection.
+            </p>
+          </section>
+        </div>
+        <footer class="dialog-foot">
+          <span id="selection-count" aria-live="polite"></span
+          ><button id="apply" class="p-btn primary" disabled>Save choices</button>
+        </footer>
+      </div>
+    </dialog>
+    <dialog id="photo-view" aria-labelledby="photo-title">
+      <div class="dialog-frame">
+        <header class="dialog-head">
+          <h2 id="photo-title"></h2>
+          <button class="p-btn" data-close="photo-view">Close</button>
+        </header>
+        <div class="dialog-body photo-detail">
+          <img id="photo-large" alt="" />
+          <p id="photo-caption"></p>
+          <div id="photo-tags" class="tags"></div>
+          <a id="immich" class="p-btn" target="_blank" rel="noopener" hidden>Open in Immich ↗</a>
+        </div>
+        <footer class="dialog-foot">
+          <button id="photo-prev" class="p-btn">← Previous</button><button id="photo-next" class="p-btn">Next →</button>
+        </footer>
+      </div>
+    </dialog>
+    <dialog id="correction-dialog" aria-labelledby="correction-title">
+      <div class="dialog-frame">
+        <header class="dialog-head">
+          <h2 id="correction-title">Stack corrections</h2>
+          <button class="p-btn" data-close="correction-dialog">Close</button>
+        </header>
+        <div class="dialog-body">
+          <p>
+            These separations stay in place as your library changes. Resetting a correction allows photos to group
+            again; it doesn’t change your keeper decisions.
+          </p>
+          <div id="correction-list"></div>
+          <div id="correction-error" role="alert" hidden></div>
+          <p id="correction-recovery" class="notice" hidden>
+            The response is uncertain. Close this window and use Retry last action to continue safely.
+          </p>
+          <button id="correction-more" class="p-btn" hidden>Load more</button>
+        </div>
+      </div>
+    </dialog>
+    <script type="module" src="/curate/page.js"></script>
+  </body>
+</html>

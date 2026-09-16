@@ -235,11 +235,35 @@ export class CurateRepository {
         id,
         filename: row.original_path?.split('/').pop() ?? id,
         caption: row.short_caption ?? '',
+        tags: this.prepare('SELECT tag FROM asset_tags WHERE asset_id=? ORDER BY tag').all(id).map(r => r.tag),
         state: row.state,
         evidence: JSON.parse(row.evidence_json),
         metadata: { checkedAt: row.checked_at ?? null, outcome: row.outcome ?? 'pending' },
       };
     });
+  }
+  covers(ids) {
+    // Bounded display projection: never expand evidence or a whole stack just
+    // to paint its card. Missing source rows do not change saved membership.
+    return ids.map(id => {
+      const row = this.prepare(`SELECT a.original_path,ls.short_caption FROM assets a
+        LEFT JOIN latest_success ls ON ls.asset_id=a.asset_id WHERE a.asset_id=?`).get(id);
+      return { id, filename: row?.original_path?.split('/').pop() || id, caption: row?.short_caption ?? '' };
+    });
+  }
+  corrections(offset = 0, limit = 50) {
+    if (!Number.isSafeInteger(offset) || offset < 0 || !Number.isSafeInteger(limit) || limit < 1 || limit > 50)
+      throw new CurateError('Invalid corrections page.', 'invalid_curate_query', 400);
+    const rows = this.prepare(`SELECT id,revision,created_at createdAt FROM curate_separations
+      WHERE active=1 ORDER BY created_at DESC,id LIMIT ? OFFSET ?`).all(limit + 1, offset);
+    return {
+      corrections: rows.slice(0, limit).map(row => ({ ...row, active: true,
+        memberCount: this.prepare('SELECT COUNT(*) n FROM curate_separation_members WHERE separation_id=?').get(row.id).n,
+        photos: this.covers(this.prepare(`SELECT asset_id FROM curate_separation_members
+          WHERE separation_id=? ORDER BY partition_no,asset_id LIMIT 3`).all(row.id).map(r => r.asset_id)),
+      })),
+      nextOffset: rows.length > limit ? offset + limit : null,
+    };
   }
   context(ids) {
     const pending = ids.map((id) => this.photo(id)).filter(Boolean),

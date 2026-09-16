@@ -512,10 +512,16 @@ test('foundation HTTP routes return complete groups and reject malformed or stal
     try {
       const v = await (await fetch(base + 'groups')).json();
       assert.equal(v.groups[0].memberCount, 2);
+      assert.equal(v.groups[0].photos.length, 1);
+      assert.ok(v.groups[0].photos.every(p => !Object.hasOwn(p, 'evidence')));
       assert.equal((await post('comparisons', null)).status, 400);
       const c = await (await post('comparisons', { viewId: v.viewId, groupId: v.groups[0].id })).json();
       assert.equal((await post('separations', { comparisonId: c.id, partitions: [['a'], ['a']] })).status, 400);
       assert.equal((await post('separations', { comparisonId: c.id, partitions: [['a'], ['b']] })).status, 200);
+      const corrections = await (await fetch(base + 'separations')).json();
+      assert.equal(corrections.corrections[0].id, c.id);
+      assert.equal(corrections.corrections[0].memberCount, 2);
+      assert.equal((await fetch(base + 'separations?limit=51')).status, 400);
       const second = await (await post('groups', {})).json();
       assert.equal(second.total, 2);
       assert.equal((await fetch(base + 'groups?replacesViewId=' + v.viewId)).status, 400);
@@ -539,6 +545,14 @@ test('foundation HTTP routes return complete groups and reject malformed or stal
       assert.equal((await post('groups', null)).status, 400);
       assert.equal((await fetch(base + 'groups?viewId=missing')).status, 409);
       assert.equal(repo.db.prepare('SELECT COUNT(*) n FROM manual_overrides').get().n, 0);
+      const reset = await (await post('separations/reset', {id:c.id, revision:1})).json();
+      assert.equal(reset.revision, 2);
+      assert.equal((await (await fetch(base + 'separations')).json()).corrections.length, 0);
+      const currentCorrection = await (await fetch(base + 'separations?id='+c.id)).json();
+      assert.equal(currentCorrection.correction.active, 0);
+      assert.equal(currentCorrection.correction.revision, 2);
+      const replay = await (await post('separations', {comparisonId:c.id, partitions:[['a'],['b']]})).json();
+      assert.equal(replay.revision, 1, 'immutable receipt must not be mistaken for current active state');
     } finally {
       await new Promise((resolve) => server.close(resolve));
     }
