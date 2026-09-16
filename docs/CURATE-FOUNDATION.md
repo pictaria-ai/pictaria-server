@@ -2,7 +2,7 @@
 
 This is the production foundation being built in PIC-367. The existing Curate
 page and released referee continue using their existing interfaces. PIC-368
-supplies coherent decisions/sync/Undo and PIC-369 moves the comparison UI onto
+supplies [coherent decisions/sync/Undo](CURATE-DECISIONS.md) and PIC-369 moves the comparison UI onto
 this foundation. The legacy grouping path must be removed at that cutover;
 maintaining two permanent grouping implementations is not the plan.
 
@@ -48,7 +48,8 @@ image identity, membership, or human state can change its applicability.
 ## Storage and runtime
 
 The existing enrichment SQLite database owns the additive schema-13 tables.
-Persistent-state contract 16 requires the ordinary pre-migration recovery point;
+The decision layer additionally uses schema 14 / persistent-state contract 17.
+The current contract requires the ordinary pre-migration recovery point;
 rollback uses that snapshot, not a promise that the v1.2.1 binary understands new
 state. No human decisions, existing tags, old referee verdicts, or profile settings
 are rewritten during this migration. Existing review rows enter a durable dirty

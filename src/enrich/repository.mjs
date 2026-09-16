@@ -14,7 +14,8 @@ import { historyRetention } from './historyRetention.mjs';
 import { AiTagSyncStore, AI_TAG_SYNC_SCHEMA } from './aiTagSyncStore.mjs';
 import { DISCOVERY_SCHEMA } from './discovery.mjs';
 import { matchingRun, workEligibility } from './eligibility.mjs';
-import { ACTION_RULES } from './reviewActions.mjs';
+import { SYNC_ACTION_RULES } from './reviewActions.mjs';
+import { DecisionRepository, DECISION_SCHEMA } from '../curate/decisions.mjs';
 import { canonicalJson, MAX_RUN_CONFIGURATION_BYTES } from './runConfiguration.mjs';
 
 const MAX_NORMALIZED_OUTPUT_BYTES = 64 * 1024;
@@ -177,7 +178,7 @@ function syncJobFromRow(row) {
     if (!Number.isSafeInteger(numericId) || numericId <= 0) {
       throw new Error('invalid row identifier');
     }
-    if (!Object.hasOwn(ACTION_RULES, row.action)) {
+    if (!Object.hasOwn(SYNC_ACTION_RULES, row.action)) {
       throw new Error('unsupported decision action');
     }
     if (!Number.isSafeInteger(attempts) || attempts < 0) {
@@ -196,7 +197,7 @@ function syncJobFromRow(row) {
     if (add.some((tag) => remove.includes(tag))) {
       throw new Error('the same frame tag cannot be added and removed');
     }
-    const expected = ACTION_RULES[row.action];
+    const expected = SYNC_ACTION_RULES[row.action];
     // Older queued decisions may contain only a subset of today's canonical
     // rule (for example, before reviewed-tag cleanup was added). Preserve
     // those compatible jobs, but never let restored state reverse an action.
@@ -517,6 +518,7 @@ const ENRICH_MIGRATIONS = [
     db.exec(CURATE_SCHEMA);
     db.exec('INSERT OR IGNORE INTO curate_dirty(asset_id) SELECT asset_id FROM review_list');
   } },
+  { version: 14, up(db) { db.exec(DECISION_SCHEMA); } },
 ];
 
 // The review projection of a normalized output: exactly the fields the
@@ -602,6 +604,7 @@ export class Repository {
     this.timings = new EnrichTimingStore(this.db);
     this.aiTagSync = new AiTagSyncStore(this.db);
     this.curate = new CurateRepository(this);
+    this.decisions = new DecisionRepository(this);
     this.historyRetention = historyRetention();
     this.db.exec('PRAGMA journal_mode = WAL');
     // Decisions, tags, and captions are personal data: keep the DB (and its
@@ -615,7 +618,7 @@ export class Repository {
   }
 
   initSchema() {
-    const schemaSql = readFileSync(SCHEMA_PATH, 'utf8') + TIMING_SCHEMA + DISCOVERY_SCHEMA + AI_TAG_SYNC_SCHEMA + CURATE_SCHEMA;
+    const schemaSql = readFileSync(SCHEMA_PATH, 'utf8') + TIMING_SCHEMA + DISCOVERY_SCHEMA + AI_TAG_SYNC_SCHEMA + CURATE_SCHEMA + DECISION_SCHEMA;
     const result = migrateDatabase(this.db, {
       schema: schemaSql,
       migrations: ENRICH_MIGRATIONS,
@@ -633,6 +636,14 @@ export class Repository {
         this.db.exec(index.sql);
       }
     }
+    this.decisions.bootstrap(function* () {
+      let after = 0;
+      for (;;) {
+        const rows = this.db.prepare(`SELECT ${SYNC_JOB_ROW_PROJECTION} FROM pending_sync_jobs WHERE id>? ORDER BY id LIMIT 50`).all(after);
+        if (!rows.length) break;
+        for (const row of rows) { after = row.storage_id; yield syncJobFromRow(row); }
+      }
+    }.bind(this));
     installCurateTriggers(this.db);
     for (const [column, expression] of [['file_created_at','julianday(file_created_at)'], ['checksum','checksum'], ['duplicate_id','duplicate_id']]) {
       if (tableHasColumns(this.db,'assets',[column])) this.db.exec(`CREATE INDEX IF NOT EXISTS idx_curate_source_${column} ON assets(${expression})`);
@@ -1712,39 +1723,34 @@ export class Repository {
 
   // Applies a manual review decision locally and enqueues its Immich sync job
   // in one transaction, so decisions and their pushes can never diverge.
-  recordDecision({ assetIds, addTags, removeTags, action }) {
-    const now = utcNow();
+  recordDecision({ assetIds, addTags, removeTags, action, revision }) {
     return this.transaction(() => {
-      const queuedRefs = Number(this.db.prepare(`
-        SELECT COALESCE(SUM(
-          CASE WHEN json_valid(asset_ids_json) THEN json_array_length(asset_ids_json) ELSE ? END
-        ), 0) AS count
-        FROM pending_sync_jobs
-      `).get(MAX_PENDING_SYNC_ASSET_REFS)?.count ?? 0);
-      if (queuedRefs + assetIds.length > MAX_PENDING_SYNC_ASSET_REFS) {
-        const error = new Error('The review sync backlog is full. Wait for pending work or dismiss failed jobs, then retry.');
-        error.code = 'review_sync_backlog_full';
-        error.status = 409;
-        throw error;
-      }
-      this.#applyManualFrameTags(assetIds, addTags, removeTags, action, now);
-      const result = this.db
-        .prepare(
-          `
-          INSERT INTO pending_sync_jobs (action, asset_ids_json, add_tags_json, remove_tags_json, attempts, created_at)
-          VALUES (?, ?, ?, ?, 0, ?)
-          `,
-        )
-        .run(action, JSON.stringify(assetIds), JSON.stringify(addTags), JSON.stringify(removeTags), now);
+      const jobId = this.enqueueDecisionSync({ assetIds, addTags, removeTags, action });
+      this.#applyManualFrameTags(assetIds, addTags, removeTags, action, utcNow());
+      this.decisions.recordIntent(assetIds, addTags, removeTags, revision);
       this.#pruneManualOverrideHistoryIfDue();
-      return Number(result.lastInsertRowid);
+      return jobId;
     });
+  }
+
+  enqueueDecisionSync({ assetIds, addTags, removeTags, action }) {
+    const queuedRefs = Number(this.db.prepare(`SELECT COALESCE(SUM(
+      CASE WHEN json_valid(asset_ids_json) THEN json_array_length(asset_ids_json) ELSE ? END
+    ), 0) AS count FROM pending_sync_jobs`).get(MAX_PENDING_SYNC_ASSET_REFS)?.count ?? 0);
+    if (queuedRefs + assetIds.length > MAX_PENDING_SYNC_ASSET_REFS) {
+      const error = new Error('The review sync backlog is full. Wait for pending work or dismiss failed jobs, then retry.');
+      error.code = 'review_sync_backlog_full'; error.status = 409; throw error;
+    }
+    return Number(this.db.prepare(`INSERT INTO pending_sync_jobs
+      (action,asset_ids_json,add_tags_json,remove_tags_json,attempts,created_at) VALUES(?,?,?,?,0,?)`)
+      .run(action,JSON.stringify(assetIds),JSON.stringify(addTags),JSON.stringify(removeTags),utcNow()).lastInsertRowid);
   }
 
   setManualFrameTags({ assetIds, addTags, removeTags, action }) {
     const now = utcNow();
     this.transaction(() => {
       this.#applyManualFrameTags(assetIds, addTags, removeTags, action, now);
+      this.decisions.recordIntent(assetIds, addTags, removeTags, undefined, { synced: true });
       this.#pruneManualOverrideHistoryIfDue();
     });
   }
@@ -1847,6 +1853,39 @@ export class Repository {
     this.db
       .prepare('UPDATE pending_sync_jobs SET attempts = attempts + 1, last_error = ?, dead_at = ? WHERE id = ?')
       .run(sanitizeDiagnostic(error), utcNow(), jobId);
+  }
+
+  // Move unavailable photos out of a batch without losing its healthy work
+  // or operation links. Each parked photo can be retried independently. The
+  // transaction preserves the total queued asset references (including at cap).
+  deadLetterSyncJobAssets(jobId, assetIds, error) {
+    return this.transaction(() => {
+      const row = this.db.prepare('SELECT asset_ids_json FROM pending_sync_jobs WHERE id = ?').get(jobId);
+      if (!row) return;
+      const ids = JSON.parse(row.asset_ids_json);
+      const failed = new Set(assetIds);
+      if (!failed.size || [...failed].some(id => !ids.includes(id))) throw new Error('Invalid unavailable sync asset scope.');
+      if (ids.length === 1) {
+        this.deadLetterSyncJob(jobId, error);
+        return;
+      }
+      const insert = this.db.prepare(`INSERT INTO pending_sync_jobs
+        (action,asset_ids_json,add_tags_json,remove_tags_json,attempts,created_at,last_error,dead_at)
+        SELECT action,?,add_tags_json,remove_tags_json,attempts+1,created_at,?,?
+        FROM pending_sync_jobs WHERE id=?`);
+      const link = this.db.prepare(`INSERT INTO decision_sync_links(job_id,operation_id)
+        SELECT ?,operation_id FROM decision_sync_links WHERE job_id=?`);
+      const message = sanitizeDiagnostic(error), now = utcNow();
+      for (const id of failed) {
+        const parkedId = Number(insert.run(JSON.stringify([id]), message, now, jobId).lastInsertRowid);
+        link.run(parkedId, jobId);
+      }
+      const remaining = ids.filter(id => !failed.has(id));
+      if (remaining.length) {
+        this.db.prepare(`UPDATE pending_sync_jobs SET asset_ids_json=?,attempts=0,last_error=NULL WHERE id=?`)
+          .run(JSON.stringify(remaining), jobId);
+      } else this.completeSyncJob(jobId);
+    });
   }
 
   deadSyncJobs() {
@@ -2429,7 +2468,7 @@ export class Repository {
             created_at AS at,
             'curation' AS category,
             'curation.decision' AS type,
-            'curate' AS source,
+            CASE WHEN action IN ('frame_favorite','frame_hide') THEN 'frame' ELSE 'curate' END AS source,
             NULL AS device_id,
             asset_id,
             NULL AS provider,
@@ -2439,6 +2478,9 @@ export class Repository {
               WHEN 'approve' THEN 'Photo approved in Curate'
               WHEN 'reject' THEN 'Photo marked Never Show in Curate'
               WHEN 'clear' THEN 'Photo decision cleared in Curate'
+              WHEN 'restore' THEN 'Photo decision undone in Curate'
+              WHEN 'frame_favorite' THEN 'Frame Favorite saved locally'
+              WHEN 'frame_hide' THEN 'Frame Never Show saved locally'
               ELSE 'Photo decision recorded in Curate'
             END AS summary,
             CASE action

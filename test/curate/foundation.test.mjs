@@ -478,7 +478,7 @@ test('migration from schema 12 queues only review rows; corrections/evidence/vie
     db.close();
     const migrated = new Repository(legacy);
     try {
-      assert.deepEqual(migrated.initSchema().applied, [13]);
+      assert.deepEqual(migrated.initSchema().applied, [13, 14]);
       assert.equal(migrated.db.prepare('SELECT COUNT(*) n FROM curate_dirty').get().n, 2);
       await migrated.curate.flush();
       assert.equal(migrated.curate.photo('a').recognizedCount, null);

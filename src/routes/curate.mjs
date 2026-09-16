@@ -3,7 +3,7 @@ import { CurateError } from '../curate/contracts.mjs';
 
 // Production foundation for PIC-368/369. The existing /api/review/assets UI
 // contract is intentionally unchanged until complete keeper-set actions land.
-export function createCurateRoutes({ curate }) {
+export function createCurateRoutes({ curate, review = null }) {
   return async (request, response, url) => {
     if (!url.pathname.startsWith('/api/review/curate/')) return false;
     response.setHeader('Cache-Control', 'no-store');
@@ -37,6 +37,19 @@ export function createCurateRoutes({ curate }) {
       } else if (request.method === 'POST' && path === 'comparisons/photos') {
         const body = await readObject(request, { maxBytes: 4096 });
         result = curate.comparisonPhotos(body.comparisonId, body.offset ?? 0, body.limit ?? 50);
+      } else if (request.method === 'POST' && path === 'operations') {
+        const body = await readObject(request, { maxBytes: 4096 });
+        result = await curate.issueDecision(body.comparisonId, body.mode ?? 'manual');
+      } else if (request.method === 'POST' && path === 'operations/apply') {
+        const body = await readObject(request, { maxBytes: 256 * 1024 });
+        result = await curate.applyDecision(body);
+        review?.wakeSyncWorker();
+      } else if (request.method === 'GET' && path === 'operations/status') {
+        result = curate.repo.decisions.status(url.searchParams.get('operationId'));
+      } else if (request.method === 'POST' && path === 'operations/retry') {
+        const body = await readObject(request, { maxBytes: 4096 });
+        result = curate.repo.decisions.retry(body.operationId);
+        review?.wakeSyncWorker();
       } else if (request.method === 'POST' && path === 'separations') {
         const body = await readObject(request, { maxBytes: 5 * 1024 * 1024 });
         result = await curate.separate(body.comparisonId, body.partitions);
@@ -58,7 +71,7 @@ export function createCurateRoutes({ curate }) {
       sendJson(response, 200, result);
       return true;
     } catch (error) {
-      if (error instanceof CurateError || error instanceof HttpBodyError) {
+      if (error instanceof CurateError || error instanceof HttpBodyError || error?.name === 'AssetBatchError' || error?.code === 'review_sync_backlog_full') {
         sendError(response, error.status ?? 400, error.code, error.message);
         return true;
       }

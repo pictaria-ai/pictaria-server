@@ -1,5 +1,4 @@
 import { readJsonBody, sendAudio, sendError, sendJson } from '../http.mjs';
-import { findFrameTag, FRAME_ELIGIBLE_TAG, FRAME_FAVORITE_TAG, FRAME_NEVER_SHOW_TAG } from '../frame/tags.mjs';
 import { applyLocationEnrichment, enrichAssetLocation, getLocationEnrichment } from '../ambient/geocoding.mjs';
 import { AskQuestionError, generateAskAnswer, validateAskRequest } from '../voice/askQuestion.mjs';
 import { generateInterestingPhotoAnswer, interestingTimeoutFallback, InterestingPhotoError } from '../voice/interestingPhoto.mjs';
@@ -50,8 +49,7 @@ function voiceProseBudgetMs(config) {
   return Math.min(Number.isFinite(configured) && configured > 0 ? configured : 25000, MAX_VOICE_PROSE_BUDGET_MS);
 }
 
-export function createVoiceRoutes({ immich, config, requireImmich, voiceMetrics = null, activityLog = null, tagWrites = null }) {
-  const withTagWrite = work => tagWrites ? tagWrites.run(work, { priority: 2 }) : work();
+export function createVoiceRoutes({ immich, config, requireImmich, voiceMetrics = null, activityLog = null, review = null }) {
   const voiceConfig = config.voice;
   const ambientConfig = config.ambient;
   const promptsConfig = config.prompts ?? {};
@@ -282,20 +280,13 @@ export function createVoiceRoutes({ immich, config, requireImmich, voiceMetrics 
       }
       const assetId = decodeURIComponent(favoriteMatch[1]);
       try {
-        await withTagWrite(async () => {
-          const tags = await immich.upsertTags([FRAME_FAVORITE_TAG]);
-          const favoriteTag = findFrameTag(tags, FRAME_FAVORITE_TAG);
-          if (!favoriteTag?.id) {
-            activityLog?.assetFavorited({ assetId, outcome: 'failed' });
-            sendError(response, 502, 'favorite_tag_missing', 'Immich did not return the favorite tag ID.');
-            return true;
-          }
-          await immich.tagAssetsBulk({ tagIds: [favoriteTag.id], assetIds: [assetId] });
-          activityLog?.assetFavorited({ assetId });
-          sendJson(response, 200, { assetId, tag: favoriteTag });
-        });
+        if (!review) throw new Error('Decision service unavailable.');
+        const result = await review.frameDecision(assetId, 'frame_favorite');
+        activityLog?.assetFavorited({ assetId });
+        sendJson(response, 200, result);
       } catch (error) {
         activityLog?.assetFavorited({ assetId, outcome: 'failed' });
+        if (sendDecisionFailure(response, error)) return true;
         throw error;
       }
       return true;
@@ -308,31 +299,13 @@ export function createVoiceRoutes({ immich, config, requireImmich, voiceMetrics 
       }
       const assetId = decodeURIComponent(neverShowMatch[1]);
       try {
-        await withTagWrite(async () => {
-          const tags = await immich.upsertTags([FRAME_NEVER_SHOW_TAG]);
-          const neverShowTag = findFrameTag(tags, FRAME_NEVER_SHOW_TAG);
-          if (!neverShowTag?.id) {
-            activityLog?.assetHidden({ assetId, outcome: 'failed' });
-            sendError(response, 502, 'never_show_tag_missing', 'Immich did not return the never-show tag ID.');
-            return true;
-          }
-          await immich.tagAssetsBulk({ tagIds: [neverShowTag.id], assetIds: [assetId] });
-
-          const allTags = await immich.listTags();
-          const eligibleTag = findFrameTag(allTags, FRAME_ELIGIBLE_TAG);
-          if (eligibleTag?.id) {
-            await immich.untagAssets({ tagId: eligibleTag.id, assetIds: [assetId] });
-          }
-
-          activityLog?.assetHidden({ assetId });
-          sendJson(response, 200, {
-            addedTag: neverShowTag,
-            assetId,
-            removedTag: eligibleTag ?? null,
-          });
-        });
+        if (!review) throw new Error('Decision service unavailable.');
+        const result = await review.frameDecision(assetId, 'frame_hide');
+        activityLog?.assetHidden({ assetId });
+        sendJson(response, 200, result);
       } catch (error) {
         activityLog?.assetHidden({ assetId, outcome: 'failed' });
+        if (sendDecisionFailure(response, error)) return true;
         throw error;
       }
       return true;
@@ -429,4 +402,16 @@ export function createVoiceRoutes({ immich, config, requireImmich, voiceMetrics 
       );
     }
   }
+}
+
+function sendDecisionFailure(response, error) {
+  if (error.savedLocally) {
+    sendJson(response, 502, { error: { code:'decision_sync_pending',
+      message:'Saved locally. Immich synchronization is pending; see Curate sync status to retry failed work.' }, savedLocally:true, sync:'pending' });
+    return true;
+  }
+  if (error?.name === 'AssetBatchError' || error?.code?.startsWith('curate_') || error?.code === 'review_sync_backlog_full') {
+    sendError(response,error.status ?? 400,error.code,error.message);return true;
+  }
+  return false;
 }

@@ -309,13 +309,13 @@ lifecycle.register('backup', 3000, (timeoutMs) => awaitDrain(backupDrain, timeou
 lifecycle.register('thumbhash-backfill', 3000, (timeoutMs) => awaitDrain(thumbhashBackfill, timeoutMs));
 
 const features = [
-  createCurateRoutes({ curate }),
+  createCurateRoutes({ curate, review }),
   createActivityRoutes({ activityHistory }),
   createEnrichRoutes({ review, aiTagSync, enrichRunner, taxonomy, profiles, repo, requireImmich, config, immich, captionWriteback, referee, activityLog }),
   createAlbumsRoutes({ immich, store: albumStore, config, requireImmich, enrichRepo: repo }),
   createWakeWordRoutes({ store: wakeWordModels }),
   createFrameRoutes({ immich, frameHub, frameLedger, requireImmich, voiceMetrics, activityLog }),
-  createVoiceRoutes({ immich, config, tagWrites, requireImmich, voiceMetrics, activityLog }),
+  createVoiceRoutes({ immich, config, review, requireImmich, voiceMetrics, activityLog }),
   createAmbientRoutes({ config }),
   createInsightsRoutes({ collector: insightsCollector, repo: insightsRepo, immich, config, settingsStore, requireImmich }),
   createSettingsRoutes({ settingsStore, profiles }),

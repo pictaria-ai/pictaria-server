@@ -312,9 +312,9 @@ export function createEnrichRoutes({ review, aiTagSync = null, enrichRunner, tax
       }
       try {
         const assetIds = validateAssetBatch(body.asset_ids, { code: 'invalid_decision_request' });
-        sendJson(response, 200, review.applyDecision({ action: body.action, assetIds }));
+        sendJson(response, 200, review.applyDecision({ action: body.action, assetIds, keepers: body.keepers }));
       } catch (error) {
-        if (error instanceof AssetBatchError || error?.code === 'review_sync_backlog_full') {
+        if (error instanceof AssetBatchError || error?.code?.startsWith('curate_') || error?.code === 'review_sync_backlog_full') {
           sendError(response, error.status ?? 400, error.code, error.message);
           return true;
         }
