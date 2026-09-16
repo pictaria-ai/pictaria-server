@@ -22,12 +22,14 @@ export function createCurateRoutes({ curate, review = null }) {
           : await curate.openView({
               kind: url.searchParams.get('kind') ?? 'all',
               search: url.searchParams.get('q') ?? '',
+              sort: url.searchParams.get('sort') ?? 'oldest',
             });
       } else if (request.method === 'POST' && path === 'groups') {
         const body = await readObject(request, { maxBytes: 4096 });
         result = await curate.openView({
           kind: body.kind,
           search: body.search,
+          sort: body.sort,
           replacesViewId: body.replacesViewId,
         });
       } else if (request.method === 'POST' && path === 'comparisons') {

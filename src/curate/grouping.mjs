@@ -134,6 +134,8 @@ export function groupPhotos(rows, { stacks = true, separations = [], limits = GR
             ? `single:${GROUPING_METHOD}:${ids[0]}`
             : fingerprint({ method: GROUPING_METHOD, ids: keyIds }),
         ids,
+        // The first member has the earliest known capture time (unknown dates sort last).
+        capturedMs: g.first,
         route: g.unavailable
           ? 'unavailable'
           : ids.length === 1

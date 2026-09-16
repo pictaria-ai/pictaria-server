@@ -3,9 +3,11 @@ import { node, thumbnail, photoCard, groupCard } from './photos.js';
 
 const el = (id) => document.getElementById(id);
 const client = new CurateClient();
+const SORT_PREFERENCE = 'pictaria.curate.sort';
 const state = {
   kind: 'all',
   search: '',
+  sort: 'oldest',
   view: null,
   groups: [],
   next: null,
@@ -58,6 +60,7 @@ function recovery() {
   const locked = state.busy || Boolean(client.saved.pending);
   el('refresh').disabled = locked || state.loading;
   el('search').disabled = locked || state.loading;
+  el('sort').disabled = locked || state.loading;
   el('corrections').disabled = locked;
   el('more').disabled = locked || state.loading;
   for (const button of document.querySelectorAll('#filters button, .group-card'))
@@ -99,7 +102,7 @@ async function refresh() {
   clearErrors();
   recovery();
   try {
-    const view = await client.open({ kind: state.kind, search: state.search });
+    const view = await client.open({ kind: state.kind, search: state.search, sort: state.sort });
     state.view = view;
     state.groups = view.groups;
     state.next = view.nextOffset;
@@ -359,6 +362,25 @@ async function corrections(append = false) {
 
 el('refresh').onclick = () => run(refresh);
 el('more').onclick = () => run(more);
+el('sort').onchange = () =>
+  run(async () => {
+    if (state.busy || state.loading || client.saved.pending) return;
+    const previous = state.sort;
+    state.sort = el('sort').value;
+    try {
+      await refresh();
+    } catch (e) {
+      // Failed replacement leaves the displayed cards in their previous order.
+      state.sort = previous;
+      el('sort').value = previous;
+      throw e;
+    }
+    try {
+      localStorage.setItem(SORT_PREFERENCE, state.sort);
+    } catch {
+      /* Preference storage is optional. */
+    }
+  });
 for (const button of document.querySelectorAll('#filters button'))
   button.onclick = () =>
     run(async () => {
@@ -545,6 +567,14 @@ run(async () => {
   state.kind = client.saved.filters?.kind || 'all';
   state.search = client.saved.filters?.search || '';
   el('search').value = state.search;
+  state.sort = client.saved.filters?.sort === 'newest' ? 'newest' : 'oldest';
+  try {
+    const saved = localStorage.getItem(SORT_PREFERENCE);
+    if (['oldest', 'newest'].includes(saved)) state.sort = saved;
+  } catch {
+    /* Keep the tab preference when browser storage is unavailable. */
+  }
+  el('sort').value = state.sort;
   if (client.saved.pending) {
     recovery();
     el('count').textContent = 'Resolve the last action to load photos.';

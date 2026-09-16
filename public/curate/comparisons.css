@@ -60,6 +60,17 @@ button {
 .search-label input {
   width: 100%;
 }
+.sort-label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--p-muted);
+  font-size: 13px;
+}
+.sort-label select {
+  width: auto;
+  min-height: 40px;
+}
 .notice {
   padding: 14px;
   margin: 14px 0;

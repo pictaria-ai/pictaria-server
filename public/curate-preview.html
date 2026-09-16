@@ -44,6 +44,13 @@
           ><span class="sr-only">Search pending photos</span
           ><input id="search" class="p-input" type="search" maxlength="200" placeholder="Search photos"
         /></label>
+        <label class="sort-label" title="Stacks use their earliest photo. Unknown capture dates appear last.">
+          <span>Date taken</span>
+          <select id="sort" class="p-input">
+            <option value="oldest">Oldest first</option>
+            <option value="newest">Newest first</option>
+          </select>
+        </label>
         <div class="p-grow"></div>
         <button id="corrections" class="p-btn">Stack corrections</button
         ><button id="refresh" class="p-btn">Refresh</button>

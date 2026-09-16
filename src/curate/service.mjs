@@ -74,8 +74,9 @@ export class CurateService {
     this.metrics.rebuildMs = performance.now() - start;
     return this.current;
   }
-  async openView({ kind = 'all', search = '', replacesViewId = null } = {}) {
-    if (!['all', 'stacks', 'singles'].includes(kind) || typeof search !== 'string' || search.length > 200)
+  async openView({ kind = 'all', search = '', sort = 'oldest', replacesViewId = null } = {}) {
+    if (!['all', 'stacks', 'singles'].includes(kind) || !['oldest', 'newest'].includes(sort) ||
+        typeof search !== 'string' || search.length > 200)
       throw new CurateError('Invalid Curate filter.', 'invalid_curate_query', 400);
     if (
       replacesViewId !== null &&
@@ -101,9 +102,17 @@ export class CurateService {
       );
       groups = groups.filter((g) => g.ids.some((id) => matches.has(id)));
     }
+    // Grouping emits comparisons in earliest-capture order, with equal dates
+    // resolved by the first member's ID. Reverse only the dated groups: unknown
+    // dates stay last. This linear pass leaves membership/member order intact.
+    if (sort === 'newest') {
+      const dated = [], undated = [];
+      for (const group of groups) (group.capturedMs === null ? undated : dated).push(group);
+      groups = dated.reverse().concat(undated);
+    }
     // Paging stores order/whole memberships, not expanded photos/provenance.
     // Capacity failure is explicit; no page silently drops part of a stack.
-    const lease = await this.store.createView(current, groups, { replacesViewId });
+    const lease = await this.store.createView(current, groups, { replacesViewId, sort });
     this.metadata.wake();
     return this.page(lease.id);
   }
@@ -115,6 +124,7 @@ export class CurateService {
       viewId,
       expiresAt: view.expiresAt,
       total: view.total,
+      sort: view.sort ?? 'oldest',
       immichUrl: this.config.immichPublicUrl || null,
       offset,
       metadata: this.metadata.status(),

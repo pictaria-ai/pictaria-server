@@ -7,6 +7,10 @@ All notable changes to Pictaria Server are documented here. This project follows
 
 ### Development
 
+- The Curate preview now offers **Date taken → Oldest first / Newest first**,
+  remembered per browser. Sorting applies across the full result set before
+  pagination, using each stack's earliest photo and placing unknown dates last.
+  Stack membership, keeper choices and photo order inside comparisons are unchanged.
 - Added an opt-in human-only Curate comparison preview at `/curate-preview.html`:
   stable complete stacks, multiple keeper selection, explicit reviewed remainder,
   persistent Remove from stack / Split into singles corrections, reset, conditional

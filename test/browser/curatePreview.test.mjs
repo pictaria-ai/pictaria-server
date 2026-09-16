@@ -3,6 +3,95 @@ import assert from 'node:assert/strict';
 import { launchChrome, findChrome } from './harness.mjs';
 import { curatePreviewFixture } from './curatePreviewFixture.mjs';
 
+test('Curate preview date order is global, remembered and stable until refresh', { timeout: 60000 }, async (t) => {
+  if (!findChrome()) return t.skip('Chrome required');
+  const fixture = await curatePreviewFixture({ stackSize: 3, singles: 52 });
+  const browser = await launchChrome(),
+    page = await browser.newPage();
+  t.after(async () => {
+    await browser.stop();
+    await fixture.stop();
+  });
+  const click = (selector) => page.evaluate(`document.querySelector(${JSON.stringify(selector)}).click()`);
+  const sort = (value) =>
+    page.evaluate(
+      `document.querySelector('#sort').value=${JSON.stringify(value)};document.querySelector('#sort').dispatchEvent(new Event('change'))`,
+    );
+  const cards = () => page.evaluate('[...document.querySelectorAll(".group-card")].map(c=>c.dataset.groupId)');
+  const ready = (count) =>
+    page.waitFor(
+      `document.querySelectorAll('.group-card').length===${count} && !document.querySelector('#refresh').disabled`,
+    );
+  await page.navigate(`${fixture.base}/curate-preview.html`);
+  await page.waitFor('document.querySelector(".gate-backdrop input")');
+  await page.evaluate(
+    'document.querySelector(".gate-backdrop input").value="smoke-secret";document.querySelector(".gate-backdrop button").click()',
+  );
+  await ready(50);
+  assert.equal(await page.evaluate('document.querySelector("#sort").value'), 'oldest');
+  await click('#more');
+  await ready(53);
+  const original = await cards();
+  await sort('newest');
+  await ready(50);
+  assert.deepEqual(await cards(), [...original].reverse().slice(0, 50));
+  await click('#more');
+  await ready(53);
+  assert.deepEqual(await cards(), [...original].reverse());
+  await page.navigate(`${fixture.base}/curate-preview.html`);
+  await ready(50);
+  assert.equal(await page.evaluate('document.querySelector("#sort").value'), 'newest');
+  assert.deepEqual(await cards(), [...original].reverse().slice(0, 50));
+  fixture.add(3000, 900000, 'latest-arrival');
+  await page.waitFor('!document.querySelector("#updates").hidden');
+  assert.deepEqual(await cards(), [...original].reverse().slice(0, 50));
+  await click('#refresh');
+  await ready(50);
+  assert.match((await cards())[0], new RegExp(fixture.id(3000)));
+  await click('[data-kind=stacks]');
+  await ready(1);
+  assert.equal((await cards())[0], original[0]);
+  await click('[data-kind=singles]');
+  await ready(50);
+  assert.match((await cards())[0], new RegExp(fixture.id(3000)));
+  await page.evaluate(
+    'document.querySelector("#search").value="single-52";document.querySelector("#search").dispatchEvent(new Event("input"))',
+  );
+  await ready(1);
+  assert.match((await cards())[0], new RegExp(fixture.id(1052)));
+  await page.evaluate(
+    'document.querySelector("#search").value="";document.querySelector("#search").dispatchEvent(new Event("input"))',
+  );
+  await ready(50);
+  // A failed sort replacement must not label old cards as the new order.
+  await page.evaluate(`window.realFetch=window.fetch;window.fetch=(input,options)=>{
+    if(String(input).endsWith('/curate/groups') && options?.method==='POST') {
+      window.fetch=window.realFetch;
+      return Promise.resolve(new Response(JSON.stringify({error:{message:'Sort temporarily unavailable'}}),{status:503}));
+    }
+    return window.realFetch(input,options);
+  }`);
+  const before = await cards();
+  await sort('oldest');
+  await page.waitFor('!document.querySelector("#error").hidden && !document.querySelector("#refresh").disabled');
+  assert.equal(await page.evaluate('document.querySelector("#sort").value'), 'newest');
+  assert.deepEqual(await cards(), before);
+  await click('#refresh');
+  await ready(50);
+  await click('.group-card');
+  await page.waitFor('!document.querySelector("#apply").disabled');
+  await click('#apply');
+  await ready(50);
+  assert.equal(await page.evaluate('document.querySelector("#sort").value'), 'newest');
+  assert.match((await cards())[0], new RegExp(fixture.id(1052)));
+  await click('#undo');
+  await ready(50);
+  assert.match((await cards())[0], new RegExp(fixture.id(3000)));
+  await sort('oldest');
+  await ready(50);
+  assert.match((await cards())[0], new RegExp(fixture.id(1001)));
+});
+
 test(
   'Curate preview singles, read-only viewer, open conflicts and immediate re-entry',
   { timeout: 45000 },

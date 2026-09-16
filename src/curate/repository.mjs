@@ -433,7 +433,7 @@ export class CurateRepository {
     ).get(alias.root_id, now);
     return { previous, rootId: alias.root_id };
   }
-  async createView(current, groups, { replacesViewId = null } = {}) {
+  async createView(current, groups, { replacesViewId = null, sort = 'oldest' } = {}) {
     // Identical ordered memberships share an immutable SQLite snapshot across
     // tabs, retries and filters. They never page a moving current index. Hashing
     // and persistence yield, and all retained snapshot bytes count toward 5 MiB.
@@ -487,6 +487,7 @@ export class CurateRepository {
         generation: current.generation,
         stacks: current.stacks,
         total: groups.length,
+        sort,
         snapshotId,
         ...(rootId ? { replacementRootId: rootId } : {}),
       };

@@ -18,6 +18,13 @@ legacy grouping, rather than leaving both implementations active indefinitely.
 
 - All, Stacks and Singles show pending comparisons. Search can match one member
   but opens the **whole** saved stack. Grid pagination does not limit decisions.
+- **Date taken → Oldest first / Newest first** orders the full result set before
+  pagination. Stacks use their earliest known capture time in either direction;
+  photos inside a stack remain in capture order. Undated comparisons stay last.
+  Equal dates use deterministic first-member IDs (reversed for Newest first).
+  Oldest first is the initial default; the choice is remembered in this browser.
+  Changing sort resets pagination and opens a fresh view. Background arrivals
+  remain behind **Updates available** until you explicitly refresh.
 - Open a stack, inspect its members and select zero, one or several keepers.
   Click an image to toggle Keep; **View larger** opens its detailed viewer.
   The action states the complete result, for example **Keep 2, mark 3 reviewed**.
@@ -69,6 +76,8 @@ block Save until the previews can be retried.
   coordinates the view. Layout is isolated in `comparisons.css`.
 - The latest view ID is retained in session storage and passed as
   `replacesViewId` on reload, navigation return, filtering and post-action refresh.
+  The selected order is recorded in the view lease and its immutable paged
+  snapshot, so later pages and reload recovery cannot mix different orders.
   BroadcastChannel detects cloned session storage so a duplicate tab does not
   replace its original tab's live view. Browsers without BroadcastChannel use
   fresh views as a safety fallback; old views expire normally.
@@ -93,7 +102,8 @@ block Save until the previews can be retried.
   binary using contract 17 or earlier requires restoring the **complete** matching
   pre-upgrade checkpoint (including state metadata and databases); changing only
   the application image is blocked by the downgrade guard. See
-  [upgrade and recovery](UPGRADING.md).
+  [upgrade and recovery](UPGRADING.md). The date-sort follow-up adds no further
+  schema or persistent-state version change.
 
 ## Validation and remaining work
 
@@ -103,6 +113,9 @@ lost-response recovery across reload, conflicting newer human intent, Undo,
 persistent Remove/Split/reset, duplicated tabs, keyboard interaction and a
 390-pixel viewport. Viewer keyboard selection, compact grids, single-photo
 controls, correction action history and failed-open recovery are also covered.
+Date-order coverage includes pagination, duplicate stacks spanning distant dates,
+missing/equal dates, filters/search, browser preference, failed replacement,
+background arrivals, decisions/Undo and persisted view order after restart.
 Protocol tests cover serialized replacement, rejected requests, unavailable
 storage, exact retry and oversized-group admission. Existing foundation
 and decision tests cover server restarts, input changes and atomicity.
@@ -111,7 +124,7 @@ The preview deliberately contains no actionable AI recommendations: old per-phot
 ranks are not valid new comparison advice. Production check/keeper integration,
 applicable versus historical advice states and full-set Apply AI advice belong to
 the PIC-116/PIC-370/PIC-346 integration. PIC-369 stays open for that integration
-and final default-page UX. Sorting, top-level bulk selection, tag editing and
+and final default-page UX. Broader sorting choices, top-level bulk selection, tag editing and
 the stack explanation surface keep their separately tracked scopes.
 
 Full production mixed-load/incremental-memory gates, 30k repeated browser workflow
