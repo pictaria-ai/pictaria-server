@@ -208,6 +208,38 @@ test('curating the same photo during AI write preserves the decision and complet
   });
 });
 
+test('Curate releases the lane while settling and cannot repair obsolete AI tags after a newer enrichment sync', async () => {
+  await fixture(async ({ seed, repo, immich, sync, review }) => {
+    const assetId = seed(1); repo.reviewListAdd([assetId], 'test');
+    const receipt = review.applyDecision({ action:'approve', assetIds:[assetId] }).receipt;
+    const entered = deferred(), release = deferred();
+    const verify = review.verifyAndRepairTags.bind(review); let held = false;
+    review.verifyAndRepairTags = async (job, options) => {
+      if (!held && job.add.includes('frame/eligible')) { held = true; entered.resolve(); await release.promise; }
+      return verify(job, options);
+    };
+    const waitFor = async condition => {
+      const deadline = Date.now() + 5000;
+      while (!condition()) { assert.ok(Date.now() < deadline, 'sync did not finish'); await new Promise(r => setTimeout(r, 5)); }
+    };
+    review.startSyncWorker();
+    try {
+      await entered.promise;
+      seed(1, ['ai/scene/water']);
+      let aiDone = false;
+      const ai = sync.tick().then(() => { aiDone = true; });
+      await waitFor(() => aiDone); await ai;
+      assert.ok(!immich.photos.get(assetId).has('ai/scene/mountains'));
+      const afterNewTags = immich.calls.length;
+      release.resolve(); await waitFor(() => repo.pendingSyncJobCount() === 0);
+      assert.ok(immich.calls.slice(afterNewTags).every(([kind,,tags]) => kind !== 'add' || !tags.includes('ai/scene/mountains')));
+      assert.deepEqual([...immich.photos.get(assetId)].sort(), ['ai/scene/water','frame/eligible']);
+      assert.equal(repo.decisions.status(receipt.operationId).sync, 'synced');
+      assert.equal(repo.aiTagSync.status().written, 1);
+    } finally { release.resolve(); await review.stopSyncWorker(); }
+  });
+});
+
 test('a persistently inconsistent photo is parked without failing successfully verified neighbors', async () => {
   await fixture(async ({ seed, repo, immich, sync }) => {
     const bad = seed(1); seed(2); immich.photos.get(bad).add('ai/scene/old'); immich.dropRemoval = true;

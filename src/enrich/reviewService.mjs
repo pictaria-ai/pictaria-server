@@ -396,6 +396,10 @@ export class ReviewService {
         this.repo.completeSyncJobSlice(job.id, assetIds.length);
         this._syncLastCompletedAt = new Date().toISOString();
       } catch (error) {
+        // A new local choice or AI projection arrived while remote work was
+        // settling. Re-read current intent immediately without charging a
+        // transport failure or acknowledging the obsolete snapshot.
+        if (error.code === 'decision_sync_changed') continue;
         const message = sanitizeDiagnostic(error instanceof Error ? error.message : error, {
           secrets: configuredSecrets(this.config, this.immich),
         });
@@ -435,22 +439,34 @@ export class ReviewService {
   }
 
   async pushDecisionToImmich(job) {
-    const push = async () => {
-      try { return await this.#pushDecisionToImmich(job); }
-      catch (error) {
-        // A photo may disappear between the availability read and a bulk
-        // mutation. Identify it before parking; a tag endpoint's own 404 is
-        // not evidence that every photo in this batch is unavailable.
-        if ([404,410].includes(error.status) && error.code !== 'decision_asset_unavailable')
-          await this.#readAvailableAssets(job.assetIds);
-        throw error;
+    try {
+      const batches = await this.#withTagWrites(() => this.#writeDecisionToImmich(job));
+      for (const batch of batches) {
+        // Settling happens outside the write lane. Re-acquire it for each
+        // verification/repair pass, and reject stale snapshots before repair.
+        await this.verifyAndRepairTags(batch, {
+          localTagsByAsset: batch.localTagsByAsset,
+          checkAvailability: true,
+          runExclusive: work => this.#withTagWrites(work),
+          assertCurrent: batch.assertCurrent,
+        });
+        this.repo.decisions.acknowledge(batch.rows);
       }
-    };
-    if (this.tagWrites) return this.tagWrites.run(push, { priority: 2 });
-    return push();
+    } catch (error) {
+      // A photo may disappear between the availability read and a bulk
+      // mutation. Identify it before parking; a tag endpoint's own 404 is
+      // not evidence that every photo in this batch is unavailable.
+      if ([404,410].includes(error.status) && error.code !== 'decision_asset_unavailable')
+        await this.#withTagWrites(() => this.#readAvailableAssets(job.assetIds));
+      throw error;
+    }
   }
 
-  async #pushDecisionToImmich(job, { verify = true } = {}) {
+  #withTagWrites(work) {
+    return this.tagWrites ? this.tagWrites.run(work, { priority:2 }) : work();
+  }
+
+  async #writeDecisionToImmich(job) {
     if (job.assetIds.length > SYNC_ASSET_BATCH_SIZE) {
       throw new Error(`Review sync work exceeded the ${SYNC_ASSET_BATCH_SIZE}-asset worker slice.`);
     }
@@ -471,12 +487,30 @@ export class ReviewService {
       batches.get(key).assetIds.push(id);
       batches.get(key).rows.push(...rows);
     }
+    const includeAi = !job.action.startsWith('frame_');
+    if (aiOnly.length) batches.set('ai-only', { assetIds:aiOnly, rows:[], add:[], remove:[] });
+    // Snapshot every batch synchronously with its intent rows, before any
+    // network await lets a newer decision/enrichment update the projection.
     for (const batch of batches.values()) {
+      const humanIds = batch.assetIds.map(id => this.repo.decisions.humanId(id));
+      batch.localTagsByAsset = includeAi ? this.repo.loadAssetTagsFor(batch.assetIds, { prefix:'ai/' }) : {};
+      const aiSignature = JSON.stringify(batch.localTagsByAsset);
+      batch.assertCurrent = () => {
+        if (batch.assetIds.some((id, i) => this.repo.decisions.humanId(id) !== humanIds[i]) ||
+          (includeAi && JSON.stringify(this.repo.loadAssetTagsFor(batch.assetIds, { prefix:'ai/' })) !== aiSignature)) {
+          const error = new Error('Decision or AI tags changed while synchronization was settling.');
+          error.code = 'decision_sync_changed';
+          throw error;
+        }
+      };
+    }
+    for (const batch of batches.values()) {
+      batch.assertCurrent();
       // Availability is an observation, not cross-system atomicity. Refuse a
       // known unavailable asset before mutations; failures after a partial
       // remote write leave durable intent pending for explicit recovery.
       const remoteAssets = await this.#readAvailableAssets(batch.assetIds);
-      const existingTagIds = tagMap(await this.immich.listTags());
+      const existingTagIds = batch.rows.length ? tagMap(await this.immich.listTags()) : {};
       const tagIds = { ...existingTagIds };
       if (batch.add.length) Object.assign(tagIds, await ensureImmichTagIds(this.immich, batch.add));
       for (const tag of batch.remove) if (existingTagIds[tag])
@@ -485,18 +519,9 @@ export class ReviewService {
       // A Frame command owns only its decision patch; it cannot remove AI tags
       // on photos Pictaria has never enriched. Curate keeps its prior AI-sync
       // behavior, independently of the latest human patch above.
-      const includeAi = !job.action.startsWith('frame_');
-      if (includeAi) await this.syncAiTagsForAssets(batch.assetIds, tagIds, { remoteAssets });
-      if (verify) {
-        await this.verifyAndRepairTags(batch, { checkAvailability:true, ...(includeAi ? {} : { localTagsByAsset: {} }) });
-        this.repo.decisions.acknowledge(batch.rows);
-      }
+      if (includeAi) await this.syncAiTagsForAssets(batch.assetIds, tagIds, { remoteAssets, localTagsByAsset:batch.localTagsByAsset });
     }
-    if (aiOnly.length) {
-      const remoteAssets = await this.#readAvailableAssets(aiOnly);
-      await this.syncAiTagsForAssets(aiOnly, {}, { remoteAssets });
-      await this.verifyAndRepairTags({ assetIds:aiOnly, add:[], remove:[] }, { checkAvailability:true });
-    }
+    return [...batches.values()];
   }
 
   async #readAvailableAssets(assetIds) {
@@ -536,7 +561,7 @@ export class ReviewService {
       // sleep. Keep durable intent pending until the worker verifies it. Do not
       // wake that worker ahead of this inline attempt for the same photo.
       const push = async () => {
-        await this.#pushDecisionToImmich({ id:jobId, assetIds:[assetId], action }, { verify:false });
+        await this.#writeDecisionToImmich({ id:jobId, assetIds:[assetId], action });
         const tags = await this.immich.listTags();
         const primary = tags.find(t => tagValue(t) === rule.add[0]);
         const eligible = tags.find(t => tagValue(t) === 'frame/eligible') ?? null;
@@ -557,87 +582,102 @@ export class ReviewService {
   // a short settle and repair once; if it is still inconsistent, throw so the
   // durable queue retries the whole (idempotent) job. A never-show decision
   // must not complete while the remote photo is still eligible.
-  async verifyAndRepairTags(job, { localTagsByAsset = this.repo.loadAssetTagsFor(job.assetIds, { prefix: 'ai/' }), verifyAiRemovals = false, checkAvailability = false } = {}) {
-    const expectedByAsset = new Map(
-      job.assetIds.map((assetId) => [assetId, [...(localTagsByAsset[assetId] ?? []), ...job.add]]),
-    );
-
+  async verifyAndRepairTags(job, {
+    localTagsByAsset = this.repo.loadAssetTagsFor(job.assetIds, { prefix:'ai/' }),
+    verifyAiRemovals = false, checkAvailability = false,
+    runExclusive = work => work(), assertCurrent = () => {},
+  } = {}) {
     for (let attempt = 0; attempt < 2; attempt += 1) {
       await sleep(this.verifyDelayMs);
-      const missingByAsset = new Map();
-      const retainedByAsset = new Map();
-      const retainedTagIdsByAsset = new Map();
-      for (const assetId of job.assetIds) {
-        const remoteAsset = checkAvailability ? await this.#readAvailableAsset(assetId) : await this.immich.getAsset(assetId);
-        if (!Array.isArray(remoteAsset?.tags)) {
-          throw new Error(
-            'Immich did not expose asset tags. Enable Tags under Account Settings → Features for the API-key account, confirm the key includes tag.read, tag.create, and tag.asset, then retry.',
-          );
-        }
-        const remoteTagIds = tagMap(remoteAsset.tags);
-        const remoteTags = new Set(remoteAsset.tags.map((tag) => tagValue(tag)).filter(Boolean));
-        const missing = (expectedByAsset.get(assetId) ?? []).filter((tag) => !remoteTags.has(tag));
-        if (missing.length > 0) {
-          missingByAsset.set(assetId, missing);
-        }
-        const retained = [...new Set([
-          ...job.remove.filter((tag) => remoteTags.has(tag)),
-          ...(verifyAiRemovals ? [...remoteTags].filter(tag => tag.startsWith('ai/') && !(localTagsByAsset[assetId] ?? []).includes(tag)) : []),
-        ])];
-        if (retained.length > 0) {
-          retainedByAsset.set(assetId, retained);
-          retainedTagIdsByAsset.set(
-            assetId,
-            retained.map((tag) => remoteTagIds[tag]).filter(Boolean),
-          );
-        }
-      }
-      if (missingByAsset.size === 0 && retainedByAsset.size === 0) {
-        return;
-      }
-      if (attempt === 1) {
-        const problems = [];
-        if (missingByAsset.size > 0) {
-          problems.push(`Missing: ${[...missingByAsset.entries()]
-            .map(([assetId, tags]) => `${assetId}: ${tags.join(', ')}`)
-            .join(' | ')}`);
-        }
-        if (retainedByAsset.size > 0) {
-          problems.push(`Still present: ${[...retainedByAsset.entries()]
-            .map(([assetId, tags]) => `${assetId}: ${tags.join(', ')}`)
-            .join(' | ')}`);
-        }
-        const error = new Error(
-          `Immich did not retain all requested tags after a repair attempt. Confirm Tags is enabled for the API-key account and that the affected photos are owned by or writable to that account, then retry. ${problems.join(' | ')}`,
+      const verified = await runExclusive(() => this.#verifyAndRepairPass(job, {
+        localTagsByAsset, verifyAiRemovals, checkAvailability, assertCurrent, attempt,
+      }));
+      if (verified) return;
+    }
+  }
+
+  async #verifyAndRepairPass(job, { localTagsByAsset, verifyAiRemovals, checkAvailability, assertCurrent, attempt }) {
+    assertCurrent();
+    const expectedByAsset = new Map(
+      job.assetIds.map(assetId => [assetId, [...(localTagsByAsset[assetId] ?? []), ...job.add]]),
+    );
+    const missingByAsset = new Map();
+    const retainedByAsset = new Map();
+    const retainedTagIdsByAsset = new Map();
+    for (const assetId of job.assetIds) {
+      const remoteAsset = checkAvailability ? await this.#readAvailableAsset(assetId) : await this.immich.getAsset(assetId);
+      if (!Array.isArray(remoteAsset?.tags)) {
+        throw new Error(
+          'Immich did not expose asset tags. Enable Tags under Account Settings → Features for the API-key account, confirm the key includes tag.read, tag.create, and tag.asset, then retry.',
         );
-        error.code = 'immich_tag_inconsistent';
-        error.assetIds = [...new Set([...missingByAsset.keys(), ...retainedByAsset.keys()])];
-        throw error;
       }
-      const inconsistentAssets = new Set([...missingByAsset.keys(), ...retainedByAsset.keys()]);
-      this.log(`immich tag state is still inconsistent on ${inconsistentAssets.size} asset(s); repairing`);
-      if (retainedByAsset.size > 0) {
-        const assetsByTagId = new Map();
-        for (const [assetId, retainedTagIds] of retainedTagIdsByAsset) {
-          for (const retainedTagId of retainedTagIds) {
-            push(assetsByTagId, retainedTagId, assetId);
-          }
-        }
-        for (const [retainedTagId, assetIds] of assetsByTagId) {
-          await this.immich.untagAssets({ tagId: retainedTagId, assetIds });
-        }
+      const remoteTagIds = tagMap(remoteAsset.tags);
+      const remoteTags = new Set(remoteAsset.tags.map((tag) => tagValue(tag)).filter(Boolean));
+      const missing = (expectedByAsset.get(assetId) ?? []).filter((tag) => !remoteTags.has(tag));
+      if (missing.length > 0) {
+        missingByAsset.set(assetId, missing);
       }
-      if (missingByAsset.size > 0) {
-        const allMissing = [...new Set([...missingByAsset.values()].flat())].sort();
-        const resolved = await ensureImmichTagIds(this.immich, allMissing);
-        for (const [assetId, missing] of missingByAsset) {
-          await this.immich.tagAssetsBulk({
-            assetIds: [assetId],
-            tagIds: missing.map((tag) => resolved[tag]).filter(Boolean),
-          });
-        }
+      const retained = [...new Set([
+        ...job.remove.filter((tag) => remoteTags.has(tag)),
+        ...(verifyAiRemovals ? [...remoteTags].filter(tag => tag.startsWith('ai/') && !(localTagsByAsset[assetId] ?? []).includes(tag)) : []),
+      ])];
+      if (retained.length > 0) {
+        retainedByAsset.set(assetId, retained);
+        retainedTagIdsByAsset.set(
+          assetId,
+          retained.map((tag) => remoteTagIds[tag]).filter(Boolean),
+        );
       }
     }
+    assertCurrent();
+    if (missingByAsset.size === 0 && retainedByAsset.size === 0) {
+      return true;
+    }
+    if (attempt === 1) {
+      const problems = [];
+      if (missingByAsset.size > 0) {
+        problems.push(`Missing: ${[...missingByAsset.entries()]
+          .map(([assetId, tags]) => `${assetId}: ${tags.join(', ')}`)
+          .join(' | ')}`);
+      }
+      if (retainedByAsset.size > 0) {
+        problems.push(`Still present: ${[...retainedByAsset.entries()]
+          .map(([assetId, tags]) => `${assetId}: ${tags.join(', ')}`)
+          .join(' | ')}`);
+      }
+      const error = new Error(
+        `Immich did not retain all requested tags after a repair attempt. Confirm Tags is enabled for the API-key account and that the affected photos are owned by or writable to that account, then retry. ${problems.join(' | ')}`,
+      );
+      error.code = 'immich_tag_inconsistent';
+      error.assetIds = [...new Set([...missingByAsset.keys(), ...retainedByAsset.keys()])];
+      throw error;
+    }
+    const inconsistentAssets = new Set([...missingByAsset.keys(), ...retainedByAsset.keys()]);
+    this.log(`immich tag state is still inconsistent on ${inconsistentAssets.size} asset(s); repairing`);
+    if (retainedByAsset.size > 0) {
+      const assetsByTagId = new Map();
+      for (const [assetId, retainedTagIds] of retainedTagIdsByAsset) {
+        for (const retainedTagId of retainedTagIds) {
+          push(assetsByTagId, retainedTagId, assetId);
+        }
+      }
+      for (const [retainedTagId, assetIds] of assetsByTagId) {
+        assertCurrent();
+        await this.immich.untagAssets({ tagId: retainedTagId, assetIds });
+      }
+    }
+    if (missingByAsset.size > 0) {
+      const allMissing = [...new Set([...missingByAsset.values()].flat())].sort();
+      const resolved = await ensureImmichTagIds(this.immich, allMissing);
+      for (const [assetId, missing] of missingByAsset) {
+        assertCurrent();
+        await this.immich.tagAssetsBulk({
+          assetIds: [assetId],
+          tagIds: missing.map((tag) => resolved[tag]).filter(Boolean),
+        });
+      }
+    }
+    return false;
   }
 
   // Reconcile ai/* tags in Immich with the local source of truth for the

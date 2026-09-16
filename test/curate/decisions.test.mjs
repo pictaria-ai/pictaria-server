@@ -136,7 +136,7 @@ test('partial remote write survives restart and converges to a newer Hide withou
 test('new intent accepted during an in-flight remote write remains pending until a follow-up repairs it',async()=>{
  await fixture(async f=>{f.seed();f.accept('approve',IDS[0]);const original=f.immich.tagAssetsBulk.bind(f.immich);let once=true;
  f.immich.tagAssetsBulk=async p=>{await original(p);if(once){once=false;f.accept('frame_hide',IDS[0]);}};
- const old=f.repo.nextSyncJob();await f.review.pushDecisionToImmich(old);f.repo.completeSyncJob(old.id);assert.ok(f.repo.decisions.pendingFor(IDS[0]).length>0);
+ const old=f.repo.nextSyncJob();await assert.rejects(f.review.pushDecisionToImmich(old),{code:'decision_sync_changed'});assert.ok(f.repo.decisions.pendingFor(IDS[0]).length>0);
  await f.drain();assert.ok(f.immich.assets.get(IDS[0]).has('frame/never-show'));assert.equal(f.immich.assets.get(IDS[0]).has('frame/eligible'),false);
  });
 });
@@ -194,6 +194,69 @@ test('deleted or trashed remote photos never produce a synced receipt; permanent
  for(let i=0;i<100&&f.repo.pendingSyncJobCount();i++)await new Promise(r=>setImmediate(r));await f.review.stopSyncWorker();
  assert.equal(f.repo.pendingSyncJobCount(),0);assert.equal(f.repo.deadSyncJobCount(),3);assert.equal(f.repo.decisions.status(receipt.operationId).sync,'failed');assert.equal(f.immich.calls.length,0);
 });
+});
+test('consecutive Frame HTTP actions do not wait on the default 1500 ms worker settle',async t=>{
+ await fixture(async f=>{
+  const {createServer}=await import('node:http');const {createVoiceRoutes}=await import('../../src/routes/voice.mjs');
+  const route=createVoiceRoutes({immich:f.immich,review:f.review,config:{voice:{},ambient:{}},requireImmich:()=>true});
+  const server=createServer(async(req,res)=>{if(!await route(req,res,new URL(req.url,'http://local')))res.writeHead(404).end();});
+  await new Promise(r=>server.listen(0,'127.0.0.1',r));const base=`http://127.0.0.1:${server.address().port}/api/assets/`;
+  f.review.verifyDelayMs=1500;
+  const verify=f.review.verifyAndRepairTags.bind(f.review);let settling=false;
+  f.review.verifyAndRepairTags=(...args)=>{settling=true;return verify(...args);};
+  f.review.startSyncWorker();const timings=[];
+  try {
+   for(let i=0;i<4;i++) {
+    const started=performance.now();const response=await fetch(base+id(i+90)+(i%2?'/never-show':'/favorite'),{method:'POST'});
+    assert.equal(response.status,200);await response.json();timings.push(performance.now()-started);
+    assert.ok(timings.at(-1)<1000,`Frame action ${i+1} waited ${timings.at(-1)} ms`);
+    if(i===0)await waitFor(()=>settling);
+   }
+   assert.ok(f.repo.pendingSyncJobCount()>0,'verification remains pending after the fast replies');
+  } finally {
+   f.review.verifyDelayMs=0;await f.review.stopSyncWorker();await new Promise(r=>server.close(r));
+  }
+  await f.drain();assert.equal(f.repo.pendingSyncJobCount(),0);
+  t.diagnostic(`Consecutive Frame HTTP actions: ${timings.map(n=>n.toFixed(1)).join(', ')} ms`);
+ });
+});
+test('newer Frame Hide during settle, verification reads or repair settle prevents stale approval repair',async()=>{
+ for(const phase of ['settle','read','repair-settle'])await fixture(async f=>{
+  f.seed([IDS[0]]);const receipt=f.review.applyDecision({action:'approve',assetIds:[IDS[0]]}).receipt;
+  let release, entered=false;
+  const gate=new Promise(resolve=>{release=resolve;});
+  const verify=f.review.verifyAndRepairTags.bind(f.review);
+  let passes=0;
+  f.review.verifyAndRepairTags=(job,options)=>verify(job,{...options,runExclusive:async work=>{
+   passes++;
+   if((phase==='settle'&&passes===1)||(phase==='repair-settle'&&passes===2)){entered=true;await gate;}
+   return options.runExclusive(work);
+  }});
+  if(phase==='repair-settle') {
+   const add=f.immich.tagAssetsBulk.bind(f.immich);let first=true;
+   f.immich.tagAssetsBulk=async p=>{if(first){first=false;return;}return add(p);};
+  }
+  if(phase==='read') {
+   const get=f.immich.getAsset.bind(f.immich);let reads=0;
+   f.immich.getAsset=async assetId=>{
+    if(++reads===2){f.immich.assets.get(assetId).delete('frame/eligible');entered=true;await gate;}
+    return get(assetId);
+   };
+  }
+  const recordFailure=f.repo.recordSyncJobFailure.bind(f.repo);let failures=0;
+  f.repo.recordSyncJobFailure=(...args)=>{failures++;return recordFailure(...args);};
+  f.review.startSyncWorker();let hide;
+  try {
+   await waitFor(()=>entered);const start=f.immich.calls.length;
+   let replied=false;hide=f.review.frameDecision(IDS[0],'frame_hide').then(()=>{replied=true;});
+   if(phase!=='read')await waitFor(()=>replied); // no write lock held during either settle
+   release();await hide;await waitFor(()=>f.repo.pendingSyncJobCount()===0);
+   assert.ok(f.immich.calls.slice(start).every(([kind,,tags])=>!(kind==='add'&&tags.includes('frame/eligible'))));
+   assert.ok(f.immich.assets.get(IDS[0]).has('frame/never-show'));assert.equal(f.immich.assets.get(IDS[0]).has('frame/eligible'),false);
+   assert.equal(failures,0);assert.equal(f.repo.deadSyncJobCount(),0);
+   assert.equal(f.repo.decisions.status(receipt.operationId).sync,'superseded');
+  } finally {release();await hide;}
+ });
 });
 test('unavailable photos are isolated; healthy siblings sync, and ordinary failed-job retry recovers after restart',async()=>{
  for(const mode of ['trashed','offline','404','410','local','verification','bulk-race'])await fixture(async f=>{

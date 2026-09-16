@@ -38,6 +38,9 @@ Frame success response fields remain compatible. Success follows the remote
 mutation without waiting for the background verification delay; the durable job
 stays pending until verification/repair completes. A remote failure after local
 acceptance reports HTTP 502 with `savedLocally: true` and pending synchronization.
+If the inline attempt discovers a missing or trashed photo, it returns that same
+saved-locally response; the worker subsequently parks the photo in the failed-job
+list until it becomes available and is retried.
 Existing Frame clients display that as a failure; presenting the saved/pending
 distinction in Frame is separate client work. Frame calls do not currently issue
 their own operation receipt or Undo. Their accepted human revision still protects
@@ -90,6 +93,15 @@ unsynchronized decision intents for its bounded asset slice. It verifies additio
 and removals, repairs once, and acknowledges only the exact revisions it sent.
 An older in-flight request can finish after a new local action; that acknowledgment
 cannot clear the new work. Its later job repairs toward current intent.
+
+The decision worker releases the shared write lane during both the initial settle
+delay and the delay after a repair. It reacquires the lane for verification and
+repair, so consecutive Frame requests can mutate while it waits. Before verifying,
+after remote reads and before repair writes, it checks the affected photos' human
+revisions and AI-tag projection. A changed snapshot stays queued and is reconciled
+again from current intent without counting it as a remote failure. Network work
+already in progress still holds the lane; the existing AI-tag worker has its own
+bounded synchronization pass.
 
 Frame actions do not reconcile remote AI tags on previously un-enriched photos.
 Ordinary/custom tags remain untouched. Curate retains its existing AI-tag-sync
