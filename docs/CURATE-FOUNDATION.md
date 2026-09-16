@@ -115,6 +115,9 @@ Curate page. They inherit the server's existing password/session/origin checks.
 
 - `POST /api/review/curate/groups`: open a saved view. Optional `kind` is `all`,
   `stacks`, or `singles`; `search` matches through members without shrinking a stack.
+  Optional `sort` is `oldest` (default) or `newest`, by the earliest capture time
+  in each comparison; undated comparisons stay last. Ordering applies before
+  pagination and does not change membership or photo order within a stack.
   Supply `replacesViewId` to relinquish this caller's previous view and comparison
   when opening the new view. Other tabs' scopes and snapshot ownership stay intact.
 - `GET /api/review/curate/groups` with `viewId`, `offset`, and `limit` pages up to 50 group

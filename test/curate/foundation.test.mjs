@@ -525,6 +525,68 @@ test('migration from schema 12 queues only review rows; corrections/evidence/vie
       migrated.close();
     }
   }));
+test('date ordering spans pages, preserves whole stacks and snapshots, and places unknown dates last', async () =>
+  fixture(async ({ repo, service, add, path }) => {
+    // Duplicate members span the other photos' dates. The stack still sorts by
+    // its earliest member, not its newest one or the order of ingestion.
+    add('stack-later', 40000, { checksum: 'same', originalPath: '/photos/find-this.jpg' });
+    for (let i = 55; i >= 1; i--) add(`single-${i}`, i * 600);
+    add('stack-first', 0, { checksum: 'same' });
+    add('undated', 0, { fileCreatedAt: null });
+    const full = view => [...view.groups, ...(view.nextOffset === null ? [] :
+      service.page(view.viewId, view.nextOffset).groups)];
+    const asc = await service.openView();
+    const ascending = full(asc);
+    assert.equal(asc.sort, 'oldest');
+    assert.equal(asc.groups.length, 50);
+    assert.equal(asc.total, 57);
+    assert.equal(ascending[0].memberCount, 2);
+    assert.equal(ascending.at(-1).photos[0].id, 'undated');
+    const desc = await service.openView({ sort: 'newest' });
+    const descending = full(desc);
+    assert.equal(desc.sort, 'newest');
+    assert.deepEqual(descending.map(g => g.id), [
+      ...ascending.slice(0, -1).map(g => g.id).reverse(), ascending.at(-1).id,
+    ]);
+    assert.equal(descending[0].photos[0].id, 'single-55');
+    assert.equal(descending.at(-2).memberCount, 2);
+    const stack = service.comparison(desc.viewId, descending.at(-2).id);
+    assert.deepEqual(stack.ids, ['stack-first', 'stack-later']);
+    assert.equal((await service.openView({ sort: 'newest', kind: 'singles' })).total, 56);
+    const stacks = await service.openView({ sort: 'newest', kind: 'stacks', search: 'find-this' });
+    assert.equal(stacks.total, 1);
+    assert.equal(stacks.groups[0].memberCount, 2);
+    // Date edits and new arrivals affect a refreshed view, never an existing page.
+    add('newest-arrival', 80000);
+    add('single-1', 90000);
+    await service.refresh();
+    assert.equal(service.page(desc.viewId).updatesAvailable, true);
+    assert.deepEqual(full(desc).map(g => g.id), descending.map(g => g.id));
+    const fresh = await service.openView({ sort: 'newest', replacesViewId: stacks.viewId });
+    assert.equal(fresh.groups[0].photos[0].id, 'single-1');
+    assert.equal(fresh.groups[1].photos[0].id, 'newest-arrival');
+    assert.deepEqual(service.comparison(desc.viewId, stack.groupId).ids, stack.ids);
+    await service.close();
+    const reopened = new Repository(path);
+    const restored = new CurateService({ repo: reopened });
+    try {
+      reopened.initSchema();
+      assert.equal(restored.page(desc.viewId).sort, 'newest');
+      assert.deepEqual(restored.page(desc.viewId, 50).groups.map(g => g.id), descending.slice(50).map(g => g.id));
+      assert.deepEqual(full(asc).map(g => g.id), ascending.map(g => g.id));
+    } finally { await restored.close(); reopened.close(); }
+  }));
+
+test('equal capture dates and unknown dates have deterministic order in both directions', async () =>
+  fixture(async ({ service, add }) => {
+    service.config.curateBurstGrouping = false;
+    add('b', 0); add('a', 0); add('z', 0, {fileCreatedAt: null}); add('y', 0, {fileCreatedAt: null});
+    const ids = view => view.groups.map(g => g.photos[0].id);
+    assert.deepEqual(ids(await service.openView({sort: 'oldest'})), ['a', 'b', 'y', 'z']);
+    assert.deepEqual(ids(await service.openView({sort: 'newest'})), ['b', 'a', 'y', 'z']);
+    assert.deepEqual(ids(await service.openView({sort: 'newest'})), ['b', 'a', 'y', 'z']);
+  }));
+
 test('foundation HTTP routes return complete groups and reject malformed or stale actions', async () =>
   fixture(async ({ repo, service, add }) => {
     const { createServer } = await import('node:http');
@@ -548,6 +610,11 @@ test('foundation HTTP routes return complete groups and reject malformed or stal
         body: JSON.stringify(body),
       });
     try {
+      for (const sort of ['score', '', 42, null, [], {}])
+        assert.equal((await post('groups', { sort })).status, 400);
+      assert.equal((await fetch(base + 'groups?sort=score')).status, 400);
+      assert.equal((await (await fetch(base + 'groups?sort=newest')).json()).sort, 'newest');
+      assert.equal((await (await post('groups', {sort: 'newest'})).json()).sort, 'newest');
       const v = await (await fetch(base + 'groups')).json();
       assert.equal(v.groups[0].memberCount, 2);
       assert.equal(v.groups[0].photos.length, 1);
