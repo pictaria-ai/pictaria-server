@@ -23,6 +23,7 @@ ${METADATA_SCHEMA}
 CREATE TABLE IF NOT EXISTS curate_separations (
  id TEXT PRIMARY KEY, active INTEGER NOT NULL, revision INTEGER NOT NULL, created_at INTEGER NOT NULL, undo_until INTEGER NOT NULL
 );
+CREATE INDEX IF NOT EXISTS idx_curate_separation_active_time ON curate_separations(active,created_at DESC,id);
 CREATE TABLE IF NOT EXISTS curate_separation_members (
  separation_id TEXT NOT NULL, asset_id TEXT NOT NULL, partition_no INTEGER NOT NULL,
  PRIMARY KEY(separation_id,asset_id)

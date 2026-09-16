@@ -77,6 +77,8 @@ photos does not veto manual choices. An added member, changed image/evidence,
 newer human choice or manual separation conflicts without partially applying.
 Advice-based actions are unavailable until the production advice lifecycle supplies
 its stricter applicability checks; old per-photo ranks are not accepted as proof.
+The [manual comparison preview](CURATE-PREVIEW.md) now uses this scoped protocol,
+including persisted exact retries, whole-comparison selection and receipt-based Undo.
 
 Undo checks every affected photo's latest human revision and restores only the
 tags touched by its original operation. It preserves intervening AI/custom tags.

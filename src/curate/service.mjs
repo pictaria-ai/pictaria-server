@@ -115,6 +115,7 @@ export class CurateService {
       viewId,
       expiresAt: view.expiresAt,
       total: view.total,
+      immichUrl: this.config.immichPublicUrl || null,
       offset,
       metadata: this.metadata.status(),
       updatesAvailable:
@@ -123,7 +124,8 @@ export class CurateService {
         Boolean(this.repo.db.prepare('SELECT 1 FROM curate_dirty LIMIT 1').get()),
       groups: this.store
         .viewGroups(viewId, offset, limit)
-        .map((g) => ({ id: g.id, memberCount: g.ids.length, route: g.route })),
+        .map((g) => ({ id: g.id, memberCount: g.ids.length, route: g.route,
+          photos: this.store.covers(g.ids.slice(0, 1)) })),
       nextOffset: offset + limit < view.total ? offset + limit : null,
     };
   }
