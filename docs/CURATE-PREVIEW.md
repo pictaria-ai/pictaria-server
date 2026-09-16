@@ -14,6 +14,10 @@ runtime acceptance are complete; it is not a second permanent Curate product.
 The eventual default-page cutover must consolidate these entry points and retire
 legacy grouping, rather than leaving both implementations active indefinitely.
 
+For composition experiments, the separate **Stacking lab** link opens a
+[temporary, read-only testing page](CURATE-STACKING-LAB.md). Unlike decisions
+in this preview, its proposed partitions are never saved.
+
 ## Review flow
 
 - All, Stacks and Singles show pending comparisons. Search can match one member

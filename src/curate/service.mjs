@@ -2,6 +2,7 @@ import { Worker } from 'node:worker_threads';
 import { groupPhotos } from './grouping.mjs';
 import { CurateError } from './contracts.mjs';
 import { CurateMetadataRefresher } from './metadata.mjs';
+import { StackingLab } from './lab.mjs';
 
 export class CurateService {
   constructor({ repo, config = {}, immich = null, metadataOptions = {} }) {
@@ -16,6 +17,7 @@ export class CurateService {
     this.metrics = { maxProjectionSliceMs: 0, rebuildMs: 0 };
     this.abort = new AbortController();
     this.metadata = new CurateMetadataRefresher({ curate: this, ...metadataOptions });
+    this.lab = new StackingLab(this);
   }
   async refresh() {
     if (this.closed) throw new CurateError('Curate is stopping.', 'curate_unavailable', 503);
@@ -262,6 +264,7 @@ export class CurateService {
     clearInterval(this.timer);
     this.closed = true;
     this.abort.abort();
+    await this.lab.close();
     await this.metadata.close();
     if (this.worker) await this.worker.terminate();
     await this.building?.catch(() => {});

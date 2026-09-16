@@ -1,0 +1,87 @@
+// Experimental, deterministic lab rules. These never change production groups.
+export const LAB_PHOTO_LIMIT = 250;
+
+export function decodeHash(value) {
+  if (typeof value !== 'string' || !value.length || value.length > 128 ||
+      !/^[A-Za-z0-9+/]+={0,2}$/.test(value)) return null;
+  try {
+    const bytes = Uint8Array.from(atob(value), (c) => c.charCodeAt(0));
+    return bytes.length >= 3 ? bytes : null;
+  } catch { return null; }
+}
+
+// Same raw-byte normalized L1 heuristic as released Curate. Unknown is not 1.
+export function hashDistance(a, b) {
+  if (!a || !b || a.length !== b.length) return null;
+  let sum = 0;
+  for (let i = 0; i < a.length; i++) sum += Math.abs(a[i] - b[i]);
+  return sum / (a.length * 255);
+}
+
+export function supportedCount(photo) {
+  return [0, 1, 2].includes(photo.peopleCount) && photo.peopleCount === photo.recognizedCount
+    ? photo.peopleCount : null;
+}
+
+export function timeGroups(photos, gapMs) {
+  const sorted = [...photos].sort((a, b) =>
+    (a.time ?? Infinity) - (b.time ?? Infinity) || a.id.localeCompare(b.id));
+  const groups = [];
+  for (const photo of sorted) {
+    const last = groups.at(-1);
+    if (last && photo.time !== null && last.at(-1).time !== null &&
+        photo.time - last.at(-1).time <= gapMs) last.push(photo);
+    else groups.push([photo]);
+  }
+  return groups;
+}
+
+export function partition(photos, { gapMs, spanMs = null, thumbhash = false, threshold = 0.1, people = false }) {
+  if (photos.length > LAB_PHOTO_LIMIT) throw Error(`Experiments support at most ${LAB_PHOTO_LIMIT} photos.`);
+  if (!Number.isFinite(gapMs) || gapMs < 0 || gapMs > 180000 ||
+      (spanMs !== null && (!Number.isFinite(spanMs) || spanMs < 0 || spanMs > 3600000)) ||
+      !Number.isFinite(threshold) || threshold < 0 || threshold > 1) throw Error('Invalid experiment settings.');
+  const sorted = [...photos].sort((a, b) =>
+    (a.time ?? Infinity) - (b.time ?? Infinity) || a.id.localeCompare(b.id));
+  const hashes = new Map(photos.map((p) => [p.id, decodeHash(p.thumbhash)]));
+  const groups = [], byPhoto = new Map(), reasons = new Map();
+  for (const photo of sorted) {
+    let found = null;
+    const blocked = new Set();
+    if (photo.time === null) blocked.add('Capture time unknown');
+    else for (let i = groups.length - 1; i >= 0; i--) {
+      const group = groups[i];
+      if (group.at(-1).time === null || photo.time - group.at(-1).time > gapMs) {
+        blocked.add('Time gap'); continue;
+      }
+      if (spanMs !== null && photo.time - group[0].time > spanMs) {
+        blocked.add('Total span'); continue;
+      }
+      let compatible = true;
+      for (const member of group) {
+        if (people && supportedCount(photo) !== null && supportedCount(member) !== null &&
+            supportedCount(photo) !== supportedCount(member)) {
+          blocked.add('People-count difference'); compatible = false; break;
+        }
+        if (thumbhash) {
+          const distance = hashDistance(hashes.get(photo.id), hashes.get(member.id));
+          if (distance === null || distance > threshold) {
+            blocked.add(distance === null ? 'ThumbHash unavailable or incompatible' : 'ThumbHash difference');
+            compatible = false; break;
+          }
+        }
+      }
+      if (compatible) { found = group; break; }
+    }
+    if (found) {
+      found.push(photo);
+      reasons.set(photo.id, 'Joins this group under the selected rules');
+    } else {
+      found = [photo]; groups.push(found);
+      reasons.set(photo.id, blocked.size ? `New group: ${[...blocked].join(', ').toLowerCase()}` : 'Starts the first group');
+    }
+    byPhoto.set(photo.id, found);
+  }
+  const numbered = new Map(groups.map((g, i) => [g, i + 1]));
+  return { groups, reasons, byPhoto: new Map([...byPhoto].map(([id, g]) => [id, numbered.get(g)])) };
+}

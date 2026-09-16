@@ -7,6 +7,12 @@ All notable changes to Pictaria Server are documented here. This project follows
 
 ### Development
 
+- Added a testing-only **Stacking lab** linked from the Curate preview. Start
+  with time-only groups, then try time/span, ThumbHash and supported people-count
+  rules while keeping every photo visible in labelled proposed groups. Click a
+  photo to highlight its group and inspect distances. Experiments use local
+  cached evidence and do not save settings, make curation decisions or call AI.
+  See [lab rules and limits](docs/CURATE-STACKING-LAB.md).
 - The Curate preview now offers **Date taken → Oldest first / Newest first**,
   remembered per browser. Sorting applies across the full result set before
   pagination, using each stack's earliest photo and placing unknown dates last.

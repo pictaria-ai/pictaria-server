@@ -1,0 +1,72 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Pictaria — Stacking lab</title>
+    <link rel="icon" type="image/png" sizes="32x32" href="/brand/favicon-32.png" />
+    <script src="/theme.js"></script>
+    <script src="/auth-gate.js" defer></script>
+    <script src="/nav.js" defer></script>
+    <link rel="stylesheet" href="/pictaria.css" />
+    <link rel="stylesheet" href="/curate/comparisons.css" />
+    <link rel="stylesheet" href="/curate/stacking-lab.css" />
+  </head>
+  <body>
+    <header class="p-topbar">
+      <a class="p-brand" href="/"><img class="p-brand-word" src="/brand/wordmark.png" alt="Pictaria" /></a>
+      <span class="p-supporter-slot" aria-live="polite"></span>
+      <nav class="p-nav"><a href="/insights.html">Insights</a><a href="/enrich.html">Enrich</a><a href="/curate.html" class="active">Curate</a><a href="/albums.html">Albums</a></nav>
+      <div class="p-grow"></div><a class="p-gear" href="/settings.html" aria-label="Settings">⚙</a>
+    </header>
+    <main>
+      <div class="heading">
+        <div><h1>Stacking lab <span class="p-chip">Testing only</span></h1><p class="p-muted">Explore what makes a good stack.</p></div>
+        <a class="p-btn" href="/curate-preview.html">Back to Curate preview</a>
+      </div>
+      <p class="preview-note">Experiments are temporary. They don’t change your stacks, decisions or settings, and don’t make AI calls.</p>
+      <h2>Start with time</h2>
+      <p class="p-muted">Pending photos form a group when each photo is within the chosen gap of the previous one. There is no total span limit here. Open a group to try stricter rules.</p>
+      <form id="baseline" class="toolbar">
+        <label class="sort-label">Maximum gap <input id="baseline-gap" class="p-input" type="number" min="1" max="180" step="1" value="15" required /> seconds</label>
+        <label class="sort-label">Date taken <select id="sort" class="p-input"><option value="oldest">Oldest first</option><option value="newest">Newest first</option></select></label>
+        <button id="build" class="p-btn" type="submit">Build time groups</button>
+      </form>
+      <p id="count" class="p-muted" aria-live="polite">Loading pending photos…</p>
+      <p id="snapshot-note" class="p-muted lab-small"></p>
+      <p id="error" role="alert" hidden></p>
+      <section id="groups" class="group-grid" aria-label="Time groups"></section>
+      <div class="load-row"><button id="more" class="p-btn" hidden>Load more</button></div>
+    </main>
+    <dialog id="experiment" aria-labelledby="experiment-title">
+      <div class="dialog-frame">
+        <header class="dialog-head"><div><h2 id="experiment-title">Explore time group</h2><p id="experiment-subtitle" class="p-muted"></p></div><button class="p-btn" data-close="experiment">Close</button></header>
+        <div class="dialog-body">
+          <p id="experiment-error" role="alert" hidden></p>
+          <div id="experiment-content" hidden>
+            <div class="lab-settings">
+              <label>Maximum gap <span><input id="gap" type="number" min="0" max="180" step="1" /> seconds</span></label>
+              <div class="lab-setting"><label><input id="use-span" type="checkbox" /> Limit total group span</label><span><input id="span" aria-label="Maximum total span in seconds" type="number" min="1" max="3600" step="1" value="180" disabled /> seconds</span></div>
+              <div class="lab-setting"><label><input id="use-hash" type="checkbox" /> Require similar ThumbHash</label><span class="threshold-control"><input id="threshold" aria-label="Maximum ThumbHash distance" type="range" min="0" max="1" step="0.005" value="0.1" disabled /><output id="threshold-value" for="threshold">0.100</output></span><small>Lower is stricter. Every pair must pass.</small></div>
+              <label><span><input id="use-people" type="checkbox" /> Separate different people counts</span><small>Uses supported Enrich counts corroborated by recognized face counts. Unknown or conflicting counts don’t split a group.</small></label>
+            </div>
+            <div class="compare-tools"><button id="reset" class="p-btn">Reset to time only</button><button id="clear-focus" class="p-btn" disabled>Show all groups equally</button><button id="copy" class="p-btn">Copy experiment summary</button></div>
+            <p id="result" class="lab-result" aria-live="polite"></p>
+            <p id="focus-help" class="p-muted">Click a photo to highlight its proposed group. Dimmed photos stay in the experiment.</p>
+            <p id="evidence-note" class="p-muted lab-small"></p>
+            <details class="lab-method"><summary>How this experiment works</summary><p>Photos are processed oldest first and join the most recently created compatible group. The gap is measured from that group’s last photo; the span from its first. ThumbHash and people-count checks apply to every member. Changing a threshold can rearrange the partitions rather than just remove photos.</p><p>This is an experimental grouping rule, not an exact replay of either Curate version. ThumbHash is a rough visual descriptor, not an exact duplicate checksum or confidence score. Missing or incompatible hashes stay separate when the hash rule is on. Saved stack corrections and duplicate IDs are ignored here. These rules only split the selected time group; widen the starting gap on the main page to explore other neighbors.</p><p>Evidence is a snapshot of local cached data. Building this page does not refresh metadata from Immich. No photos are deleted or marked reviewed.</p></details>
+            <section id="lab-photos" class="photo-grid compact" aria-label="Experimental groups"></section>
+          </div>
+        </div>
+      </div>
+    </dialog>
+    <dialog id="lab-viewer" aria-labelledby="viewer-title">
+      <div class="dialog-frame">
+        <header class="dialog-head"><h2 id="viewer-title"></h2><a id="immich" class="p-btn" target="_blank" rel="noopener" hidden>Immich ↗</a><button class="p-btn" data-close="lab-viewer">Close</button></header>
+        <div class="dialog-body photo-detail"><img id="viewer-image" alt="" /></div>
+        <footer class="dialog-foot"><button id="previous" class="p-btn">← Previous</button><span id="viewer-position"></span><button id="next" class="p-btn">Next →</button></footer>
+      </div>
+    </dialog>
+    <script type="module" src="/curate/stacking-lab.js"></script>
+  </body>
+</html>

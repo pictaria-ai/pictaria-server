@@ -10,7 +10,13 @@ export function createCurateRoutes({ curate, review = null }) {
     try {
       const path = url.pathname.slice('/api/review/curate/'.length);
       let result;
-      if (request.method === 'GET' && path === 'groups') {
+      if (request.method === 'POST' && path === 'lab/views') {
+        result = await curate.lab.open(await readObject(request, { maxBytes: 4096 }));
+      } else if (request.method === 'GET' && path === 'lab/groups') {
+        result = curate.lab.page(url.searchParams.get('viewId'), Number(url.searchParams.get('offset') ?? 0));
+      } else if (request.method === 'GET' && path === 'lab/comparison') {
+        result = curate.lab.comparison(url.searchParams.get('viewId'), Number(url.searchParams.get('groupId') ?? -1));
+      } else if (request.method === 'GET' && path === 'groups') {
         if (url.searchParams.has('replacesViewId'))
           throw new CurateError('Use POST to replace a Curate view.', 'invalid_curate_query', 400);
         result = url.searchParams.has('viewId')
