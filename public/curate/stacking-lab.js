@@ -1,6 +1,6 @@
 import { request } from './client.js';
 import { node, thumbnail } from './photos.js';
-import { partition, decodeHash, hashDistance, supportedCount } from './stacking-model.js';
+import { partition, decodeHash, hashDistance, peopleCategory, peopleLabel } from './stacking-model.js';
 
 const el = (id) => document.getElementById(id);
 let view, loaded = 0, current, result, focused = null, viewerIndex = 0, requestId = 0;
@@ -66,14 +66,15 @@ async function open(group) {
       button.onclick = () => { focused = focused === photo.id ? null : photo.id; renderResult(); };
       const info = node('div', undefined, 'lab-info');
       const file = node('strong', photo.filename, 'filename'); file.title = photo.filename;
-      const count = supportedCount(photo);
-      const facts = node('p', `${date(photo.time)} · People: ${count ?? 'unknown / unsupported'}`, 'p-muted');
+      const facts = node('p', date(photo.time), 'p-muted');
+      const people = node('p', `Enrich people: ${peopleLabel(photo)}`, 'lab-people');
+      const recognition = node('p', `Immich recognized: ${photo.recognizedCount ?? 'unknown'} (may be incomplete)`, 'p-muted');
       const reason = node('p', '', 'lab-reason'), distance = node('p', '', 'lab-distance p-muted');
       const larger = node('button', 'View larger', 'p-btn quiet');
       larger.onclick = () => showPhoto(value.photos.indexOf(photo));
       const failed = node('p', 'Preview unavailable; try Immich.', 'p-muted'); failed.hidden = true;
       image.onerror = () => { failed.hidden = false; };
-      info.append(file, facts, reason, distance, larger, failed); card.append(button, info);
+      info.append(file, facts, people, recognition, reason, distance, larger, failed); card.append(button, info);
       el('lab-photos').append(card); cards.set(photo.id, { card, button, badge, reason, distance });
     }
     reset();
@@ -112,8 +113,8 @@ function renderResult() {
   el('focus-help').textContent = group ? `Group ${group} highlighted. Click another photo to compare; dimmed photos are still included.` : 'Click a photo to highlight its proposed group. Dimmed photos stay in the experiment.';
   el('clear-focus').disabled = !focused;
   const unknownHash = current.photos.filter((p) => !decodeHash(p.thumbhash)).length;
-  const unknownPeople = current.photos.filter((p) => supportedCount(p) === null).length;
-  el('evidence-note').textContent = `Missing ThumbHash: ${unknownHash} · Unknown or unsupported people counts: ${unknownPeople}. Photo links open Immich from the larger viewer.`;
+  const unknownPeople = current.photos.filter((p) => peopleCategory(p) === null).length;
+  el('evidence-note').textContent = `Missing ThumbHash: ${unknownHash} · Unknown Enrich people categories: ${unknownPeople}. Photo links open Immich from the larger viewer.`;
   for (const photo of current.photos) {
     const item = cards.get(photo.id), number = result.byPhoto.get(photo.id);
     item.card.style.setProperty('--group-color', colors[(number - 1) % colors.length]);
@@ -158,7 +159,7 @@ el('reset').onclick = reset;
 el('clear-focus').onclick = () => { focused = null; renderResult(); };
 el('copy').onclick = async () => {
   const s = settings();
-  const text = `Stacking lab (experimental)\nStarting gap: ${current.gapSeconds} s\nGap: ${s.gapMs / 1000} s; span: ${s.spanMs === null ? 'unlimited' : s.spanMs / 1000 + ' s'}\nThumbHash: ${s.thumbhash ? s.threshold.toFixed(3) + ' (every pair)' : 'off'}; people counts: ${s.people ? 'on' : 'off'}\n${el('result').textContent}\n${el('evidence-note').textContent.split('. Photo links')[0]}`;
+  const text = `Stacking lab (experimental)\nStarting gap: ${current.gapSeconds} s\nGap: ${s.gapMs / 1000} s; span: ${s.spanMs === null ? 'unlimited' : s.spanMs / 1000 + ' s'}\nThumbHash: ${s.thumbhash ? s.threshold.toFixed(3) + ' (every pair)' : 'off'}; Enrich people categories (none/one/couple/group): ${s.people ? 'on' : 'off'}\n${el('result').textContent}\n${el('evidence-note').textContent.split('. Photo links')[0]}`;
   try {
     if (navigator.clipboard?.writeText) await navigator.clipboard.writeText(text);
     else {

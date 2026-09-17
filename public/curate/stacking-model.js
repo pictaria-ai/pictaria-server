@@ -18,9 +18,16 @@ export function hashDistance(a, b) {
   return sum / (a.length * 255);
 }
 
-export function supportedCount(photo) {
-  return [0, 1, 2].includes(photo.peopleCount) && photo.peopleCount === photo.recognizedCount
-    ? photo.peopleCount : null;
+export function peopleCategory(photo) {
+  return ['none', 'one', 'couple', 'group'].includes(photo.peopleCategory) ? photo.peopleCategory : null;
+}
+
+export function peopleLabel(photo) {
+  const category = peopleCategory(photo);
+  if (category) return { none: 'None', one: 'One', couple: 'Couple', group: 'Group' }[category];
+  if (photo.peopleStatus === 'unsupported') return 'Unknown (saved Enrich information unavailable)';
+  if (photo.peopleStatus === 'conflicting') return 'Unknown (conflicting Enrich fields)';
+  return 'Unknown';
 }
 
 export function timeGroups(photos, gapMs) {
@@ -59,9 +66,9 @@ export function partition(photos, { gapMs, spanMs = null, thumbhash = false, thr
       }
       let compatible = true;
       for (const member of group) {
-        if (people && supportedCount(photo) !== null && supportedCount(member) !== null &&
-            supportedCount(photo) !== supportedCount(member)) {
-          blocked.add('People-count difference'); compatible = false; break;
+        if (people && peopleCategory(photo) !== null && peopleCategory(member) !== null &&
+            peopleCategory(photo) !== peopleCategory(member)) {
+          blocked.add('Enrich people-category difference'); compatible = false; break;
         }
         if (thumbhash) {
           const distance = hashDistance(hashes.get(photo.id), hashes.get(member.id));

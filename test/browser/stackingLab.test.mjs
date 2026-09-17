@@ -11,6 +11,17 @@ test('stacking lab shows complete partitions, focused dimming, evidence, reset a
   fixture.repo.updateAssetVisuals(fixture.id(1), { thumbhash: Buffer.alloc(21, 0).toString('base64') });
   fixture.repo.updateAssetVisuals(fixture.id(2), { thumbhash: Buffer.alloc(21, 255).toString('base64') });
   fixture.repo.updateAssetVisuals(fixture.id(3), { thumbhash: Buffer.alloc(21, 0).toString('base64') });
+  fixture.repo.saveRunConfiguration({ id: 'c'.repeat(64), inferenceId: 'd'.repeat(64), snapshot: {
+    formatVersion: 1, inference: { contractVersion: 1, jsonSchema: { properties: {
+      has_people: { type: 'boolean' }, people_count: { type: 'string', enum: ['none', 'one', 'couple', 'group', 'unknown'] },
+    } } },
+  } });
+  for (const [i, category] of ['one', 'couple', 'group'].entries()) {
+    fixture.repo.curate.observe({ id: fixture.id(i + 1), people: [] });
+    fixture.repo.recordProcessingRun({ assetId: fixture.id(i + 1), provider: 'test', model: 'test',
+      promptVersion: 'v1', taxonomyVersion: 'v1', status: 'succeeded', configurationId: 'c'.repeat(64),
+      normalizedOutput: { has_people: true, people_count: category } });
+  }
   const before = fixture.repo.db.prepare('SELECT * FROM manual_overrides').all();
   const denied = await fetch(`${fixture.base}/api/review/curate/lab/views`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: '{}' });
   assert.equal(denied.status, 401);
@@ -39,6 +50,12 @@ test('stacking lab shows complete partitions, focused dimming, evidence, reset a
   await click('#reset');
   assert.match(await page.evaluate('document.querySelector("#result").textContent'), /1 group/);
   assert.equal(await page.evaluate('document.querySelectorAll("#lab-photos .dimmed").length'), 0);
+  assert.deepEqual(await page.evaluate('[...document.querySelectorAll(".lab-people")].map(n=>n.textContent)'),
+    ['Enrich people: One', 'Enrich people: Couple', 'Enrich people: Group']);
+  await click('#use-people');
+  assert.match(await page.evaluate('document.querySelector("#result").textContent'), /3 groups \(1 \+ 1 \+ 1\)/);
+  await click('#reset');
+  assert.match(await page.evaluate('document.querySelector("#result").textContent'), /1 group/);
   // Invalid inputs leave the last result explicitly labelled and cannot be copied.
   await page.evaluate('document.querySelector("#gap").value="99";document.querySelector("#gap").dispatchEvent(new Event("input"))');
   assert.equal(await page.evaluate('document.querySelector("#copy").disabled'), true);

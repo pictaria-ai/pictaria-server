@@ -13,7 +13,7 @@ Curate algorithm. The normal password gate protects its APIs.
    pending photos from all Curate categories; already-decided photos are absent.
    Undated photos remain singles; known unavailable photos are counted separately.
 2. Open a group. Start with time only, then try a shorter gap, an optional total
-   span, ThumbHash, and supported people-count differences. Settings apply only
+   span, ThumbHash, and Enrich people-category differences. Settings apply only
    to that complete time group. Widen the starting gap on the main page to test
    neighbors outside it. Experiment settings reset when another group opens.
 3. Every photo stays visible in capture order with a numbered proposed group.
@@ -28,7 +28,7 @@ Curate algorithm. The normal password gate protects its APIs.
 Photos are considered oldest first with deterministic ID ties. Each joins the
 most recently created group that satisfies the selected rules; otherwise it
 starts a new group. The gap is measured from that group's last photo, the span
-from its first, and visual/count compatibility against **every member**. No
+from its first, and visual/category compatibility against **every member**. No
 pair-comparison sampling is performed within an admitted experiment. This is a
 greedy partition, not an optimal clustering guarantee. Threshold changes can
 rearrange memberships, not simply remove members from a fixed group.
@@ -41,12 +41,20 @@ With the rule on, absent, malformed or different-length descriptors cannot pass
 the pair test and stay separate. The lab does not reproduce released Curate's
 neighbor chaining, same-day links, ten-photo cap or AI subject splits.
 
-The people rule uses the preview's conservative count veto: both photos must
-have an exact supported producing Enrich count (0/1/2), each corroborated by the
-cached recognized-face count. Different supported counts then block a join.
-Missing, conflicting or unsupported facts remain unknown. Recognized identities
-are not compared, recognition completeness is not assumed, and scene tags do
-not affect this experiment.
+The people rule compares supported saved Enrich categories: **None, One, Couple
+and Group**. Different known categories block a join; `group` is a useful category,
+not an invented exact headcount. Two Group photos are still compatible under this
+rule even if one contains more people than the other. The time and visual rules
+continue to apply.
+
+The lab reads the latest successful Enrich result with its saved producing schema;
+it does not guess from tag text or today's profile. Missing/unsupported provenance,
+unknown values, or conflicting `has_people` / `people_count` fields remain unknown
+and do not force a split. The photo card explains unavailable/conflicting evidence.
+Immich's recognized-person count is shown separately and is not required to match:
+recognition may miss people. Recognized identities and scene tags are not compared.
+This is deliberately broader than the Curate Preview's current corroborated
+exact-count rule. Production/Preview grouping is unchanged by this lab experiment.
 
 ## Isolation, snapshots and limits
 

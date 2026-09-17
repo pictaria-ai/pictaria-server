@@ -6,10 +6,29 @@ import { join } from 'node:path';
 import { partition, timeGroups, decodeHash, hashDistance } from '../../public/curate/stacking-model.js';
 import { Repository } from '../../src/enrich/repository.mjs';
 import { CurateService } from '../../src/curate/service.mjs';
+import { labPeopleEvidence } from '../../src/curate/lab-evidence.mjs';
 
 const hash = (byte) => Buffer.alloc(21, byte).toString('base64');
 const photo = (id, time, byte = 0, extra = {}) => ({ id, time, thumbhash: hash(byte), ...extra });
 const ids = (groups) => groups.map((g) => g.map((p) => p.id));
+const schema = { properties: {
+  has_people: { type: 'boolean' },
+  people_count: { type: 'string', enum: ['none', 'one', 'couple', 'group', 'unknown'] },
+} };
+
+test('lab accepts Group as a producing category, while unsupported and conflicting evidence stays unknown', () => {
+  for (const category of ['none', 'one', 'couple', 'group']) {
+    assert.deepEqual(labPeopleEvidence({ people_count: category, has_people: category !== 'none' }, schema, 'saved'),
+      { peopleCategory: category, peopleStatus: 'known' });
+  }
+  const group = { people_count: 'group', has_people: true };
+  assert.equal(labPeopleEvidence(group, null, 'saved').peopleStatus, 'unsupported');
+  assert.equal(labPeopleEvidence(group, schema, null).peopleCategory, null);
+  assert.equal(labPeopleEvidence({ ...group, has_people: false }, schema, 'saved').peopleStatus, 'conflicting');
+  assert.equal(labPeopleEvidence({ ...group, has_people: 'true' }, schema, 'saved').peopleCategory, null);
+  assert.equal(labPeopleEvidence({ ...group, people_count: 'unknown' }, schema, 'saved').peopleStatus, 'unknown');
+  assert.equal(labPeopleEvidence({ ...group, people_count: 3 }, schema, 'saved').peopleCategory, null);
+});
 
 test('time baseline is a complete inclusive chain, with undated singles last', () => {
   const rows = Array.from({ length: 30 }, (_, i) => photo(`p${i}`, i * 15000));
@@ -37,12 +56,16 @@ test('unknown, malformed and different-length hashes are unassessed, not evidenc
   assert.equal(partition([a, b], { gapMs: 15000 }).groups.length, 1);
 });
 
-test('count veto requires corroborated supported counts; unknown and contradictory evidence do not invent a count', () => {
-  const a = photo('a', 0, 0, { peopleCount: 1, recognizedCount: 1 });
-  const b = photo('b', 1000, 0, { peopleCount: 2, recognizedCount: 2 });
-  assert.equal(partition([a, b], { gapMs: 15000, people: true }).groups.length, 2);
-  assert.equal(partition([a, { ...b, recognizedCount: 1 }], { gapMs: 15000, people: true }).groups.length, 1);
-  assert.equal(partition([a, { ...b, peopleCount: null }], { gapMs: 15000, people: true }).groups.length, 1);
+test('categories separate None/One/Couple/Group without requiring face recognition; unknown cannot bridge conflicts', () => {
+  const rows = ['none', 'one', 'couple', 'group'].map((peopleCategory, i) =>
+    photo(String(i), i * 1000, 0, { peopleCategory, recognizedCount: 0 }));
+  assert.equal(partition(rows, { gapMs: 15000, people: true }).groups.length, 4);
+  assert.equal(partition(rows, { gapMs: 15000, people: false }).groups.length, 1);
+  assert.equal(partition([rows[3], { ...rows[3], id: 'another-group', recognizedCount: 7 }],
+    { gapMs: 15000, people: true }).groups.length, 1);
+  const unknown = photo('unknown', 1500);
+  assert.deepEqual(ids(partition([rows[1], unknown, rows[2]], { gapMs: 15000, people: true }).groups),
+    [['1', 'unknown'], ['2']]);
 });
 
 test('span limits prevent long chains, partitions remain exhaustive and input is immutable', () => {
@@ -70,6 +93,14 @@ test('lab snapshots are stable, bounded, isolated from decisions, and based only
   };
   try {
     add('a', 0); add('b', 1000); add('kept', 2000);
+    repo.saveRunConfiguration({ id: 'a'.repeat(64), inferenceId: 'b'.repeat(64),
+      snapshot: { formatVersion: 1, inference: { contractVersion: 1, jsonSchema: schema } } });
+    for (const [assetId, category] of [['a', 'one'], ['b', 'group']]) {
+      repo.curate.observe({ id: assetId, people: [] });
+      repo.recordProcessingRun({ assetId, provider: 'test', model: 'test', promptVersion: 'v1',
+        taxonomyVersion: 'v1', status: 'succeeded', configurationId: 'a'.repeat(64),
+        normalizedOutput: { has_people: true, people_count: category } });
+    }
     repo.setManualFrameTags({ assetIds: ['kept'], addTags: ['frame/eligible'], removeTags: [], action: 'approve' });
     for (let i = 0; i < 60; i++) add(`single-${i}`, 600000 * (i + 1));
     const tables = ['manual_overrides', 'asset_tags', 'review_list', 'decision_operations', 'curate_separations', 'curate_leases'];
@@ -83,6 +114,9 @@ test('lab snapshots are stable, bounded, isolated from decisions, and based only
     const comparison = service.lab.comparison(first.viewId, 0);
     assert.deepEqual(comparison.photos.map((p) => p.id), ['a', 'b']);
     assert.equal(comparison.photos[0].thumbhash, hash(0));
+    assert.deepEqual(comparison.photos.map(p => [p.peopleCategory, p.recognizedCount]), [['one', 0], ['group', 0]]);
+    assert.equal(partition(comparison.photos, { gapMs: 15000, people: true }).groups.length, 2);
+    assert.equal(repo.curate.photo('b').peopleCount, null, 'production exact-count projection is unchanged');
     assert.equal(service.timer, undefined); // opening the lab does not activate metadata refresh
     assert.throws(() => service.comparison(first.viewId, '0'), /expired/i);
     add('new', 500);

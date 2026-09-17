@@ -8,10 +8,12 @@ All notable changes to Pictaria Server are documented here. This project follows
 ### Development
 
 - Added a testing-only **Stacking lab** linked from the Curate preview. Start
-  with time-only groups, then try time/span, ThumbHash and supported people-count
+  with time-only groups, then try time/span, ThumbHash and Enrich people-category
   rules while keeping every photo visible in labelled proposed groups. Click a
   photo to highlight its group and inspect distances. Experiments use local
   cached evidence and do not save settings, make curation decisions or call AI.
+  The people experiment separates None, One, Couple and Group without requiring
+  matching Immich recognition. Cards display those two evidence sources separately.
   See [lab rules and limits](docs/CURATE-STACKING-LAB.md).
 - The Curate preview now offers **Date taken → Oldest first / Newest first**,
   remembered per browser. Sorting applies across the full result set before
