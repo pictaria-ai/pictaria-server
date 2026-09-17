@@ -43,7 +43,7 @@ export function timeGroups(photos, gapMs) {
   return groups;
 }
 
-export function partition(photos, { gapMs, spanMs = null, thumbhash = false, threshold = 0.1, people = false }) {
+export function partition(photos, { gapMs, spanMs = null, thumbhash = false, threshold = 0.1, people = false, identities = false }) {
   if (photos.length > LAB_PHOTO_LIMIT) throw Error(`Experiments support at most ${LAB_PHOTO_LIMIT} photos.`);
   if (!Number.isFinite(gapMs) || gapMs < 0 || gapMs > 180000 ||
       (spanMs !== null && (!Number.isFinite(spanMs) || spanMs < 0 || spanMs > 3600000)) ||
@@ -51,6 +51,7 @@ export function partition(photos, { gapMs, spanMs = null, thumbhash = false, thr
   const sorted = [...photos].sort((a, b) =>
     (a.time ?? Infinity) - (b.time ?? Infinity) || a.id.localeCompare(b.id));
   const hashes = new Map(photos.map((p) => [p.id, decodeHash(p.thumbhash)]));
+  const recognized = new Map(photos.map((p) => [p.id, new Set(p.recognizedIds ?? [])]));
   const groups = [], byPhoto = new Map(), reasons = new Map();
   for (const photo of sorted) {
     let found = null;
@@ -66,6 +67,12 @@ export function partition(photos, { gapMs, spanMs = null, thumbhash = false, thr
       }
       let compatible = true;
       for (const member of group) {
+        // Positive, disjoint observations only. An overlap may be a partial
+        // recognition list; missing observations do not force a separation.
+        const a = recognized.get(photo.id), b = recognized.get(member.id);
+        if (identities && a.size && b.size && ![...a].some((id) => b.has(id))) {
+          blocked.add('Different recognized people'); compatible = false; break;
+        }
         if (people && peopleCategory(photo) !== null && peopleCategory(member) !== null &&
             peopleCategory(photo) !== peopleCategory(member)) {
           blocked.add('Enrich people-category difference'); compatible = false; break;

@@ -13,7 +13,7 @@ Curate algorithm. The normal password gate protects its APIs.
    pending photos from all Curate categories; already-decided photos are absent.
    Undated photos remain singles; known unavailable photos are counted separately.
 2. Open a group. Start with time only, then try a shorter gap, an optional total
-   span, ThumbHash, and Enrich people-category differences. Settings apply only
+   span, ThumbHash, Enrich people categories and recognized-person identities. Settings apply only
    to that complete time group. Widen the starting gap on the main page to test
    neighbors outside it. Experiment settings reset when another group opens.
 3. Every photo stays visible in capture order with a numbered proposed group.
@@ -28,7 +28,7 @@ Curate algorithm. The normal password gate protects its APIs.
 Photos are considered oldest first with deterministic ID ties. Each joins the
 most recently created group that satisfies the selected rules; otherwise it
 starts a new group. The gap is measured from that group's last photo, the span
-from its first, and visual/category compatibility against **every member**. No
+from its first, and visual/category/identity compatibility against **every member**. No
 pair-comparison sampling is performed within an admitted experiment. This is a
 greedy partition, not an optimal clustering guarantee. Threshold changes can
 rearrange memberships, not simply remove members from a fixed group.
@@ -51,10 +51,31 @@ The lab reads the latest successful Enrich result with its saved producing schem
 it does not guess from tag text or today's profile. Missing/unsupported provenance,
 unknown values, or conflicting `has_people` / `people_count` fields remain unknown
 and do not force a split. The photo card explains unavailable/conflicting evidence.
-Immich's recognized-person count is shown separately and is not required to match:
-recognition may miss people. Recognized identities and scene tags are not compared.
+Immich recognition is shown separately and is not required to match:
+recognition may miss people. Scene tags are not compared.
 This is deliberately broader than the Curate Preview's current corroborated
 exact-count rule. Production/Preview grouping is unchanged by this lab experiment.
+
+**Separate different recognized people** is an independent, initially-off rule.
+It compares cached Immich person IDs without needing Enrich categories. Two
+nonempty identity lists with **no identities in common** block a join. Missing,
+empty, omitted or malformed lists do not force a split; overlapping lists remain
+compatible because one could be incomplete. Matching identities never override
+the other enabled rules. All-pairs checking prevents an unknown or overlapping
+photo from bridging two photos with disjoint identities.
+
+For example, solo photos recognized as `{A}` and `{B}` separate under this rule.
+A couple photo `{A,B}` overlaps both and is not separated from either by identity
+alone; enabling Enrich people categories also separates it from the One photos.
+This is an experimental signal, not certainty: if Immich detects only A in one
+couple photo and only B in another, even this rule can split similar photos.
+
+Cards use **Person 1, Person 2, …** consistently within the open experiment so
+identity overlaps are visible. These labels are local to that experiment, not
+Immich names or stable labels across groups. Identity lists are bounded to the
+existing cached-evidence limits; no person-name or metadata lookup is added.
+Copied summaries include the switch and evidence coverage, but no identity IDs
+or labels. Rebuild time groups to pick up changed cached recognition.
 
 ## Isolation, snapshots and limits
 

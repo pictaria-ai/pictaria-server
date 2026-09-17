@@ -2,7 +2,7 @@ import { parentPort, workerData } from 'node:worker_threads';
 import { DatabaseSync } from 'node:sqlite';
 import { timeGroups } from '../../public/curate/stacking-model.js';
 import { CurateRepository } from './repository.mjs';
-import { labPeopleEvidence } from './lab-evidence.mjs';
+import { labPeopleEvidence, labRecognizedIds } from './lab-evidence.mjs';
 
 // Only cached evidence crosses this boundary; no credentials or provider calls.
 const db = new DatabaseSync(workerData.path, { readOnly: true });
@@ -11,6 +11,8 @@ try {
   const store = new CurateRepository({ db });
   const rows = db.prepare(`SELECT p.asset_id id,p.captured_ms time,
     p.recognized_count recognizedCount,p.availability,pr.configuration_id,
+    CASE WHEN length(json_extract(p.evidence_json,'$.recognition'))<=4096
+      THEN json_extract(p.evidence_json,'$.recognition') ELSE NULL END recognition,
     json_extract(pr.normalized_output_json,'$.people_count') people_count,
     json_extract(pr.normalized_output_json,'$.has_people') has_people,
     json_type(pr.normalized_output_json,'$.has_people') people_type,
@@ -24,9 +26,10 @@ try {
   if (rows.length > 50000) throw Error('The stacking lab supports up to 50,000 pending photos. No partial view was created.');
   const unavailable = rows.filter((p) => p.availability === 'unavailable').length;
   const photos = rows.filter((p) => p.availability !== 'unavailable').map(({
-    availability, configuration_id, has_people, people_count, people_type, ...p
+    availability, configuration_id, has_people, people_count, people_type, recognition, ...p
   }) => ({
     ...p, filename: p.filename?.split('/').pop() || p.id,
+    recognizedIds: labRecognizedIds(recognition),
     ...labPeopleEvidence({
       has_people: ['true', 'false'].includes(people_type) ? Boolean(has_people) : null,
       people_count,

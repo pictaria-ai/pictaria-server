@@ -14,6 +14,9 @@ All notable changes to Pictaria Server are documented here. This project follows
   cached evidence and do not save settings, make curation decisions or call AI.
   The people experiment separates None, One, Couple and Group without requiring
   matching Immich recognition. Cards display those two evidence sources separately.
+  A separate recognized-people switch splits photos with nonempty, disjoint Immich
+  identity lists. Missing or overlapping lists do not force a split; Person 1 / 2
+  labels help explain the evidence within each experiment.
   See [lab rules and limits](docs/CURATE-STACKING-LAB.md).
 - The Curate preview now offers **Date taken → Oldest first / Newest first**,
   remembered per browser. Sorting applies across the full result set before

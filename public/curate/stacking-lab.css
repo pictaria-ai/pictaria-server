@@ -1,6 +1,6 @@
 #baseline-gap { width: 80px; }
 .lab-small { font-size: 12px; }
-.lab-settings { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; margin-top: 18px; }
+.lab-settings { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 12px; margin-top: 18px; }
 .lab-settings > label, .lab-setting { display: flex; flex-direction: column; gap: 12px; padding: 14px; border: 1px solid var(--p-line); border-radius: 8px; background: var(--p-panel-2); font-size: 13px; }
 .lab-settings small { color: var(--p-muted); line-height: 1.5; }
 .lab-settings input[type=number] { width: 75px; padding: 7px; border: 1px solid var(--p-line); border-radius: 5px; color: var(--p-ink); background: var(--p-panel); }

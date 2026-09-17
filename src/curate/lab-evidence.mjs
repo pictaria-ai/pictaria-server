@@ -1,4 +1,17 @@
-import { producingPeopleFact } from './evidence.mjs';
+import { producingPeopleFact, MAX_EVIDENCE_BYTES, MAX_PEOPLE } from './evidence.mjs';
+
+// Keep missing, omitted or malformed observations unknown. An empty list is
+// usable display evidence, but cannot establish that nobody is in the photo.
+export function labRecognizedIds(serialized) {
+  if (typeof serialized !== 'string' || serialized.length > MAX_EVIDENCE_BYTES) return null;
+  try {
+    const recognition = JSON.parse(serialized);
+    if (recognition?.omitted !== false || !Array.isArray(recognition.ids) ||
+        recognition.ids.length > MAX_PEOPLE || !recognition.ids.every((id) =>
+          typeof id === 'string' && id.length > 0 && id.length <= 128)) return null;
+    return [...new Set(recognition.ids)].sort();
+  } catch { return null; }
+}
 
 // Lab-only categorical experiment. Keep the production exact-count adapter
 // unchanged, and use the saved producing contract rather than guessing from tags.

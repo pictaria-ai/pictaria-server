@@ -57,6 +57,10 @@ async function open(group) {
     el('experiment-subtitle').textContent = `${date(value.photos[0].time)} · ${value.photos.length} photos · Testing only`;
     el('experiment-content').hidden = false;
     el('lab-photos').replaceChildren();
+    const personLabels = new Map();
+    for (const photo of value.photos) for (const id of photo.recognizedIds ?? []) {
+      if (!personLabels.has(id)) personLabels.set(id, `Person ${personLabels.size + 1}`);
+    }
     for (const photo of value.photos) {
       const card = node('article', undefined, 'photo-card'); card.dataset.photoId = photo.id;
       const button = node('button', undefined, 'photo-image');
@@ -68,7 +72,9 @@ async function open(group) {
       const file = node('strong', photo.filename, 'filename'); file.title = photo.filename;
       const facts = node('p', date(photo.time), 'p-muted');
       const people = node('p', `Enrich people: ${peopleLabel(photo)}`, 'lab-people');
-      const recognition = node('p', `Immich recognized: ${photo.recognizedCount ?? 'unknown'} (may be incomplete)`, 'p-muted');
+      const recognized = photo.recognizedIds?.map((id) => personLabels.get(id));
+      const recognition = node('p', `Immich recognized: ${recognized === undefined ? 'unknown' :
+        recognized.length ? recognized.join(', ') : 'none identified'} (may be incomplete)`, 'lab-recognition p-muted');
       const reason = node('p', '', 'lab-reason'), distance = node('p', '', 'lab-distance p-muted');
       const larger = node('button', 'View larger', 'p-btn quiet');
       larger.onclick = () => showPhoto(value.photos.indexOf(photo));
@@ -84,12 +90,13 @@ async function open(group) {
 function settings() {
   return { gapMs: Number(el('gap').value) * 1000,
     spanMs: el('use-span').checked ? Number(el('span').value) * 1000 : null,
-    thumbhash: el('use-hash').checked, threshold: Number(el('threshold').value), people: el('use-people').checked };
+    thumbhash: el('use-hash').checked, threshold: Number(el('threshold').value), people: el('use-people').checked,
+    identities: el('use-identities').checked };
 }
 function reset() {
   el('gap').value = current.gapSeconds; el('gap').max = current.gapSeconds;
   el('span').value = 180; el('threshold').value = 0.1;
-  for (const id of ['use-span', 'use-hash', 'use-people']) el(id).checked = false;
+  for (const id of ['use-span', 'use-hash', 'use-people', 'use-identities']) el(id).checked = false;
   focused = null; recalculate();
 }
 function recalculate() {
@@ -114,7 +121,8 @@ function renderResult() {
   el('clear-focus').disabled = !focused;
   const unknownHash = current.photos.filter((p) => !decodeHash(p.thumbhash)).length;
   const unknownPeople = current.photos.filter((p) => peopleCategory(p) === null).length;
-  el('evidence-note').textContent = `Missing ThumbHash: ${unknownHash} · Unknown Enrich people categories: ${unknownPeople}. Photo links open Immich from the larger viewer.`;
+  const noIdentities = current.photos.filter((p) => !p.recognizedIds?.length).length;
+  el('evidence-note').textContent = `Missing ThumbHash: ${unknownHash} · Unknown Enrich people categories: ${unknownPeople} · Photos without recognized identities: ${noIdentities}. Photo links open Immich from the larger viewer.`;
   for (const photo of current.photos) {
     const item = cards.get(photo.id), number = result.byPhoto.get(photo.id);
     item.card.style.setProperty('--group-color', colors[(number - 1) % colors.length]);
@@ -159,7 +167,7 @@ el('reset').onclick = reset;
 el('clear-focus').onclick = () => { focused = null; renderResult(); };
 el('copy').onclick = async () => {
   const s = settings();
-  const text = `Stacking lab (experimental)\nStarting gap: ${current.gapSeconds} s\nGap: ${s.gapMs / 1000} s; span: ${s.spanMs === null ? 'unlimited' : s.spanMs / 1000 + ' s'}\nThumbHash: ${s.thumbhash ? s.threshold.toFixed(3) + ' (every pair)' : 'off'}; Enrich people categories (none/one/couple/group): ${s.people ? 'on' : 'off'}\n${el('result').textContent}\n${el('evidence-note').textContent.split('. Photo links')[0]}`;
+  const text = `Stacking lab (experimental)\nStarting gap: ${current.gapSeconds} s\nGap: ${s.gapMs / 1000} s; span: ${s.spanMs === null ? 'unlimited' : s.spanMs / 1000 + ' s'}\nThumbHash: ${s.thumbhash ? s.threshold.toFixed(3) + ' (every pair)' : 'off'}; Enrich people categories (none/one/couple/group): ${s.people ? 'on' : 'off'}\nDifferent recognized people (nonempty lists with no identities in common): ${s.identities ? 'on' : 'off'}\n${el('result').textContent}\n${el('evidence-note').textContent.split('. Photo links')[0]}`;
   try {
     if (navigator.clipboard?.writeText) await navigator.clipboard.writeText(text);
     else {

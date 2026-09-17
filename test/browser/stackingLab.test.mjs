@@ -17,7 +17,8 @@ test('stacking lab shows complete partitions, focused dimming, evidence, reset a
     } } },
   } });
   for (const [i, category] of ['one', 'couple', 'group'].entries()) {
-    fixture.repo.curate.observe({ id: fixture.id(i + 1), people: [] });
+    const people = [['person-a'], ['person-b'], ['person-a', 'person-b']][i].map(id => ({ id }));
+    fixture.repo.curate.observe({ id: fixture.id(i + 1), people });
     fixture.repo.recordProcessingRun({ assetId: fixture.id(i + 1), provider: 'test', model: 'test',
       promptVersion: 'v1', taxonomyVersion: 'v1', status: 'succeeded', configurationId: 'c'.repeat(64),
       normalizedOutput: { has_people: true, people_count: category } });
@@ -52,10 +53,25 @@ test('stacking lab shows complete partitions, focused dimming, evidence, reset a
   assert.equal(await page.evaluate('document.querySelectorAll("#lab-photos .dimmed").length'), 0);
   assert.deepEqual(await page.evaluate('[...document.querySelectorAll(".lab-people")].map(n=>n.textContent)'),
     ['Enrich people: One', 'Enrich people: Couple', 'Enrich people: Group']);
+  assert.deepEqual(await page.evaluate('[...document.querySelectorAll(".lab-recognition")].map(n=>n.textContent)'),
+    ['Immich recognized: Person 1 (may be incomplete)', 'Immich recognized: Person 2 (may be incomplete)',
+      'Immich recognized: Person 1, Person 2 (may be incomplete)']);
+  await click('#use-identities');
+  assert.match(await page.evaluate('document.querySelector("#result").textContent'), /2 groups \(1 \+ 2\)/);
+  assert.match(await page.evaluate('document.querySelectorAll(".lab-reason")[1].textContent'), /different recognized people/);
+  await page.evaluate('Object.defineProperty(navigator, "clipboard", { configurable: true, value: { writeText: async text => { window.copiedLabSummary = text; } } })');
+  await click('#copy');
+  const summary = await page.evaluate('window.copiedLabSummary');
+  assert.match(summary, /Different recognized people .*: on/);
+  assert.doesNotMatch(summary, /person-a|person-b|Person 1|Person 2/);
   await click('#use-people');
   assert.match(await page.evaluate('document.querySelector("#result").textContent'), /3 groups \(1 \+ 1 \+ 1\)/);
+  await click('#use-identities');
+  assert.match(await page.evaluate('document.querySelector("#result").textContent'), /3 groups \(1 \+ 1 \+ 1\)/);
+  await click('#use-identities');
   await click('#reset');
   assert.match(await page.evaluate('document.querySelector("#result").textContent'), /1 group/);
+  assert.equal(await page.evaluate('document.querySelector("#use-identities").checked'), false);
   // Invalid inputs leave the last result explicitly labelled and cannot be copied.
   await page.evaluate('document.querySelector("#gap").value="99";document.querySelector("#gap").dispatchEvent(new Event("input"))');
   assert.equal(await page.evaluate('document.querySelector("#copy").disabled'), true);

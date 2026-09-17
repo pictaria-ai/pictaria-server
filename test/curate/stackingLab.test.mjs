@@ -6,7 +6,7 @@ import { join } from 'node:path';
 import { partition, timeGroups, decodeHash, hashDistance } from '../../public/curate/stacking-model.js';
 import { Repository } from '../../src/enrich/repository.mjs';
 import { CurateService } from '../../src/curate/service.mjs';
-import { labPeopleEvidence } from '../../src/curate/lab-evidence.mjs';
+import { labPeopleEvidence, labRecognizedIds } from '../../src/curate/lab-evidence.mjs';
 
 const hash = (byte) => Buffer.alloc(21, byte).toString('base64');
 const photo = (id, time, byte = 0, extra = {}) => ({ id, time, thumbhash: hash(byte), ...extra });
@@ -28,6 +28,15 @@ test('lab accepts Group as a producing category, while unsupported and conflicti
   assert.equal(labPeopleEvidence({ ...group, has_people: 'true' }, schema, 'saved').peopleCategory, null);
   assert.equal(labPeopleEvidence({ ...group, people_count: 'unknown' }, schema, 'saved').peopleStatus, 'unknown');
   assert.equal(labPeopleEvidence({ ...group, people_count: 3 }, schema, 'saved').peopleCategory, null);
+});
+
+test('lab identity evidence preserves unknown and bounds cached identity lists', () => {
+  const observation = (ids, omitted = false) => JSON.stringify({ ids, omitted });
+  assert.deepEqual(labRecognizedIds(observation(['b', 'a', 'a'])), ['a', 'b']);
+  assert.deepEqual(labRecognizedIds(observation([])), []);
+  for (const value of [null, '{}', 'invalid', observation(null), observation(['a'], true),
+    observation(['']), observation([7]), observation(['a'.repeat(129)]),
+    observation(Array(101).fill('a')), ' '.repeat(4097)]) assert.equal(labRecognizedIds(value), null);
 });
 
 test('time baseline is a complete inclusive chain, with undated singles last', () => {
@@ -66,6 +75,31 @@ test('categories separate None/One/Couple/Group without requiring face recogniti
   const unknown = photo('unknown', 1500);
   assert.deepEqual(ids(partition([rows[1], unknown, rows[2]], { gapMs: 15000, people: true }).groups),
     [['1', 'unknown'], ['2']]);
+});
+
+test('identity experiment separates disjoint people independently, without forcing unknown or overlapping lists apart', () => {
+  const a = photo('a', 0, 0, { peopleCategory: 'one', recognizedIds: ['person-a'] });
+  const b = photo('b', 1000, 0, { peopleCategory: 'one', recognizedIds: ['person-b'] });
+  const couple = photo('couple', 2000, 0, { peopleCategory: 'couple', recognizedIds: ['person-a', 'person-b'] });
+  const rows = [a, b, couple], original = structuredClone(rows);
+  assert.equal(partition(rows, { gapMs: 15000 }).groups.length, 1);
+  assert.deepEqual(ids(partition(rows, { gapMs: 15000, people: true }).groups), [['a', 'b'], ['couple']]);
+  const result = partition(rows, { gapMs: 15000, identities: true });
+  assert.deepEqual(ids(result.groups), [['a'], ['b', 'couple']]);
+  assert.match(result.reasons.get('b'), /different recognized people/);
+  assert.equal(partition(rows, { gapMs: 15000, identities: true, people: true }).groups.length, 3);
+  // No Enrich provenance is needed; matching IDs do not override time or hashes.
+  assert.equal(partition([a, { ...b, peopleCategory: null }], { gapMs: 15000, identities: true }).groups.length, 2);
+  assert.equal(partition([a, { ...b, recognizedIds: a.recognizedIds }], { gapMs: 500, identities: true }).groups.length, 2);
+  assert.equal(partition([a, { ...b, recognizedIds: a.recognizedIds, thumbhash: hash(255) }],
+    { gapMs: 15000, identities: true, thumbhash: true }).groups.length, 2);
+  // Neither unknown observations nor an overlapping pair can bridge a known conflict.
+  for (const recognizedIds of [null, [], ['person-a', 'person-b']]) {
+    const middle = photo('middle', 500, 0, { recognizedIds });
+    assert.deepEqual(ids(partition([a, middle, b], { gapMs: 15000, identities: true }).groups),
+      [['a', 'middle'], ['b']]);
+  }
+  assert.deepEqual(rows, original);
 });
 
 test('span limits prevent long chains, partitions remain exhaustive and input is immutable', () => {
@@ -115,6 +149,7 @@ test('lab snapshots are stable, bounded, isolated from decisions, and based only
     assert.deepEqual(comparison.photos.map((p) => p.id), ['a', 'b']);
     assert.equal(comparison.photos[0].thumbhash, hash(0));
     assert.deepEqual(comparison.photos.map(p => [p.peopleCategory, p.recognizedCount]), [['one', 0], ['group', 0]]);
+    assert.deepEqual(comparison.photos.map(p => p.recognizedIds), [[], []]);
     assert.equal(partition(comparison.photos, { gapMs: 15000, people: true }).groups.length, 2);
     assert.equal(repo.curate.photo('b').peopleCount, null, 'production exact-count projection is unchanged');
     assert.equal(service.timer, undefined); // opening the lab does not activate metadata refresh
@@ -125,8 +160,15 @@ test('lab snapshots are stable, bounded, isolated from decisions, and based only
     // The only domain mutation was the deliberately added test photo.
     repo.db.prepare('DELETE FROM review_list WHERE asset_id=?').run('new');
     assert.deepEqual(snapshot(), before);
+    repo.curate.observe({ id: 'a', people: [{ id: 'person-a' }] });
+    repo.curate.observe({ id: 'b', people: [{ id: 'person-b' }, { id: 'person-b' }] });
     const reversed = await service.lab.open({ sort: 'newest' });
     assert.equal(reversed.groups[0].photo.id, 'single-59');
+    const refreshed = service.lab.comparison(reversed.viewId, reversed.total - 1);
+    assert.deepEqual(refreshed.photos.map(p => p.recognizedIds), [['person-a'], ['person-b']]);
+    assert.equal(partition(refreshed.photos, { gapMs: 15000, identities: true }).groups.length, 2);
+    assert.deepEqual(service.lab.comparison(first.viewId, 0).photos.map(p => p.recognizedIds), [[], []],
+      'recognition changes do not alter an open experiment');
     await assert.rejects(service.lab.open({ gapSeconds: 0 }), /1–180/);
     assert.throws(() => service.lab.page(reversed.viewId, -1), /Invalid/);
     assert.throws(() => service.lab.comparison(reversed.viewId, -1), /not found/);
