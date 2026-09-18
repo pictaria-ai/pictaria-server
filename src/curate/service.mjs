@@ -3,6 +3,7 @@ import { groupPhotos } from './grouping.mjs';
 import { CurateError } from './contracts.mjs';
 import { CurateMetadataRefresher } from './metadata.mjs';
 import { StackingLab } from './lab.mjs';
+import { CurateSimilaritySearch } from './similarity.mjs';
 
 export class CurateService {
   constructor({ repo, config = {}, immich = null, metadataOptions = {} }) {
@@ -17,6 +18,7 @@ export class CurateService {
     this.metrics = { maxProjectionSliceMs: 0, rebuildMs: 0 };
     this.abort = new AbortController();
     this.metadata = new CurateMetadataRefresher({ curate: this, ...metadataOptions });
+    this.similarity = new CurateSimilaritySearch({ curate: this });
     this.lab = new StackingLab(this);
   }
   async refresh() {
@@ -254,6 +256,7 @@ export class CurateService {
   }
   settingsChanged() {
     this.metadata.settingsChanged();
+    this.similarity.settingsChanged();
   }
   requestMetadataRefresh(ids) {
     this.store.metadata.request(ids, this.metadata.now(), { force: true });
@@ -264,6 +267,7 @@ export class CurateService {
     clearInterval(this.timer);
     this.closed = true;
     this.abort.abort();
+    await this.similarity.close();
     await this.lab.close();
     await this.metadata.close();
     if (this.worker) await this.worker.terminate();

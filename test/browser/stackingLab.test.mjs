@@ -30,6 +30,9 @@ test('stacking lab shows complete partitions, focused dimming, evidence, reset a
   const deniedRefresh = await fetch(`${fixture.base}/api/review/curate/lab/recognition`, { method: 'POST',
     headers: { 'content-type': 'application/json' }, body: '{}' });
   assert.equal(deniedRefresh.status, 401);
+  const deniedRanking = await fetch(`${fixture.base}/api/review/curate/lab/ranking`, { method: 'POST',
+    headers: { 'content-type': 'application/json' }, body: '{}' });
+  assert.equal(deniedRanking.status, 401);
   const click = (selector) => page.evaluate(`document.querySelector(${JSON.stringify(selector)}).click()`);
   await page.navigate(`${fixture.base}/curate-stacking-lab.html`);
   await page.waitFor('document.querySelector(".gate-backdrop input")');
@@ -89,6 +92,34 @@ test('stacking lab shows complete partitions, focused dimming, evidence, reset a
   await click('#reset');
   assert.match(await page.evaluate('document.querySelector("#result").textContent'), /1 group/);
   assert.equal(await page.evaluate('document.querySelector("#use-identities").checked'), false);
+  assert.equal(fixture.similarityReads.length, 0, 'opening and rule changes never search');
+  fixture.similarityResponses.set(fixture.id(1), async () => ({ status: 200, body: { assets: {
+    items: [fixture.assets[0], ...Array.from({ length: 50 }, (_, i) => ({ type: 'IMAGE',
+      id: i === 9 ? fixture.id(2) : `unrelated-${i}` }))], nextPage: '2',
+  } } }));
+  // Highlighting a later photo affects ThumbHash only, not the search reference.
+  await click('#lab-photos .photo-card:nth-child(2) .photo-image');
+  await click('#check-ranking');
+  await page.waitFor('document.querySelector("#check-ranking").textContent==="Ranking checked"');
+  assert.deepEqual(fixture.similarityReads, [{ queryAssetId: fixture.id(1), type: 'IMAGE', visibility: 'timeline', size: 51, withExif: false }]);
+  const ranks = await page.evaluate('[...document.querySelectorAll(".lab-ranking")].map(n=>n.textContent)');
+  assert.deepEqual(ranks, ['Similarity search reference · earliest photo', 'Immich similarity rank: #10', 'Not in the first 50 results']);
+  assert.match(await page.evaluate('document.querySelector("#ranking-status").textContent'), /50 results · Search took \d+\.\d\d s · Checked/);
+  await click('#use-people'); await click('#reset');
+  assert.deepEqual(await page.evaluate('[...document.querySelectorAll(".lab-ranking")].map(n=>n.textContent)'), ranks);
+  assert.equal(fixture.similarityReads.length, 1);
+  await click('#copy');
+  const rankedSummary = await page.evaluate('window.copiedLabSummary');
+  assert.match(rankedSummary, /Photo 2: Immich similarity rank: #10/);
+  assert.doesNotMatch(rankedSummary, /unrelated-|00000000|target-portrait|person-a/);
+  // Reopen and explicitly check: the shared cache supplies the same result.
+  fixture.repo.db.prepare('UPDATE curate_metadata SET last_attempt_at=0,next_at=0').run();
+  await page.evaluate('document.querySelector("[data-close=experiment]").click();document.querySelector(".group-card").click()');
+  await page.waitFor('!document.querySelector("#refresh-recognition").disabled && !document.querySelector("#experiment-content").hidden');
+  await click('#check-ranking');
+  await page.waitFor('document.querySelector("#check-ranking").textContent==="Ranking checked"');
+  assert.match(await page.evaluate('document.querySelector("#ranking-status").textContent'), /Reused result/);
+  assert.equal(fixture.similarityReads.length, 1);
   // Invalid inputs leave the last result explicitly labelled and cannot be copied.
   await page.evaluate('document.querySelector("#gap").value="99";document.querySelector("#gap").dispatchEvent(new Event("input"))');
   assert.equal(await page.evaluate('document.querySelector("#copy").disabled'), true);
@@ -104,6 +135,62 @@ test('stacking lab shows complete partitions, focused dimming, evidence, reset a
   assert.deepEqual(fixture.repo.db.prepare('SELECT * FROM manual_overrides').all(), before);
   assert.equal(fixture.repo.db.prepare('SELECT count(*) n FROM decision_operations').get().n, 0);
   assert.equal(fixture.repo.db.prepare('SELECT count(*) n FROM curate_separations').get().n, 0);
+});
+
+test('similarity errors assign no ranks, back off, and clear when opening another experiment', { timeout: 60000 }, async t => {
+  if (!findChrome()) return t.skip('Chrome required');
+  const fixture = await curatePreviewFixture({ stackSize: 2, singles: 1 });
+  const browser = await launchChrome(), page = await browser.newPage();
+  t.after(async () => { await browser.stop(); await fixture.stop(); });
+  const click = selector => page.evaluate(`document.querySelector(${JSON.stringify(selector)}).click()`);
+  await page.navigate(`${fixture.base}/curate-stacking-lab.html`);
+  await page.waitFor('document.querySelector(".gate-backdrop input")');
+  await page.evaluate('document.querySelector(".gate-backdrop input").value="smoke-secret";document.querySelector(".gate-backdrop button").click()');
+  await page.waitFor('document.querySelectorAll(".group-card").length===2');
+  await click('.group-card');
+  await page.waitFor('!document.querySelector("#experiment-content").hidden');
+  const entered = Promise.withResolvers(), release = Promise.withResolvers();
+  fixture.similarityResponses.set(fixture.id(1), async () => { entered.resolve(); await release.promise;
+    return { status: 400, body: { message: 'PRIVATE_UPSTREAM_TEXT' } };
+  });
+  await click('#check-ranking'); await entered.promise;
+  assert.match(await page.evaluate('document.querySelector("#ranking-status").textContent'), /Searching Immich/);
+  release.resolve();
+  await page.waitFor('!document.querySelector("#check-ranking").disabled');
+  assert.match(await page.evaluate('document.querySelector("#ranking-status").textContent'), /Smart Search/);
+  assert.doesNotMatch(await page.evaluate('document.body.textContent'), /PRIVATE_UPSTREAM_TEXT/);
+  assert.equal(await page.evaluate('document.querySelectorAll(".lab-ranking:not([hidden])").length'), 0);
+  await click('#check-ranking');
+  await page.waitFor('document.querySelector("#ranking-status").textContent.includes("wait")');
+  assert.equal(fixture.similarityReads.length, 1, 'failure cooldown prevents repeated upstream requests');
+  await page.evaluate('document.querySelector("[data-close=experiment]").click();document.querySelector(".group-card:nth-child(2)").click()');
+  await page.waitFor('document.querySelectorAll("#lab-photos .photo-card").length===1');
+  assert.equal(await page.evaluate('document.querySelector("#check-ranking").disabled'), true);
+  assert.match(await page.evaluate('document.querySelector("#ranking-status").textContent'), /at least two photos/);
+});
+
+test('closing an in-flight ranking search cannot populate a newly opened experiment', { timeout: 60000 }, async t => {
+  if (!findChrome()) return t.skip('Chrome required');
+  const fixture = await curatePreviewFixture({ stackSize: 2, singles: 1 });
+  const browser = await launchChrome(), page = await browser.newPage();
+  const entered = Promise.withResolvers(), release = Promise.withResolvers();
+  t.after(async () => { release.resolve(); await browser.stop(); await fixture.stop(); });
+  fixture.similarityResponses.set(fixture.id(1), async () => { entered.resolve(); await release.promise;
+    return { status: 200, body: { assets: { items: fixture.assets.slice(0, 2) } } };
+  });
+  await page.navigate(`${fixture.base}/curate-stacking-lab.html`);
+  await page.waitFor('document.querySelector(".gate-backdrop input")');
+  await page.evaluate('document.querySelector(".gate-backdrop input").value="smoke-secret";document.querySelector(".gate-backdrop button").click()');
+  await page.waitFor('document.querySelectorAll(".group-card").length===2');
+  await page.evaluate('document.querySelector(".group-card").click()');
+  await page.waitFor('!document.querySelector("#experiment-content").hidden');
+  await page.evaluate('document.querySelector("#check-ranking").click()'); await entered.promise;
+  await page.evaluate('document.querySelector("[data-close=experiment]").click();document.querySelector(".group-card:nth-child(2)").click()');
+  release.resolve();
+  await page.waitFor('document.querySelectorAll("#lab-photos .photo-card").length===1 && !document.querySelector("#refresh-recognition").disabled');
+  assert.match(await page.evaluate('document.querySelector("#ranking-status").textContent'), /at least two photos/);
+  assert.equal(await page.evaluate('document.querySelectorAll(".lab-ranking:not([hidden])").length'), 0);
+  assert.equal(fixture.similarityReads.length, 1);
 });
 
 test('lab distinguishes empty, omitted and failed recognition; closing a refresh cannot update another experiment', { timeout: 60000 }, async t => {

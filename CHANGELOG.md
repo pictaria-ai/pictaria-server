@@ -22,6 +22,10 @@ All notable changes to Pictaria Server are documented here. This project follows
   service. A Refresh from Immich button repeats the read; loading, missing,
   empty and failed results are distinct, with check times and fixed evidence
   while experimenting. Reads are bounded and cancellable, with no re-enrichment.
+  An on-demand **Check similarity ranking** searches Immich from the group's
+  earliest photo and shows other members' ranks among the first 50 timeline
+  photo results (excluding the reference), plus search time. It reuses results,
+  makes one bounded search at a time and does not apply a new grouping rule.
   See [lab rules and limits](docs/CURATE-STACKING-LAB.md).
 - The Curate preview now offers **Date taken → Oldest first / Newest first**,
   remembered per browser. Sorting applies across the full result set before

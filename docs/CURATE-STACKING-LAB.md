@@ -24,6 +24,56 @@ Curate algorithm. The normal password gate protects its APIs.
    larger** opens a viewer with previous/next controls and a configured Immich
    link. **Copy experiment summary** copies rules, group sizes and evidence
    coverage, without photo IDs, names, hashes or images.
+4. Optionally click **Check similarity ranking**. Immich searches its timeline
+   images using this time group's earliest photo, including images outside the
+   group. The other cards show their positions among the first 50 results after
+   removing the reference. The reference stays fixed even when highlighting a
+   different photo or changing rules. Search duration and check time appear above
+   the photos; copied summaries include ranks using Photo 1 / Photo 2 labels.
+
+## Immich similarity ranking
+
+This is an inspection tool, not a grouping switch. Immich uses its existing Smart
+Search image embeddings; Pictaria neither downloads images for this search nor
+runs new AI inference. Smart Search must be enabled and have processed the
+reference photo. The existing API key needs `asset.read`. No direct access to
+Immich's database or internal machine-learning service is used.
+
+Ranks are relative to the accessible timeline-image search pool, not distances,
+confidence scores or proof that photos belong together. A library containing many
+similar images can push a good alternative down the list. Missing embeddings,
+visibility and access can also keep a photo out. **Not in the first 50 results**
+does not mean different; if Immich returns fewer photos, the label reports that
+actual returned count. Failed or malformed searches assign no ranks.
+
+Each click uses one public `POST /api/search/smart` request with `queryAssetId`,
+`type: IMAGE`, `visibility: timeline`, `size: 51` and `withExif: false`. Requesting
+51 allows for the reference itself; it is removed wherever it appears and the
+remaining list is capped at 50. The flat filters are supported in Immich 2.7.5,
+3.1 and 3.2 (deprecated but still accepted in 3.2). No paging, retries or alternate
+endpoint fallback occurs. Only members of the opened group receive ranks in the
+browser; unrelated result IDs and full asset metadata are not exposed.
+
+The reusable `CurateSimilaritySearch` service has one search lane per Pictaria
+instance, a 15-second deadline and 2 MiB response ceiling. Concurrent uncached
+checks return a busy message, rather than queueing. Starts are at least five
+seconds apart; a failure imposes a 30-second pause. Closing the dialog cancels
+the request, and late answers cannot populate another experiment. Connection
+changes, changed reference-image evidence or removal from the review list
+invalidate reuse; changes during a read withhold the response.
+
+At most 40 results (50 IDs each, without metadata) are kept in memory for ten
+minutes. They are reused across tabs and group reopenings with the same reference;
+the displayed time is the original search time, not cache lookup time. Once
+checked, the open experiment keeps that result fixed. Reopen and check after
+expiry to obtain a new result. Library changes or an Immich search-model change
+may alter rankings on the next search. The cache does not promise a live view of
+those changes and is cleared on restart.
+
+Opening groups, loading more groups, refreshing recognition, and adjusting rules
+never launch this search. There is no automatic all-stack mode. Returning 50
+results limits response size, not Immich's internal search work; measured test-
+instance latency and library load should guide any future background use.
 
 ## Experimental rules
 

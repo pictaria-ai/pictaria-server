@@ -5,6 +5,7 @@ import { partition, decodeHash, hashDistance, peopleCategory, peopleLabel } from
 const el = (id) => document.getElementById(id);
 let view, loaded = 0, current, result, focused = null, viewerIndex = 0, requestId = 0;
 let currentGroup, refreshing = false, refreshController;
+let ranking = null, rankingController, rankingId = 0;
 const personLabels = new Map();
 const cards = new Map();
 const colors = ['#648cea', '#bc8b47', '#4baca0', '#b884c9', '#d17c74', '#8da84e'];
@@ -48,6 +49,10 @@ function append(value) {
 async function open(group) {
   const token = ++requestId;
   refreshController?.abort();
+  rankingController?.abort(); rankingId++; ranking = null;
+  el('check-ranking').textContent = 'Check similarity ranking';
+  el('check-ranking').disabled = group.memberCount < 2;
+  el('ranking-status').textContent = group.memberCount < 2 ? 'Choose a group with at least two photos.' : 'Only searches when you click. Results are reused for 10 minutes.';
   refreshing = false;
   currentGroup = group.id; personLabels.clear();
   current = null; cards.clear(); focused = null;
@@ -75,17 +80,46 @@ async function open(group) {
       const people = node('p', `Enrich people: ${peopleLabel(photo)}`, 'lab-people');
       const recognition = node('p', 'Loading recognition data…', 'lab-recognition p-muted');
       const checked = node('p', '', 'lab-checked p-muted');
+      const rank = node('p', '', 'lab-ranking'); rank.hidden = true;
       const reason = node('p', '', 'lab-reason'), distance = node('p', '', 'lab-distance p-muted');
       const larger = node('button', 'View larger', 'p-btn quiet');
       larger.onclick = () => showPhoto(current.photos.findIndex(p => p.id === photo.id));
       const failed = node('p', 'Preview unavailable; try Immich.', 'p-muted'); failed.hidden = true;
       image.onerror = () => { failed.hidden = false; };
-      info.append(file, facts, people, recognition, checked, reason, distance, larger, failed); card.append(button, info);
-      el('lab-photos').append(card); cards.set(photo.id, { card, button, badge, reason, distance, recognition, checked });
+      info.append(file, facts, people, recognition, checked, rank, reason, distance, larger, failed); card.append(button, info);
+      el('lab-photos').append(card); cards.set(photo.id, { card, button, badge, reason, distance, recognition, checked, rank });
     }
     reset();
     void refreshRecognition();
   } catch (e) { if (token === requestId) { error('experiment-error', e.message); el('experiment-subtitle').textContent = 'Could not open this time group.'; } }
+}
+
+async function checkRanking() {
+  if (!current || current.photos.length < 2) return;
+  const token = ++rankingId;
+  rankingController?.abort(); rankingController = new AbortController();
+  el('check-ranking').disabled = true;
+  el('ranking-status').textContent = 'Searching Immich…';
+  try {
+    const value = await request('lab/ranking', { viewId: view.viewId, groupId: currentGroup }, { signal: rankingController.signal });
+    if (token !== rankingId || !el('experiment').open) return;
+    ranking = value;
+    const ranks = new Map(value.photos.map(p => [p.id, p.rank]));
+    for (const photo of current.photos) {
+      const rank = ranks.get(photo.id), item = cards.get(photo.id);
+      item.rank.hidden = false;
+      item.rank.textContent = photo.id === value.referenceId ? 'Similarity search reference · earliest photo'
+        : rank !== null && rank !== undefined ? `Immich similarity rank: #${rank}`
+        : value.returned === value.limit ? `Not in the first ${value.limit} results`
+        : `Not in the ${value.returned} returned results`;
+    }
+    el('ranking-status').textContent = `${value.returned} results · Search took ${(value.elapsedMs / 1000).toFixed(2)} s · Checked ${date(value.checkedAt)}${value.cached ? ' · Reused result' : ''}`;
+    el('check-ranking').textContent = 'Ranking checked';
+  } catch (e) {
+    if (token !== rankingId || !el('experiment').open) return;
+    el('ranking-status').textContent = e.message;
+    el('check-ranking').disabled = false;
+  }
 }
 
 async function refreshRecognition() {
@@ -216,10 +250,12 @@ el('more').onclick = async () => {
 for (const input of document.querySelectorAll('.lab-settings input')) input.addEventListener('input', recalculate);
 el('reset').onclick = reset;
 el('refresh-recognition').onclick = refreshRecognition;
+el('check-ranking').onclick = checkRanking;
 el('clear-focus').onclick = () => { focused = null; renderResult(); };
 el('copy').onclick = async () => {
   const s = settings();
-  const text = `Stacking lab (experimental)\nStarting gap: ${current.gapSeconds} s\nGap: ${s.gapMs / 1000} s; span: ${s.spanMs === null ? 'unlimited' : s.spanMs / 1000 + ' s'}\nThumbHash: ${s.thumbhash ? s.threshold.toFixed(3) + ' (every pair)' : 'off'}; Enrich people categories (none/one/couple/group): ${s.people ? 'on' : 'off'}\nDifferent recognized people (nonempty lists with no identities in common): ${s.identities ? 'on' : 'off'}\n${el('recognition-status').textContent}\n${el('result').textContent}\n${el('evidence-note').textContent.split('. Photo links')[0]}`;
+  const rankSummary = ranking ? `\nImmich similarity ranking (earliest reference; timeline images; first 50 excluding reference)\n${el('ranking-status').textContent}\n${current.photos.map((p, i) => `Photo ${i + 1}: ${cards.get(p.id).rank.textContent}`).join('\n')}` : '';
+  const text = `Stacking lab (experimental)\nStarting gap: ${current.gapSeconds} s\nGap: ${s.gapMs / 1000} s; span: ${s.spanMs === null ? 'unlimited' : s.spanMs / 1000 + ' s'}\nThumbHash: ${s.thumbhash ? s.threshold.toFixed(3) + ' (every pair)' : 'off'}; Enrich people categories (none/one/couple/group): ${s.people ? 'on' : 'off'}\nDifferent recognized people (nonempty lists with no identities in common): ${s.identities ? 'on' : 'off'}\n${el('recognition-status').textContent}\n${el('result').textContent}\n${el('evidence-note').textContent.split('. Photo links')[0]}${rankSummary}`;
   try {
     if (navigator.clipboard?.writeText) await navigator.clipboard.writeText(text);
     else {
@@ -239,7 +275,10 @@ for (const dialog of document.querySelectorAll('dialog')) {
 el('experiment').addEventListener('close', () => {
   // Native close events are queued. A quickly reopened dialog owns a new
   // request already; the old close must not cancel that request.
-  if (!el('experiment').open) { requestId++; refreshController?.abort(); refreshing = false; }
+  if (!el('experiment').open) {
+    requestId++; refreshController?.abort(); refreshing = false;
+    rankingId++; rankingController?.abort();
+  }
 });
 el('previous').onclick = () => showPhoto(viewerIndex - 1);
 el('next').onclick = () => showPhoto(viewerIndex + 1);

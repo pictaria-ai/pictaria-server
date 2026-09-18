@@ -27,3 +27,6 @@
   .lab-info { padding: 7px; }
   #lab-viewer .dialog-foot { flex-wrap: nowrap; }
 }
+.lab-similarity { border-block: 1px solid var(--p-line); padding-block: 12px; margin-block: 16px; }
+.lab-similarity .compare-tools { margin-top: 0; }
+.lab-ranking { font-weight: 600; }

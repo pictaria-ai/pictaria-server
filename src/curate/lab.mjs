@@ -92,6 +92,18 @@ export class StackingLab {
         recognitionCheckedAt: metadata.checkedAt, recognitionOutcome: metadata.outcome };
     }) };
   }
+  async similarityRanking(id, groupId, { signal } = {}) {
+    const { photos } = this.comparison(id, groupId);
+    if (photos.length < 2)
+      throw new CurateError('Choose a time group with at least two photos.', 'invalid_lab_query', 400);
+    // The snapshot is already in capture order (ID ties); rule toggles or a
+    // highlighted photo cannot change the reference or narrow the search pool.
+    const { ids, ...result } = await this.curate.similarity.search(photos[0].id, { signal });
+    this.view(id);
+    const positions = new Map(ids.map((id, index) => [id, index + 1]));
+    return { ...result, returned: ids.length, photos: photos.map(p => ({ id: p.id,
+      rank: positions.get(p.id) ?? null })) };
+  }
   async close() {
     this.closed = true;
     this.views.clear();

@@ -16,14 +16,16 @@ export function createCurateRoutes({ curate, review = null }) {
         result = curate.lab.page(url.searchParams.get('viewId'), Number(url.searchParams.get('offset') ?? 0));
       } else if (request.method === 'GET' && path === 'lab/comparison') {
         result = curate.lab.comparison(url.searchParams.get('viewId'), Number(url.searchParams.get('groupId') ?? -1));
-      } else if (request.method === 'POST' && path === 'lab/recognition') {
+      } else if (request.method === 'POST' && ['lab/recognition', 'lab/ranking'].includes(path)) {
         const body = await readObject(request, { maxBytes: 4096 });
         const controller = new AbortController();
         const close = () => { if (!response.writableFinished) controller.abort(); };
         response.once('close', close);
         try {
           if (response.destroyed) return true;
-          result = await curate.lab.refreshRecognition(body.viewId, body.groupId, { signal: controller.signal });
+          result = path === 'lab/ranking'
+            ? await curate.lab.similarityRanking(body.viewId, body.groupId, { signal: controller.signal })
+            : await curate.lab.refreshRecognition(body.viewId, body.groupId, { signal: controller.signal });
           if (response.destroyed) return true;
         } finally { response.removeListener('close', close); }
       } else if (request.method === 'GET' && path === 'groups') {

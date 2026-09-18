@@ -53,6 +53,10 @@
               <label><span><input id="use-identities" type="checkbox" /> Separate different recognized people</span><small>Split when both photos have recognized people and no identities in common. Missing or overlapping lists don’t force a split.</small></label>
             </div>
             <div class="compare-tools"><button id="reset" class="p-btn">Reset to time only</button><button id="clear-focus" class="p-btn" disabled>Show all groups equally</button><button id="copy" class="p-btn">Copy experiment summary</button></div>
+            <section class="lab-similarity" aria-label="Immich similarity ranking">
+              <div class="compare-tools"><button id="check-ranking" class="p-btn">Check similarity ranking</button><span id="ranking-status" class="p-muted" role="status"></span></div>
+              <p class="p-muted lab-small">Searches Immich’s timeline photos using the earliest photo in this time group. Shows each other photo’s position in the first 50 results, excluding the reference. Ranks are relative to your library, not similarity scores, and don’t change the groups.</p>
+            </section>
             <p id="result" class="lab-result" aria-live="polite"></p>
             <p id="focus-help" class="p-muted">Click a photo to highlight its proposed group. Dimmed photos stay in the experiment.</p>
             <p id="evidence-note" class="p-muted lab-small"></p>

@@ -124,6 +124,15 @@ The shared Immich client accepts caller cancellation and a smaller response boun
 for this lane; other callers retain their existing defaults. Metadata refresh
 performs no image downloads, AI calls, tag writes, album changes or curation actions.
 
+`CurateSimilaritySearch` is a separate explicit search lane, first exposed through
+the stacking lab. It asks the public Immich Smart Search API for up to 51 timeline
+images relative to one validated review photo and retains 50 ordered IDs after
+removing that reference. It neither retrieves embeddings nor interprets rank as
+distance. A single in-flight request, deadline, response bound, short in-memory
+cache, pacing/backoff, and connection/reference guards bound work across callers.
+It is not scheduled by opening Curate and does not affect grouping or keeper
+advice. See [ranking semantics and limits](CURATE-STACKING-LAB.md#immich-similarity-ranking).
+
 Already-kept context comes from an indexed query of at most 64 candidates within
 the local time bounds, selects at most eight compatible photos, and reports
 omissions. It is read-only. A single pending newcomer remains a single for manual

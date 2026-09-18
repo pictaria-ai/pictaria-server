@@ -13,6 +13,7 @@ export async function curatePreviewFixture({ stackSize = 52, singles = 52 } = {}
     tags = new Map(),
     photoTags = new Map();
   const detailReads = [], detailResponses = new Map();
+  const similarityReads = [], similarityResponses = new Map();
   const id = (n) => `00000000-0000-0000-0000-${String(n).padStart(12, '0')}`;
   function add(n, seconds, name) {
     const asset = {
@@ -78,6 +79,11 @@ export async function curatePreviewFixture({ stackSize = 52, singles = 52 } = {}
     }
     if (path === '/api/search/metadata')
       return json({ assets: { items: assets, nextPage: null, total: assets.length } });
+    if (path === '/api/search/smart') {
+      similarityReads.push(body);
+      const override = await similarityResponses.get(body.queryAssetId)?.(body);
+      return override ? json(override.body, override.status) : json({ assets: { items: assets.slice(0, body.size) } });
+    }
     if (path === '/api/server/version') return json({ major: 3, minor: 2, patch: 0 });
     if (path === '/api/people') return json({ people: [], total: 0 });
     if (path === '/api/search/statistics') return json({ total: assets.length });
@@ -112,6 +118,8 @@ export async function curatePreviewFixture({ stackSize = 52, singles = 52 } = {}
     photoTags,
     detailReads,
     detailResponses,
+    similarityReads,
+    similarityResponses,
     dir,
     async stop() {
       await server.stop();
