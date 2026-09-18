@@ -1,16 +1,16 @@
 // Browser-side scope and retry protocol. Rendering never owns operation IDs.
 const ROOT = '/api/review/curate/';
 const KEY = 'pictaria.curate.preview';
-export async function request(path, body) {
+export async function request(path, body, { signal } = {}) {
   const response = await fetch(
     ROOT + path,
-    body === undefined
+    { ...(signal ? { signal } : {}), ...(body === undefined
       ? {}
       : {
           method: 'POST',
           headers: { 'content-type': 'application/json' },
           body: JSON.stringify(body),
-        },
+        }) },
   );
   if (response.status === 401) window.pictariaGate?.show();
   const value = await response.json();

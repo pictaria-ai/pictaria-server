@@ -10,13 +10,18 @@ All notable changes to Pictaria Server are documented here. This project follows
 - Added a testing-only **Stacking lab** linked from the Curate preview. Start
   with time-only groups, then try time/span, ThumbHash and Enrich people-category
   rules while keeping every photo visible in labelled proposed groups. Click a
-  photo to highlight its group and inspect distances. Experiments use local
-  cached evidence and do not save settings, make curation decisions or call AI.
+  photo to highlight its group and inspect distances. Experiments combine local
+  Enrich evidence with selected-photo Immich reads and do not save settings,
+  make curation decisions or call AI.
   The people experiment separates None, One, Couple and Group without requiring
   matching Immich recognition. Cards display those two evidence sources separately.
   A separate recognized-people switch splits photos with nonempty, disjoint Immich
   identity lists. Missing or overlapping lists do not force a split; Person 1 / 2
   labels help explain the evidence within each experiment.
+  Opening a group now refreshes recognition through Curate's shared metadata
+  service. A Refresh from Immich button repeats the read; loading, missing,
+  empty and failed results are distinct, with check times and fixed evidence
+  while experimenting. Reads are bounded and cancellable, with no re-enrichment.
   See [lab rules and limits](docs/CURATE-STACKING-LAB.md).
 - The Curate preview now offers **Date taken → Oldest first / Newest first**,
   remembered per browser. Sorting applies across the full result set before

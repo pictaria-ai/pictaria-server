@@ -2,6 +2,7 @@ import { Worker } from 'node:worker_threads';
 import { randomUUID } from 'node:crypto';
 import { CurateError } from './contracts.mjs';
 import { LAB_PHOTO_LIMIT } from '../../public/curate/stacking-model.js';
+import { labRecognizedIds } from './lab-evidence.mjs';
 
 // Separate, ephemeral scopes: lab IDs cannot issue decisions or corrections.
 export class StackingLab {
@@ -74,6 +75,22 @@ export class StackingLab {
       throw new CurateError(`This time group has ${photos.length} photos. Experiments support up to ${LAB_PHOTO_LIMIT}; try a shorter starting gap. No photos were sampled.`, 'lab_group_too_large', 422);
     return { photos, gapSeconds: view.gapSeconds, capturedAt: view.expiresAt - 30 * 60000,
       immichUrl: this.curate.config.immichPublicUrl || null };
+  }
+  async refreshRecognition(id, groupId, { signal } = {}) {
+    const comparison = this.comparison(id, groupId);
+    const refreshed = await this.curate.metadata.refreshPhotos(comparison.photos.map(p => p.id), { signal });
+    // Return an independent experiment snapshot. Neither other tabs nor an
+    // already-open experiment gain changing evidence as background work runs.
+    this.view(id);
+    const byId = new Map(refreshed.photos.map(p => [p.id, p]));
+    return { ...comparison, photos: comparison.photos.map(photo => {
+      const metadata = byId.get(photo.id);
+      const recognizedIds = metadata.outcome === 'refreshed'
+        ? labRecognizedIds(JSON.stringify(metadata.recognition)) : null;
+      return { ...photo, recognizedIds, recognizedCount: recognizedIds?.length ?? null,
+        recognitionStatus: recognizedIds !== null ? 'loaded' : metadata.outcome === 'refreshed' ? 'not-returned' : 'failed',
+        recognitionCheckedAt: metadata.checkedAt, recognitionOutcome: metadata.outcome };
+    }) };
   }
   async close() {
     this.closed = true;

@@ -99,6 +99,27 @@ Metadata refresh is a separate Immich-read lane, not the AI job queue:
   not control this lane. A changed Immich connection resets its read/backoff state;
   prior evidence remains explicitly last-observed until replaced.
 
+The shared refresher also supports **explicit selected-photo reads** through
+`refreshPhotos(ids, {signal})`. The stacking lab is its first caller; a later
+standard comparison UI can use the same service without introducing another
+Immich client or concurrency pool. These requested reads need no background-view
+lease and work independently of the automatic Stacks setting. They read only the
+validated review-photo IDs provided by the caller (up to 500; the lab limits this
+to its complete group of at most 250). Background work finishes its at-most-two
+active reads and yields the lane to waiting selections.
+
+Explicit reads bypass the 24-hour freshness schedule but retain the durable
+30-second per-photo minimum, two-call concurrency, 1 MiB response ceiling,
+30-second per-call deadline, connection-wide backoff and stale-source checks.
+Four selections can be active/waiting, each with a 45-second overall deadline
+including queue/cooldown time. Cancellation and shutdown stop further requests;
+the lane remains occupied until in-flight reads drain. Failures and omitted
+recognition are returned per photo without substituting cached recognition.
+Returned recognition is the bounded observation from that response, not a claim
+that the full photo has been recognized. Normal partial-response merging into
+the shared cache remains unchanged. There is no new persistent schema or job
+history. Automatic background refresh retains its original view/Stacks gating.
+
 The shared Immich client accepts caller cancellation and a smaller response bound
 for this lane; other callers retain their existing defaults. Metadata refresh
 performs no image downloads, AI calls, tag writes, album changes or curation actions.

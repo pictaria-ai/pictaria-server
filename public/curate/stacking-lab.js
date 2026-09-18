@@ -4,6 +4,8 @@ import { partition, decodeHash, hashDistance, peopleCategory, peopleLabel } from
 
 const el = (id) => document.getElementById(id);
 let view, loaded = 0, current, result, focused = null, viewerIndex = 0, requestId = 0;
+let currentGroup, refreshing = false, refreshController;
+const personLabels = new Map();
 const cards = new Map();
 const colors = ['#648cea', '#bc8b47', '#4baca0', '#b884c9', '#d17c74', '#8da84e'];
 const date = (value) => value === null ? 'Unknown capture date' : new Date(value).toLocaleString();
@@ -45,6 +47,9 @@ function append(value) {
 
 async function open(group) {
   const token = ++requestId;
+  refreshController?.abort();
+  refreshing = false;
+  currentGroup = group.id; personLabels.clear();
   current = null; cards.clear(); focused = null;
   el('experiment-content').hidden = true;
   el('experiment-title').textContent = `Explore ${group.memberCount} photo${group.memberCount === 1 ? '' : 's'}`;
@@ -53,15 +58,11 @@ async function open(group) {
   try {
     const value = await request(`lab/comparison?${new URLSearchParams({ viewId: view.viewId, groupId: group.id })}`);
     if (token !== requestId || !el('experiment').open) return;
-    current = value;
+    current = { ...value, photos: value.photos.map(p => ({ ...p, recognizedIds: null, recognitionStatus: 'loading' })) };
     el('experiment-subtitle').textContent = `${date(value.photos[0].time)} · ${value.photos.length} photos · Testing only`;
     el('experiment-content').hidden = false;
     el('lab-photos').replaceChildren();
-    const personLabels = new Map();
-    for (const photo of value.photos) for (const id of photo.recognizedIds ?? []) {
-      if (!personLabels.has(id)) personLabels.set(id, `Person ${personLabels.size + 1}`);
-    }
-    for (const photo of value.photos) {
+    for (const photo of current.photos) {
       const card = node('article', undefined, 'photo-card'); card.dataset.photoId = photo.id;
       const button = node('button', undefined, 'photo-image');
       const image = node('img'); image.src = thumbnail(photo.id); image.alt = photo.filename; image.loading = 'lazy';
@@ -72,19 +73,69 @@ async function open(group) {
       const file = node('strong', photo.filename, 'filename'); file.title = photo.filename;
       const facts = node('p', date(photo.time), 'p-muted');
       const people = node('p', `Enrich people: ${peopleLabel(photo)}`, 'lab-people');
-      const recognized = photo.recognizedIds?.map((id) => personLabels.get(id));
-      const recognition = node('p', `Immich recognized: ${recognized === undefined ? 'unknown' :
-        recognized.length ? recognized.join(', ') : 'none identified'} (may be incomplete)`, 'lab-recognition p-muted');
+      const recognition = node('p', 'Loading recognition data…', 'lab-recognition p-muted');
+      const checked = node('p', '', 'lab-checked p-muted');
       const reason = node('p', '', 'lab-reason'), distance = node('p', '', 'lab-distance p-muted');
       const larger = node('button', 'View larger', 'p-btn quiet');
-      larger.onclick = () => showPhoto(value.photos.indexOf(photo));
+      larger.onclick = () => showPhoto(current.photos.findIndex(p => p.id === photo.id));
       const failed = node('p', 'Preview unavailable; try Immich.', 'p-muted'); failed.hidden = true;
       image.onerror = () => { failed.hidden = false; };
-      info.append(file, facts, people, recognition, reason, distance, larger, failed); card.append(button, info);
-      el('lab-photos').append(card); cards.set(photo.id, { card, button, badge, reason, distance });
+      info.append(file, facts, people, recognition, checked, reason, distance, larger, failed); card.append(button, info);
+      el('lab-photos').append(card); cards.set(photo.id, { card, button, badge, reason, distance, recognition, checked });
     }
     reset();
+    void refreshRecognition();
   } catch (e) { if (token === requestId) { error('experiment-error', e.message); el('experiment-subtitle').textContent = 'Could not open this time group.'; } }
+}
+
+async function refreshRecognition() {
+  if (!current) return;
+  const token = ++requestId;
+  let refreshError = '';
+  refreshController?.abort();
+  refreshController = new AbortController();
+  refreshing = true;
+  el('refresh-recognition').disabled = true;
+  el('recognition-status').textContent = `Loading recognition data for ${current.photos.length} photos…`;
+  for (const input of document.querySelectorAll('.lab-settings input')) input.disabled = true;
+  el('reset').disabled = el('copy').disabled = true;
+  for (const item of cards.values()) { item.recognition.textContent = 'Loading recognition data…'; item.checked.textContent = ''; }
+  try {
+    const refreshed = await request('lab/recognition', { viewId: view.viewId, groupId: currentGroup }, { signal: refreshController.signal });
+    if (token !== requestId || !el('experiment').open) return;
+    current = refreshed;
+  } catch (e) {
+    if (token !== requestId || !el('experiment').open) return;
+    current = { ...current, photos: current.photos.map(p => ({ ...p, recognizedIds: null,
+      recognitionStatus: 'failed', recognitionCheckedAt: null })) };
+    refreshError = e.message;
+  } finally {
+    if (token === requestId && el('experiment').open) {
+      refreshing = false;
+      el('refresh-recognition').disabled = el('reset').disabled = false;
+      for (const input of document.querySelectorAll('.lab-settings input')) input.disabled = false;
+      renderRecognition(refreshError); recalculate();
+    }
+  }
+}
+function renderRecognition(refreshError = '') {
+  const loaded = current.photos.filter(p => p.recognitionStatus === 'loaded').length;
+  el('recognition-status').textContent = refreshError || (loaded === current.photos.length
+    ? 'Recognition loaded from Immich. Held fixed for this experiment.'
+    : `Recognition available for ${loaded} of ${current.photos.length} photos. Missing data won’t force a split. Refresh to retry.`);
+  for (const photo of current.photos) {
+    for (const id of photo.recognizedIds ?? []) if (!personLabels.has(id)) personLabels.set(id, `Person ${personLabels.size + 1}`);
+    const item = cards.get(photo.id);
+    item.recognition.textContent = photo.recognitionStatus === 'failed' ? 'Couldn’t load recognition data'
+      : photo.recognitionStatus !== 'loaded' ? 'Recognition data not returned by Immich'
+      : photo.recognizedIds.length ? `Immich recognized: ${photo.recognizedIds.map(id => personLabels.get(id)).join(', ')} (may be incomplete)`
+      : 'No recognized people returned by Immich';
+    item.checked.textContent = photo.recognitionCheckedAt ? `Checked ${date(photo.recognitionCheckedAt)}` :
+      ({ permission: 'Check Immich access permissions.', connection: 'Could not reach Immich.',
+        'not-configured': 'Immich connection not configured.', unavailable: 'Photo unavailable in Immich.',
+        interrupted: 'Refresh interrupted or timed out; retry when ready.', changed: 'Photo information changed; refresh to retry.',
+        'invalid-response': 'Immich returned unusable photo information.', 'storage-error': 'Could not save photo information.' }[photo.recognitionOutcome] ?? '');
+  }
 }
 
 function settings() {
@@ -100,7 +151,7 @@ function reset() {
   focused = null; recalculate();
 }
 function recalculate() {
-  if (!current) return;
+  if (!current || refreshing) return;
   el('span').disabled = !el('use-span').checked;
   el('threshold').disabled = !el('use-hash').checked;
   el('threshold-value').textContent = Number(el('threshold').value).toFixed(3);
@@ -164,10 +215,11 @@ el('more').onclick = async () => {
 };
 for (const input of document.querySelectorAll('.lab-settings input')) input.addEventListener('input', recalculate);
 el('reset').onclick = reset;
+el('refresh-recognition').onclick = refreshRecognition;
 el('clear-focus').onclick = () => { focused = null; renderResult(); };
 el('copy').onclick = async () => {
   const s = settings();
-  const text = `Stacking lab (experimental)\nStarting gap: ${current.gapSeconds} s\nGap: ${s.gapMs / 1000} s; span: ${s.spanMs === null ? 'unlimited' : s.spanMs / 1000 + ' s'}\nThumbHash: ${s.thumbhash ? s.threshold.toFixed(3) + ' (every pair)' : 'off'}; Enrich people categories (none/one/couple/group): ${s.people ? 'on' : 'off'}\nDifferent recognized people (nonempty lists with no identities in common): ${s.identities ? 'on' : 'off'}\n${el('result').textContent}\n${el('evidence-note').textContent.split('. Photo links')[0]}`;
+  const text = `Stacking lab (experimental)\nStarting gap: ${current.gapSeconds} s\nGap: ${s.gapMs / 1000} s; span: ${s.spanMs === null ? 'unlimited' : s.spanMs / 1000 + ' s'}\nThumbHash: ${s.thumbhash ? s.threshold.toFixed(3) + ' (every pair)' : 'off'}; Enrich people categories (none/one/couple/group): ${s.people ? 'on' : 'off'}\nDifferent recognized people (nonempty lists with no identities in common): ${s.identities ? 'on' : 'off'}\n${el('recognition-status').textContent}\n${el('result').textContent}\n${el('evidence-note').textContent.split('. Photo links')[0]}`;
   try {
     if (navigator.clipboard?.writeText) await navigator.clipboard.writeText(text);
     else {
@@ -184,7 +236,11 @@ for (const dialog of document.querySelectorAll('dialog')) {
   dialog.addEventListener('pointerdown', (e) => { backdrop = e.target === dialog; });
   dialog.addEventListener('click', (e) => { if (backdrop && e.target === dialog) dialog.close(); });
 }
-el('experiment').addEventListener('close', () => { requestId++; });
+el('experiment').addEventListener('close', () => {
+  // Native close events are queued. A quickly reopened dialog owns a new
+  // request already; the old close must not cancel that request.
+  if (!el('experiment').open) { requestId++; refreshController?.abort(); refreshing = false; }
+});
 el('previous').onclick = () => showPhoto(viewerIndex - 1);
 el('next').onclick = () => showPhoto(viewerIndex + 1);
 el('lab-viewer').addEventListener('keydown', (e) => {

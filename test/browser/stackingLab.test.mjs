@@ -18,7 +18,8 @@ test('stacking lab shows complete partitions, focused dimming, evidence, reset a
   } });
   for (const [i, category] of ['one', 'couple', 'group'].entries()) {
     const people = [['person-a'], ['person-b'], ['person-a', 'person-b']][i].map(id => ({ id }));
-    fixture.repo.curate.observe({ id: fixture.id(i + 1), people });
+    fixture.assets.find(a => a.id === fixture.id(i + 1)).people = people;
+    fixture.repo.curate.observe({ id: fixture.id(i + 1), people: [{ id: 'stale-cached-person' }] });
     fixture.repo.recordProcessingRun({ assetId: fixture.id(i + 1), provider: 'test', model: 'test',
       promptVersion: 'v1', taxonomyVersion: 'v1', status: 'succeeded', configurationId: 'c'.repeat(64),
       normalizedOutput: { has_people: true, people_count: category } });
@@ -26,6 +27,9 @@ test('stacking lab shows complete partitions, focused dimming, evidence, reset a
   const before = fixture.repo.db.prepare('SELECT * FROM manual_overrides').all();
   const denied = await fetch(`${fixture.base}/api/review/curate/lab/views`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: '{}' });
   assert.equal(denied.status, 401);
+  const deniedRefresh = await fetch(`${fixture.base}/api/review/curate/lab/recognition`, { method: 'POST',
+    headers: { 'content-type': 'application/json' }, body: '{}' });
+  assert.equal(deniedRefresh.status, 401);
   const click = (selector) => page.evaluate(`document.querySelector(${JSON.stringify(selector)}).click()`);
   await page.navigate(`${fixture.base}/curate-stacking-lab.html`);
   await page.waitFor('document.querySelector(".gate-backdrop input")');
@@ -35,6 +39,8 @@ test('stacking lab shows complete partitions, focused dimming, evidence, reset a
   await page.waitFor('document.querySelectorAll(".group-card").length===53 && !document.querySelector("#build").disabled');
   await click('.group-card');
   await page.waitFor('document.querySelectorAll("#lab-photos .photo-card").length===3');
+  await page.waitFor('!document.querySelector("#refresh-recognition").disabled');
+  assert.deepEqual([...new Set(fixture.detailReads)].sort(), [fixture.id(1), fixture.id(2), fixture.id(3)]);
   assert.match(await page.evaluate('document.querySelector("#result").textContent'), /3 photos → 1 group/);
   await click('#use-hash');
   assert.match(await page.evaluate('document.querySelector("#result").textContent'), /2 groups \(2 \+ 1\)/);
@@ -56,6 +62,10 @@ test('stacking lab shows complete partitions, focused dimming, evidence, reset a
   assert.deepEqual(await page.evaluate('[...document.querySelectorAll(".lab-recognition")].map(n=>n.textContent)'),
     ['Immich recognized: Person 1 (may be incomplete)', 'Immich recognized: Person 2 (may be incomplete)',
       'Immich recognized: Person 1, Person 2 (may be incomplete)']);
+  assert.match(await page.evaluate('document.querySelector("#recognition-status").textContent'), /loaded from Immich/);
+  // A remote change cannot silently alter this experiment. Deliberate refresh
+  // uses the same selected photos and retains rule settings and person labels.
+  fixture.assets.find(a => a.id === fixture.id(2)).people = [{ id: 'person-a' }];
   await click('#use-identities');
   assert.match(await page.evaluate('document.querySelector("#result").textContent'), /2 groups \(1 \+ 2\)/);
   assert.match(await page.evaluate('document.querySelectorAll(".lab-reason")[1].textContent'), /different recognized people/);
@@ -64,6 +74,13 @@ test('stacking lab shows complete partitions, focused dimming, evidence, reset a
   const summary = await page.evaluate('window.copiedLabSummary');
   assert.match(summary, /Different recognized people .*: on/);
   assert.doesNotMatch(summary, /person-a|person-b|Person 1|Person 2/);
+  fixture.repo.db.prepare('UPDATE curate_metadata SET last_attempt_at=0,next_at=0').run();
+  await click('#refresh-recognition');
+  await page.waitFor('!document.querySelector("#refresh-recognition").disabled');
+  assert.equal(await page.evaluate('document.querySelector("#use-identities").checked'), true);
+  assert.match(await page.evaluate('document.querySelector("#result").textContent'), /1 group/);
+  assert.match(await page.evaluate('document.querySelectorAll(".lab-recognition")[1].textContent'), /Person 1/);
+  assert.equal(fixture.detailReads.length, 6);
   await click('#use-people');
   assert.match(await page.evaluate('document.querySelector("#result").textContent'), /3 groups \(1 \+ 1 \+ 1\)/);
   await click('#use-identities');
@@ -87,4 +104,47 @@ test('stacking lab shows complete partitions, focused dimming, evidence, reset a
   assert.deepEqual(fixture.repo.db.prepare('SELECT * FROM manual_overrides').all(), before);
   assert.equal(fixture.repo.db.prepare('SELECT count(*) n FROM decision_operations').get().n, 0);
   assert.equal(fixture.repo.db.prepare('SELECT count(*) n FROM curate_separations').get().n, 0);
+});
+
+test('lab distinguishes empty, omitted and failed recognition; closing a refresh cannot update another experiment', { timeout: 60000 }, async t => {
+  if (!findChrome()) return t.skip('Chrome required');
+  const fixture = await curatePreviewFixture({ stackSize: 4, singles: 1 });
+  const browser = await launchChrome(), page = await browser.newPage();
+  t.after(async () => { await browser.stop(); await fixture.stop(); });
+  fixture.assets[0].people = [{ id: 'person-a' }];
+  delete fixture.assets[2].people;
+  fixture.detailResponses.set(fixture.id(4), async () => ({ status: 404, body: {} }));
+  for (let i = 1; i <= 4; i++) fixture.repo.curate.observe({ id: fixture.id(i), people: [{ id: 'stale-person' }] });
+  let entered = Promise.withResolvers(), release = Promise.withResolvers();
+  fixture.detailResponses.set(fixture.id(1), async () => { entered.resolve(); await release.promise; });
+  const click = selector => page.evaluate(`document.querySelector(${JSON.stringify(selector)}).click()`);
+  await page.navigate(`${fixture.base}/curate-stacking-lab.html`);
+  await page.waitFor('document.querySelector(".gate-backdrop input")');
+  await page.evaluate('document.querySelector(".gate-backdrop input").value="smoke-secret";document.querySelector(".gate-backdrop button").click()');
+  await page.waitFor('document.querySelectorAll(".group-card").length===2');
+  await click('.group-card');
+  await entered.promise;
+  assert.match(await page.evaluate('document.querySelector("#recognition-status").textContent'), /Loading recognition data/);
+  assert.equal(await page.evaluate('document.querySelector("#use-identities").disabled'), true);
+  assert.equal(await page.evaluate('document.querySelector("#copy").disabled'), true);
+  release.resolve();
+  await page.waitFor('!document.querySelector("#refresh-recognition").disabled');
+  const labels = await page.evaluate('[...document.querySelectorAll(".lab-recognition")].map(n=>n.textContent)');
+  assert.match(labels[0], /Person 1/);
+  assert.equal(labels[1], 'No recognized people returned by Immich');
+  assert.equal(labels[2], 'Recognition data not returned by Immich');
+  assert.equal(labels[3], 'Couldn’t load recognition data');
+  assert.match(await page.evaluate('document.querySelector("#recognition-status").textContent'), /2 of 4/);
+  assert.equal(await page.evaluate('document.querySelectorAll("#lab-photos .photo-card").length'), 4);
+  assert.ok((await page.evaluate('[...document.querySelectorAll(".lab-checked")].map(n=>n.textContent)')).slice(0,3).every(s => s.startsWith('Checked')));
+  entered = Promise.withResolvers(); release = Promise.withResolvers();
+  fixture.repo.db.prepare('UPDATE curate_metadata SET last_attempt_at=0,next_at=0').run();
+  await click('#refresh-recognition'); await entered.promise;
+  // Same browser turn forces the native close event to arrive after reopening.
+  await page.evaluate('document.querySelector("[data-close=experiment]").click();document.querySelector(".group-card:nth-child(2)").click()');
+  release.resolve();
+  await page.waitFor('!document.querySelector("#refresh-recognition").disabled && document.querySelectorAll("#lab-photos .photo-card").length===1');
+  assert.match(await page.evaluate('document.querySelector("#experiment-title").textContent'), /Explore 1 photo/);
+  assert.equal(await page.evaluate('document.querySelector(".lab-recognition").textContent'), 'No recognized people returned by Immich');
+  assert.equal(fixture.repo.db.prepare('SELECT count(*) n FROM decision_operations').get().n, 0);
 });

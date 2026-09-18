@@ -12,6 +12,7 @@ export async function curatePreviewFixture({ stackSize = 52, singles = 52 } = {}
   const assets = [],
     tags = new Map(),
     photoTags = new Map();
+  const detailReads = [], detailResponses = new Map();
   const id = (n) => `00000000-0000-0000-0000-${String(n).padStart(12, '0')}`;
   function add(n, seconds, name) {
     const asset = {
@@ -54,7 +55,10 @@ export async function curatePreviewFixture({ stackSize = 52, singles = 52 } = {}
       );
     }
     if (path.startsWith('/api/assets/')) {
+      if (request.method === 'GET') detailReads.push(path.split('/')[3]);
       const asset = assets.find((a) => a.id === path.split('/')[3]);
+      const override = await detailResponses.get(asset?.id)?.(asset);
+      if (override) return json(override.body, override.status);
       return asset
         ? json({ ...asset, tags: [...photoTags.get(asset.id)].map((value) => ({ id: value, value })) })
         : json({}, 404);
@@ -106,6 +110,8 @@ export async function curatePreviewFixture({ stackSize = 52, singles = 52 } = {}
     assets,
     contextId,
     photoTags,
+    detailReads,
+    detailResponses,
     dir,
     async stop() {
       await server.stop();

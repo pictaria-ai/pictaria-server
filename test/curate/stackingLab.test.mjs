@@ -169,6 +169,18 @@ test('lab snapshots are stable, bounded, isolated from decisions, and based only
     assert.equal(partition(refreshed.photos, { gapMs: 15000, identities: true }).groups.length, 2);
     assert.deepEqual(service.lab.comparison(first.viewId, 0).photos.map(p => p.recognizedIds), [[], []],
       'recognition changes do not alter an open experiment');
+    const calls = [];
+    service.immich = { async getAsset(id) {
+      calls.push(id);
+      return { id, fileCreatedAt: new Date(id === 'a' ? 0 : 1000).toISOString(),
+        ...(id === 'a' ? { people: [{ id: 'fresh-person' }] } : {}) };
+    } };
+    const live = await service.lab.refreshRecognition(first.viewId, 0);
+    assert.deepEqual(calls.sort(), ['a', 'b']);
+    assert.deepEqual(live.photos.map(p => [p.recognizedIds, p.recognitionStatus]),
+      [[['fresh-person'], 'loaded'], [null, 'not-returned']]);
+    assert.deepEqual(service.lab.comparison(first.viewId, 0).photos.map(p => p.recognizedIds), [[], []]);
+    assert.deepEqual(snapshot(), before, 'recognition reads never create decisions or leases');
     await assert.rejects(service.lab.open({ gapSeconds: 0 }), /1–180/);
     assert.throws(() => service.lab.page(reversed.viewId, -1), /Invalid/);
     assert.throws(() => service.lab.comparison(reversed.viewId, -1), /not found/);
