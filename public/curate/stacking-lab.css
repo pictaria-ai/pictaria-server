@@ -30,3 +30,13 @@
 .lab-similarity { border-block: 1px solid var(--p-line); padding-block: 12px; margin-block: 16px; }
 .lab-similarity .compare-tools { margin-top: 0; }
 .lab-ranking { font-weight: 600; }
+
+.lab-rank-scroll { max-width: 100%; overflow: auto; max-height: 420px; margin-block: 12px; }
+.lab-rank-scroll table { border-collapse: collapse; font-size: 12px; min-width: 100%; }
+.lab-rank-scroll caption { text-align: left; color: var(--p-muted); padding-block: 8px; }
+.lab-rank-scroll th, .lab-rank-scroll td { border: 1px solid var(--p-line); padding: 7px; text-align: center; white-space: nowrap; }
+.lab-rank-scroll td:last-child { text-align: left; white-space: normal; min-width: 180px; }
+.lab-rank-scroll th { background: var(--p-panel-2); }
+.lab-rank-scroll .p-btn { font-size: 12px; padding: 5px; }
+#pair-evidence { max-height: 240px; overflow: auto; }
+#pair-evidence p { margin-block: 8px; }

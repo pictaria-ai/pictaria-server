@@ -16,6 +16,28 @@ export function createCurateRoutes({ curate, review = null }) {
         result = curate.lab.page(url.searchParams.get('viewId'), Number(url.searchParams.get('offset') ?? 0));
       } else if (request.method === 'GET' && path === 'lab/comparison') {
         result = curate.lab.comparison(url.searchParams.get('viewId'), Number(url.searchParams.get('groupId') ?? -1));
+      } else if (request.method === 'POST' && path === 'lab/ranks/plan') {
+        result = curate.lab.ranks.plan(await readObject(request, { maxBytes: 8192 }));
+      } else if (request.method === 'POST' && path === 'lab/ranks/run') {
+        const body = await readObject(request, { maxBytes: 8192 });
+        const controller = new AbortController();
+        const close = () => { if (!response.writableFinished) controller.abort(); };
+        response.once('close', close);
+        try {
+          await curate.lab.ranks.run(body, { signal: controller.signal, emit: async event => {
+            if (response.destroyed) { controller.abort(); controller.signal.throwIfAborted(); }
+            if (!response.headersSent) response.writeHead(200, { 'Content-Type': 'application/x-ndjson', 'X-Accel-Buffering': 'no' });
+            // <=40 rows of <=40 ranks: bounded output even for a slow reader.
+            response.write(JSON.stringify(event) + '\n');
+          } });
+          response.end();
+        } catch (error) {
+          if (response.destroyed) return true;
+          if (!response.headersSent) throw error;
+          response.end(JSON.stringify({ type: 'error', code: error instanceof CurateError ? error.code : 'lab_rank_interrupted',
+            message: error instanceof CurateError ? error.message : 'Rank comparison interrupted. Completed rows are retained; no requests were retried.' }) + '\n');
+        } finally { response.removeListener('close', close); }
+        return true;
       } else if (request.method === 'POST' && ['lab/recognition', 'lab/ranking'].includes(path)) {
         const body = await readObject(request, { maxBytes: 4096 });
         const controller = new AbortController();

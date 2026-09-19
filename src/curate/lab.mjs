@@ -2,6 +2,7 @@ import { Worker } from 'node:worker_threads';
 import { randomUUID } from 'node:crypto';
 import { CurateError } from './contracts.mjs';
 import { LAB_PHOTO_LIMIT } from '../../public/curate/stacking-model.js';
+import { LabRanks } from './lab-ranks.mjs';
 import { labRecognizedIds } from './lab-evidence.mjs';
 
 // Separate, ephemeral scopes: lab IDs cannot issue decisions or corrections.
@@ -9,6 +10,7 @@ export class StackingLab {
   constructor(curate) {
     this.curate = curate;
     this.views = new Map();
+    this.ranks = new LabRanks(this);
   }
   async open({ gapSeconds = 15, sort = 'oldest' } = {}) {
     if (!Number.isInteger(gapSeconds) || gapSeconds < 1 || gapSeconds > 180 || !['oldest', 'newest'].includes(sort))

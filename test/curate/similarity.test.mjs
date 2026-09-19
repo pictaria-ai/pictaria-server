@@ -157,3 +157,94 @@ test('upstream errors give actionable messages without forwarding private diagno
     assert.equal(calls.length, 1);
   });
 });
+
+function rankView(curate, ids) {
+  curate.lab.views.set('rank-view', { expiresAt: Date.now() + 60000,
+    groups: [ids.map((id, time) => ({ id, time }))] });
+  return { viewId: 'rank-view', groupId: 0 };
+}
+async function rankPass(curate, body, signal = new AbortController().signal) {
+  const plan = curate.lab.ranks.plan(body), events = [];
+  await curate.lab.ranks.run({ ...body, admission: plan.admission }, { signal, emit: async value => events.push(value) });
+  return { plan, events };
+}
+
+test('group rank passes admit eight new requests, keep directions distinct, and expose only selected ranks', async t => {
+  const { curate, repo, calls, advance } = setup(t, args => ({ assets: { items: args.body.queryAssetId === 'a'
+    ? [item('outside-private'), item('b')] : [item('a')] } }));
+  const ids = ['a', 'b', 'c', ...Array.from({ length: 7 }, (_, i) => `more-${i}`)];
+  for (const id of ids.slice(3)) { repo.upsertAsset({ id }); repo.reviewListAdd([id], 'test'); }
+  const body = rankView(curate, ids);
+  const waits = []; curate.lab.ranks.wait = async ms => { waits.push(ms); advance(ms); };
+  const first = await rankPass(curate, body);
+  assert.equal(first.plan.newSearches, 8); assert.equal(first.plan.remaining, 2);
+  assert.equal(calls.length, 8); assert.deepEqual(waits, Array(7).fill(5000));
+  const rows = first.events.filter(e => e.type === 'row').map(e => e.row);
+  assert.equal(rows[0].photos.find(p => p.id === 'b').rank, 2);
+  assert.equal(rows[1].photos.find(p => p.id === 'a').rank, 1);
+  assert.equal(rows[0].photos.find(p => p.id === 'c').rank, null);
+  assert.doesNotMatch(JSON.stringify(first), /outside-private|synthetic-secret|privateMetadata/);
+  const second = await rankPass(curate, { ...body, completed: rows.map(r => r.referenceId), scope: first.plan.scope });
+  assert.equal(second.plan.newSearches, 2); assert.equal(calls.length, 10);
+  const cached = await rankPass(curate, body);
+  assert.equal(cached.plan.newSearches, 0); assert.equal(cached.plan.cached, 10); assert.equal(calls.length, 10);
+  assert.equal(repo.db.prepare('SELECT count(*) n FROM decision_operations').get().n, 0);
+});
+
+test('rank admission rejects expired cache estimates, changed sources and forged completed scope before work', async t => {
+  const { curate, repo, calls, advance, search } = setup(t, () => ({ assets: { items: [item('a'), item('b')] } }));
+  const body = rankView(curate, ['a', 'b']);
+  await search.search('a');
+  const plan = curate.lab.ranks.plan(body);
+  advance(limits.cacheMs);
+  await assert.rejects(curate.lab.ranks.run({ ...body, admission: plan.admission }, {
+    signal: new AbortController().signal, emit: async () => assert.fail('no stream before admission'),
+  }), { code: 'lab_rank_estimate_changed' });
+  assert.equal(calls.length, 1);
+  assert.throws(() => curate.lab.ranks.plan({ ...body, completed: ['a'] }), { code: 'lab_rank_changed' });
+  repo.updateAssetVisuals('a', { thumbhash: 'AQID' });
+  assert.throws(() => curate.lab.ranks.plan({ ...body, scope: plan.scope }), { code: 'lab_rank_changed' });
+});
+
+test('cancel between rank requests stops the pass; one lane is reserved even while pacing', async t => {
+  const { curate, calls, search } = setup(t, () => ({ assets: { items: [item('a'), item('b')] } }));
+  const body = rankView(curate, ['a', 'b', 'c']), controller = new AbortController();
+  curate.lab.ranks.wait = async (_ms, signal) => {
+    await assert.rejects(search.search('c'), { code: 'similarity_busy' });
+    await assert.rejects(rankPass(curate, body), { code: 'similarity_busy' });
+    controller.abort(); signal.throwIfAborted();
+  };
+  await assert.rejects(rankPass(curate, body, controller.signal), { name: 'AbortError' });
+  assert.equal(calls.length, 1); assert.equal(search.owner, null);
+});
+
+test('rank failure stops without retry and changed connection cannot leak mixed-library evidence', async t => {
+  const { curate, calls, advance, client, search } = setup(t, (_args, n) => {
+    if (n === 2) throw Error('private backend error');
+    return { assets: { items: [item('a')] } };
+  });
+  const body = rankView(curate, ['a', 'b', 'c']);
+  curate.lab.ranks.wait = async ms => advance(ms);
+  const { events } = await rankPass(curate, body);
+  assert.equal(calls.length, 2); assert.equal(events.at(-1).stopped, true);
+  assert.equal(events.filter(e => e.type === 'row').at(-1).row.state, 'failed');
+  assert.doesNotMatch(JSON.stringify(events), /private backend error/);
+  assert.equal(search.owner, null);
+  const plan = curate.lab.ranks.plan(body);
+  await assert.rejects(curate.lab.ranks.run({ ...body, admission: plan.admission }, {
+    signal: new AbortController().signal, emit: async event => { if (event.type === 'start') client.apiKey = 'replacement-secret'; },
+  }), { code: 'lab_rank_changed' });
+  assert.equal(calls.length, 2); assert.equal(search.owner, null);
+});
+
+test('oversized rank groups are rejected without sampling; expired views and shutdown stop passes', async t => {
+  const { curate, calls, search } = setup(t, () => ({ assets: { items: [] } }));
+  const body = rankView(curate, Array.from({ length: 41 }, (_, i) => `p${i}`));
+  assert.throws(() => curate.lab.ranks.plan(body), { code: 'lab_rank_size' });
+  rankView(curate, ['a', 'b']);
+  curate.lab.ranks.wait = async () => { await search.close(); };
+  await assert.rejects(rankPass(curate, body), { name: 'AbortError' });
+  assert.equal(calls.length, 1); assert.equal(search.owner, null);
+  curate.lab.views.clear();
+  assert.throws(() => curate.lab.ranks.plan(body), { code: 'lab_expired' });
+});

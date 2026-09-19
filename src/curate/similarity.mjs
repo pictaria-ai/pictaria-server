@@ -14,6 +14,7 @@ export class CurateSimilaritySearch {
     this.timeoutMs = timeoutMs;
     this.cache = new Map();
     this.nextAt = 0;
+    this.shutdown = new AbortController();
   }
   connectionKey() {
     const client = this.curate.immich;
@@ -34,10 +35,26 @@ export class CurateSimilaritySearch {
       throw new CurateError('The reference photo is no longer available for this experiment. Rebuild time groups.', 'similarity_reference_changed');
     return fingerprint(row);
   }
-  async search(referenceId, { signal } = {}) {
+  cached(referenceId) {
+    this.settingsChanged();
+    const source = this.sourceKey(referenceId);
+    for (const [id, value] of this.cache) if (value.checkedAt + SIMILARITY_LIMITS.cacheMs <= this.now()) this.cache.delete(id);
+    const value = this.cache.get(fingerprint([this.connection, referenceId, source]));
+    return value ? { ...value, ids: [...value.ids], cached: true } : null;
+  }
+  reserve() {
+    if (this.owner || this.work || this.closed || this.curate.closed)
+      throw new CurateError('Another similarity search is running or stopping. Try again later.', 'similarity_busy', 503);
+    this.owner = Symbol('similarity pass');
+    return this.owner;
+  }
+  release(owner) { if (this.owner === owner) this.owner = null; }
+  async search(referenceId, { signal, owner } = {}) {
     if (typeof referenceId !== 'string' || !referenceId || referenceId.length > 128)
       throw new CurateError('Invalid similarity reference.', 'invalid_curate_query', 400);
     signal?.throwIfAborted();
+    if (this.owner && this.owner !== owner)
+      throw new CurateError('A group similarity check is running. Try again when it finishes.', 'similarity_busy', 503);
     if (this.closed || this.curate.closed)
       throw new CurateError('Similarity search is stopping.', 'similarity_unavailable', 503);
     const original = this.curate.immich;
@@ -100,6 +117,7 @@ export class CurateSimilaritySearch {
   }
   async close() {
     this.closed = true;
+    this.shutdown.abort();
     this.controller?.abort();
     this.cache.clear();
     await this.work?.catch(() => {});

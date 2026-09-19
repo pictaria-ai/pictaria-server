@@ -7,6 +7,14 @@ All notable changes to Pictaria Server are documented here. This project follows
 
 ### Development
 
+- The stacking lab now compares directional Immich search ranks from multiple
+  reference photos, with request estimates, progress, cancellation and explicit
+  partial coverage. Each pass makes at most eight new paced searches; the matrix
+  supports up to 40 photos. A separate **Try combined evidence** mode combines
+  ThumbHash, people evidence and reciprocal ranks, explaining supported,
+  provisional and separated groups. Rules and cutoffs remain experimental;
+  neither production Curate nor AI referees change.
+
 - Added a testing-only **Stacking lab** linked from the Curate preview. Start
   with time-only groups, then try time/span, ThumbHash and Enrich people-category
   rules while keeping every photo visible in labelled proposed groups. Click a

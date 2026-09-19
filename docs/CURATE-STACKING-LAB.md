@@ -33,7 +33,8 @@ Curate algorithm. The normal password gate protects its APIs.
 
 ## Immich similarity ranking
 
-This is an inspection tool, not a grouping switch. Immich uses its existing Smart
+The earliest-photo check is an inspection tool. The multi-reference table can also
+feed the explicitly selected combined-evidence experiment described below. Immich uses its existing Smart
 Search image embeddings; Pictaria neither downloads images for this search nor
 runs new AI inference. Smart Search must be enabled and have processed the
 reference photo. The existing API key needs `asset.read`. No direct access to
@@ -46,7 +47,7 @@ visibility and access can also keep a photo out. **Not in the first 50 results**
 does not mean different; if Immich returns fewer photos, the label reports that
 actual returned count. Failed or malformed searches assign no ranks.
 
-Each click uses one public `POST /api/search/smart` request with `queryAssetId`,
+Each uncached reference uses one public `POST /api/search/smart` request with `queryAssetId`,
 `type: IMAGE`, `visibility: timeline`, `size: 51` and `withExif: false`. Requesting
 51 allows for the reference itself; it is removed wherever it appears and the
 remaining list is capped at 50. The flat filters are supported in Immich 2.7.5,
@@ -75,7 +76,83 @@ never launch this search. There is no automatic all-stack mode. Returning 50
 results limits response size, not Immich's internal search work; measured test-
 instance latency and library load should guide any future background use.
 
-## Experimental rules
+## Multi-reference rank comparison (PIC-380)
+
+**Check selected group** checks multiple references in capture order. Each row
+is one search: A→B and B→A are separate observations, never an inferred symmetric
+score. The table identifies references by the same Photo 1 / 2 labels shown on
+cards. Click a row label to highlight that photo's proposed group. It shows
+unqueried, waiting/searching, complete, cached and failed states, returned depth,
+original check time and search duration. Only selected-photo ranks reach the UI.
+
+A local-only preflight displays new searches, reusable cache rows and references
+left for later. Each explicit pass admits **at most eight uncached searches**,
+reserves the existing shared search lane and spaces request starts at least five
+seconds apart. It streams progress and has a 180-second overall deadline. The
+per-request timeout, response cap, failure cooldown and cache limits still apply.
+If the cache estimate changes before admission, the pass does not start; the UI
+shows an updated estimate. There are no hidden retries or extra result pages.
+
+**Cancel** or closing the dialog aborts further work. Completed rows remain;
+unqueried rows are unknown. A failed request stops the pass. **Check remaining
+references** starts another explicit pass and does not retry failed references.
+**Reset rank evidence** deliberately clears those held rows; the next pass can
+reuse any valid ten-minute cache entries. It is not a forced cache eviction.
+Changing the connection or any selected source revision invalidates the combined
+rank evidence, rather than mixing libraries/renditions. A changed or expired
+snapshot requires reset/rebuild. Ranks do not detect unrelated library changes
+or search-model revisions; their displayed timestamps describe that limitation.
+
+The matrix admits **2–40 photos**. A larger group stays available to the other lab
+experiments, but its rank check is explicitly unavailable; no subset silently
+stands for the whole group. Groups with 9–40 uncached references need multiple
+explicit passes. Each direction needs at most one search, so N references cost
+at most N requests, not N². This does not imply Immich's internal search work is
+constant or cheap; test-instance load still needs evaluation before automation.
+
+## Combined-evidence experiment (PIC-380)
+
+Select **Try combined evidence** to compare candidate rules with the original
+individual filters. Enable the evidence sources to include, then optionally
+**Use reciprocal search ranks**. These switches only reuse held data. Search
+rows are committed to the grouping experiment after the explicit pass ends,
+including completed rows from a cancelled/failed pass. No incremental arrival
+silently rearranges the grouping mid-pass. Changing controls still recalculates
+against the previously held evidence until that pass ends.
+
+This deliberately small decision table is an experiment, **not calibrated
+production behavior**:
+
+- Close ThumbHash, with no observed conflict in the enabled people evidence,
+  supports alternatives under the tested rule.
+- Different known Enrich categories or disjoint nonempty recognized IDs plus a
+  ThumbHash difference propose a separation, unless reciprocal near ranks
+  contradict it. This corroboration rule can still be wrong and needs evaluation.
+- Close ThumbHash or reciprocal near ranks conflicting with people evidence
+  remain uncertain. People differences alone do not split photos in this mode.
+- Reciprocal near ranks plus supported people agreement can support alternatives
+  even when the coarse hash differs. Rank alone needs independent composition
+  evidence. The initial top-10 cutoff is a lab starting value, not a recommendation.
+- Missing, failed, asymmetric, low or not-returned rank evidence is unknown,
+  never evidence of dissimilarity. With insufficient evidence, keep the bounded
+  time group provisional for inspection rather than inventing a separation.
+
+Every proposed group checks every pair. A supported A–B and B–C cannot bridge a
+proposed A–C separation. Any uncertain internal pair labels the group provisional.
+Stable capture-time/ID ordering and the same greedy placement rules apply. Time
+and span boundaries still constrain the scope. All original photos remain visible.
+Highlight a photo to see its pair explanations, raw hash distances, directional
+ranks, people conflicts and missing observations. The copy action includes those
+explanations using photo numbers without filenames, asset IDs or identity labels.
+
+This does not implement exact-checksum/rendition rules, detected-face counts,
+scene tags, Pictaria vectors, production defaults or either AI role. The lab still
+ignores saved human separations, so it cannot stand in for production acceptance.
+No supported/provisional label here authorizes bypassing an AI stack check.
+
+## Individual-filter rules
+
+These are the original lab rules, used when combined mode is off.
 
 Photos are considered oldest first with deterministic ID ties. Each joins the
 most recently created group that satisfies the selected rules; otherwise it

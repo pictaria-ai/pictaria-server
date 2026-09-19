@@ -235,3 +235,52 @@ test('lab distinguishes empty, omitted and failed recognition; closing a refresh
   assert.equal(await page.evaluate('document.querySelector(".lab-recognition").textContent'), 'No recognized people returned by Immich');
   assert.equal(fixture.repo.db.prepare('SELECT count(*) n FROM decision_operations').get().n, 0);
 });
+
+test('multi-reference ranks stream progress, preserve partial cancellation, and feed an explicit combined experiment', { timeout: 60000 }, async t => {
+  if (!findChrome()) return t.skip('Chrome required');
+  const fixture = await curatePreviewFixture({ stackSize: 3, singles: 0 });
+  const browser = await launchChrome(), page = await browser.newPage();
+  t.after(async () => { await browser.stop(); await fixture.stop(); });
+  const click = selector => page.evaluate(`document.querySelector(${JSON.stringify(selector)}).click()`);
+  for (const path of ['plan', 'run']) {
+    const denied = await fetch(`${fixture.base}/api/review/curate/lab/ranks/${path}`, { method: 'POST',
+      headers: { 'content-type': 'application/json' }, body: '{}' });
+    assert.equal(denied.status, 401);
+  }
+  await page.navigate(`${fixture.base}/curate-stacking-lab.html`);
+  await page.waitFor('document.querySelector(".gate-backdrop input")');
+  await page.evaluate('document.querySelector(".gate-backdrop input").value="smoke-secret";document.querySelector(".gate-backdrop button").click()');
+  await page.waitFor('document.querySelector(".group-card")'); await click('.group-card');
+  await page.waitFor('document.querySelector("#check-group-ranks") && !document.querySelector("#check-group-ranks").disabled && !document.querySelector("#refresh-recognition").disabled');
+  assert.match(await page.evaluate('document.querySelector("#rank-comparison").textContent'), /3 new searches/);
+  assert.equal(fixture.similarityReads.length, 0);
+  await click('#combined-mode'); await click('#use-ranks');
+  assert.match(await page.evaluate('document.querySelector("#combined-summary").textContent'), /3 uncertain/);
+  await click('#check-group-ranks');
+  await page.waitFor('document.querySelector("#rank-comparison").textContent.includes("1 of 3 new searches complete")');
+  assert.equal(fixture.similarityReads.length, 1);
+  await click('#rank-comparison .compare-tools button:nth-child(2)');
+  await page.waitFor('document.querySelector("#rank-comparison").textContent.includes("Cancelled.") && !document.querySelector("#check-group-ranks").disabled');
+  assert.match(await page.evaluate('document.querySelector("#rank-comparison").textContent'), /2 new searches/);
+  assert.match(await page.evaluate('document.querySelector("#rank-comparison tbody").textContent'), /Complete.*Unqueried/s);
+  await click('#check-group-ranks');
+  await page.waitFor('document.querySelector("#rank-comparison").textContent.includes("Pass complete.") && document.querySelector("#check-group-ranks").disabled', { timeoutMs: 20000 });
+  assert.equal(fixture.similarityReads.length, 3);
+  const row = await page.evaluate('[...document.querySelectorAll("#rank-comparison tbody tr:first-child td")].map(n=>n.textContent)');
+  assert.deepEqual(row.slice(0, 3), ['·', '1', '2']);
+  assert.equal(await page.evaluate('document.querySelectorAll("#rank-comparison tbody tr").length'), 3);
+  await click('#rank-comparison tbody tr:nth-child(2) button');
+  assert.match(await page.evaluate('document.querySelector("#pair-evidence").textContent'), /Photos 1 ↔ 2.*reciprocal near ranks/s);
+  assert.match(await page.evaluate('document.querySelector("#combined-summary").textContent'), /uncertain/, 'rank alone is not proof');
+  const before = fixture.similarityReads.length;
+  await click('#use-hash'); await click('#use-people'); await click('#use-ranks');
+  assert.equal(fixture.similarityReads.length, before);
+  await page.send('Emulation.setDeviceMetricsOverride', { width: 375, height: 812, deviceScaleFactor: 1, mobile: true });
+  assert.equal(await page.evaluate('document.querySelector("#experiment").scrollWidth <= document.querySelector("#experiment").clientWidth'), true);
+  await page.evaluate('Object.defineProperty(navigator,"clipboard",{configurable:true,value:{writeText:async text=>{window.copied=text}}})');
+  await click('#copy');
+  assert.match(await page.evaluate('window.copied'), /Directional ranks.*Photo 2/s);
+  assert.doesNotMatch(await page.evaluate('window.copied'), /00000000|target-portrait|synthetic/);
+  assert.equal(fixture.repo.db.prepare('SELECT count(*) n FROM decision_operations').get().n, 0);
+  assert.equal(fixture.repo.db.prepare('SELECT count(*) n FROM curate_separations').get().n, 0);
+});

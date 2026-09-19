@@ -43,7 +43,7 @@ export function timeGroups(photos, gapMs) {
   return groups;
 }
 
-export function partition(photos, { gapMs, spanMs = null, thumbhash = false, threshold = 0.1, people = false, identities = false }) {
+export function partition(photos, { gapMs, spanMs = null, thumbhash = false, threshold = 0.1, people = false, identities = false, pairRule = null }) {
   if (photos.length > LAB_PHOTO_LIMIT) throw Error(`Experiments support at most ${LAB_PHOTO_LIMIT} photos.`);
   if (!Number.isFinite(gapMs) || gapMs < 0 || gapMs > 180000 ||
       (spanMs !== null && (!Number.isFinite(spanMs) || spanMs < 0 || spanMs > 3600000)) ||
@@ -67,6 +67,8 @@ export function partition(photos, { gapMs, spanMs = null, thumbhash = false, thr
       }
       let compatible = true;
       for (const member of group) {
+        const pairReason = pairRule?.(photo, member);
+        if (pairReason) { blocked.add(pairReason); compatible = false; break; }
         // Positive, disjoint observations only. An overlap may be a partial
         // recognition list; missing observations do not force a separation.
         const a = recognized.get(photo.id), b = recognized.get(member.id);
