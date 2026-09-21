@@ -16,20 +16,25 @@ Curate algorithm. The normal password gate protects its APIs.
    span, ThumbHash, Enrich people categories and recognized-person identities. Settings apply only
    to that complete time group. Widen the starting gap on the main page to test
    neighbors outside it. Experiment settings reset when another group opens.
+   Controls sit beside the photos on desktop. On smaller screens, the settings
+   panel has its own bounded scroll area and can be collapsed. Rank tables, pair
+   evidence and longer explanations are expandable below the photos.
    Opening a group loads recognition from Immich before enabling the controls.
-   **Refresh from Immich** repeats that read while keeping the selected rules.
+   **Recognition data → Refresh from Immich** repeats that read while keeping
+   the selected rules.
 3. Every photo stays visible in capture order with a numbered proposed group.
    Click an image to highlight its group and dim the others; no photo is discarded.
    This also shows ThumbHash distances to the highlighted reference. **View
    larger** opens a viewer with previous/next controls and a configured Immich
-   link. **Copy experiment summary** copies rules, group sizes and evidence
+   link. **Copy** in the window header copies rules, group sizes and evidence
    coverage, without photo IDs, names, hashes or images.
-4. Optionally click **Check similarity ranking**. Immich searches its timeline
+4. Optionally open **Earliest-photo search** below the photos and click
+   **Check similarity ranking**. Immich searches its timeline
    images using this time group's earliest photo, including images outside the
    group. The other cards show their positions among the first 50 results after
    removing the reference. The reference stays fixed even when highlighting a
-   different photo or changing rules. Search duration and check time appear above
-   the photos; copied summaries include ranks using Photo 1 / Photo 2 labels.
+   different photo or changing rules. Search duration and check time appear in
+   that section; copied summaries include ranks using Photo 1 / Photo 2 labels.
 
 ## Immich similarity ranking
 
@@ -112,9 +117,9 @@ constant or cheap; test-instance load still needs evaluation before automation.
 
 ## Combined-evidence experiment (PIC-380)
 
-Select **Try combined evidence** to compare candidate rules with the original
+Select **Combine evidence** to compare candidate rules with the original
 individual filters. Enable the evidence sources to include, then optionally
-**Use reciprocal search ranks**. These switches only reuse held data. Search
+**Reciprocal search ranks**. These switches only reuse held data. Search
 rows are committed to the grouping experiment after the explicit pass ends,
 including completed rows from a cancelled/failed pass. No incremental arrival
 silently rearranges the grouping mid-pass. Changing controls still recalculates
@@ -131,17 +136,19 @@ These rules are **not calibrated production behavior**:
   different** (initially ≥0.150) can corroborate separation. There is no special
   transition at the individual filter's 0.100. A hash is never an exact-duplicate
   proof. These starting values need owner evaluation.
-- Different supported Enrich categories corroborated by recognition counts can
-  propose separation despite a close shared-backdrop hash. Both people switches
-  must be enabled. Each recognized-ID count must agree with its own category:
-  None=0, One=1, Couple=2, Group≥3. Missing or conflicting counts do not qualify;
-  empty observations alone do not establish absence. This extends the PIC-367
-  count-corroboration approach to the lab's supported Group category. Recognition
-  completeness still is not guaranteed, so agreement is evidence, not proof.
-- A people difference plus clearly different ThumbHash or corroborating rank
-  contrast can propose separation. Reciprocal near ranks conflicting with people
-  evidence keep the pair uncertain. A rank contrast plus clearly different hash
-  can also propose separation without people evidence.
+- **Same recognized people** is a strict, independent rule in both lab modes.
+  Any difference between two observed identity sets proposes separation, including
+  partial overlaps and an empty list versus a nonempty one. Missing/failed lists
+  remain unknown. Matching sets ignore ordering and duplicates; empty matches do
+  not supply positive composition evidence. Close hashes or strong reciprocal
+  ranks cannot override an identity change when this switch is on. This replaces
+  the earlier lab rule that required disjoint sets and corroboration; see the
+  recognition examples below. Other production/preview grouping is unchanged.
+- A supported Enrich-category difference plus clearly different ThumbHash or
+  corroborating rank contrast can propose separation. Reciprocal near ranks
+  conflicting with Enrich categories keep the pair uncertain unless the recognized
+  people rule already requires separation. A rank contrast plus clearly different
+  hash can also propose separation without people evidence.
 - Reciprocal near ranks plus compatible people evidence can recover alternatives
   despite a coarse-hash difference. Rank alone does not support alternatives.
 - Missing, failed and not-returned ranks stay unknown, never evidence of
@@ -227,19 +234,25 @@ exact-count rule. Production/Preview grouping rules are unchanged by this lab
 experiment. Fresh shared metadata can affect their next view, just as normal
 Curate metadata refresh can.
 
-**Separate different recognized people** is an independent, initially-off rule.
-It compares Immich person IDs without needing Enrich categories. Two
-nonempty identity lists with **no identities in common** block a join. Missing,
-empty, omitted or malformed lists do not force a split; overlapping lists remain
-compatible because one could be incomplete. Matching identities never override
-the other enabled rules. All-pairs checking prevents an unknown or overlapping
-photo from bridging two photos with disjoint identities.
+**Same recognized people** is an independent, initially-off rule in both lab
+modes. It compares the complete returned sets of Immich person IDs without
+needing Enrich categories. Any observed set change blocks a join. This includes
+adding/removing one person, changing one identity while keeping another, or an
+explicit empty list versus a nonempty one. Ordering and repeated IDs do not matter.
+Missing, omitted, malformed or failed observations stay unknown and do not force
+separation. All-pairs checking prevents an unknown photo from bridging two photos
+with differing identity sets. Other enabled rules still apply to matching sets.
 
-For example, solo photos recognized as `{A}` and `{B}` separate under this rule.
-A couple photo `{A,B}` overlaps both and is not separated from either by identity
-alone; enabling Enrich people categories also separates it from the One photos.
-This is an experimental signal, not certainty: if Immich detects only A in one
-couple photo and only B in another, even this rule can split similar photos.
+For example, `{A}`, `{B}`, and `{A,B}` form three groups with this rule enabled.
+`{A,B}` and `{B,A}` remain compatible; `{A,B}` and `{A,C}` separate despite the
+same count and one shared person. `[]` differs from `{A}`, whereas an unavailable
+list is not compared as `[]`. In combined mode, visual/rank support cannot override
+these differences. Disabling the switch removes this constraint.
+
+This stricter behavior follows the September 21 owner-requested lab iteration.
+It is not proof of different composition: if Immich misses a face or fails to
+recognize someone, legitimate alternatives may separate. An empty list is an
+observation of recognition, not proof that no people are present in the photo.
 
 Cards use **Person 1, Person 2, …** consistently within the open experiment so
 identity overlaps are visible. These labels are local to that experiment, not

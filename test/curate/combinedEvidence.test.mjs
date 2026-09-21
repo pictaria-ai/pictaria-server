@@ -33,12 +33,12 @@ test('reciprocal ranks and people agreement recover a coarse-hash difference; ra
   assert.deepEqual(memberships(combinedPartition([b, a], settings, rows)), [['a', 'b']]);
 });
 
-test('a shared backdrop separates by corroborated counts, retaining the backlit solo with its supported alternatives', () => {
+test('a shared backdrop separates by changed recognized people, retaining the backlit solo with its supported alternatives', () => {
   const { photos, rows } = mixedBackdrop(), before = JSON.stringify([photos, [...rows]]);
   const result = combinedPartition(photos, settings, rows);
   assert.deepEqual(memberships(result), [['a', 'b', 'c', 'f'], ['d', 'e']]);
   assert.equal(result.pair('a', 'd').state, 'separate');
-  assert.match(result.pair('a', 'd').reason, /corroborated by recognition counts/);
+  assert.match(result.pair('a', 'd').reason, /Different recognized people/);
   assert.equal(result.pair('a', 'f').state, 'supported');
   assert.deepEqual(memberships(combinedPartition([...photos].reverse(), settings, rows)), memberships(result));
   assert.equal(JSON.stringify([photos, [...rows]]), before);
@@ -107,14 +107,34 @@ test('three hash bands remove the old 0.100 support/separation cliff; middle-ban
   assert.equal(assessPair(photo('a', 0), photo('b', 100, 'couple'), settings).state, 'separate');
 });
 
-test('count corroboration respects missing/contradictory observations, group lower bound and disabled controls', () => {
-  const one = photo('a', 0, 'one', ['person']);
-  for (const ids of [null, [], ['person']]) assert.equal(assessPair(one, photo('b', 0, 'couple', ids), settings).state, 'uncertain');
-  assert.equal(assessPair(one, photo('b', 0, 'group', ['x', 'y', 'z']), settings).state, 'separate');
-  assert.equal(assessPair(one, photo('b', 0, 'group', ['x', 'y']), settings).state, 'uncertain');
+test('recognized set changes always separate when enabled, despite overlap, hashes, ranks or category agreement', () => {
+  const one = photo('a', 0, 'one', ['person']), rows = rowsFor(['a', 'b']);
+  for (const ids of [[], ['other'], ['person', 'partner']]) {
+    const other = photo('b', 0, 'one', ids);
+    const assessment = assessPair(one, other, settings, rows);
+    assert.equal(assessment.state, 'separate');
+    assert.match(assessment.reason, /Different recognized people/);
+    assert.match(assessment.notes.join(' '), /identity sets differ/);
+    assert.equal(assessPair(one, other, { ...settings, identities: false }, rows).state, 'supported');
+    assert.equal(assessPair(one, other, { ...settings, people: false, thumbhash: false, ranks: false }).state, 'separate');
+  }
   const couple = photo('b', 0, 'couple', ['person', 'partner']);
-  assert.equal(assessPair(one, couple, { ...settings, identities: false }).state, 'uncertain');
-  assert.equal(assessPair(one, couple, settings, rowsFor(['a', 'b'])).state, 'uncertain', 'reciprocal rank support contradicts the count-based separation');
+  assert.equal(assessPair(couple, photo('c', 0, 'couple', ['person', 'other']), settings).state, 'separate', 'same count with partial overlap is still a change');
+  assert.equal(assessPair(couple, photo('c', 0, 'couple', ['partner', 'person', 'person']), settings).state, 'supported');
+});
+
+test('missing recognition stays unknown; empty lists are compared but never provide positive composition support', () => {
+  const one = photo('a', null, null, ['person']);
+  for (const ids of [null, undefined, 'invalid']) {
+    const assessment = assessPair(one, photo('b', null, null, ids), settings);
+    assert.equal(assessment.state, 'uncertain');
+    assert.match(assessment.notes.join(' '), /Recognized identities missing/);
+  }
+  assert.equal(assessPair(photo('a', null, null, []), photo('b', null, null, []), settings, rowsFor(['a', 'b'])).state, 'uncertain');
+  const photos = [photo('a', 0, null, ['person']), photo('b', 0, null, null), photo('c', 0, null, ['person', 'partner'])];
+  const result = combinedPartition(photos, settings, rowsFor(['a', 'b', 'c']));
+  assert.notEqual(result.byPhoto.get('a'), result.byPhoto.get('c'), 'an unknown middle photo cannot bridge a changed identity set');
+  assert.equal(result.groups.flat().length, 3);
 });
 
 test('time bounds, unknown dates and maximum size still constrain supported-first grouping', () => {

@@ -34,6 +34,14 @@ test('stacking lab shows complete partitions, focused dimming, evidence, reset a
     headers: { 'content-type': 'application/json' }, body: '{}' });
   assert.equal(deniedRanking.status, 401);
   const click = (selector) => page.evaluate(`document.querySelector(${JSON.stringify(selector)}).click()`);
+  const controlsAndPhotosVisible = () => page.evaluate(`(() => {
+    const control = document.querySelector('#use-identities').getBoundingClientRect();
+    const photo = document.querySelector('#lab-photos .photo-image').getBoundingClientRect();
+    const results = document.querySelector('.lab-results').getBoundingClientRect();
+    return control.top >= 0 && control.bottom < innerHeight && photo.top >= results.top &&
+      photo.top + 100 <= Math.min(results.bottom, innerHeight);
+  })()`);
+  await page.send('Emulation.setDeviceMetricsOverride', { width: 1280, height: 800, deviceScaleFactor: 1, mobile: false });
   await page.navigate(`${fixture.base}/curate-stacking-lab.html`);
   await page.waitFor('document.querySelector(".gate-backdrop input")');
   await page.evaluate('document.querySelector(".gate-backdrop input").value="smoke-secret";document.querySelector(".gate-backdrop button").click()');
@@ -47,6 +55,7 @@ test('stacking lab shows complete partitions, focused dimming, evidence, reset a
   assert.match(await page.evaluate('document.querySelector("#result").textContent'), /3 photos → 1 group/);
   await click('#use-hash');
   assert.match(await page.evaluate('document.querySelector("#result").textContent'), /2 groups \(2 \+ 1\)/);
+  assert.equal(await controlsAndPhotosVisible(), true, 'settings changes leave photo results in view');
   await click('#lab-photos .photo-image');
   assert.equal(await page.evaluate('document.querySelectorAll("#lab-photos .dimmed").length'), 1);
   assert.equal(await page.evaluate('document.querySelectorAll("#lab-photos .photo-card").length'), 3);
@@ -70,7 +79,18 @@ test('stacking lab shows complete partitions, focused dimming, evidence, reset a
   // uses the same selected photos and retains rule settings and person labels.
   fixture.assets.find(a => a.id === fixture.id(2)).people = [{ id: 'person-a' }];
   await click('#use-identities');
-  assert.match(await page.evaluate('document.querySelector("#result").textContent'), /2 groups \(1 \+ 2\)/);
+  assert.match(await page.evaluate('document.querySelector("#result").textContent'), /3 groups \(1 \+ 1 \+ 1\)/);
+  await click('#combined-mode');
+  assert.match(await page.evaluate('document.querySelector("#result").textContent'), /3 groups \(1 \+ 1 \+ 1\)/, 'partial identity overlap also separates in combined mode');
+  await page.send('Emulation.setDeviceMetricsOverride', { width: 390, height: 844, deviceScaleFactor: 1, mobile: true });
+  assert.equal(await controlsAndPhotosVisible(), true, 'mobile controls do not push all photo results off screen');
+  assert.equal(await page.evaluate('document.querySelector("#experiment").scrollWidth <= document.querySelector("#experiment").clientWidth'), true);
+  const photoTop = await page.evaluate('document.querySelector("#lab-photos").getBoundingClientRect().top');
+  await click('#lab-controls > summary');
+  assert.ok(await page.evaluate('document.querySelector("#lab-photos").getBoundingClientRect().top') < photoTop, 'collapsing settings frees more room for photos');
+  await click('#lab-controls > summary');
+  await page.send('Emulation.setDeviceMetricsOverride', { width: 1280, height: 800, deviceScaleFactor: 1, mobile: false });
+  await click('#combined-mode');
   assert.match(await page.evaluate('document.querySelectorAll(".lab-reason")[1].textContent'), /different recognized people/);
   await page.evaluate('Object.defineProperty(navigator, "clipboard", { configurable: true, value: { writeText: async text => { window.copiedLabSummary = text; } } })');
   await click('#copy');
@@ -81,7 +101,7 @@ test('stacking lab shows complete partitions, focused dimming, evidence, reset a
   await click('#refresh-recognition');
   await page.waitFor('!document.querySelector("#refresh-recognition").disabled');
   assert.equal(await page.evaluate('document.querySelector("#use-identities").checked'), true);
-  assert.match(await page.evaluate('document.querySelector("#result").textContent'), /1 group/);
+  assert.match(await page.evaluate('document.querySelector("#result").textContent'), /2 groups \(2 \+ 1\)/);
   assert.match(await page.evaluate('document.querySelectorAll(".lab-recognition")[1].textContent'), /Person 1/);
   assert.equal(fixture.detailReads.length, 6);
   await click('#use-people');
@@ -263,14 +283,14 @@ test('multi-reference ranks stream progress, preserve partial cancellation, and 
   await click('#rank-comparison .compare-tools button:nth-child(2)');
   await page.waitFor('document.querySelector("#rank-comparison").textContent.includes("Cancelled.") && !document.querySelector("#check-group-ranks").disabled');
   assert.match(await page.evaluate('document.querySelector("#rank-comparison").textContent'), /2 new searches/);
-  assert.match(await page.evaluate('document.querySelector("#rank-comparison tbody").textContent'), /Complete.*Unqueried/s);
+  assert.match(await page.evaluate('document.querySelector("#rank-table tbody").textContent'), /Complete.*Unqueried/s);
   await click('#check-group-ranks');
   await page.waitFor('document.querySelector("#rank-comparison").textContent.includes("Pass complete.") && document.querySelector("#check-group-ranks").disabled', { timeoutMs: 20000 });
   assert.equal(fixture.similarityReads.length, 3);
-  const row = await page.evaluate('[...document.querySelectorAll("#rank-comparison tbody tr:first-child td")].map(n=>n.textContent)');
+  const row = await page.evaluate('[...document.querySelectorAll("#rank-table tbody tr:first-child td")].map(n=>n.textContent)');
   assert.deepEqual(row.slice(0, 3), ['·', '1 0 outside', '2 0 outside']);
-  assert.equal(await page.evaluate('document.querySelectorAll("#rank-comparison tbody tr").length'), 3);
-  await click('#rank-comparison tbody tr:nth-child(2) button');
+  assert.equal(await page.evaluate('document.querySelectorAll("#rank-table tbody tr").length'), 3);
+  await click('#rank-table tbody tr:nth-child(2) button');
   assert.match(await page.evaluate('document.querySelector("#pair-evidence").textContent'), /Photos 1 ↔ 2.*reciprocal near ranks/s);
   assert.match(await page.evaluate('document.querySelector("#combined-summary").textContent'), /uncertain/, 'rank alone is not proof');
   const before = fixture.similarityReads.length;

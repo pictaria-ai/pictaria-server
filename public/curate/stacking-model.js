@@ -30,6 +30,15 @@ export function peopleLabel(photo) {
   return 'Unknown';
 }
 
+export function recognizedPeople(photo) {
+  return Array.isArray(photo.recognizedIds) ? new Set(photo.recognizedIds) : null;
+}
+
+// A returned empty list is an observation; unavailable recognition is not.
+export function identitiesDiffer(a, b) {
+  return a === null || b === null ? null : a.size !== b.size || [...a].some(id => !b.has(id));
+}
+
 export function timeGroups(photos, gapMs) {
   const sorted = [...photos].sort((a, b) =>
     (a.time ?? Infinity) - (b.time ?? Infinity) || a.id.localeCompare(b.id));
@@ -51,7 +60,7 @@ export function partition(photos, { gapMs, spanMs = null, thumbhash = false, thr
   const sorted = [...photos].sort((a, b) =>
     (a.time ?? Infinity) - (b.time ?? Infinity) || a.id.localeCompare(b.id));
   const hashes = new Map(photos.map((p) => [p.id, decodeHash(p.thumbhash)]));
-  const recognized = new Map(photos.map((p) => [p.id, new Set(p.recognizedIds ?? [])]));
+  const recognized = new Map(photos.map((p) => [p.id, recognizedPeople(p)]));
   const groups = [], byPhoto = new Map(), reasons = new Map();
   for (const photo of sorted) {
     let found = null;
@@ -67,10 +76,8 @@ export function partition(photos, { gapMs, spanMs = null, thumbhash = false, thr
       }
       let compatible = true;
       for (const member of group) {
-        // Positive, disjoint observations only. An overlap may be a partial
-        // recognition list; missing observations do not force a separation.
         const a = recognized.get(photo.id), b = recognized.get(member.id);
-        if (identities && a.size && b.size && ![...a].some((id) => b.has(id))) {
+        if (identities && identitiesDiffer(a, b)) {
           blocked.add('Different recognized people'); compatible = false; break;
         }
         if (people && peopleCategory(photo) !== null && peopleCategory(member) !== null &&

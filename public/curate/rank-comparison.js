@@ -32,18 +32,19 @@ async function stream(body, signal, receive) {
 }
 
 export class RankComparison {
-  constructor({ root, viewId, groupId, photos, onChange, onBusy, onFocus }) {
+  constructor({ root, tableRoot, viewId, groupId, photos, onChange, onBusy, onFocus }) {
     Object.assign(this, { root, viewId, groupId, photos, onChange, onBusy, onFocus });
     this.rows = new Map(); this.evidence = new Map();
     this.button = node('button', 'Check selected group', 'p-btn'); this.button.id = 'check-group-ranks';
     this.cancel = node('button', 'Cancel', 'p-btn'); this.cancel.hidden = true;
-    this.reset = node('button', 'Reset rank evidence', 'p-btn quiet');
+    this.reset = node('button', 'Reset ranks', 'p-btn quiet');
     this.status = node('p', '', 'p-muted'); this.status.setAttribute('role', 'status');
     this.estimate = node('p', '', 'p-muted lab-small');
     const controls = node('div', undefined, 'compare-tools'); controls.append(this.button, this.cancel, this.reset);
     this.table = node('div', undefined, 'lab-rank-scroll'); this.table.tabIndex = 0;
     this.table.setAttribute('role', 'region'); this.table.setAttribute('aria-label', 'Directional search ranks; scroll to see more columns');
-    root.replaceChildren(controls, this.estimate, this.status, this.table);
+    root.replaceChildren(controls, this.estimate, this.status);
+    tableRoot.replaceChildren(this.table);
     this.button.onclick = () => this.run();
     this.cancel.onclick = () => this.controller?.abort();
     this.reset.onclick = () => {
@@ -65,7 +66,7 @@ export class RankComparison {
       const plan = await request('lab/ranks/plan', this.body());
       if (this.disposed || generation !== this.generation) return;
       this.plan = plan; this.scope = plan.scope;
-      this.estimate.textContent = `Next pass: ${plan.newSearches} new search${plan.newSearches === 1 ? '' : 'es'} · ${plan.cached} cached · ${plan.remaining} left for a later pass. At most 8 new searches, one at a time, at least 5 seconds apart.`;
+      this.estimate.textContent = `${plan.newSearches} new searches · ${plan.cached} cached${plan.remaining ? ` · ${plan.remaining} left for later` : ''}. Paced 5 seconds apart.`;
       this.button.textContent = this.rows.size ? 'Check remaining references' : 'Check selected group';
       this.button.disabled = plan.newSearches + plan.cached === 0;
     } catch (error) {

@@ -92,7 +92,7 @@ async function open(group) {
       info.append(file, facts, people, recognition, checked, rank, reason, distance, larger, failed); card.append(button, info);
       el('lab-photos').append(card); cards.set(photo.id, { card, button, badge, reason, distance, recognition, checked, rank });
     }
-    rankPanel = new RankComparison({ root: el('rank-comparison'), viewId: view.viewId, groupId: currentGroup,
+    rankPanel = new RankComparison({ root: el('rank-comparison'), tableRoot: el('rank-table'), viewId: view.viewId, groupId: currentGroup,
       photos: current.photos, onChange: recalculate,
       onBusy: busy => { el('check-ranking').disabled = busy || !!ranking || current.photos.length < 2; },
       onFocus: id => { focused = id; renderResult(); } });
@@ -203,9 +203,9 @@ function recalculate() {
   el('rank-cutoff').disabled = el('rank-contrast').disabled = !combined || !el('use-ranks').checked;
   el('near-hash').disabled = el('far-hash').disabled = !combined || !el('use-hash').checked;
   for (const hint of document.querySelectorAll('.combined-hint')) hint.hidden = !combined;
-  el('hash-label').textContent = combined ? 'Use ThumbHash evidence' : 'Require similar ThumbHash';
-  el('people-label').textContent = combined ? 'Use Enrich people categories' : 'Separate Enrich people categories';
-  el('identities-label').textContent = combined ? 'Use recognized identities' : 'Separate different recognized people';
+  el('mode-hint').textContent = combined
+    ? el('use-identities').checked ? 'Signals combine; recognized people must still match.' : 'Signals combine; uncertain matches stay provisional.'
+    : 'Each enabled rule must pass. Combine evidence to use ranks.';
   for (const hint of document.querySelectorAll('.strict-hint')) hint.hidden = combined;
   el('span').disabled = !el('use-span').checked;
   el('threshold').disabled = combined || !el('use-hash').checked;
@@ -233,7 +233,7 @@ function renderResult() {
       evidence.append(node('p', `Photos ${Math.min(i, j) + 1} ↔ ${Math.max(i, j) + 1}: ${pair.state === 'separate' ? 'separation proposed' : pair.state}. ${pair.reason}. ${pair.notes.join(' · ')}`));
     }
   }
-  el('focus-help').textContent = group ? `Group ${group} highlighted. Click another photo to compare; dimmed photos are still included.` : 'Click a photo to highlight its proposed group. Dimmed photos stay in the experiment.';
+  el('focus-help').textContent = group ? `Group ${group} highlighted. Dimmed photos stay included.` : 'Click a photo to highlight its group.';
   el('clear-focus').disabled = !focused;
   const unknownHash = current.photos.filter((p) => !decodeHash(p.thumbhash)).length;
   const unknownPeople = current.photos.filter((p) => peopleCategory(p) === null).length;
@@ -295,7 +295,7 @@ el('copy').onclick = async () => {
       const copied = document.execCommand('copy'); area.remove();
       if (!copied) throw Error('Clipboard unavailable.');
     }
-    el('copy').textContent = 'Copied'; setTimeout(() => { el('copy').textContent = 'Copy experiment summary'; }, 2000);
+    el('copy').textContent = 'Copied'; setTimeout(() => { el('copy').textContent = 'Copy'; }, 2000);
   } catch { error('experiment-error', 'Could not copy the summary in this browser.'); }
 };
 for (const button of document.querySelectorAll('[data-close]')) button.onclick = () => el(button.dataset.close).close();

@@ -10,14 +10,16 @@ All notable changes to Pictaria Server are documented here. This project follows
 - The stacking lab now compares directional Immich search ranks from multiple
   reference photos, with request estimates, progress, cancellation and explicit
   partial coverage. Each pass makes at most eight new paced searches; the matrix
-  supports up to 40 photos. A separate **Try combined evidence** mode combines
+  supports up to 40 photos. A separate **Combine evidence** mode combines
   ThumbHash, people evidence and reciprocal ranks, explaining supported,
   provisional and separated groups. Rules and cutoffs remain experimental;
   neither production Curate nor AI referees change. Combined mode now places
   supported pairs before uncertain attachments, adjusts ranks for other photos
-  in the candidate group, and uses three ThumbHash bands. Corroborated people
-  counts and returned-rank contrast can separate shared-backdrop compositions;
+  in the candidate group, and uses three ThumbHash bands. People
+  differences and returned-rank contrast can separate shared-backdrop compositions;
   missing ranks stay unknown. Raw ranks and adjusted counts remain visible.
+  Lab controls now sit beside the photos, with a bounded, collapsible settings
+  panel on mobile. Rank tables and longer explanations expand below the photos.
 
 - Added a testing-only **Stacking lab** linked from the Curate preview. Start
   with time-only groups, then try time/span, ThumbHash and Enrich people-category
@@ -27,9 +29,11 @@ All notable changes to Pictaria Server are documented here. This project follows
   make curation decisions or call AI.
   The people experiment separates None, One, Couple and Group without requiring
   matching Immich recognition. Cards display those two evidence sources separately.
-  A separate recognized-people switch splits photos with nonempty, disjoint Immich
-  identity lists. Missing or overlapping lists do not force a split; Person 1 / 2
-  labels help explain the evidence within each experiment.
+  **Same recognized people** splits on any change in observed Immich identities
+  in either lab mode, including partial overlaps and empty versus nonempty lists.
+  Missing or failed recognition stays unknown. Hash/rank similarity cannot
+  override this enabled rule; ordering and repeated IDs do not affect matches.
+  Person 1 / 2 labels help explain the evidence within each experiment.
   Opening a group now refreshes recognition through Curate's shared metadata
   service. A Refresh from Immich button repeats the read; loading, missing,
   empty and failed results are distinct, with check times and fixed evidence

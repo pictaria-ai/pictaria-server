@@ -77,7 +77,7 @@ test('categories separate None/One/Couple/Group without requiring face recogniti
     [['1', 'unknown'], ['2']]);
 });
 
-test('identity experiment separates disjoint people independently, without forcing unknown or overlapping lists apart', () => {
+test('identity experiment separates every observed set change, including overlapping and empty lists', () => {
   const a = photo('a', 0, 0, { peopleCategory: 'one', recognizedIds: ['person-a'] });
   const b = photo('b', 1000, 0, { peopleCategory: 'one', recognizedIds: ['person-b'] });
   const couple = photo('couple', 2000, 0, { peopleCategory: 'couple', recognizedIds: ['person-a', 'person-b'] });
@@ -85,7 +85,7 @@ test('identity experiment separates disjoint people independently, without forci
   assert.equal(partition(rows, { gapMs: 15000 }).groups.length, 1);
   assert.deepEqual(ids(partition(rows, { gapMs: 15000, people: true }).groups), [['a', 'b'], ['couple']]);
   const result = partition(rows, { gapMs: 15000, identities: true });
-  assert.deepEqual(ids(result.groups), [['a'], ['b', 'couple']]);
+  assert.deepEqual(ids(result.groups), [['a'], ['b'], ['couple']]);
   assert.match(result.reasons.get('b'), /different recognized people/);
   assert.equal(partition(rows, { gapMs: 15000, identities: true, people: true }).groups.length, 3);
   // No Enrich provenance is needed; matching IDs do not override time or hashes.
@@ -93,12 +93,20 @@ test('identity experiment separates disjoint people independently, without forci
   assert.equal(partition([a, { ...b, recognizedIds: a.recognizedIds }], { gapMs: 500, identities: true }).groups.length, 2);
   assert.equal(partition([a, { ...b, recognizedIds: a.recognizedIds, thumbhash: hash(255) }],
     { gapMs: 15000, identities: true, thumbhash: true }).groups.length, 2);
-  // Neither unknown observations nor an overlapping pair can bridge a known conflict.
-  for (const recognizedIds of [null, [], ['person-a', 'person-b']]) {
+  // Every member must agree: unknown observations cannot bridge a conflict.
+  for (const recognizedIds of [null, undefined, [], ['person-a', 'person-b']]) {
     const middle = photo('middle', 500, 0, { recognizedIds });
     assert.deepEqual(ids(partition([a, middle, b], { gapMs: 15000, identities: true }).groups),
-      [['a', 'middle'], ['b']]);
+      recognizedIds == null ? [['a', 'middle'], ['b']] : [['a'], ['middle'], ['b']]);
   }
+  for (const recognizedIds of [null, undefined, 'invalid']) {
+    assert.equal(partition([a, { ...b, recognizedIds }], { gapMs: 15000, identities: true }).groups.length, 1);
+  }
+  assert.equal(partition([a, { ...b, recognizedIds: [] }], { gapMs: 15000, identities: true }).groups.length, 2);
+  assert.equal(partition([couple, { ...couple, id: 'reordered', recognizedIds: ['person-b', 'person-a', 'person-a'] }],
+    { gapMs: 15000, identities: true }).groups.length, 1, 'identities are sets, not ordered lists');
+  assert.equal(partition([{ ...a, recognizedIds: [] }, { ...b, recognizedIds: [] }],
+    { gapMs: 15000, identities: true }).groups.length, 1);
   assert.deepEqual(rows, original);
 });
 

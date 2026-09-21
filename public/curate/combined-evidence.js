@@ -1,4 +1,4 @@
-import { LAB_PHOTO_LIMIT, decodeHash, hashDistance, peopleCategory } from './stacking-model.js';
+import { LAB_PHOTO_LIMIT, decodeHash, hashDistance, peopleCategory, recognizedPeople, identitiesDiffer } from './stacking-model.js';
 import { evidencePartition } from './evidence-partition.js';
 import { rankObservation } from './rank-evidence.js';
 
@@ -12,31 +12,26 @@ function evaluator(photos, settings, rows) {
       !Number.isInteger(s.rankContrast) || s.rankContrast < 1 || s.rankContrast > 49)
     throw Error('Choose ordered ThumbHash bands and valid outside-photo/contrast limits.');
   const hashes = new Map(photos.map(p => [p.id, decodeHash(p.thumbhash)]));
-  const countsAgree = p => {
-    const category = peopleCategory(p), ids = p.recognizedIds;
-    if (!Array.isArray(ids) || category === null) return false;
-    const count = new Set(ids).size;
-    return category === 'group' ? count >= 3 : count === { none: 0, one: 1, couple: 2 }[category];
-  };
+  const recognized = new Map(photos.map(p => [p.id, recognizedPeople(p)]));
   const observations = new Map();
   const input = (a, b) => {
     // Direction matters to the two rank observations; cache in call order.
     const id = JSON.stringify([a.id, b.id]);
     if (observations.has(id)) return observations.get(id);
     const ac = peopleCategory(a), bc = peopleCategory(b);
-    const ai = new Set(a.recognizedIds ?? []), bi = new Set(b.recognizedIds ?? []);
-    const overlap = [...ai].some(id => bi.has(id));
+    const ai = recognized.get(a.id), bi = recognized.get(b.id);
+    const identityDifference = identitiesDiffer(ai, bi);
+    const identityConflict = s.identities && identityDifference === true;
     const categoryConflict = s.people && ac !== null && bc !== null && ac !== bc;
-    const conflict = categoryConflict || (s.identities && ai.size > 0 && bi.size > 0 && !overlap);
-    const agreement = (s.people && ac !== null && ac === bc) || (s.identities && overlap);
-    const countConflict = s.people && s.identities && categoryConflict && countsAgree(a) && countsAgree(b);
+    const conflict = categoryConflict || identityConflict;
+    const agreement = (s.people && ac !== null && ac === bc) || (s.identities && identityDifference === false && ai.size > 0);
     const distance = s.thumbhash ? hashDistance(hashes.get(a.id), hashes.get(b.id)) : null;
     const near = distance !== null && distance <= s.nearHash, far = distance !== null && distance >= s.farHash;
     const middle = distance !== null && !near && !far;
     const ab = s.ranks ? rankObservation(rows.get(a.id), b.id) : null;
     const ba = s.ranks ? rankObservation(rows.get(b.id), a.id) : null;
     const reciprocal = ab !== null && ba !== null && ab.outsideAhead <= s.outsideLimit && ba.outsideAhead <= s.outsideLimit;
-    const result = { ac, bc, ai, bi, overlap, conflict, agreement, countConflict, distance, near, middle, far, ab, ba, reciprocal };
+    const result = { ac, bc, ai, bi, identityDifference, identityConflict, conflict, agreement, distance, near, middle, far, ab, ba, reciprocal };
     observations.set(id, result); return result;
   };
   const contrastFrom = (a, b, rank) => {
@@ -56,20 +51,19 @@ function evaluator(photos, settings, rows) {
     if (s.thumbhash) notes.push(p.distance === null ? 'ThumbHash unknown'
       : `ThumbHash ${p.distance.toFixed(3)} (${p.near ? 'very close' : p.far ? 'clearly different' : 'middle band'})`);
     if (s.people) notes.push(p.ac === null || p.bc === null ? 'Enrich people unknown' : `Enrich people ${p.ac} / ${p.bc}`);
-    if (s.identities) notes.push(!Array.isArray(a.recognizedIds) || !Array.isArray(b.recognizedIds)
-      ? 'Recognized identities missing' : `Recognized counts ${p.ai.size} / ${p.bi.size} (may be incomplete); ${p.overlap ? 'some identities match' : p.ai.size && p.bi.size ? 'identities differ' : 'empty observations do not establish absence'}`);
-    if (p.countConflict) notes.push('Both recognition counts corroborate their different Enrich categories');
+    if (s.identities) notes.push(p.identityDifference === null ? 'Recognized identities missing'
+      : `Recognized counts ${p.ai.size} / ${p.bi.size} (may be incomplete); ${p.identityDifference ? 'identity sets differ' : p.ai.size ? 'same identities' : 'both lists empty; people may still be present'}`);
     if (s.ranks) {
       const label = (from, value) => value ? `#${value.rank}, ${value.outsideAhead} outside ahead`
         : rows.get(from)?.state === 'complete' ? 'not returned' : rows.get(from)?.state ?? 'unqueried';
       notes.push(`Search → ${label(a.id, p.ab)}; ← ${label(b.id, p.ba)}${p.reciprocal ? ' (reciprocal near ranks)' : contrast ? ' (reciprocal contrast with supported alternatives)' : ' (no conclusive rank contrast)'}`);
     }
     let state = 'uncertain', reason = 'Capture time only or insufficient evidence';
-    if (p.conflict && p.reciprocal) reason = 'Reciprocal ranks conflict with people evidence';
-    else if (p.countConflict || (p.conflict && (p.far || contrast)) || (p.far && contrast)) {
+    if (p.identityConflict) { state = 'separate'; reason = 'Different recognized people'; }
+    else if (p.conflict && p.reciprocal) reason = 'Reciprocal ranks conflict with people evidence';
+    else if ((p.conflict && (p.far || contrast)) || (p.far && contrast)) {
       state = 'separate';
-      reason = p.countConflict ? 'Different Enrich categories corroborated by recognition counts'
-        : contrast ? 'Returned rank contrast corroborates a people or visual difference' : 'Clearly different ThumbHash corroborates people difference';
+      reason = contrast ? 'Returned rank contrast corroborates a people or visual difference' : 'Clearly different ThumbHash corroborates people difference';
     } else if (p.conflict || contrast) reason = 'Conflicting evidence needs review';
     else if (p.near || (p.middle && (p.agreement || p.reciprocal)) || (p.reciprocal && p.agreement)) {
       state = 'supported'; reason = p.near ? 'Very close ThumbHash without observed conflict'
