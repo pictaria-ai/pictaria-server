@@ -13,7 +13,11 @@ All notable changes to Pictaria Server are documented here. This project follows
   supports up to 40 photos. A separate **Try combined evidence** mode combines
   ThumbHash, people evidence and reciprocal ranks, explaining supported,
   provisional and separated groups. Rules and cutoffs remain experimental;
-  neither production Curate nor AI referees change.
+  neither production Curate nor AI referees change. Combined mode now places
+  supported pairs before uncertain attachments, adjusts ranks for other photos
+  in the candidate group, and uses three ThumbHash bands. Corroborated people
+  counts and returned-rank contrast can separate shared-backdrop compositions;
+  missing ranks stay unknown. Raw ranks and adjusted counts remain visible.
 
 - Added a testing-only **Stacking lab** linked from the Curate preview. Start
   with time-only groups, then try time/span, ThumbHash and Enrich people-category

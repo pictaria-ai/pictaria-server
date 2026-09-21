@@ -40,3 +40,7 @@
 .lab-rank-scroll .p-btn { font-size: 12px; padding: 5px; }
 #pair-evidence { max-height: 240px; overflow: auto; }
 #pair-evidence p { margin-block: 8px; }
+
+.rank-outside { display: block; color: var(--p-muted); font-size: 10px; }
+.combined-hint:not([hidden]) { display: grid; gap: 10px; }
+.strict-hint[hidden], .combined-hint[hidden] { display: none; }

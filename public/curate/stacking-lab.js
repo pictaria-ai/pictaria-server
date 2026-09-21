@@ -1,5 +1,5 @@
 import { RankComparison } from './rank-comparison.js';
-import { combinedPartition } from './combined-evidence.js';
+import { combinedPartition, COMBINED_DEFAULTS } from './combined-evidence.js';
 import { request } from './client.js';
 import { node, thumbnail } from './photos.js';
 import { partition, decodeHash, hashDistance, peopleCategory, peopleLabel } from './stacking-model.js';
@@ -185,29 +185,33 @@ function settings() {
     spanMs: el('use-span').checked ? Number(el('span').value) * 1000 : null,
     thumbhash: el('use-hash').checked, threshold: Number(el('threshold').value), people: el('use-people').checked,
     identities: el('use-identities').checked, ranks: el('use-ranks').checked,
-    rankLimit: Number(el('rank-cutoff').value), combined: el('combined-mode').checked };
+    nearHash: el('use-hash').checked ? Number(el('near-hash').value) : COMBINED_DEFAULTS.nearHash, farHash: el('use-hash').checked ? Number(el('far-hash').value) : COMBINED_DEFAULTS.farHash,
+    outsideLimit: el('use-ranks').checked ? Number(el('rank-cutoff').value) : COMBINED_DEFAULTS.outsideLimit, rankContrast: el('use-ranks').checked ? Number(el('rank-contrast').value) : COMBINED_DEFAULTS.rankContrast, combined: el('combined-mode').checked };
 }
 function reset() {
   el('gap').value = current.gapSeconds; el('gap').max = current.gapSeconds;
   el('span').value = 180; el('threshold').value = 0.1;
   for (const id of ['use-span', 'use-hash', 'use-people', 'use-identities', 'use-ranks', 'combined-mode']) el(id).checked = false;
-  el('rank-cutoff').value = 10;
+  el('near-hash').value = COMBINED_DEFAULTS.nearHash; el('far-hash').value = COMBINED_DEFAULTS.farHash;
+  el('rank-cutoff').value = COMBINED_DEFAULTS.outsideLimit; el('rank-contrast').value = COMBINED_DEFAULTS.rankContrast;
   focused = null; recalculate();
 }
 function recalculate() {
   if (!current || refreshing) return;
   const combined = el('combined-mode').checked;
   el('use-ranks').disabled = !combined;
-  el('rank-cutoff').disabled = !combined || !el('use-ranks').checked;
+  el('rank-cutoff').disabled = el('rank-contrast').disabled = !combined || !el('use-ranks').checked;
+  el('near-hash').disabled = el('far-hash').disabled = !combined || !el('use-hash').checked;
+  for (const hint of document.querySelectorAll('.combined-hint')) hint.hidden = !combined;
   el('hash-label').textContent = combined ? 'Use ThumbHash evidence' : 'Require similar ThumbHash';
   el('people-label').textContent = combined ? 'Use Enrich people categories' : 'Separate Enrich people categories';
   el('identities-label').textContent = combined ? 'Use recognized identities' : 'Separate different recognized people';
   for (const hint of document.querySelectorAll('.strict-hint')) hint.hidden = combined;
   el('span').disabled = !el('use-span').checked;
-  el('threshold').disabled = !el('use-hash').checked;
+  el('threshold').disabled = combined || !el('use-hash').checked;
   el('threshold-value').textContent = Number(el('threshold').value).toFixed(3);
-  if (!el('gap').value || !el('gap').checkValidity() || (el('use-span').checked && (!el('span').value || !el('span').checkValidity())) || (combined && (!el('rank-cutoff').value || !el('rank-cutoff').checkValidity()))) {
-    error('experiment-error', 'Enter a valid gap, span and rank cutoff. Results below still use the previous settings.');
+  if (!el('gap').value || !el('gap').checkValidity() || (el('use-span').checked && (!el('span').value || !el('span').checkValidity())) || (combined && ((el('use-hash').checked && (['near-hash', 'far-hash'].some(id => !el(id).value || !el(id).checkValidity()) || Number(el('near-hash').value) >= Number(el('far-hash').value))) || (el('use-ranks').checked && ['rank-cutoff', 'rank-contrast'].some(id => !el(id).value || !el(id).checkValidity()))))) {
+    error('experiment-error', 'Enter valid time limits, ordered ThumbHash bands, and rank limits. Results below still use the previous settings.');
     el('copy').disabled = true; return;
   }
   error('experiment-error'); el('copy').disabled = false;
@@ -282,7 +286,8 @@ el('clear-focus').onclick = () => { focused = null; renderResult(); };
 el('copy').onclick = async () => {
   const s = settings();
   const rankSummary = ranking ? `\nImmich similarity ranking (earliest reference; timeline images; first 50 excluding reference)\n${el('ranking-status').textContent}\n${current.photos.map((p, i) => `Photo ${i + 1}: ${cards.get(p.id).rank.textContent}`).join('\n')}` : '';
-  const text = `Stacking lab (experimental)\nStarting gap: ${current.gapSeconds} s\nGap: ${s.gapMs / 1000} s; span: ${s.spanMs === null ? 'unlimited' : s.spanMs / 1000 + ' s'}\nThumbHash: ${s.thumbhash ? s.threshold.toFixed(3) + ' (every pair)' : 'off'}; Enrich people categories (none/one/couple/group): ${s.people ? 'on' : 'off'}\nDifferent recognized people (nonempty lists with no identities in common): ${s.identities ? 'on' : 'off'}\n${el('recognition-status').textContent}\n${el('result').textContent}\n${el('evidence-note').textContent.split('. Photo links')[0]}${rankSummary}\nMode: ${s.combined ? 'Combined evidence (experimental)' : 'Individual filters'}; reciprocal rank cutoff: ${s.ranks && s.combined ? s.rankLimit : 'off'}\n${el('combined-summary').textContent}\n${rankPanel?.summary() ?? ''}\n${el('pair-evidence').textContent}`;
+  const hashSummary = !s.thumbhash ? 'off' : s.combined ? `very close ≤ ${s.nearHash.toFixed(3)}, clearly different ≥ ${s.farHash.toFixed(3)}` : `${s.threshold.toFixed(3)} (every pair)`;
+  const text = `Stacking lab (experimental)\nStarting gap: ${current.gapSeconds} s\nGap: ${s.gapMs / 1000} s; span: ${s.spanMs === null ? 'unlimited' : s.spanMs / 1000 + ' s'}\nThumbHash: ${hashSummary}; Enrich people categories (none/one/couple/group): ${s.people ? 'on' : 'off'}\nDifferent recognized people (nonempty lists with no identities in common): ${s.identities ? 'on' : 'off'}\n${el('recognition-status').textContent}\n${el('result').textContent}\n${el('evidence-note').textContent.split('. Photo links')[0]}${rankSummary}\nMode: ${s.combined ? 'Combined evidence (experimental)' : 'Individual filters'}; outside photos ahead / minimum contrast: ${s.ranks && s.combined ? `${s.outsideLimit} / ${s.rankContrast}` : 'off'}\n${el('combined-summary').textContent}\n${rankPanel?.summary() ?? ''}\n${[...el('pair-evidence').children].map(p => p.textContent).join('\n')}`;
   try {
     if (navigator.clipboard?.writeText) await navigator.clipboard.writeText(text);
     else {

@@ -81,7 +81,7 @@ instance latency and library load should guide any future background use.
 **Check selected group** checks multiple references in capture order. Each row
 is one search: A→B and B→A are separate observations, never an inferred symmetric
 score. The table identifies references by the same Photo 1 / 2 labels shown on
-cards. Click a row label to highlight that photo's proposed group. It shows
+cards. Click a row label to highlight that photo's proposed group. It retains raw ranks plus outside-photo counts, and shows
 unqueried, waiting/searching, complete, cached and failed states, returned depth,
 original check time and search duration. Only selected-photo ranks reach the UI.
 
@@ -120,30 +120,70 @@ including completed rows from a cancelled/failed pass. No incremental arrival
 silently rearranges the grouping mid-pass. Changing controls still recalculates
 against the previously held evidence until that pass ends.
 
-This deliberately small decision table is an experiment, **not calibrated
-production behavior**:
+The September 21 review revises this experiment to prefer supported matches
+before uncertain attachments. The original single-threshold/time-first rule is
+superseded in combined mode; the individual-filter baseline remains available.
+These rules are **not calibrated production behavior**:
 
-- Close ThumbHash, with no observed conflict in the enabled people evidence,
-  supports alternatives under the tested rule.
-- Different known Enrich categories or disjoint nonempty recognized IDs plus a
-  ThumbHash difference propose a separation, unless reciprocal near ranks
-  contradict it. This corroboration rule can still be wrong and needs evaluation.
-- Close ThumbHash or reciprocal near ranks conflicting with people evidence
-  remain uncertain. People differences alone do not split photos in this mode.
-- Reciprocal near ranks plus supported people agreement can support alternatives
-  even when the coarse hash differs. Rank alone needs independent composition
-  evidence. The initial top-10 cutoff is a lab starting value, not a recommendation.
-- Missing, failed, asymmetric, low or not-returned rank evidence is unknown,
-  never evidence of dissimilarity. With insufficient evidence, keep the bounded
-  time group provisional for inspection rather than inventing a separation.
+- ThumbHash has three bands. **Very close** (initially ≤0.025) can support a
+  pair without another signal, unless there is conflicting evidence. The **middle
+  band** needs compatible people evidence or reciprocal near ranks. **Clearly
+  different** (initially ≥0.150) can corroborate separation. There is no special
+  transition at the individual filter's 0.100. A hash is never an exact-duplicate
+  proof. These starting values need owner evaluation.
+- Different supported Enrich categories corroborated by recognition counts can
+  propose separation despite a close shared-backdrop hash. Both people switches
+  must be enabled. Each recognized-ID count must agree with its own category:
+  None=0, One=1, Couple=2, Group≥3. Missing or conflicting counts do not qualify;
+  empty observations alone do not establish absence. This extends the PIC-367
+  count-corroboration approach to the lab's supported Group category. Recognition
+  completeness still is not guaranteed, so agreement is evidence, not proof.
+- A people difference plus clearly different ThumbHash or corroborating rank
+  contrast can propose separation. Reciprocal near ranks conflicting with people
+  evidence keep the pair uncertain. A rank contrast plus clearly different hash
+  can also propose separation without people evidence.
+- Reciprocal near ranks plus compatible people evidence can recover alternatives
+  despite a coarse-hash difference. Rank alone does not support alternatives.
+- Missing, failed and not-returned ranks stay unknown, never evidence of
+  dissimilarity. Asymmetry or an isolated low returned rank does not establish
+  separation. Unresolved pairs stay provisional for human inspection.
 
-Every proposed group checks every pair. A supported A–B and B–C cannot bridge a
-proposed A–C separation. Any uncertain internal pair labels the group provisional.
-Stable capture-time/ID ordering and the same greedy placement rules apply. Time
-and span boundaries still constrain the scope. All original photos remain visible.
-Highlight a photo to see its pair explanations, raw hash distances, directional
-ranks, people conflicts and missing observations. The copy action includes those
-explanations using photo numbers without filenames, asset IDs or identity labels.
+**Adjusted ranks.** The table retains raw ranks and also displays the number of
+photos **outside the selected time group** ranked ahead of a returned target:
+`raw rank − 1 − other selected photos ahead`. For a fourteen-photo burst with
+all thirteen alternatives ahead of any outside photo, that count is zero for
+every relationship. The initial reciprocal-near allowance is **2 outside photos
+ahead** in both directions, independent of burst size. The removed candidates
+are not assumed to be true siblings: this is a correction for outside competition,
+not a distance, probability or proof that the selected photos match. Missing
+results cannot be assigned an adjusted count. Changing the selected candidate
+scope can change adjusted ranks; changing proposed partitions does not.
+
+**Returned-rank contrast.** A worse returned position is usable only when both
+directions have a better supported alternative in their respective rows. That
+alternative must have reciprocal near ranks, no observed people conflict, and
+independent hash/people corroboration. The worse target must exceed the near
+allowance and have at least **8 more outside photos ahead** than that alternative
+(initial lab value). This can corroborate another observed difference; it does
+not turn a low or absent rank into a standalone veto. Both the allowance and
+contrast gap are adjustable in combined mode without more API requests.
+
+**Placement.** Consider supported links first in stable capture-time/ID order,
+then attach uncertain relationships; every attempted merge checks all cross-group
+separations and the final consecutive-gap/total-span limits. Revisit previously
+out-of-gap supported links after uncertain attachments can supply intermediate
+photos. For A–B uncertain, B–C supported and A–C separate, retain B+C and leave
+A separate. Equal supported links use capture-time/ID ties; this is deterministic
+greedy clustering, not a global optimality guarantee. A proposed separation
+cannot be bridged by a third member. Any uncertain internal pair labels the group
+provisional. Undated photos stay single; all original photos remain visible.
+
+Highlight a photo to inspect raw and adjusted ranks, hash bands, corroborating
+counts, conflicts and missing evidence. Copied explanations retain paragraph
+breaks and omit filenames, asset IDs and identity labels. Whole-group synthetic
+regressions cover mixed solo/couple/backlit photos, fourteen-photo bursts,
+uncertain contamination, missing ranks and contradictory observations; real-photo
+false merges and missed alternatives still need evaluation.
 
 This does not implement exact-checksum/rendition rules, detected-face counts,
 scene tags, Pictaria vectors, production defaults or either AI role. The lab still

@@ -255,6 +255,7 @@ test('multi-reference ranks stream progress, preserve partial cancellation, and 
   assert.match(await page.evaluate('document.querySelector("#rank-comparison").textContent'), /3 new searches/);
   assert.equal(fixture.similarityReads.length, 0);
   await click('#combined-mode'); await click('#use-ranks');
+  assert.equal(await page.evaluate('getComputedStyle(document.querySelector(".threshold-control")).display'), 'none');
   assert.match(await page.evaluate('document.querySelector("#combined-summary").textContent'), /3 uncertain/);
   await click('#check-group-ranks');
   await page.waitFor('document.querySelector("#rank-comparison").textContent.includes("1 of 3 new searches complete")');
@@ -267,7 +268,7 @@ test('multi-reference ranks stream progress, preserve partial cancellation, and 
   await page.waitFor('document.querySelector("#rank-comparison").textContent.includes("Pass complete.") && document.querySelector("#check-group-ranks").disabled', { timeoutMs: 20000 });
   assert.equal(fixture.similarityReads.length, 3);
   const row = await page.evaluate('[...document.querySelectorAll("#rank-comparison tbody tr:first-child td")].map(n=>n.textContent)');
-  assert.deepEqual(row.slice(0, 3), ['·', '1', '2']);
+  assert.deepEqual(row.slice(0, 3), ['·', '1 0 outside', '2 0 outside']);
   assert.equal(await page.evaluate('document.querySelectorAll("#rank-comparison tbody tr").length'), 3);
   await click('#rank-comparison tbody tr:nth-child(2) button');
   assert.match(await page.evaluate('document.querySelector("#pair-evidence").textContent'), /Photos 1 ↔ 2.*reciprocal near ranks/s);
@@ -280,6 +281,15 @@ test('multi-reference ranks stream progress, preserve partial cancellation, and 
   await page.evaluate('Object.defineProperty(navigator,"clipboard",{configurable:true,value:{writeText:async text=>{window.copied=text}}})');
   await click('#copy');
   assert.match(await page.evaluate('window.copied'), /Directional ranks.*Photo 2/s);
+  assert.match(await page.evaluate('window.copied'), /0 outside ahead/);
+  assert.match(await page.evaluate('window.copied'), /Photos 1 ↔ 2:[^\n]+\nPhotos 2 ↔ 3:/);
+  assert.equal(await page.evaluate('document.querySelector("#near-hash").value'), '0.025');
+  assert.equal(await page.evaluate('document.querySelector("#far-hash").value'), '0.15');
+  await page.evaluate('document.querySelector("#near-hash").value="0.2";document.querySelector("#near-hash").dispatchEvent(new Event("input"))');
+  assert.equal(await page.evaluate('document.querySelector("#copy").disabled'), true);
+  assert.match(await page.evaluate('document.querySelector("#experiment-error").textContent'), /ordered ThumbHash bands/);
+  await click('#use-hash');
+  assert.equal(await page.evaluate('document.querySelector("#copy").disabled'), false, 'disabled hash bands do not block the other experiments');
   assert.doesNotMatch(await page.evaluate('window.copied'), /00000000|target-portrait|synthetic/);
   assert.equal(fixture.repo.db.prepare('SELECT count(*) n FROM decision_operations').get().n, 0);
   assert.equal(fixture.repo.db.prepare('SELECT count(*) n FROM curate_separations').get().n, 0);

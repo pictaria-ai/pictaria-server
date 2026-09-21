@@ -1,3 +1,4 @@
+import { rankObservation } from './rank-evidence.js';
 import { request } from './client.js';
 import { node } from './photos.js';
 
@@ -112,7 +113,7 @@ export class RankComparison {
   }
   render() {
     if (this.photos.length > 40 || this.photos.length < 2) { this.table.replaceChildren(); return; }
-    const table = node('table'), caption = node('caption', 'Row = reference photo → column = matching photo. — means not returned, not a mismatch.');
+    const table = node('table'), caption = node('caption', 'Row → column: raw rank, then photos outside this time group ranked ahead. — means not returned, not a mismatch.');
     table.append(caption);
     const head = node('thead'), labels = node('tr'); labels.append(node('th', 'Search from ↓ / to →'));
     for (let i = 0; i < this.photos.length; i++) { const th = node('th', String(i + 1)); th.scope = 'col'; labels.append(th); }
@@ -123,10 +124,11 @@ export class RankComparison {
       const button = node('button', `Photo ${i + 1}`, 'p-btn quiet'); button.onclick = () => this.onFocus(photo.id);
       label.append(button); tr.append(label);
       for (const target of this.photos) {
-        const rank = row?.state === 'complete' ? row.photos.find(p => p.id === target.id)?.rank : null;
+        const observation = rankObservation(row, target.id), rank = observation?.rank;
         const cell = node('td', target.id === photo.id ? '·' : row?.state !== 'complete' ? '?' : rank == null ? '—' : String(rank));
+        if (target.id !== photo.id && observation) cell.append(node('small', ` ${observation.outsideAhead} outside`, 'rank-outside'));
         cell.title = target.id === photo.id ? 'Reference itself' : row?.state === 'complete'
-          ? rank == null ? `Not in ${row.returned} returned results (maximum ${row.limit}); similarity unknown` : `Rank ${rank} in this reference’s results`
+          ? rank == null ? `Not in ${row.returned} returned results (maximum ${row.limit}); similarity unknown` : `Raw rank ${rank}; ${observation.outsideAhead} photos outside the selected time group ahead. Not a distance.`
           : row?.state === 'failed' ? row.message : row?.state === 'loading' ? 'Waiting or searching' : 'Unqueried';
         tr.append(cell);
       }
@@ -142,7 +144,7 @@ export class RankComparison {
     return ['Directional ranks (timeline images; first 50 excluding each reference)', ...this.photos.map(p => {
       const row = this.rows.get(p.id);
       return `Photo ${number(p.id)}: ${row?.state === 'complete'
-        ? `${row.cached ? 'cached' : 'complete'}, ${row.returned}/${row.limit} results, ${new Date(row.checkedAt).toISOString()}; ` + row.photos.filter(t => t.id !== p.id).map(t => `${number(t.id)}=${t.rank ?? 'not returned'}`).join(', ')
+        ? `${row.cached ? 'cached' : 'complete'}, ${row.returned}/${row.limit} results, ${new Date(row.checkedAt).toISOString()}; ` + row.photos.filter(t => t.id !== p.id).map(t => { const o = rankObservation(row, t.id); return `${number(t.id)}=${o ? `#${o.rank} / ${o.outsideAhead} outside ahead` : 'not returned'}`; }).join(', ')
         : row?.state ?? 'unqueried'}`;
     })].join('\n');
   }
