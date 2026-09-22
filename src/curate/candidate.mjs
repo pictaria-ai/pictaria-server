@@ -112,6 +112,14 @@ export function candidateGroups(rows, { stacks = true, separations = [], ranks =
         if (!conflict && !localSupported) { references.add(a.id); references.add(b.id); }
       }
     }
+    // Recovery against a core of >=3 can depend on directions from locally
+    // supported neighbors too. Preserve that context when a candidate has at
+    // least four members; querying only unsupported endpoints can miss a valid
+    // asymmetric attachment. Hard-conflicted neighbors cannot provide it.
+    const unresolved = new Set(references);
+    if (members.length >= 4) for (const p of members) {
+      if (members.some(q => q !== p && unresolved.has(q.id) && !at(p, q).conflict)) references.add(p.id);
+    }
     const referenceIds = ids.filter(id => references.has(id));
     const complete = referenceIds.every(id => Object.hasOwn(supplied, id));
     for (const { a, b, pair } of pairs) {

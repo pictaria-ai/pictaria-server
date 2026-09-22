@@ -18,7 +18,7 @@ All notable changes to Pictaria Server are documented here. This project follows
   Candidate 2 keeps compatible uncertain photos together provisionally while
   searches are pending, unavailable or missing results. Enrich Group separates
   from None/One (Group vs Couple remains ambiguous). Searches skip references
-  that cannot resolve an uncertain pair, while rank counts still use the original
+  that cannot resolve uncertainty or support core recovery; rank counts use the original
   time group. Completed inconclusive checks are explicitly labeled uncertain.
   Comparisons include **Why this stack?**, and unconfirmed time groups are labeled.
   Exact rules, bounds and change history live in [the algorithm guide](docs/CURATE-ALGORITHM.md).

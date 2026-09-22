@@ -86,6 +86,17 @@ test('all human partitions win, including a prohibited pair inside core recovery
   assert.deepEqual(result.groups.flatMap(g => g.ids).sort(), ['1','2','3','4','5']);
 });
 
+test('search pruning preserves locally supported references needed for asymmetric recovery', () => {
+  const rows = [0,0,20,40].map((byte, i) => photo(String(i), { thumbhash: hash(byte) }));
+  const initial = candidateGroups(rows);
+  // Photo 2 is locally close to everyone, but its incoming rank is still
+  // needed to establish photo 3's three-member-core recovery.
+  assert.deepEqual(initial.scopes[0].referenceIds, ['0','1','2','3']);
+  const result = ranked(rows, [[null,0,0,0],[0,null,0,0],[0,0,null,0],[0,6,8,null]]);
+  assert.deepEqual(partition(result), [['0','1','2','3']]);
+  assert.match(result.groups[0].reasons.join(' '), /established core/);
+});
+
 test('bounded time-only fallback is honest; missing timestamps and stacking off remain singles', () => {
   const rows = [photo('1'), photo('2', { time: 62000 }), photo('3', { time: 180001 }), photo('4', { time: null })];
   const result = candidateGroups(rows);

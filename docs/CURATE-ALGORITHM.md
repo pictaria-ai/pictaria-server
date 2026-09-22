@@ -85,7 +85,11 @@ Only opening/paging a **Curate Preview** view admits automatic searches, for
 unresolved time candidates represented on the pages requested. Opening the lab,
 released Curate, or starting the server does not admit this work. Local coherent
 matches need no extra lookup. Required references are the endpoints of locally
-unsupported pairs without a human or strong people conflict. For example, a
+unsupported pairs without a human or strong people conflict. In candidates of
+four or more photos, also include nonconflicting neighbors of those endpoints:
+a locally supported neighbor can still supply a rank needed for asymmetric
+recovery against a core. This deliberately favors preserving useful recovery
+evidence over the smallest possible request count. For example, a
 landscape/solo/couple candidate already resolved by people categories needs zero
 searches. A resolved couple in a larger candidate need not be queried when only
 the solo photos are uncertain. Filtering to just that resolved couple does not
@@ -177,7 +181,7 @@ and decision contract, not create a permanent second Curate pipeline.
 | --- | --- | --- | --- |
 | `candidate-1` | 2026-09-21 | First integrated preview: wider time candidates, contextual people evidence, positive ThumbHash, reciprocal ranks and bounded core recovery; paced background searches and stable views. | PIC-382, under PIC-380 |
 | `candidate-1` publication / UX follow-up | 2026-09-21 | Publish only complete search matrices, retain evidence for active views, and show per-card progress plus an explicit updated-stacks action. Fixes partial-result and timed-expiry regrouping during repeated refreshes; final membership rules and thresholds are unchanged. | PIC-382 |
-| `candidate-2` | 2026-09-21 | Review follow-up: retain compatible uncertainty provisionally while searches are pending, failed or missing targets; separate Group from None/One; query only references that can resolve a locally unsupported, nonconflicting pair. Preserve complete-pass publication, original-cohort outside counts and existing thresholds. | PIC-382 / PIC-380 |
+| `candidate-2` | 2026-09-21 | Review follow-up: retain compatible uncertainty provisionally while searches are pending, failed or missing targets; separate Group from None/One; query unresolved, nonconflicting pairs and their potential core-recovery context. Preserve complete-pass publication, original-cohort outside counts and existing thresholds. | PIC-382 / PIC-380 |
 
 When membership rules, thresholds or interpretation of signals change, increment
 the implementation identifier and add a row describing the behavioral change and

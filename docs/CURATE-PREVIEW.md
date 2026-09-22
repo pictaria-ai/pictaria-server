@@ -67,7 +67,7 @@ in this preview, its proposed partitions are never saved.
   retried without repeating the human decision or invoking AI.
 
 Cards show which nearby photos are waiting for a similarity check or being checked,
-with progress counts for the references needed to resolve uncertain pairs.
+with progress counts for uncertain pairs and any needed core-recovery context.
 Photos with distant ThumbHashes stay together provisionally until search evidence
 can resolve them; strong people differences and saved manual separations still
 apply immediately. Locally resolved groups need no search. A completed check highlights
@@ -75,7 +75,8 @@ affected cards and offers **Show updated stacks**; checks that leave grouping
 unchanged do not ask for a refresh. Results are applied as a complete time-candidate
 pass, never one search at a time. Missing targets and successful empty results
 remain unknown: **Check complete · similarity uncertain** keeps the compatible
-time grouping provisional. Failed or unavailable searches do not fragment it. Completed evidence stays available while the
+time grouping provisional. Failed or unavailable searches do not fragment it.
+Completed evidence stays available while the
 view is active, so repeated Refresh does not restart checks on a ten-minute timer.
 After inactivity or a server restart, this bounded memory cache can be empty and
 a fresh pass may be needed. Changes to photos, people evidence or human corrections
