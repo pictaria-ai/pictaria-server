@@ -7,6 +7,15 @@ All notable changes to Pictaria Server are documented here. This project follows
 
 ### Development
 
+- Curate Preview combines **To curate / Decided**, category and date filters,
+  compact card actions, and explicit bulk selection of single photos. Clicking
+  a photo opens a production-style full-screen lightbox with tags and details
+  beside it. Singles regain keyboard decisions, automatic advance and Undo;
+  stack keepers use separate selection controls and save together. Already-kept
+  references remain read-only, and uncertain responses retain exact safe retry.
+  This iteration remains at `/curate-preview.html`; AI referee integration and
+  the default-page cutover are still pending. [Review flow](docs/CURATE-PREVIEW.md).
+
 - Curate Preview now tries a versioned candidate stacking algorithm: wider time
   candidates, contextual people evidence, positive ThumbHash and reciprocal
   Immich search ranks. Selective background searches are paced and cached; new

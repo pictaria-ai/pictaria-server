@@ -17,7 +17,8 @@
       <span class="p-supporter-slot" aria-live="polite"></span>
       <nav class="p-nav">
         <a href="/insights.html">Insights</a><a href="/enrich.html">Enrich</a
-        ><a href="/curate.html" class="active">Curate</a><a href="/albums.html">Albums</a>
+        ><a href="/curate-preview.html" class="active">Curate</a><a href="/albums.html">Albums</a
+        ><a href="/metrics.html">Frame</a><a href="/remote.html">Remote</a>
       </nav>
       <div class="p-grow"></div>
       <a class="p-gear" href="/settings.html" aria-label="Settings">⚙</a>
@@ -28,12 +29,12 @@
           <h1>Curate <span class="p-chip">Preview</span></h1>
           <p class="p-muted">Choose good photos without keeping every repeat.</p>
         </div>
-        <a class="p-btn" href="/curate.html">Current Curate &amp; decided photos</a>
+        <a class="p-btn" href="/settings.html#sec-curate">Curate settings</a>
       </div>
-      <p class="preview-note">
-        Try the first candidate stacking algorithm. Choices here are saved to your library.
-        AI recommendations will be added in a later preview.
-      </p>
+      <nav id="sections" class="p-tabs section-tabs" aria-label="Review status">
+        <button class="p-tab active" data-section="pending">To curate</button>
+        <button class="p-tab" data-section="decided">Decided</button>
+      </nav>
       <div class="toolbar">
         <nav id="filters" class="p-tabs" aria-label="Photo groups">
           <button class="p-tab active" data-kind="all">All</button
@@ -41,7 +42,7 @@
           ><button class="p-tab" data-kind="singles">Singles</button>
         </nav>
         <label class="search-label"
-          ><span class="sr-only">Search pending photos</span
+          ><span class="sr-only">Search photos</span
           ><input id="search" class="p-input" type="search" maxlength="200" placeholder="Search photos"
         /></label>
         <label class="sort-label" title="Stacks use their earliest photo. Unknown capture dates appear last.">
@@ -51,14 +52,30 @@
             <option value="newest">Newest first</option>
           </select>
         </label>
+        <label id="category-label" class="sort-label"
+          ><span class="sr-only">Enrichment category</span>
+          <select id="category" class="p-input" aria-label="Enrichment category">
+            <option value="all">All categories</option>
+          </select>
+        </label>
         <div class="p-grow"></div>
-        <a class="p-btn" href="/curate-stacking-lab.html">Stacking lab</a>
-        <button id="corrections" class="p-btn">Stack corrections</button
-        ><button id="refresh" class="p-btn">Refresh</button>
+        <button id="refresh" class="p-btn">Refresh</button>
+        <details class="page-tools">
+          <summary class="p-btn">More</summary>
+          <div>
+            <button id="corrections" class="p-btn">Stack corrections</button>
+            <a class="p-btn" href="/curate-stacking-lab.html">Stacking lab</a>
+            <a class="p-btn" href="/curate.html">Production Curate</a>
+          </div>
+        </details>
       </div>
       <div class="view-status">
-        <span id="count" class="p-muted" aria-live="polite">Loading photos…</span
+        <label id="bulk-label"
+          ><input id="select-shown" type="checkbox" /><span id="bulk-label-text"
+            >Select single photos</span
+          ></label
         >
+        <span id="count" class="p-muted" aria-live="polite">Loading photos…</span>
       </div>
       <div id="updates" class="notice" hidden role="status">
         <span id="updates-copy"></span><button id="show-updates" class="p-btn">Show updated stacks</button>
@@ -75,6 +92,14 @@
         ><button id="retry-sync" class="p-btn" hidden>Retry sync</button
         ><button id="undo" class="p-btn" hidden>Undo</button>
       </div>
+      <div id="bulk-actions" class="notice" hidden>
+        <strong id="bulk-count"></strong>
+        <button class="p-btn primary" data-bulk="approve">Keep</button>
+        <button class="p-btn" data-bulk="reviewed">Mark reviewed</button>
+        <button class="p-btn" data-bulk="favorite">Favorite</button>
+        <button class="p-btn" data-bulk="reject">Never show</button>
+        <button id="clear-bulk" class="p-btn">Clear</button>
+      </div>
       <section id="groups" class="group-grid" aria-label="Photos to curate"></section>
       <p id="empty" class="empty" hidden>No pending photos match this view.</p>
       <div class="load-row"><button id="more" class="p-btn" hidden>Load more</button></div>
@@ -90,8 +115,8 @@
         </header>
         <div class="dialog-body">
           <p id="comparison-help">
-            Select the photos you want to keep. The rest will be marked reviewed. Reviewed photos are not deleted or
-            marked Never show.
+            Select the photos you want to keep. The rest will be marked reviewed. Reviewed photos are not
+            deleted or marked Never show.
           </p>
           <details id="stack-reason" class="stack-reason">
             <summary>Why this stack?</summary>
@@ -135,38 +160,70 @@
       </div>
     </dialog>
     <dialog id="photo-view" aria-labelledby="photo-title">
-      <div class="dialog-frame">
-        <header class="dialog-head">
-          <div>
-            <h2 id="photo-title"></h2>
-            <span id="photo-position" class="p-muted"></span>
-          </div>
-          <a id="immich" class="p-btn" target="_blank" rel="noopener" hidden>Immich ↗</a>
-          <button class="p-btn" data-close="photo-view">Close</button>
-        </header>
-        <div class="dialog-body photo-detail">
-          <img id="photo-large" alt="" />
-          <p id="photo-caption"></p>
-          <div id="photo-tags" class="tags"></div>
-          <div id="photo-secondary" class="viewer-secondary">
-            <label
-              >Decision
-              <select id="photo-outcome">
-                <option value="reviewed">Mark reviewed</option>
-                <option value="approve">Keep</option>
-                <option value="favorite">Keep as favorite</option>
-                <option value="reject">Never show</option>
-              </select></label
-            >
-            <button id="photo-remove" class="p-btn">Remove from stack</button>
-          </div>
+      <div class="lightbox-layout">
+        <div class="lightbox-stage">
+          <img id="photo-large" alt="" /><span id="photo-image-error" hidden>Preview unavailable</span>
         </div>
-        <footer class="dialog-foot">
-          <button id="photo-prev" class="p-btn">← Previous</button>
-          <button id="photo-keep" class="p-btn" aria-pressed="false">Keep (K)</button>
+        <aside class="lightbox-side">
+          <div class="lightbox-nav">
+            <button id="photo-prev" class="p-btn" aria-label="Previous photo">←</button>
+            <button id="photo-next" class="p-btn" aria-label="Next photo">→</button>
+            <button class="p-btn" data-close="photo-view">Close</button>
+          </div>
+          <span id="photo-position" class="p-muted"></span>
+          <h2 id="photo-title"></h2>
+          <p id="photo-date" class="p-muted"></p>
+          <div id="photo-error" role="alert" hidden></div>
+          <button id="photo-refresh" class="p-btn" hidden>Close and refresh</button>
+          <div id="photo-recovery" class="notice" hidden>
+            <span>The response is uncertain. Retry the same decision safely.</span>
+            <button id="photo-retry" class="p-btn">Retry decision</button>
+          </div>
+          <div id="single-actions" class="lightbox-actions">
+            <button class="p-btn" data-photo-action="favorite">Favorite (F)</button>
+            <button class="p-btn primary" data-photo-action="approve">Keep (Y)</button>
+            <button class="p-btn" data-photo-action="reviewed">Reviewed (S)</button>
+            <button class="p-btn" data-photo-action="reject">Never show (N)</button>
+          </div>
+          <div id="stack-actions">
+            <button id="photo-keep" class="p-btn" aria-pressed="false">Keep (K)</button>
+            <div id="photo-secondary" class="viewer-secondary">
+              <label
+                >Choice
+                <select id="photo-outcome">
+                  <option value="reviewed">Mark reviewed</option>
+                  <option value="approve">Keep</option>
+                  <option value="favorite">Keep as favorite</option>
+                  <option value="reject">Never show</option>
+                </select></label
+              >
+              <button id="photo-remove" class="p-btn">Remove from stack</button>
+            </div>
+            <p class="p-muted">Your selection is saved when you save the stack.</p>
+            <button id="back-comparison" class="p-btn">Back to comparison</button>
+          </div>
           <span id="photo-readonly" class="p-muted" hidden>Already kept · reference only</span>
-          <button id="photo-next" class="p-btn">Next →</button>
-        </footer>
+          <button id="back-pending-photo" class="p-btn" hidden>Back to photo being reviewed</button>
+          <div id="photo-receipt" class="notice" hidden>
+            <span id="photo-receipt-text"></span><button id="photo-undo" class="p-btn">Undo (Z)</button>
+          </div>
+          <p id="photo-keys" class="p-muted"></p>
+          <p id="photo-caption"></p>
+          <p id="photo-score" class="p-muted"></p>
+          <p id="photo-model" class="p-muted" hidden></p>
+          <h3>Tags</h3>
+          <div id="photo-tags" class="tags"></div>
+          <details id="photo-reason" class="stack-reason" hidden>
+            <summary>Why this photo is separate</summary>
+            <ul id="photo-reasons"></ul>
+          </details>
+          <section id="photo-context" hidden>
+            <h3>Already kept nearby</h3>
+            <p class="p-muted">For reference only.</p>
+            <div id="photo-context-images"></div>
+          </section>
+          <a id="immich" class="p-btn" target="_blank" rel="noopener" hidden>Open in Immich ↗</a>
+        </aside>
       </div>
     </dialog>
     <dialog id="correction-dialog" aria-labelledby="correction-title">
@@ -177,8 +234,8 @@
         </header>
         <div class="dialog-body">
           <p>
-            These separations stay in place as your library changes. Resetting a correction allows photos to group
-            again; it doesn’t change your keeper decisions.
+            These separations stay in place as your library changes. Resetting a correction allows photos to
+            group again; it doesn’t change your keeper decisions.
           </p>
           <div id="correction-list"></div>
           <div id="correction-error" role="alert" hidden></div>

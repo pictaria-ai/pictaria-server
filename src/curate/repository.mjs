@@ -233,7 +233,7 @@ export class CurateRepository {
   details(ids) {
     return ids.map((id) => {
       const row = this.prepare(
-        `SELECT a.original_path,ls.short_caption,p.state,p.evidence_json,m.checked_at,m.outcome FROM curate_photos p
+        `SELECT a.original_path,ls.short_caption,ls.frame_score,a.file_created_at,p.state,p.evidence_json,m.checked_at,m.outcome FROM curate_photos p
         JOIN assets a ON a.asset_id=p.asset_id LEFT JOIN latest_success ls ON ls.asset_id=p.asset_id
         LEFT JOIN curate_metadata m ON m.asset_id=p.asset_id WHERE p.asset_id=?`,
       ).get(id);
@@ -242,6 +242,7 @@ export class CurateRepository {
         id,
         filename: row.original_path?.split('/').pop() ?? id,
         caption: row.short_caption ?? '',
+        capturedAt: row.file_created_at ?? null, frameScore: row.frame_score ?? null,
         tags: this.prepare('SELECT tag FROM asset_tags WHERE asset_id=? ORDER BY tag').all(id).map(r => r.tag),
         state: row.state,
         evidence: JSON.parse(row.evidence_json),
@@ -253,9 +254,9 @@ export class CurateRepository {
     // Bounded display projection: never expand evidence or a whole stack just
     // to paint its card. Missing source rows do not change saved membership.
     return ids.map(id => {
-      const row = this.prepare(`SELECT a.original_path,ls.short_caption FROM assets a
+      const row = this.prepare(`SELECT a.original_path,a.file_created_at,ls.short_caption,p.state FROM assets a LEFT JOIN curate_photos p ON p.asset_id=a.asset_id
         LEFT JOIN latest_success ls ON ls.asset_id=a.asset_id WHERE a.asset_id=?`).get(id);
-      return { id, filename: row?.original_path?.split('/').pop() || id, caption: row?.short_caption ?? '' };
+      return { id, filename: row?.original_path?.split('/').pop() || id, caption: row?.short_caption ?? '', capturedAt: row?.file_created_at ?? null, state: row?.state ?? 'undecided' };
     });
   }
   corrections(offset = 0, limit = 50) {
@@ -349,11 +350,11 @@ export class CurateRepository {
     }
     return false;
   }
-  material(ids) {
+  material(ids, reviewState = 'pending') {
     this.flushIds(ids);
     const material = ids.map((id) => {
       const p = this.photo(id);
-      if (!p || p.state !== 'undecided' || p.availability === 'unavailable')
+      if (!p || (reviewState === 'decided' ? p.state === 'undecided' : p.state !== 'undecided') || p.availability === 'unavailable')
         throw new CurateError('A comparison photo changed or is unavailable. Refresh Curate.');
       const constraints = this.prepare(
         `SELECT m.separation_id,m.partition_no,s.revision,s.active FROM curate_separation_members m JOIN curate_separations s ON s.id=m.separation_id WHERE m.asset_id=? ORDER BY m.separation_id`,
@@ -440,7 +441,7 @@ export class CurateRepository {
     ).get(alias.root_id, now);
     return { previous, rootId: alias.root_id };
   }
-  async createView(current, groups, { replacesViewId = null, sort = 'oldest' } = {}) {
+  async createView(current, groups, { replacesViewId = null, sort = 'oldest', section = 'pending', category = 'all' } = {}) {
     // Identical ordered memberships share an immutable SQLite snapshot across
     // tabs, retries and filters. They never page a moving current index. Hashing
     // and persistence yield, and all retained snapshot bytes count toward 5 MiB.
@@ -497,7 +498,7 @@ export class CurateRepository {
         evidenceRevision: current.evidenceRevision ?? 0,
         stacks: current.stacks,
         total: groups.length,
-        sort,
+        sort, section, category,
         snapshotId,
         ...(rootId ? { replacementRootId: rootId } : {}),
       };
@@ -569,7 +570,7 @@ export class CurateRepository {
   }
   assertComparison(leaseId, now = Date.now()) {
     const lease = this.getLease(leaseId, 'comparison', now);
-    if (this.material(lease.ids) !== lease.material)
+    if (this.material(lease.ids, lease.reviewState) !== lease.material)
       throw new CurateError('Comparison inputs changed. Refresh Curate.');
     return lease;
   }

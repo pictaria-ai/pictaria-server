@@ -15,7 +15,8 @@ bounds and version history. Open
 **Why this stack?** in a comparison for a concise explanation.
 
 The current `/curate.html` remains the default during this staging step. The
-preview links back to it for Decided and existing workflows. This temporary entry
+preview now includes **To curate** and **Decided**; **More → Production Curate**
+keeps the released page accessible during testing. This temporary entry
 point allows human-flow review before production AI applicability, rollout and
 runtime acceptance are complete; it is not a second permanent Curate product.
 The eventual default-page cutover must consolidate these entry points and retire
@@ -27,8 +28,25 @@ in this preview, its proposed partitions are never saved.
 
 ## Review flow
 
-- All, Stacks and Singles show pending comparisons. Search can match one member
-  but opens the **whole** saved stack. Grid pagination does not limit decisions.
+- **To curate** shows all pending photos by default. All, Stacks and Singles
+  filter the same view. **All categories** can narrow it to the existing Enrich
+  review categories (Candidates, Should Review and Unlikely, or customized labels).
+  A mixed stack belongs to its highest-priority member category, as in production;
+  filtering or matching one member in search always retains the **whole** stack.
+- **Decided** shows individual photos with earlier human choices, with search
+  and date order. Open a photo or use its card actions to change that choice.
+  A newer concurrent decision invalidates the old action scope; it cannot be
+  silently overwritten. This view does not request stack similarity searches.
+- Cards show a cover, caption (filename when unavailable), date and stack size.
+  **Keep** and **Mark reviewed** are direct actions for single photos. **More**
+  exposes Favorite and Never show. Click the image for large inspection; a stack
+  opens its comparison first.
+- **Select single photos** selects the singles currently loaded, excluding stacks.
+  In Singles and Decided it reads **Select shown photos**; Stacks hides it.
+  Loading more does not add photos to the selection. Selected singles can be
+  kept, favorited, marked reviewed or marked Never show in one undoable operation
+  (up to 1,000 photos). The server verifies these are still single photos at both
+  operation creation and save; a regrouped photo requires a refresh.
 - **Date taken → Oldest first / Newest first** orders the full result set before
   pagination. Stacks use their earliest known capture time in either direction;
   photos inside a stack remain in capture order. Undated comparisons stay last.
@@ -37,21 +55,31 @@ in this preview, its proposed partitions are never saved.
   Changing sort resets pagination and opens a fresh view. Background arrivals
   remain behind a refresh notice until you explicitly load the updated view.
 - Open a stack, inspect its members and select zero, one or several keepers.
-  Click an image to toggle Keep; **View larger** opens its detailed viewer.
+  Click an image to enlarge it; the separate **Keep** button selects it.
   The action states the complete result, for example **Keep 2, mark 3 reviewed**.
   Unselected photos default to reviewed; this is neither deletion nor Never show.
-  Zero-keeper saves have neutral styling. Singles use **Keep** or **Mark reviewed**
-  without bulk selection controls.
+  Zero-keeper saves have neutral styling.
 - Comparisons with more than ten photos open in a compact grid; **Compact grid**
   can be turned off for larger images.
-- The larger viewer shows caption, tags, a header Immich link and a sticky Keep
-  control. **K** toggles Keep and arrow keys navigate; Escape closes the innermost
-  dialog. Favorite, Never show and Remove from stack are available in this viewer.
-  Keeper, Favorite and Never show choices remain a draft until the complete
-  comparison is saved. Stack corrections save immediately. Native dialog focus
-  trapping, keyboard buttons and backdrop dismissal work on narrow screens.
+- The lightbox follows the production layout: the photo fills the available
+  space beside a narrow panel with caption, tags, capture date, enrichment score,
+  producing model/profile when available, and an Immich link. On narrow screens
+  the information panel scrolls below the photo.
+- For **single photos**, buttons and production keyboard shortcuts save immediately:
+  **Y/A** Keep, **F** Favorite, **S/V** Mark reviewed, **N/R** Never show.
+  In To curate, an accepted decision advances to the next loaded card (loading the next page
+  when necessary); reaching a stack opens its complete comparison. Arrow keys
+  browse without deciding. **Z** undoes the last accepted action, and **Escape**
+  closes the viewer. Decided edits stay on the same photo for inspection. Modified/repeated keystrokes and typing in fields do not
+  trigger decisions. A lost response holds the current photo and offers exact retry.
+- In a **stack lightbox**, **K** toggles Keep and arrows browse members. Favorite
+  and Never show choices also remain a draft until the complete comparison is
+  saved. Escape or Back to comparison returns to that draft. **Remove from stack**
+  is an immediate persistent correction. Single-photo decision shortcuts do not
+  save individual stack members.
 - Already-kept nearby photos are bounded reference context. They have no decision
-  controls and are excluded from every outcome/correction payload.
+  controls and are excluded from every outcome/correction payload. Singles expose
+  these references as sidebar thumbnails, with a return button to the pending photo.
 - Remove from stack separates that member from its current peers. Split into
   singles separates all current members. The photos remain pending. These
   constraints persist across refreshes and restarts. Stack corrections lists
@@ -64,7 +92,7 @@ in this preview, its proposed partitions are never saved.
   The visible Undo affordance does not survive a page reload; saved decisions and
   corrections do. Undo feedback says **Undid choices** and separately reports
   whether the restored tags have synchronized. Older decisions remain accessible
-  from the current Curate page.
+  from the preview’s **Decided** tab.
 - Save acceptance and Immich synchronization are separate. A failed sync can be
   retried without repeating the human decision or invoking AI.
 
@@ -99,7 +127,11 @@ also require renewed checks for the affected candidate.
 
 Background progress does not replace cards, comparison membership or the user's
 selection. Explicit refresh, filter/search
-changes and successful local actions open a replacement view. Photo-information
+changes open a replacement view. Accepted pending decisions remove only their
+cards from the displayed snapshot and Undo restores them there; this preserves
+navigation order while working through singles. Other cards do not regroup as a
+side effect of a decision. Corrections, Decided edits and Undo after changing views
+reload a fresh view. Photo-information
 refresh status is separate from AI status, and failed metadata refresh can be
 requested again from the open comparison. Unknown metadata is not claimed complete.
 
@@ -133,7 +165,7 @@ block Save until the previews can be retried.
   to 50 active corrections; `?id=…` reads current state. The metadata retry route
   takes a saved comparison ID and bounded offset, never arbitrary client IDs.
 - Provider and saved settings defaults are unchanged. Preview grouping now uses
-  candidate 1; the released page and strict lab controls keep their existing rules.
+  candidate 3; the released page and strict lab controls keep their existing rules.
 - Enrichment schema **15** / persistent-state contract **18** adds optional
   correction-action metadata without rewriting existing partitions or decisions.
   The action is saved atomically with the separation; exact retries must preserve
@@ -143,7 +175,7 @@ block Save until the previews can be retried.
   binary using contract 17 or earlier requires restoring the **complete** matching
   pre-upgrade checkpoint (including state metadata and databases); changing only
   the application image is blocked by the downgrade guard. See
-  [upgrade and recovery](UPGRADING.md). The date-sort follow-up adds no further
+  [upgrade and recovery](UPGRADING.md). The date-sort and combined-UI follow-ups add no further
   schema or persistent-state version change.
 
 ## Validation and remaining work
@@ -157,7 +189,9 @@ controls, correction action history and failed-open recovery are also covered.
 Date-order coverage includes pagination, duplicate stacks spanning distant dates,
 missing/equal dates, filters/search, browser preference, failed replacement,
 background arrivals, decisions/Undo and persisted view order after restart.
-Protocol tests cover serialized replacement, rejected requests, unavailable
+Combined-UI tests also cover single-photo keyboard save/advance, page boundaries,
+read-only references, explicit bulk scope, Decided edits, Undo across refresh, and
+exact retry after a lost response. Protocol tests cover serialized replacement, rejected requests, unavailable
 storage, exact retry and oversized-group admission. Existing foundation
 and decision tests cover server restarts, input changes and atomicity.
 
@@ -165,8 +199,9 @@ The preview deliberately contains no actionable AI recommendations: old per-phot
 ranks are not valid new comparison advice. Production check/keeper integration,
 applicable versus historical advice states and full-set Apply AI advice belong to
 the PIC-116/PIC-370/PIC-346 integration. PIC-369 stays open for that integration
-and final default-page UX. Broader sorting choices, top-level bulk selection, tag editing and
-a fuller persisted stack audit keep their separately tracked scopes.
+and final default-page UX. Broader sorting choices, tag editing and a fuller persisted stack audit keep
+their separately tracked scopes. This UI iteration implements single-photo bulk
+selection; it never applies a bulk keeper choice to stacks.
 
 Full production mixed-load/incremental-memory gates, 30k repeated browser workflow
 acceptance, operational migration/cutover and owner visual review remain required

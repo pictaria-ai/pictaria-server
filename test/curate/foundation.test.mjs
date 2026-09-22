@@ -1265,3 +1265,122 @@ test("waiting for a predecessor cannot expose another tab's still-building targe
       await Promise.allSettled([first, retry, other]);
     }
   }));
+
+
+test('review category and search retain complete stacks; decided views have stable individual scope', async () =>
+  fixture(async ({ repo, service, add }) => {
+    add('00000000-0000-0000-0000-000000000001', 0, { originalPath: '/photos/match.jpg' });
+    add('00000000-0000-0000-0000-000000000002', 1);
+    add('00000000-0000-0000-0000-000000000003', 900);
+    service.review = {
+      taxonomy: {},
+      reviewRows: () => [
+        { assetId: '00000000-0000-0000-0000-000000000001', bucket: 'unlikely' },
+        { assetId: '00000000-0000-0000-0000-000000000002', bucket: 'candidates' },
+        { assetId: '00000000-0000-0000-0000-000000000003', bucket: 'should_review' },
+      ],
+    };
+    const candidates = await service.openView({ category: 'candidates', search: 'match' });
+    assert.equal(candidates.total, 1);
+    assert.equal(candidates.groups[0].memberCount, 2);
+    assert.equal((await service.openView({ category: 'unlikely' })).total, 0);
+    assert.equal(
+      (await service.openView({ category: 'should_review' })).groups[0].photos[0].id,
+      '00000000-0000-0000-0000-000000000003',
+    );
+    await assert.rejects(service.selection(candidates.viewId, [candidates.groups[0].id]), /only.*single/);
+    repo.setManualFrameTags({
+      assetIds: ['00000000-0000-0000-0000-000000000001'],
+      addTags: ['frame/eligible'],
+      removeTags: [],
+      action: 'approve',
+    });
+    const decided = await service.openView({ section: 'decided' });
+    assert.equal(decided.total, 1);
+    assert.equal(decided.groups[0].photos[0].state, 'approved');
+    const c = service.comparison(decided.viewId, decided.groups[0].id);
+    const { expiresAt, ...op } = await service.issueDecision(c.id);
+    assert.equal(op.snapshot.reviewState, 'decided');
+    const receipt = await service.applyDecision({
+      ...op,
+      outcomes: { '00000000-0000-0000-0000-000000000001': 'reject' },
+    });
+    assert.equal(receipt.assetCount, 1);
+    assert.deepEqual(
+      await service.applyDecision({ ...op, outcomes: { '00000000-0000-0000-0000-000000000001': 'reject' } }),
+      receipt,
+    );
+    await service.applyDecision({
+      operationId: receipt.undo.operationId,
+      kind: 'undo',
+      targetOperationId: receipt.operationId,
+    });
+    assert.ok(
+      repo
+        .loadAssetTagsFor(['00000000-0000-0000-0000-000000000001'])
+        ['00000000-0000-0000-0000-000000000001'].includes('frame/eligible'),
+    );
+    assert.ok(
+      !repo
+        .loadAssetTagsFor(['00000000-0000-0000-0000-000000000001'])
+        ['00000000-0000-0000-0000-000000000001'].includes('frame/never-show'),
+    );
+    await assert.rejects(service.issueDecision(c.id), /changed/);
+    await assert.rejects(service.openView({ section: 'invalid' }), /Invalid/);
+  }));
+
+test('bulk singles cannot act on new stack membership; decided snapshots reject concurrent changes', async () =>
+  fixture(async ({ repo, service, add }) => {
+    add('00000000-0000-0000-0000-000000000001', 0);
+    add('00000000-0000-0000-0000-000000000002', 900);
+    const view = await service.openView();
+    const c = await service.selection(
+      view.viewId,
+      view.groups.map((g) => g.id),
+    );
+    const { expiresAt, ...op } = await service.issueDecision(c.id);
+    add('00000000-0000-0000-0000-000000000002', 1);
+    await assert.rejects(
+      service.selection(
+        view.viewId,
+        view.groups.map((g) => g.id),
+      ),
+      /now in a stack/,
+    );
+    // Previously issued bulk operation must also reject a new stack, even when
+    // all new members were individually selected earlier.
+    await assert.rejects(
+      service.applyDecision({
+        ...op,
+        outcomes: {
+          '00000000-0000-0000-0000-000000000001': 'approve',
+          '00000000-0000-0000-0000-000000000002': 'approve',
+        },
+      }),
+      /changed/,
+    );
+    repo.setManualFrameTags({
+      assetIds: ['00000000-0000-0000-0000-000000000001'],
+      addTags: ['frame/eligible'],
+      removeTags: [],
+      action: 'approve',
+    });
+    const decided = await service.openView({ section: 'decided' });
+    const dc = service.comparison(decided.viewId, decided.groups[0].id);
+    const { expiresAt: until, ...dop } = await service.issueDecision(dc.id);
+    repo.setManualFrameTags({
+      assetIds: ['00000000-0000-0000-0000-000000000001'],
+      addTags: ['frame/favorite'],
+      removeTags: [],
+      action: 'favorite',
+    });
+    await assert.rejects(
+      service.applyDecision({ ...dop, outcomes: { '00000000-0000-0000-0000-000000000001': 'reject' } }),
+      /changed/,
+    );
+    assert.ok(
+      repo
+        .loadAssetTagsFor(['00000000-0000-0000-0000-000000000001'])
+        ['00000000-0000-0000-0000-000000000001'].includes('frame/favorite'),
+    );
+  }));

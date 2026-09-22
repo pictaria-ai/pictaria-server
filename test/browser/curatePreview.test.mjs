@@ -81,12 +81,13 @@ test('Curate preview date order is global, remembered and stable until refresh',
   await ready(50);
   await click('.group-card');
   await page.waitFor('!document.querySelector("#apply").disabled');
-  await click('#apply');
-  await ready(50);
+  await click('[data-photo-action=reviewed]');
+  await ready(49);
   assert.equal(await page.evaluate('document.querySelector("#sort").value'), 'newest');
   assert.match((await cards())[0], new RegExp(fixture.id(1052)));
-  await click('#undo');
+  await click('#photo-undo');
   await ready(50);
+  await click('[data-close=photo-view]');
   assert.match((await cards())[0], new RegExp(fixture.id(3000)));
   await sort('oldest');
   await ready(50);
@@ -154,11 +155,10 @@ test(
       assert.equal(await page.evaluate(`document.getElementById('${id}').hidden`), true);
     assert.equal(await page.evaluate('document.querySelector("#apply").textContent'), 'Mark reviewed');
     assert.equal(await page.evaluate('document.querySelector("#apply").classList.contains("primary")'), false);
-    await click('[data-keeper]');
-    assert.equal(await page.evaluate('document.querySelector("#apply").textContent'), 'Keep');
-    await click('#apply');
+    await page.waitFor('document.querySelector("#photo-view").open');
+    await click('[data-photo-action=approve]');
     await page.waitFor('!document.querySelector("#comparison").open && !document.querySelector("#refresh").disabled');
-    assert.equal(fixture.repo.curate.photo(fixture.id(1001)).state, 'approved');
+    assert.ok(fixture.repo.loadAssetTagsFor([fixture.id(1001)])[fixture.id(1001)].includes('frame/eligible'));
   },
 );
 

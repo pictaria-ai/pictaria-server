@@ -41,12 +41,6 @@ button {
 .heading p {
   margin: 6px 0 0;
 }
-.preview-note {
-  padding: 12px 14px;
-  border-left: 3px solid var(--p-accent);
-  background: var(--p-panel);
-  color: var(--p-muted);
-}
 .toolbar {
   margin: 22px 0 16px;
 }
@@ -342,30 +336,11 @@ dialog::backdrop {
   padding: 8px;
   min-height: 44px;
 }
-#photo-view .dialog-head h2 {
-  font-size: 15px;
-}
-#photo-view .dialog-head > div {
-  flex: 1;
-  min-width: 0;
-}
-#photo-view .dialog-foot .p-btn {
-  min-height: 44px;
-}
 .context-grid {
   grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
 }
 .context-grid .photo-image img {
   height: 180px;
-}
-.photo-detail {
-  text-align: center;
-}
-.photo-detail > img {
-  width: 100%;
-  height: min(65dvh, 800px);
-  object-fit: contain;
-  background: #101318;
 }
 .tags {
   display: flex;
@@ -486,23 +461,74 @@ dialog::backdrop {
   .photo-grid.compact .photo-info .p-btn {
     width: 100%;
   }
-  #photo-view .dialog-head {
-    flex-wrap: wrap;
-  }
-  #photo-view .dialog-head > div {
-    flex-basis: 100%;
-  }
-  #photo-view .dialog-foot {
-    flex-wrap: nowrap;
-    gap: 6px;
-  }
-  #photo-view .dialog-foot .p-btn {
-    font-size: 12px;
-    padding: 8px;
-  }
+
 }
 
 .stack-reason { margin: .5rem 0; }
 .stack-reason summary { cursor: pointer; font-weight: 600; }
 .stack-reason ul { margin: .5rem 0; padding-left: 1.25rem; }
 .stack-reason li { margin: .25rem 0; }
+
+/* Unified preview: the grid stays compact; inspection gets the full viewport. */
+[hidden] { display: none !important; }
+.section-tabs { margin-top: 22px; border-bottom: 1px solid var(--p-line); padding-bottom: 10px; }
+.toolbar { margin: 14px 0; }
+.page-tools { position: relative; }
+.page-tools summary, .card-menu summary { list-style: none; cursor: pointer; }
+.page-tools > div { position: absolute; z-index: 3; right: 0; display: grid; gap: 6px; width: 180px; padding: 10px; background: var(--p-panel); border: 1px solid var(--p-line); border-radius: 8px; box-shadow: var(--p-shadow); }
+#bulk-label { display: flex; gap: 8px; align-items: center; font-size: 13px; }
+#bulk-actions { position: sticky; top: 8px; z-index: 4; }
+.group-card { position: relative; overflow: visible; display: flex; flex-direction: column; }
+.group-card .cover { padding: 0; border: 0; width: 100%; overflow: hidden; border-radius: 11px 11px 0 0; display: block; }
+.group-card .cover:focus-visible { outline: 3px solid var(--p-accent); outline-offset: -3px; }
+.group-card.is-stack { box-shadow: 0 -4px 0 -1px var(--p-panel), 0 -5px 0 -1px var(--p-line); }
+.group-caption { flex: 1; padding: 10px 12px; gap: 5px; }
+.group-caption .filename { font-size: 14px; }
+.card-actions { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 4px; }
+.card-actions .p-btn { font-size: 12px; min-height: 34px; padding: 5px 9px; }
+.card-menu { position: relative; }
+.card-menu[open] { z-index: 3; }
+.card-menu > button { display: block; width: 130px; position: absolute; right: 0; background: var(--p-panel); }
+.card-menu > button:last-child { margin-top: 36px; }
+.card-selection { position: absolute; z-index: 2; left: 10px; top: 10px; padding: 4px; background: var(--p-panel); border-radius: 5px; }
+.card-selection input { margin: 0; width: 16px; height: 16px; accent-color: var(--p-accent); }
+.photo-image { cursor: zoom-in; }
+.photo-info [data-keeper] { min-width: 75px; }
+.photo-info [aria-pressed=true] { background: var(--p-accent); color: var(--p-accent-ink); }
+#photo-view { width: 100vw; max-width: 100vw; height: 100dvh; max-height: 100dvh; margin: 0; border: 0; border-radius: 0; background: rgb(8 10 13 / .97); }
+.lightbox-layout { display: grid; grid-template-columns: minmax(0,1fr) 320px; height: 100%; }
+.lightbox-stage { min-width: 0; min-height: 0; padding: 18px; display: flex; align-items: center; justify-content: center; }
+#photo-large { display: block; max-width: 100%; max-height: calc(100dvh - 36px); width: auto; height: auto; object-fit: contain; border-radius: 6px; }
+.lightbox-side { min-width: 0; background: var(--p-panel); border-left: 1px solid var(--p-line); padding: 16px; overflow: auto; display: flex; flex-direction: column; gap: 12px; }
+.lightbox-side > * { flex-shrink: 0; min-width: 0; overflow-wrap: anywhere; }
+.lightbox-side h2 { font-size: 14px; }
+.lightbox-side h3 { font-size: 13px; margin: 0; }
+.lightbox-side p { margin: 0; font-size: 13px; }
+.lightbox-nav { display: flex; gap: 7px; position: sticky; top: -16px; padding: 8px 0; background: var(--p-panel); z-index: 1; }
+.lightbox-nav button:last-child { margin-left: auto; }
+.lightbox-actions { display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); gap: 7px; }
+.lightbox-side .p-btn { white-space: normal; height: auto; min-height: 38px; }
+.lightbox-side #photo-keys { font-size: 11px; line-height: 1.7; }
+.lightbox-side #photo-caption { font-size: 14px; }
+.lightbox-side .tags { justify-content: flex-start; margin: 0; }
+.lightbox-side .tags span { max-width: 100%; overflow-wrap: anywhere; }
+.lightbox-side #immich { text-align: center; }
+.lightbox-side #stack-actions > .p-btn { width: 100%; }
+.lightbox-side .viewer-secondary { margin: 10px 0; justify-content: flex-start; }
+.lightbox-side #photo-receipt { margin: 0; padding: 10px; font-size: 12px; }
+#comparison-help { margin-bottom: 8px; font-size: 13px; }
+#photo-position, #photo-date { font-size: 12px; }
+@media (max-width: 760px) {
+  main { padding: 20px 12px 50px; }
+  .group-grid { grid-template-columns: repeat(auto-fill,minmax(200px,1fr)); gap: 14px; }
+  .toolbar { gap: 8px; }
+  .search-label { flex: 1 1 180px; }
+  .lightbox-layout { grid-template-columns: 1fr; grid-template-rows: minmax(0,1fr) auto; }
+  .lightbox-stage { padding: 8px; overflow: hidden; }
+  #photo-large { max-height: 100%; }
+  .lightbox-side { max-height: 43dvh; border-left: none; border-top: 1px solid var(--p-line); padding: 12px; gap: 10px; }
+  .lightbox-nav { top: -12px; }
+}
+#photo-context-images { display: flex; flex-wrap: wrap; gap: 8px; }
+.reference-photo { border: 0; padding: 0; background: transparent; cursor: pointer; }
+.reference-photo img { display: block; width: 74px; height: 74px; object-fit: cover; border-radius: 5px; }

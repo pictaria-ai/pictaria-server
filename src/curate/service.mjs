@@ -1,3 +1,4 @@
+import { reviewConfig } from '../enrich/reviewBuckets.mjs';
 import { Worker } from 'node:worker_threads';
 import { groupPhotos } from './grouping.mjs';
 import { candidateGroups } from './candidate.mjs';
@@ -8,8 +9,9 @@ import { StackingLab } from './lab.mjs';
 import { CurateSimilaritySearch } from './similarity.mjs';
 
 export class CurateService {
-  constructor({ repo, config = {}, immich = null, metadataOptions = {}, candidateOptions = {} }) {
+  constructor({ repo, config = {}, immich = null, metadataOptions = {}, candidateOptions = {}, review = null }) {
     this.repo = repo;
+    this.review = review;
     this.store = repo.curate;
     this.config = config;
     this.immich = immich;
@@ -100,8 +102,10 @@ export class CurateService {
     this.metrics.rebuildMs = performance.now() - start;
     return this.current;
   }
-  async openView({ kind = 'all', search = '', sort = 'oldest', replacesViewId = null } = {}) {
-    if (!['all', 'stacks', 'singles'].includes(kind) || !['oldest', 'newest'].includes(sort) ||
+  async openView({ kind = 'all', search = '', sort = 'oldest', section = 'pending', category = 'all', replacesViewId = null } = {}) {
+    if (!['pending', 'decided'].includes(section) || typeof category !== 'string' ||
+        !['all', ...this.categories().map(b => b.id)].includes(category) ||
+        !['all', 'stacks', 'singles'].includes(kind) || !['oldest', 'newest'].includes(sort) ||
         typeof search !== 'string' || search.length > 200)
       throw new CurateError('Invalid Curate filter.', 'invalid_curate_query', 400);
     if (
@@ -111,22 +115,31 @@ export class CurateService {
       throw new CurateError('Invalid previous Curate view.', 'invalid_curate_query', 400);
     const current = await this.refresh();
     this.start();
-    let groups = current.groups.filter((g) => kind === 'all' || g.ids.length > 1 === (kind === 'stacks'));
+    const rows = section === 'pending' && category !== 'all' ? this.review?.reviewRows() ?? [] : [];
+    const byPhoto = new Map(rows.map(row => [row.assetId, row]));
+    // Decided photos are individual human outcomes, never pending stacks.
+    let groups = section === 'decided'
+      ? this.repo.db.prepare(`SELECT asset_id,captured_ms FROM curate_photos
+          WHERE state<>'undecided' AND availability<>'unavailable'
+          ORDER BY captured_ms IS NULL,captured_ms,asset_id`).all().map(row => ({
+            id: `single:decided:${row.asset_id}`, ids: [row.asset_id], capturedMs: row.captured_ms, route: 'decided',
+          }))
+      : current.groups.filter(g => kind === 'all' || (g.ids.length > 1) === (kind === 'stacks'));
+    if (section === 'pending' && category !== 'all') {
+      // Categories select whole comparisons. A mixed stack belongs to the
+      // highest-priority category earned by any member, as in released Curate.
+      const priority = new Map(this.categories().map((b, i) => [b.id, i]));
+      groups = groups.filter(g => g.ids.map(id => byPhoto.get(id)?.bucket ?? 'candidates')
+        .sort((a,b) => (priority.get(a) ?? Infinity) - (priority.get(b) ?? Infinity))[0] === category);
+    }
     if (search.trim()) {
-      const term =
-        '%' + search.trim().toLowerCase().replaceAll('\\', '\\\\').replaceAll('%', '\\%').replaceAll('_', '\\_') + '%';
-      const matches = new Set(
-        this.repo.db
-          .prepare(
-            `SELECT p.asset_id FROM curate_photos p JOIN assets a ON a.asset_id=p.asset_id
-        LEFT JOIN latest_success ls ON ls.asset_id=p.asset_id WHERE p.state='undecided' AND
+      const term = '%' + search.trim().toLowerCase().replaceAll('\\', '\\\\').replaceAll('%', '\\%').replaceAll('_', '\\_') + '%';
+      const matches = new Set(this.repo.db.prepare(`SELECT p.asset_id FROM curate_photos p JOIN assets a ON a.asset_id=p.asset_id
+        LEFT JOIN latest_success ls ON ls.asset_id=p.asset_id WHERE
         (lower(a.original_path) LIKE ? ESCAPE '\\' OR lower(ls.short_caption) LIKE ? ESCAPE '\\'
-        OR EXISTS(SELECT 1 FROM asset_tags t WHERE t.asset_id=p.asset_id AND lower(t.tag) LIKE ? ESCAPE '\\'))`,
-          )
-          .all(term, term, term)
-          .map((r) => r.asset_id),
-      );
-      groups = groups.filter((g) => g.ids.some((id) => matches.has(id)));
+        OR EXISTS(SELECT 1 FROM asset_tags t WHERE t.asset_id=p.asset_id AND lower(t.tag) LIKE ? ESCAPE '\\'))`)
+        .all(term, term, term).map(r => r.asset_id));
+      groups = groups.filter(g => g.ids.some(id => matches.has(id)));
     }
     // Grouping emits comparisons in earliest-capture order, with equal dates
     // resolved by the first member's ID. Reverse only the dated groups: unknown
@@ -138,10 +151,15 @@ export class CurateService {
     }
     // Paging stores order/whole memberships, not expanded photos/provenance.
     // Capacity failure is explicit; no page silently drops part of a stack.
-    const lease = await this.store.createView(current, groups, { replacesViewId, sort });
+    const lease = await this.store.createView(section === 'decided' ? { ...current, method: 'decided' } : current, groups, { replacesViewId, sort, section, category });
     this.metadata.wake();
     this.refinement?.retry();
     return this.page(lease.id);
+  }
+  categories() {
+    return reviewConfig(this.review?.taxonomy ?? {}).buckets.sort((a,b) =>
+      a.id === 'candidates' ? -1 : b.id === 'candidates' ? 1 : a.fallback ? -1 : b.fallback ? 1 : 0)
+      .map(({id,label}) => ({id,label}));
   }
   page(viewId, offset = 0, limit = 50, attention = null) {
     if (!Number.isSafeInteger(offset) || offset < 0 || !Number.isSafeInteger(limit) || limit < 1 || limit > 50)
@@ -163,14 +181,15 @@ export class CurateService {
       visible = ids.map(lookup);
       comparison = focus === null ? null : lookup(focus);
     }
-    this.refinement?.demand(viewId, groups);
-    this.refinement?.attention(viewId, visible, comparison);
-    const refinement = this.refinement?.status(viewId, groups) ?? null;
+    if (view.section !== 'decided') this.refinement?.demand(viewId, groups);
+    if (view.section !== 'decided') this.refinement?.attention(viewId, visible, comparison);
+    const refinement = view.section === 'decided' ? null : this.refinement?.status(viewId, groups) ?? null;
     return {
       viewId,
       expiresAt: view.expiresAt,
       total: view.total,
       sort: view.sort ?? 'oldest',
+      section: view.section ?? 'pending', category: view.category ?? 'all', categories: this.categories(),
       immichUrl: this.config.immichPublicUrl || null,
       offset,
       metadata: this.metadata.status(),
@@ -181,7 +200,7 @@ export class CurateService {
         view.stacks !== (this.config.curateBurstGrouping !== false) ||
         Boolean(this.repo.db.prepare('SELECT 1 FROM curate_dirty LIMIT 1').get()),
       groups: groups.map((g) => ({ id: g.id, memberCount: g.ids.length, route: g.route,
-          similarity: this.refinement?.groupStatus(g) ?? null,
+          similarity: view.section === 'decided' ? null : this.refinement?.groupStatus(g) ?? null,
           photos: this.store.covers(g.ids.slice(0, 1)) })),
       nextOffset: offset + limit < view.total ? offset + limit : null,
     };
@@ -190,21 +209,23 @@ export class CurateService {
     const view = this.store.getLease(viewId, 'view');
     const group = this.store.viewGroup(view.id, groupId);
     if (!group) throw new CurateError('Group is not in this view.', 'curate_group_missing', 404);
-    this.assertMembership(group.ids);
-    const material = this.store.material(group.ids);
+    const reviewState = view.section === 'decided' ? 'decided' : 'pending';
+    this.assertDecisionScope(group.ids, reviewState);
+    const material = this.store.material(group.ids, reviewState);
     if (this.store.pendingScopeChanges(group.ids)) throw new CurateError('This stack is updating. Refresh Curate.');
-    const context = this.store.context(group.ids);
+    const context = reviewState === 'decided' ? { ids: [], omitted: false } : this.store.context(group.ids);
     this.store.metadata.request(context.ids, this.metadata.now());
     this.metadata.wake();
     const lease = this.store.comparisonLease(viewId, {
       groupId,
+      ...(reviewState === 'decided' ? { reviewState } : {}),
       ids: group.ids,
       material,
       mode: 'manual',
       contextIds: context.ids,
       contextOmitted: context.omitted,
     });
-    this.refinement?.attention(viewId, null, group);
+    if (reviewState !== 'decided') this.refinement?.attention(viewId, null, group);
     return {
       ...lease,
       photos: this.store.details(group.ids.slice(0, 50)),
@@ -223,7 +244,7 @@ export class CurateService {
     if (!Number.isSafeInteger(offset) || offset < 0 || !Number.isSafeInteger(limit) || limit < 1 || limit > 50)
       throw new CurateError('Invalid comparison page.', 'invalid_curate_query', 400);
     const comparison = this.store.assertComparison(comparisonId);
-    this.assertMembership(comparison.ids);
+    this.assertDecisionScope(comparison.ids, comparison.reviewState, comparison.singlesOnly);
     if (this.store.pendingScopeChanges(comparison.ids))
       throw new CurateError('This stack is updating. Refresh Curate.');
     return {
@@ -267,14 +288,37 @@ export class CurateService {
     if (!this.closed) await this.refresh();
     return result;
   }
+  async selection(viewId, groupIds) {
+    if (!Array.isArray(groupIds) || !groupIds.length || groupIds.length > 1000 ||
+        new Set(groupIds).size !== groupIds.length || groupIds.some(id => typeof id !== 'string' || id.length > 128))
+      throw new CurateError('Select up to 1,000 shown single photos.', 'invalid_curate_query', 400);
+    await this.refresh();
+    const view = this.store.getLease(viewId, 'view');
+    const groups = groupIds.map(id => this.store.viewGroup(viewId, id));
+    if (groups.some(g => !g || g.ids.length !== 1))
+      throw new CurateError('Bulk actions apply only to shown single photos.', 'invalid_curate_query', 400);
+    const ids = groups.flatMap(g => g.ids), reviewState = view.section === 'decided' ? 'decided' : 'pending';
+    this.assertDecisionScope(ids, reviewState);
+    if (reviewState === 'pending' && ids.some(id => this.current.byMember.get(id)?.ids.length !== 1))
+      throw new CurateError('A selected photo is now in a stack. Refresh Curate.');
+    const material = this.store.material(ids, reviewState);
+    return this.store.comparisonLease(viewId, { ids, material, reviewState, singlesOnly: true, mode: 'manual', contextIds: [] });
+  }
   async issueDecision(comparisonId, mode = 'manual') {
     await this.refresh();
     const comparison = this.store.assertComparison(comparisonId);
-    this.assertDecisionScope(comparison.ids);
+    this.assertDecisionScope(comparison.ids, comparison.reviewState, comparison.singlesOnly);
     return this.repo.decisions.issue(comparison, mode);
   }
-  assertDecisionScope(ids) {
-    this.assertMembership(ids);
+  assertDecisionScope(ids, reviewState = 'pending', singlesOnly = false) {
+    if (reviewState === 'decided') {
+      if (ids.some(id => !this.store.photo(id) || this.store.photo(id).state === 'undecided'))
+        throw new CurateError('A decided photo changed. Refresh Curate.');
+    } else {
+      this.assertMembership(ids);
+      if (singlesOnly && ids.some(id => this.current.byMember.get(id)?.ids.length !== 1))
+        throw new CurateError('A selected photo is now in a stack. Refresh Curate.');
+    }
     if (this.store.pendingScopeChanges(ids)) throw new CurateError('This stack is updating. Refresh Curate.');
   }
   async applyDecision(input) {
@@ -282,7 +326,7 @@ export class CurateService {
     if (replay) return replay;
     // Undo checks human state/availability, and need not rebuild groupings.
     if (input.kind !== 'undo') await this.refresh();
-    return this.repo.decisions.apply(input, ids => this.assertDecisionScope(ids));
+    return this.repo.decisions.apply(input, (ids, reviewState, singlesOnly) => this.assertDecisionScope(ids, reviewState, singlesOnly));
   }
   start() {
     if (this.timer || this.closed) return;

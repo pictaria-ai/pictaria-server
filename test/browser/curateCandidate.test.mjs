@@ -99,6 +99,7 @@ test('candidate preview refines automatically, preserves selections, explains re
       t.diagnostic(await page.evaluate('JSON.stringify({error:document.querySelector("#error").textContent,receipt:document.querySelector("#receipt").textContent,recovery:document.querySelector("#recovery").hidden,undoDisabled:document.querySelector("#undo").disabled})'));
       throw error;
     }
+    await fixture.repo.curate.flush(); // local Undo no longer replaces the open view
     assert.equal(fixture.repo.db.prepare("SELECT count(*) n FROM curate_photos WHERE state='undecided'").get().n, 5);
     assert.equal(await page.evaluate('document.querySelector("#error").hidden'), true);
   });

@@ -63,6 +63,7 @@ export function createCurateRoutes({ curate, review = null }) {
               kind: url.searchParams.get('kind') ?? 'all',
               search: url.searchParams.get('q') ?? '',
               sort: url.searchParams.get('sort') ?? 'oldest',
+              section: url.searchParams.get('section') ?? 'pending', category: url.searchParams.get('category') ?? 'all',
             });
       } else if (request.method === 'POST' && path === 'groups/status') {
         const body = await readObject(request, { maxBytes: 12 * 1024 });
@@ -72,9 +73,12 @@ export function createCurateRoutes({ curate, review = null }) {
         result = await curate.openView({
           kind: body.kind,
           search: body.search,
-          sort: body.sort,
+          sort: body.sort, section: body.section, category: body.category,
           replacesViewId: body.replacesViewId,
         });
+      } else if (request.method === 'POST' && path === 'selection') {
+        const body = await readObject(request, { maxBytes: 140 * 1024 });
+        result = await curate.selection(body.viewId, body.groupIds);
       } else if (request.method === 'POST' && path === 'comparisons') {
         const body = await readObject(request, { maxBytes: 4096 });
         await curate.refresh();
