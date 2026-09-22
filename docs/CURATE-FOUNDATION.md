@@ -10,7 +10,7 @@ before AI integration and default-page cutover. It is not linked from the main n
 
 ## Grouping and evidence
 
-**Preview update:** PIC-382 now wires [candidate algorithm 1](CURATE-ALGORITHM.md)
+**Preview update:** PIC-382 now wires [candidate algorithm 2](CURATE-ALGORITHM.md)
 into the server's Curate Preview service. That versioned document defines the
 active preview policy. The `standard-1` rules below describe the retained initial
 foundation implementation and its baseline tests, not the new preview defaults.

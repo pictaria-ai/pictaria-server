@@ -7,7 +7,7 @@ local human tags and queues their synchronization to Immich. Use a test instance
 for initial review. Merely opening the page starts bounded read-only metadata
 refresh and selective, paced Immich similarity searches, not AI requests or human decisions.
 
-PIC-382 adds [candidate stacking algorithm 1](CURATE-ALGORITHM.md): wider time
+PIC-382 adds [candidate stacking algorithm 2](CURATE-ALGORITHM.md): wider time
 candidates, contextual people signals, positive ThumbHash and reciprocal search
 ranks. The linked document owns exact rules, bounds and version history. Open
 **Why this stack?** in a comparison for a concise explanation.
@@ -67,10 +67,15 @@ in this preview, its proposed partitions are never saved.
   retried without repeating the human decision or invoking AI.
 
 Cards show which nearby photos are waiting for a similarity check or being checked,
-with progress counts. These groupings are provisional. A completed check highlights
+with progress counts for the references needed to resolve uncertain pairs.
+Photos with distant ThumbHashes stay together provisionally until search evidence
+can resolve them; strong people differences and saved manual separations still
+apply immediately. Locally resolved groups need no search. A completed check highlights
 affected cards and offers **Show updated stacks**; checks that leave grouping
 unchanged do not ask for a refresh. Results are applied as a complete time-candidate
-matrix, never one search at a time. Completed evidence stays available while the
+pass, never one search at a time. Missing targets and successful empty results
+remain unknown: **Check complete · similarity uncertain** keeps the compatible
+time grouping provisional. Failed or unavailable searches do not fragment it. Completed evidence stays available while the
 view is active, so repeated Refresh does not restart checks on a ten-minute timer.
 After inactivity or a server restart, this bounded memory cache can be empty and
 a fresh pass may be needed. Changes to photos, people evidence or human corrections

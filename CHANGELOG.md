@@ -12,9 +12,14 @@ All notable changes to Pictaria Server are documented here. This project follows
   Immich search ranks. Selective background searches are paced and cached; new
   results appear through **Show updated stacks**, preserving the opened view.
   Cards show waiting/checking progress and highlight ready updates. Search results
-  are applied only after the whole time candidate has been checked; completed
+  are applied only after all required references have been checked; completed
   evidence stays cached while its view is active, preventing timed cache expiry
   from repeatedly splitting and rejoining an unchanged stack.
+  Candidate 2 keeps compatible uncertain photos together provisionally while
+  searches are pending, unavailable or missing results. Enrich Group separates
+  from None/One (Group vs Couple remains ambiguous). Searches skip references
+  that cannot resolve an uncertain pair, while rank counts still use the original
+  time group. Completed inconclusive checks are explicitly labeled uncertain.
   Comparisons include **Why this stack?**, and unconfirmed time groups are labeled.
   Exact rules, bounds and change history live in [the algorithm guide](docs/CURATE-ALGORITHM.md).
   The released Curate page and AI keeper recommendations are unchanged.

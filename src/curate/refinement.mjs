@@ -1,5 +1,6 @@
 // Bounded, demand-driven composition evidence. This stores only candidate-member
 // ranks; unrelated search results stay in the existing short-lived search cache.
+import { CANDIDATE_METHOD } from './candidate.mjs';
 export const REFINEMENT_LIMITS = Object.freeze({ cohorts: 32, views: 200,
   activeMs: 60_000, cacheMs: 10 * 60_000, requestsPerMinute: 8 });
 
@@ -57,7 +58,7 @@ export class CurateRefinement {
     view.touched = this.now();
     for (const group of groups) for (const id of group.ids) {
       const scope = this.curate.current?.scopeByMember?.get(id);
-      if (!scope || (!scope.needsRanks && !this.entries.has(scope.id))) continue;
+      if (!scope || !scope.referenceIds.includes(id) || (!scope.needsRanks && !this.entries.has(scope.id))) continue;
       // Retain a bounded representative so a metadata refresh can renew the
       // cohort revision without requiring the user to page through it again.
       if (!view.anchors.has(scope.ids[0]) && view.anchors.size >= REFINEMENT_LIMITS.cohorts) continue;
@@ -99,33 +100,33 @@ export class CurateRefinement {
   }
   groupStatus(group) {
     if (!this.enabled()) return null;
-    const first = group.ids[0];
-    if (this.curate.current?.byMember.get(first)?.id !== group.id)
+    const first = group.ids[0], current = this.curate.current?.byMember.get(first);
+    if (current?.id !== group.id)
       return { state: 'updated' };
     // Every unchanged candidate group is contained in one time scope.
     const scope = this.curate.current?.scopeByMember?.get(first), entry = this.entries.get(scope?.id);
-    if (!scope || (!scope.needsRanks && !entry))
+    if (!scope || !current.ids.some(id => scope.referenceIds.includes(id)) || (!scope.needsRanks && !entry))
       return group.route === 'manual-budget' ? { state: 'limited' } : null;
-    const total = scope.ids.length, done = Object.keys(entry?.rows ?? {}).length;
+    const total = scope.referenceIds.length, done = Object.keys(entry?.rows ?? {}).length;
     return { state: done === total ? 'checked' : this.problem ? 'paused' :
       !entry ? 'limited' : done || scope.id === this.running?.id ? 'checking' : 'waiting',
-      done, total };
+      done, total, ...(done === total && current.route === 'candidate-unconfirmed' ? { uncertain: true } : {}) };
   }
   status(viewId, groups = []) {
     const all = this.active(), view = this.views.get(viewId);
-    const active = viewId ? new Set([...(view?.anchors ?? []), ...groups.map(g => g.ids[0])].flatMap(id => {
+    const active = viewId ? new Set([...(view?.anchors ?? []), ...groups.filter(g => this.groupStatus(g)).map(g => g.ids[0])].flatMap(id => {
       const scope = this.curate.current?.scopeByMember?.get(id);
       return scope && (scope.needsRanks || this.entries.has(scope.id)) ? [scope.id] : [];
     })) : all;
     const entries = [...active].map(id => this.entries.get(id)).filter(Boolean);
-    const pending = entries.reduce((n, e) => n + e.ids.length - Object.keys(e.rows).length, 0);
+    const pending = entries.reduce((n, e) => n + e.referenceIds.length - Object.keys(e.rows).length, 0);
     const limited = [...active].some(id => !this.entries.has(id));
     return { state: (pending || limited) && this.problem ? 'paused' :
       this.work && active.has(this.running?.id) ? 'searching' : pending || limited ? 'waiting' : 'idle',
       problem: (pending || limited) ? this.problem ?? null : null, pending, limited,
       totalGroups: active.size, checkedGroups: entries.filter(e => e.complete).length,
       ready: [...(view?.groups.values() ?? [])].filter(g => this.groupStatus(g)?.state === 'updated').length,
-      method: 'candidate-1' };
+      method: CANDIDATE_METHOD };
   }
   async tick() {
     this.settingsChanged(); this.expire();
@@ -144,9 +145,9 @@ export class CurateRefinement {
     this.requests = this.requests.filter(time => time + 60_000 > this.now());
     if (this.requests.length >= REFINEMENT_LIMITS.requestsPerMinute) return;
     const entry = [...active].map(id => this.entries.get(id)).find(e => e && this.needed(e) &&
-      e.ids.some(id => !Object.hasOwn(e.rows, id)));
+      e.referenceIds.some(id => !Object.hasOwn(e.rows, id)));
     if (!entry) return;
-    const id = entry.ids.find(id => !Object.hasOwn(entry.rows, id));
+    const id = entry.referenceIds.find(id => !Object.hasOwn(entry.rows, id));
     const connection = this.connection;
     this.controller = new AbortController(); this.running = entry;
     const signal = this.controller.signal;
@@ -171,7 +172,7 @@ export class CurateRefinement {
         entry.touchedAt = this.now();
         // Publish one complete matrix. A refreshed view must never consume a
         // mixture of queried and not-yet-queried directions from this pass.
-        if (entry.ids.every(id => Object.hasOwn(entry.rows, id))) {
+        if (entry.referenceIds.every(id => Object.hasOwn(entry.rows, id))) {
           entry.complete = true;
           this.revision++;
           await this.curate.refresh();

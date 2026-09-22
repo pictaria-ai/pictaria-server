@@ -70,7 +70,7 @@ export function similarityLabel(status) {
     case 'paused': return 'Similarity check paused · Refresh to retry';
     case 'limited': return status.total ? 'Waiting for a check slot' : 'Similarity not checked · automatic limit';
     case 'updated': return 'Updated grouping ready · Refresh to see';
-    case 'checked': return 'Similarity checked';
+    case 'checked': return status.uncertain ? 'Check complete · similarity uncertain' : 'Similarity checked';
     default: return '';
   }
 }
@@ -97,7 +97,7 @@ export function groupCard(group, open) {
   caption.append(status);
   button.updateSimilarity = (value) => {
     group.similarity = value;
-    const provisional = value && !['checked', 'updated'].includes(value.state);
+    const provisional = value && (value.uncertain || !['checked', 'updated'].includes(value.state));
     chip.textContent = group.memberCount > 1 ? `${group.memberCount} photos` : provisional ? '1 photo' : 'Single photo';
     status.textContent = similarityLabel(value);
     status.hidden = !status.textContent;

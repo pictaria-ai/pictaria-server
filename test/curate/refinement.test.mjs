@@ -32,6 +32,63 @@ async function setup(t, { n = 3, respond, hashes = false } = {}) {
   return { repo, curate, config, immich, ids, calls, refine: curate.refinement, advance: ms => { now += ms; } };
 }
 
+function enrichCategories(repo, categories) {
+  const schema = { properties: { has_people: { type: 'boolean' },
+    people_count: { type: 'string', enum: ['none', 'one', 'couple', 'group', 'unknown'] } } };
+  repo.saveRunConfiguration({ id: 'a'.repeat(64), inferenceId: 'b'.repeat(64),
+    snapshot: { formatVersion: 1, inference: { contractVersion: 1, jsonSchema: schema } } });
+  for (const [i, category] of categories.entries()) repo.recordProcessingRun({ assetId: `p${i}`,
+    provider: 'test', model: 'test', promptVersion: 'v1', taxonomyVersion: 'v1', status: 'succeeded',
+    configurationId: 'a'.repeat(64), normalizedOutput: { has_people: category !== 'none', people_count: category } });
+}
+
+test('strong people conflicts need no searches; resolved visible cards do not admit other work', async t => {
+  const separated = await setup(t);
+  enrichCategories(separated.repo, ['none', 'one', 'group']);
+  const singles = await separated.curate.openView();
+  assert.deepEqual(singles.groups.map(g => g.memberCount), [1,1,1]);
+  assert.ok(singles.groups.every(g => g.similarity === null));
+  await separated.refine.tick();
+  assert.equal(separated.calls.length, 0);
+  assert.equal(singles.refinement.pending, 0);
+
+  const s = await setup(t, { n: 6, respond: () => ({ assets: { items:
+    ['p3','p4','outside','p5','p0','p1','p2'].map(id => ({ id, type: 'IMAGE' })) } }) });
+  const categories = ['one','one','one','couple','couple','one'];
+  enrichCategories(s.repo, categories);
+  for (const [i, id] of s.ids.entries()) s.repo.upsertAsset({ id,
+    fileCreatedAt: new Date(1767225600000 + i * 1000).toISOString(),
+    originalPath: `/${categories[i]}-${id}.jpg`, thumbhash: Buffer.alloc(21, i === 5 ? 200 : 0).toString('base64') });
+  const couple = await s.curate.openView({ search: 'couple' });
+  assert.deepEqual(couple.groups.map(g => g.memberCount), [2]);
+  assert.equal(couple.groups[0].similarity, null);
+  assert.equal(couple.refinement.pending, 0);
+  await s.refine.tick(); assert.equal(s.calls.length, 0);
+
+  const all = await s.curate.openView();
+  assert.equal(all.refinement.pending, 4);
+  assert.equal(all.groups.find(g => g.memberCount === 2).similarity, null);
+  for (let i = 0; i < 4; i++) { await s.refine.tick(); s.advance(5000); }
+  assert.deepEqual(s.calls.map(c => c.body.queryAssetId), ['p0','p1','p2','p5']);
+  const entry = [...s.refine.entries.values()][0];
+  assert.equal(entry.rows.p0.p5, 1, 'unqueried couple remains inside the original time cohort');
+  assert.equal(entry.complete, true);
+  const refreshed = await s.curate.openView();
+  assert.deepEqual(refreshed.groups.map(g => g.memberCount), [4,2]);
+  assert.equal(refreshed.refinement.pending, 0);
+  assert.equal(s.curate.page(couple.viewId).updatesAvailable, false);
+});
+
+test('unconfigured similarity search keeps distant hashes provisionally together', async t => {
+  const s = await setup(t, { hashes: true });
+  s.immich.apiKey = ''; s.curate.settingsChanged();
+  const view = await s.curate.openView(); await s.refine.tick();
+  assert.equal(s.calls.length, 0);
+  assert.equal(view.groups.length, 1);
+  assert.equal(view.groups[0].memberCount, 3);
+  assert.equal(view.groups[0].route, 'candidate-unconfirmed');
+});
+
 test('no searches on rebuild/startup; visible preview demand admits only paced, cached requests', async t => {
   const { curate, refine, calls, advance } = await setup(t);
   await refine.tick(); assert.equal(calls.length, 0);
@@ -56,13 +113,14 @@ test('no searches on rebuild/startup; visible preview demand admits only paced, 
 });
 
 test('background additions never enlarge an already inspected comparison silently', async t => {
-  const { curate, refine, advance } = await setup(t, { hashes: true });
-  const view = await curate.openView(); assert.equal(view.groups.length, 3);
+  const { repo, curate } = await setup(t, { hashes: true });
+  const view = await curate.openView(); assert.equal(view.groups.length, 1);
   const comparison = curate.comparison(view.viewId, view.groups[0].id);
-  for (let i = 0; i < 3; i++) { await refine.tick(); advance(5000); }
+  repo.upsertAsset({ id: 'new', fileCreatedAt: '2026-01-01T00:00:03Z' });
+  repo.reviewListAdd(['new'], 'test');
   await curate.refresh();
-  assert.equal(curate.current.groups.length, 1);
-  assert.equal(curate.page(view.viewId).groups.length, 3);
+  assert.equal(curate.current.groups[0].ids.length, 4);
+  assert.equal(curate.page(view.viewId).groups[0].memberCount, 3);
   await assert.rejects(curate.issueDecision(comparison.id), /membership changed/);
 });
 
@@ -143,7 +201,7 @@ test('publish the landscape matrix once; active completed evidence survives cach
   for (const [i, id] of s.ids.entries()) s.repo.updateAssetVisuals(id, { thumbhash: Buffer.alloc(21, i * 45).toString('base64') });
   let view = await s.curate.openView();
   const original = view.groups.map(g => g.id);
-  assert.equal(original.length, 5);
+  assert.equal(original.length, 1);
   for (let i = 0; i < 4; i++) {
     await s.refine.tick(); s.advance(5000);
     assert.equal(s.refine.revision, 0);
@@ -156,7 +214,7 @@ test('publish the landscape matrix once; active completed evidence survives cach
   }
   await s.refine.tick();
   assert.equal(s.refine.revision, 1);
-  assert.equal(s.curate.page(view.viewId).refinement.ready, 5);
+  assert.equal(s.curate.page(view.viewId).refinement.ready, 1);
   view = await s.curate.openView({ replacesViewId: view.viewId });
   assert.deepEqual(view.groups.map(g => g.memberCount), [5]);
   assert.equal(view.groups[0].similarity.state, 'checked');
@@ -181,6 +239,9 @@ test('finished checks that change no grouping and work in another view do not ad
   for (let i = 0; i < 3; i++) { await s.refine.tick(); s.advance(5000); }
   const checked = s.curate.page(view.viewId);
   assert.equal(checked.groups[0].similarity.state, 'checked');
+  assert.equal(checked.groups[0].similarity.uncertain, true);
+  assert.equal(checked.groups[0].memberCount, 3);
+  assert.equal(checked.groups[0].route, 'candidate-unconfirmed');
   assert.equal(checked.refinement.ready, 0);
   assert.equal(checked.updatesAvailable, false);
   assert.equal(s.curate.page(other.viewId).updatesAvailable, false);
@@ -194,13 +255,15 @@ test('failed partial pass stays unpublished and resumes on explicit retry', asyn
   let view = await s.curate.openView();
   await s.refine.tick(); s.advance(5000); await s.refine.tick();
   assert.equal(s.curate.page(view.viewId).groups[0].similarity.state, 'paused');
+  assert.equal(s.curate.page(view.viewId).groups[0].memberCount, 3);
+  assert.equal(s.curate.current.groups[0].route, 'candidate-unconfirmed');
   assert.deepEqual(s.refine.snapshot(), {});
   assert.equal(s.refine.revision, 0);
   s.advance(35_000); await s.refine.tick(); assert.equal(s.calls.length, 2);
   view = await s.curate.openView({ replacesViewId: view.viewId });
   await s.refine.tick(); s.advance(5000); await s.refine.tick();
   assert.equal(s.refine.revision, 1);
-  assert.equal(s.curate.page(view.viewId).refinement.ready, 3);
+  assert.equal(s.curate.page(view.viewId).refinement.ready, 1);
   assert.equal(s.calls.length, 4);
 });
 
@@ -210,7 +273,7 @@ test('a finished merge prompts only its view; capacity limits are visible withou
   s.repo.reviewListAdd(['alone'], 'test');
   const view = await s.curate.openView(), other = await s.curate.openView({ search: 'alone' });
   for (let i = 0; i < 3; i++) { await s.refine.tick(); s.advance(5000); }
-  assert.equal(s.curate.page(view.viewId).refinement.ready, 3);
+  assert.equal(s.curate.page(view.viewId).refinement.ready, 1);
   assert.equal(s.curate.page(other.viewId).updatesAvailable, false);
   const many = await setup(t, { n: 2 });
   for (let n = 1; n <= 32; n++) for (let i = 0; i < 2; i++) {
@@ -232,7 +295,7 @@ test('leases decode candidate singles across restart and old projections are upg
   const next = new CurateService({ repo: s.repo, candidateOptions: { enabled: true }, metadataOptions: { automatic: false } });
   next.start = () => {}; t.after(() => next.close());
   const view = await next.openView();
-  assert.match(view.groups[0].id, /single:candidate-1:/);
+  assert.match(view.groups[0].id, /single:candidate-2:/);
   assert.equal(next.comparison(view.viewId, view.groups[0].id).ids[0], 'p0');
   assert.equal(s.repo.db.prepare("SELECT json_type(evidence_json,'$.category') type FROM curate_photos").get().type, 'object');
 });

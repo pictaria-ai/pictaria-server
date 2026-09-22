@@ -1,8 +1,8 @@
 # Curate stacking algorithm
 
-**Status: candidate 1, in Curate Preview only (PIC-382 / PIC-380).** These are
+**Status: candidate 2, in Curate Preview only (PIC-382 / PIC-380).** These are
 starting rules for evaluation, not calibrated accuracy claims or the released
-Curate algorithm. The implementation identifier is `candidate-1`. The current
+Curate algorithm. The implementation identifier is `candidate-2`. The current
 `/curate.html` and its AI referee are unchanged.
 
 ## What a stack means
@@ -30,7 +30,7 @@ The optional Stack Referee and Keeper Referee remain separate future integration
 “Supported” below describes this rule's evidence, **not** an AI check or permission
 to bypass one. The preview's keeper decisions are still entirely human.
 
-## Candidate 1: precise rules
+## Candidate 2: precise rules
 
 All membership rules live in `src/curate/candidate.mjs`. They run in the existing
 background grouping worker; the page renders immutable views of its output.
@@ -41,18 +41,19 @@ background grouping worker; the page renders immutable views of its output.
 | Time candidates | Pending, available photos sorted by capture time, then ID. Consecutive gap at most **90 seconds** and total span at most **180 seconds**. Start a new candidate when either limit is exceeded. Missing dates and known unavailable photos remain singles. |
 | Bounds | Evaluate all pairs in candidates of **2–40 photos**, at most **600,000 pairs per rebuild**. No sampled subset is represented as a complete check. Larger/budget-limited candidates retain unconfirmed time grouping, respecting human partitions, without rank searches. |
 | Producing Enrich evidence | Read the saved schema and output that produced the photo's result. Recognize the supported None / One / Couple / Group contract with consistent `has_people`. Unsupported or contradictory records are unknown. Never infer semantics from tag spelling or today's active profile. |
-| People composition conflict | Different supported **None / One / Couple** categories; or changed nonempty recognized identity sets when each set's size agrees with its supported small Enrich category. Group is ambiguous, not a precise count. |
+| People composition conflict | Different supported **None / One / Couple** categories; or changed nonempty recognized identity sets when each set's size agrees with its supported small Enrich category. **Group vs None/One** is also a conflict. **Group vs Couple** remains ambiguous because background people can change the category; Group is not a precise count. |
 | Recognition uncertainty | Different nonempty identity sets without that count corroboration block a ThumbHash-only match, but reciprocal ranks may support it. Recognition missing in one image, including an observed empty list, is not proof of different people. Identity lists are never claimed complete. |
 | Exact rendition support | Equal original checksums **and** compatible recorded rendition keys support grouping, within time/human constraints. An original checksum alone or an approximate Immich duplicate-group ID does not force membership. |
 | ThumbHash support | Normalized mean absolute difference of descriptor bytes **≤ 0.10** supports a pair absent people conflict/recognition uncertainty. This is the existing comparator, not a semantic embedding distance. Missing/malformed descriptors are unknown; unequal descriptor lengths do not supply close support. Larger distance alone is not a separation veto. |
 | Search support | For each direction, count photos **outside the entire original time candidate** ranked ahead of the target. Both directions with **≤ 3 outside** support a pair. An unreturned target, failed search or unqueried direction is unknown. There is no absolute similarity score. |
-| Conflicting signals | Strong people conflict plus reciprocal rank support stays uncertain: do not silently override one with the other or accept it as a supported pair. Human separation can never be overridden. |
+| Strong separations | Human separations and the supported people conflicts above prevent grouping, including when a supplied search row is close. Do not search a pair whose separation cannot change. Uncorroborated recognition changes remain uncertainty, not a strong separation. |
 | Core grouping | Order by number of supported neighbors, then capture time/ID. Greedily form cores where every pair is supported. A–B and B–C support alone cannot establish A–B–C. |
 | Asymmetric recovery | An initially single photo may attach to exactly one **frozen core of at least 3**: at least **75%** of core members rank it within 3 outside; it ranks at least one core member within 3 outside and at least **50%** within **8 outside**. Round required counts up. No people conflict or human separation with any member, including other attachments. Attachments cannot act as further attachment anchors. Two competing cores remain ambiguous. |
-| Remaining uncertainty | With visual/rank observations but insufficient support, retain separate comparisons for manual review. This is lack of support, not proof of different subjects; the original bounded candidate remains available for rank recovery. With **no usable visual/rank evidence at all**, retain unconfirmed time groups subject to supported people differences and human separations. |
+| Pending or missing evidence | Keep supported cores intact, then combine cores provisionally only when **every cross-pair is supported or unknown**. Until all required searches finish, unsupported nonconflicting pairs are unknown. Completed empty rows or absent targets also stay unknown. A distant ThumbHash alone never fragments a candidate. Strong people differences and human separations apply immediately. |
+| Completed evidence | Apply core grouping and asymmetric recovery using the completed pass. If an unsupported pair has both directional observations, it cannot be joined provisionally through an unknown bridge. Remaining unknown-compatible photos may still form a labeled provisional group. Separate comparisons mean insufficient support under these rules, not proof of different subjects. |
 
 These bounds intentionally do not reproduce the older foundation's out-of-window
-checksum/duplicate lookback. Candidate 1 uses one time-bounded composition scope.
+checksum/duplicate lookback. Candidate 2 uses one time-bounded composition scope.
 Scene tags, descriptions, detected-face counts, direct embeddings and AI judgments
 are not inputs in this version. The stricter **Same recognized people** lab
 checkbox remains an independent experimental rule, not the preview's policy.
@@ -74,7 +75,7 @@ The anonymized regression records outside counts (row → column):
 | 4 | 0 | 0 | 1 | — | 0 |
 | 5 | 0 | 2 | 2 | 0 | — |
 
-Candidate 1 retains all five. This is one useful acceptance example, not evidence
+Candidate 2 retains all five. This is one useful acceptance example, not evidence
 that the thresholds generalize. Synthetic bridge, recognition, human-correction
 and fallback tests cover the complementary failure cases.
 
@@ -83,8 +84,16 @@ and fallback tests cover the complementary failure cases.
 Only opening/paging a **Curate Preview** view admits automatic searches, for
 unresolved time candidates represented on the pages requested. Opening the lab,
 released Curate, or starting the server does not admit this work. Local coherent
-matches need no extra lookup. For each admitted candidate, the scheduler collects
-all reference searches before publishing its matrix. Partial results are used
+matches need no extra lookup. Required references are the endpoints of locally
+unsupported pairs without a human or strong people conflict. For example, a
+landscape/solo/couple candidate already resolved by people categories needs zero
+searches. A resolved couple in a larger candidate need not be queried when only
+the solo photos are uncertain. Filtering to just that resolved couple does not
+admit searches for the hidden solo group. Outside-rank counts still exclude the
+**entire original time candidate**, including members not queried.
+
+For each admitted candidate, the scheduler collects all **required** reference
+searches before publishing its matrix. Partial results are used
 only for progress, never for intermediate regrouping. Changed local evidence can
 still invalidate or resolve a candidate between requests.
 
@@ -115,9 +124,13 @@ still invalidate or resolve a candidate between requests.
   the shared cooldown. A busy lab search merely delays the preview.
 
 Cards show **Waiting for similarity check**, **Checking nearby photos · N of M**,
-or **Updated grouping ready**. The count covers the original time candidate,
-which can currently appear as several cards. Initial groupings are provisional
-until the check finishes; an unsuccessful check is explicitly paused, not complete.
+or **Updated grouping ready**. Counts cover the required references for the
+original time candidate, which can appear as several cards. Locally resolved
+cards do not display another group's pending check. Pending groupings remain
+provisional; failed searches are explicitly paused. Successful searches that
+leave membership uncertain say **Check complete · similarity uncertain**, retain
+the provisional grouping, and do not automatically retry or fragment it. An
+unconfigured or unavailable search service also leaves time groups provisional.
 The page summarizes checks for its own requested groups and highlights cards whose
 grouping changed. Checks that finish without changing grouping, or in an unrelated
 view, do not by themselves trigger a refresh prompt. Photo-information changes
@@ -145,6 +158,13 @@ wrong merges and missed alternatives, with the algorithm version. Keep the
 existing human-flow tests and verify bounded demand/cancellation, stale decisions,
 cache expiry, partial/failing searches and shared-lane contention.
 
+The **0.10 ThumbHash** cutoff remains an uncalibrated positive-support rule.
+Similar backgrounds can produce close descriptors for different scenes; the
+review identified this as a calibration concern, not a demonstrated real-photo
+regression. Returned distant ranks do not currently cancel that local support.
+Keep collecting real-photo wrong-merge examples before changing the cutoff or
+adding another veto.
+
 The numerical limits are explicit starting choices. Owner testing, complete-server
 mixed-load/memory measurements and v1.3 rollout acceptance remain outstanding.
 Do not turn qualitative examples into accuracy percentages. Future settings,
@@ -157,6 +177,7 @@ and decision contract, not create a permanent second Curate pipeline.
 | --- | --- | --- | --- |
 | `candidate-1` | 2026-09-21 | First integrated preview: wider time candidates, contextual people evidence, positive ThumbHash, reciprocal ranks and bounded core recovery; paced background searches and stable views. | PIC-382, under PIC-380 |
 | `candidate-1` publication / UX follow-up | 2026-09-21 | Publish only complete search matrices, retain evidence for active views, and show per-card progress plus an explicit updated-stacks action. Fixes partial-result and timed-expiry regrouping during repeated refreshes; final membership rules and thresholds are unchanged. | PIC-382 |
+| `candidate-2` | 2026-09-21 | Review follow-up: retain compatible uncertainty provisionally while searches are pending, failed or missing targets; separate Group from None/One; query only references that can resolve a locally unsupported, nonconflicting pair. Preserve complete-pass publication, original-cohort outside counts and existing thresholds. | PIC-382 / PIC-380 |
 
 When membership rules, thresholds or interpretation of signals change, increment
 the implementation identifier and add a row describing the behavioral change and

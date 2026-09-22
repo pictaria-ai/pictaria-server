@@ -4,7 +4,7 @@ import { thumbhashDistance } from '../enrich/reviewService.mjs';
 import { recognizedIds } from './evidence.mjs';
 
 // Membership-affecting changes require a new version and a docs/CURATE-ALGORITHM.md entry.
-export const CANDIDATE_METHOD = 'candidate-1';
+export const CANDIDATE_METHOD = 'candidate-2';
 export const CANDIDATE_LIMITS = Object.freeze({ gapMs: 90_000, spanMs: 180_000,
   photos: 40, comparisons: 600_000, hashDistance: 0.10, nearOutside: 3, moderateOutside: 8 });
 const small = { none: 0, one: 1, couple: 2 };
@@ -80,14 +80,18 @@ export function candidateGroups(rows, { stacks = true, separations = [], ranks =
     const near = (a, b, threshold = limits.nearOutside) => {
       const n = outside(a, b); return n !== null && n <= threshold;
     };
-    let visual = false, needsRanks = false;
+    const references = new Set(), pairs = [];
     for (let i = 0; i < members.length; i++) {
       const a = members[i]; if (!matrix.has(a.id)) matrix.set(a.id, new Map());
       for (let j = i + 1; j < members.length; j++) {
         const b = members[j]; if (!matrix.has(b.id)) matrix.set(b.id, new Map());
         metrics.pairComparisons++;
         const human = separated(a, b), ca = small[a.peopleCategory], cb = small[b.peopleCategory];
-        const categoryConflict = Number.isInteger(ca) && Number.isInteger(cb) && ca !== cb;
+        // A group differs from none/one, but background people make group vs
+        // couple ambiguous. The category is not an exact detected-face count.
+        const categoryConflict = (Number.isInteger(ca) && Number.isInteger(cb) && ca !== cb) ||
+          (a.peopleCategory === 'group' && (cb === 0 || cb === 1)) ||
+          (b.peopleCategory === 'group' && (ca === 0 || ca === 1));
         const identityConflict = a.identities && b.identities && a.identities.length && b.identities.length &&
           difference(a.identities, b.identities);
         const groundedIdentities = Number.isInteger(ca) && Number.isInteger(cb) &&
@@ -97,31 +101,30 @@ export function candidateGroups(rows, { stacks = true, separations = [], ranks =
         const exact = a.checksum && a.checksum === b.checksum && a.renditionKey && a.renditionKey === b.renditionKey;
         const hashKnown = Boolean(a.hash && b.hash);
         const hashClose = hashKnown && thumbhashDistance(a.hash, b.hash) <= limits.hashDistance;
-        const reciprocal = near(a, b) && near(b, a);
-        visual ||= hashKnown || outside(a, b) !== null || outside(b, a) !== null || Boolean(exact);
-        // Conflicting strong signals remain uncertain. One missed recognition
-        // can be rescued by reciprocal ranks; a common background alone cannot.
-        const supported = !human && !peopleConflict &&
-          (exact || reciprocal || (hashClose && !recognitionUncertain));
-        const pair = { supported: Boolean(supported), conflict: human || (peopleConflict && !reciprocal),
-          human, peopleConflict, recognitionUncertain, hashClose, reciprocal, exact: Boolean(exact) };
+        const conflict = human || peopleConflict;
+        const localSupported = !conflict && Boolean(exact || (hashClose && !recognitionUncertain));
+        const pair = { localSupported, conflict,
+          human, peopleConflict, recognitionUncertain, hashClose, exact: Boolean(exact) };
         matrix.get(a.id).set(b.id, pair); matrix.get(b.id).set(a.id, pair);
-        if (!human && !supported) needsRanks = true;
+        pairs.push({ a, b, pair });
+        // Search only where new evidence can change the result. Keep the full
+        // cohort separately: outside-rank counts must not change with pruning.
+        if (!conflict && !localSupported) { references.add(a.id); references.add(b.id); }
       }
     }
-    scopes.push({ id: scopeId, ids, materialKeys: cohort.map(p => p.materialKey), needsRanks });
+    const referenceIds = ids.filter(id => references.has(id));
+    const complete = referenceIds.every(id => Object.hasOwn(supplied, id));
+    for (const { a, b, pair } of pairs) {
+      // Even a direct caller cannot publish half a pass. A completed empty
+      // response or absent target is still unknown, not contrary evidence.
+      pair.reciprocal = complete && near(a, b) && near(b, a);
+      pair.supported = !pair.conflict && (pair.localSupported || pair.reciprocal);
+      pair.unknown = !pair.conflict && !pair.supported &&
+        (!complete || outside(a, b) === null || outside(b, a) === null);
+    }
+    scopes.push({ id: scopeId, ids, referenceIds, materialKeys: cohort.map(p => p.materialKey),
+      needsRanks: referenceIds.length > 0 && !complete });
     const reasons = ['Time candidates use a 90-second gap and a 3-minute total span.'];
-    if (!visual) {
-      const provisional = [];
-      for (const p of members) {
-        const group = provisional.find(g => g.every(q => !at(p, q).conflict));
-        if (group) group.push(p); else provisional.push([p]);
-      }
-      for (const g of provisional) emit(g, g.length > 1 ? 'candidate-unconfirmed' : 'single',
-        [...reasons, 'Grouped by capture time and available people evidence; visual similarity is not established.',
-          'Saved human separations and supported people differences were respected.']);
-      continue;
-    }
     // Build fully supported cores first, with deterministic tie-breaking.
     // A single bridge must not merge two already established cores.
     const degree = p => members.filter(q => q !== p && at(p, q).supported).length;
@@ -138,7 +141,7 @@ export function candidateGroups(rows, { stacks = true, separations = [], ranks =
     const attached = new Set();
     for (const item of cores.filter(g => g.core.length === 1)) {
       const p = item.core[0];
-      const targets = cores.filter(({ core, additions }) => core.length >= 3 &&
+      const targets = cores.filter(({ core, additions }) => complete && core.length >= 3 &&
         [...core, ...additions].every(q => !at(p, q).conflict && !at(p, q).peopleConflict) &&
         core.filter(q => near(q, p)).length >= Math.ceil(core.length * 0.75) &&
         core.some(q => near(p, q)) &&
@@ -146,18 +149,36 @@ export function candidateGroups(rows, { stacks = true, separations = [], ranks =
       // Competing valid cores are ambiguous; do not pick an arbitrary one.
       if (targets.length === 1) { targets[0].additions.push(p); attached.add(p.id); }
     }
+    const resolved = [];
     for (const { core, additions } of cores) {
       if (core.length === 1 && attached.has(core[0].id)) continue;
-      const g = [...core, ...additions], pairs = g.flatMap((p, i) => g.slice(i + 1).map(q => at(p, q)));
+      resolved.push({ members: [...core, ...additions], recovered: additions.length > 0, provisional: false });
+    }
+    // Preserve supported cores, then retain compatible unknowns provisionally.
+    // All cross-pairs must allow the join: neither a human/people conflict nor
+    // an observed unsupported pair can disappear through an uncertain bridge.
+    const retained = [];
+    for (const item of resolved) {
+      const target = retained.find(g => item.members.every(p => g.members.every(q =>
+        at(p, q).supported || at(p, q).unknown)));
+      if (target) {
+        target.provisional ||= item.members.some(p => target.members.some(q => at(p, q).unknown));
+        target.members.push(...item.members); target.recovered ||= item.recovered;
+      } else retained.push(item);
+    }
+    for (const { members: g, recovered, provisional } of retained) {
+      const pairs = g.flatMap((p, i) => g.slice(i + 1).map(q => at(p, q)));
       const why = [...reasons];
+      if (provisional) why.push('Provisional time group: similarity evidence is pending or incomplete.',
+        'Saved human separations and supported people differences were respected.');
       if (g.length === 1) why.push('No sufficiently supported group found; this photo remains separate for review.');
       if (pairs.some(p => p.exact)) why.push('Matching original checksums and compatible renditions support grouping.');
       if (pairs.some(p => p.hashClose)) why.push('Close ThumbHash descriptors support visual similarity.');
       if (pairs.some(p => p.reciprocal)) why.push('Reciprocal nearby Immich search ranks support this composition.');
-      if (additions.length) why.push('An asymmetric search match was retained through strong support from the established core.');
+      if (recovered) why.push('An asymmetric search match was retained through strong support from the established core.');
       if (g.some(p => labels.has(p.id))) why.push('Saved human separations were respected.');
       why.push('Distant ThumbHash values or missing search results alone are not evidence of a different subject.');
-      emit(g, g.length > 1 ? 'candidate-supported' : 'single', why);
+      emit(g, provisional ? 'candidate-unconfirmed' : g.length > 1 ? 'candidate-supported' : 'single', why);
     }
   }
   groups.sort((a, b) => (a.capturedMs ?? Infinity) - (b.capturedMs ?? Infinity) || a.ids[0].localeCompare(b.ids[0]));

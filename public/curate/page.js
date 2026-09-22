@@ -164,7 +164,7 @@ function showComparisonSimilarity(status) {
   const text = similarityLabel(status);
   el('comparison-similarity').textContent = text + (status?.state === 'updated'
     ? '. Close this comparison and use Show updated stacks when you’re ready.'
-    : text && status.state !== 'checked' ? '. This grouping is provisional.' : '');
+    : text && (status.uncertain || status.state !== 'checked') ? '. This grouping is provisional.' : '');
   el('comparison-similarity').hidden = !text;
 }
 async function more() {
@@ -218,8 +218,8 @@ async function compare(group) {
   showComparisonSimilarity(comparison.similarity);
   el('stack-reason').hidden = false;
   el('stack-reason').querySelector('summary').textContent = group.memberCount > 1 ? 'Why this stack?' : 'Why this photo is separate';
-  el('stack-algorithm').textContent = comparison.algorithm === 'candidate-1'
-    ? 'Candidate algorithm 1 · no AI stack check' : 'Grouping from this saved view';
+  el('stack-algorithm').textContent = /^candidate-\d+$/.test(comparison.algorithm)
+    ? `Candidate algorithm ${comparison.algorithm.split('-')[1]} · no AI stack check` : 'Grouping from this saved view';
   el('stack-reasons').replaceChildren(...(comparison.reasons ?? []).map(reason => node('li', reason)));
   state.outcomes = comparison.oversized ? {} : Object.fromEntries(comparison.ids.map((id) => [id, 'reviewed']));
   state.photoList = [...comparison.photos, ...comparison.context];

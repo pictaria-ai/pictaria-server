@@ -21,22 +21,22 @@ test('candidate preview refines automatically, preserves selections, explains re
     await page.navigate(`${fixture.base}/curate-preview.html`);
     await page.waitFor('document.querySelector(".gate-backdrop input")');
     await page.evaluate('document.querySelector(".gate-backdrop input").value="smoke-secret";document.querySelector(".gate-backdrop button").click()');
-    await page.waitFor('document.querySelectorAll(".group-card").length===5 && !document.querySelector("#refresh").disabled');
+    await page.waitFor('document.querySelectorAll(".group-card").length===1 && !document.querySelector("#refresh").disabled');
     await page.waitFor('document.querySelector(".group-card[data-similarity=checking]")');
     assert.match(await page.evaluate('document.querySelector("#refinement").textContent'), /Marked cards may regroup/);
     await click('#refresh');
     await page.waitFor('!document.querySelector("#refresh").disabled');
-    assert.equal(await page.evaluate('document.querySelectorAll(".group-card").length'), 5, 'partial checks do not regroup on Refresh');
+    assert.equal(await page.evaluate('document.querySelectorAll(".group-card").length'), 1, 'partial checks do not regroup on Refresh');
     await click('.group-card');
     await page.waitFor('!document.querySelector("#apply").disabled');
     await click('[data-keeper]');
     // No per-stack rank button: the normal preview page drives bounded work.
     await page.waitFor('!document.querySelector("#updates").hidden && document.querySelector("#refinement").hidden', { timeoutMs: 40000 });
     assert.equal(fixture.similarityReads.length, 5);
-    assert.equal(await page.evaluate('document.querySelectorAll(".group-card").length'), 5);
+    assert.equal(await page.evaluate('document.querySelectorAll(".group-card").length'), 1);
     assert.equal(await page.evaluate('document.querySelectorAll("#photos .selected").length'), 1);
-    assert.equal(await page.evaluate('document.querySelectorAll("#photos [data-keeper]").length'), 1);
-    assert.equal(await page.evaluate('document.querySelectorAll(".group-card[data-similarity=updated]").length'), 5);
+    assert.equal(await page.evaluate('document.querySelectorAll("#photos [data-keeper]").length'), 5);
+    assert.equal(await page.evaluate('document.querySelectorAll(".group-card[data-similarity=updated]").length'), 1);
     assert.match(await page.evaluate('document.querySelector("#comparison-similarity").textContent'), /Updated grouping ready/);
     assert.equal(await page.evaluate('document.querySelector("#show-updates").textContent'), 'Show updated stacks');
     await click('[data-close=comparison]'); await click('#show-updates');
@@ -47,7 +47,7 @@ test('candidate preview refines automatically, preserves selections, explains re
     assert.equal(await page.evaluate('document.querySelectorAll(".group-card").length'), 1);
     await click('.group-card'); await page.waitFor('document.querySelectorAll("#photos [data-keeper]").length===5');
     await click('#stack-reason summary');
-    assert.match(await page.evaluate('document.querySelector("#stack-reason").textContent'), /Candidate algorithm 1/);
+    assert.match(await page.evaluate('document.querySelector("#stack-reason").textContent'), /Candidate algorithm 2/);
     assert.match(await page.evaluate('document.querySelector("#stack-reasons").textContent'), /established core/);
     await click(`[data-keeper="${fixture.id(1)}"]`); await click(`[data-keeper="${fixture.id(3)}"]`);
     await click('#apply');
