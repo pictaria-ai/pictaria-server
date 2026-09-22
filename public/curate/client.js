@@ -82,7 +82,8 @@ export class CurateClient {
     this.serial = result.catch(() => {});
     return result;
   }
-  page(viewId, offset = 0, limit = 50) {
+  page(viewId, offset = 0, limit = 50, attention = null) {
+    if (attention) return this.api('groups/status', { viewId, offset, limit, ...attention });
     return this.api(`groups?${new URLSearchParams({ viewId, offset, limit })}`);
   }
   comparison(viewId, groupId) {

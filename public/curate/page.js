@@ -1,5 +1,5 @@
 import { CurateClient, request, decisionSummary } from './client.js';
-import { node, thumbnail, photoCard, groupCard, similarityLabel } from './photos.js';
+import { node, thumbnail, photoCard, groupCard, similarityLabel, similarityIndicator } from './photos.js';
 
 const el = (id) => document.getElementById(id);
 const client = new CurateClient();
@@ -162,9 +162,16 @@ function showViewStatus(view) {
 }
 function showComparisonSimilarity(status) {
   const text = similarityLabel(status);
-  el('comparison-similarity').textContent = text + (status?.state === 'updated'
+  const indicator = similarityIndicator(status);
+  const signature = JSON.stringify(status);
+  if (el('comparison-similarity').dataset.status === signature) {
+    el('comparison-similarity').hidden = !text;
+    return;
+  }
+  el('comparison-similarity').dataset.status = signature;
+  el('comparison-similarity').replaceChildren(...(indicator ? [indicator] : []), node('span', text + (status?.state === 'updated'
     ? '. Close this comparison and use Show updated stacks when you’re ready.'
-    : text && (status.uncertain || status.state !== 'checked') ? '. This grouping is provisional.' : '');
+    : text && (status.uncertain || status.state !== 'checked') ? '. This grouping is provisional.' : '')));
   el('comparison-similarity').hidden = !text;
 }
 async function more() {
@@ -581,7 +588,10 @@ setInterval(async () => {
       const index = state.comparison && el('comparison').open
         ? state.groups.findIndex(g => g.id === state.comparison.groupId)
         : state.groups.findIndex(g => visibleCards.has(g.id));
-      const status = await client.page(id, Math.floor(Math.max(0, index) / 50) * 50, 50);
+      const status = await client.page(id, Math.floor(Math.max(0, index) / 50) * 50, 50, {
+        visibleGroupIds: [...visibleCards].slice(0, 50),
+        comparisonGroupId: el('comparison').open ? state.comparison?.groupId ?? null : null,
+      });
       if (state.view?.viewId === id) showViewStatus(status);
     }
     if (state.syncId) {

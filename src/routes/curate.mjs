@@ -64,6 +64,9 @@ export function createCurateRoutes({ curate, review = null }) {
               search: url.searchParams.get('q') ?? '',
               sort: url.searchParams.get('sort') ?? 'oldest',
             });
+      } else if (request.method === 'POST' && path === 'groups/status') {
+        const body = await readObject(request, { maxBytes: 12 * 1024 });
+        result = curate.page(body.viewId, body.offset ?? 0, body.limit ?? 50, body);
       } else if (request.method === 'POST' && path === 'groups') {
         const body = await readObject(request, { maxBytes: 4096 });
         result = await curate.openView({

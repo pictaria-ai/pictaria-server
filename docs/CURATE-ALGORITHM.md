@@ -133,8 +133,19 @@ searches before publishing its matrix. Partial results are used
 only for progress, never for intermediate regrouping. Changed local evidence can
 still invalidate or resolve a candidate between requests.
 
-- One shared lane with the lab, at least **5 seconds** between new requests,
-  at most **8 new requests per rolling minute**. No extra AI/provider calls.
+- One shared lane with the lab, at least **2 seconds** between new requests,
+  with a **30-new-request rolling-minute cap** on automatic work. Requests stay
+  sequential. A successful search taking at least two seconds adds a pause equal
+  to its duration (capped at 30 seconds) after completion. Failures retain the
+  longer cooldown and explicit retry requirement. No extra AI/provider calls.
+- The opened comparison gets the next search turn, followed by currently visible
+  cards, then other admitted groups. An in-flight request finishes normally.
+  The browser reports at most 50 visible group IDs plus the open comparison;
+  the server validates all against the saved view. Attention expires after 12
+  seconds without renewal, while broader view demand retains its 60-second limit.
+  Prioritization does not bypass admission/capacity, source or membership checks.
+  Cached evidence can be consumed during network pacing without spending a
+  request slot. The reference set and 50-result window are unchanged.
 - Each request asks for one reference's first 51 image results, removes the
   reference and keeps at most **50**. No pagination to find a desired match.
   Timeout **15 seconds**, response limit **2 MiB**, failure cooldown at least
@@ -145,7 +156,7 @@ still invalidate or resolve a candidate between requests.
   demand or progress**, rather than ten minutes from admission. No retained entry
   is evicted merely to start more work. At capacity, other cohorts wait until
   space expires; this is shown on their cards. Requests are sequential, and one
-  candidate can take several minutes. Partial coverage is never published as a
+  candidate can still wait behind active work or slow searches. Partial coverage is never published as a
   completed grouping result.
 - The shared search cache holds at most **40 references for 10 minutes**. The
   automatic cache retains only candidate-member positions and result-window
@@ -168,6 +179,22 @@ provisional; failed searches are explicitly paused. Successful searches that
 leave membership uncertain say **Check complete · similarity uncertain**, retain
 the provisional grouping, and do not automatically retry or fragment it. An
 unconfigured or unavailable search service also leaves time groups provisional.
+Photo cards and the open comparison also show a small status indicator: muted
+spinner for queued work, blue spinner while checking, green check for completed
+supported work or ready updates, and amber for paused, limited or inconclusive
+checks. Locally resolved cards say no search is needed; unconfigured checks are
+not shown as completed. Text/accessible labels accompany color and animation;
+reduced-motion preferences disable spinning. Updated views with pending checks
+keep a pending indicator, rather than claiming completion.
+
+`refinement.metrics` on the groups/status response exposes only in-memory
+aggregate measurements since service start: search attempts/completions, cache
+hits, failures, last/average completed-search duration, completed automatic
+cohorts and average admission-to-completion time (including queueing, pauses and
+inactivity). Search measurements include the shared lab lane; direct lab-cache
+reads do not increment `cacheHits`. No photo IDs or responses are included.
+These are diagnostic counters, not persistent performance history or a new UI.
+
 The page summarizes checks for its own requested groups and highlights cards whose
 grouping changed. Checks that finish without changing grouping, or in an unrelated
 view, do not by themselves trigger a refresh prompt. Photo-information changes
@@ -218,6 +245,7 @@ and decision contract, not create a permanent second Curate pipeline.
 | `candidate-1` publication / UX follow-up | 2026-09-21 | Publish only complete search matrices, retain evidence for active views, and show per-card progress plus an explicit updated-stacks action. Fixes partial-result and timed-expiry regrouping during repeated refreshes; final membership rules and thresholds are unchanged. | PIC-382 |
 | `candidate-2` | 2026-09-21 | Review follow-up: retain compatible uncertainty provisionally while searches are pending, failed or missing targets; separate Group from None/One; query unresolved, nonconflicting pairs and their potential core-recovery context. Preserve complete-pass publication, original-cohort outside counts and existing thresholds. | PIC-382 / PIC-380 |
 | `candidate-3` | 2026-09-21 | Owner scene/couple counterexample: repeated contrast between reciprocal subgroups can override hash support and provisional unknown joins. Preserve bounded result-window counts; verify larger hash-only groups so contrary evidence can arrive. Keep 50 results, pacing, complete-pass publication, and the landscape recovery rule. | PIC-382 / PIC-380 |
+| `candidate-3` scheduling / status follow-up | 2026-09-22 | Two-second healthy pacing, 30 automatic requests/minute, slow-response backoff, open/visible priority, immediate cached reuse and aggregate diagnostics. Visual queued/checking/done/attention markers; grouping rules, reference selection and result depth unchanged. | PIC-382 |
 
 When membership rules, thresholds or interpretation of signals change, increment
 the implementation identifier and add a row describing the behavioral change and

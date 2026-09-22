@@ -25,6 +25,12 @@ All notable changes to Pictaria Server are documented here. This project follows
   groups get bounded verification searches; isolated missing results, failed
   checks and partial passes cannot trigger the contrast rule. Search size stays
   at 50; opened comparisons and selections remain fixed until refresh.
+  Healthy searches now start two seconds apart (up to 30 automatic requests per
+  minute), with extra delay on slow responses. Open comparisons and visible
+  cards take priority; cached evidence avoids network waits. Small queued/checking
+  spinners, green ready checks and amber attention markers make progress visible
+  without relying on color alone. Diagnostic counters expose request/latency and
+  queue-completion measurements; grouping rules and search coverage are unchanged.
   Comparisons include **Why this stack?**, and unconfirmed time groups are labeled.
   Exact rules, bounds and change history live in [the algorithm guide](docs/CURATE-ALGORITHM.md).
   The released Curate page and AI keeper recommendations are unchanged.

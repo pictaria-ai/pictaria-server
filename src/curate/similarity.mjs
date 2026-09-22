@@ -2,19 +2,21 @@ import { CurateError, fingerprint } from './contracts.mjs';
 
 export const SIMILARITY_LIMITS = Object.freeze({
   results: 50, timeoutMs: 15_000, responseBytes: 2 * 1024 * 1024,
-  cacheEntries: 40, cacheMs: 10 * 60_000, minIntervalMs: 5_000, failureIntervalMs: 30_000,
+  cacheEntries: 40, cacheMs: 10 * 60_000, minIntervalMs: 2_000, failureIntervalMs: 30_000,
 });
 
 // Shared read-only search lane. Callers own demand and composition policy; this
 // transport never paginates, retries, calls AI or makes human decisions.
 export class CurateSimilaritySearch {
-  constructor({ curate, now = Date.now, timeoutMs = SIMILARITY_LIMITS.timeoutMs }) {
+  constructor({ curate, now = Date.now, elapsedNow = () => performance.now(), timeoutMs = SIMILARITY_LIMITS.timeoutMs }) {
     this.curate = curate;
     this.now = now;
+    this.elapsedNow = elapsedNow;
     this.timeoutMs = timeoutMs;
     this.cache = new Map();
     this.nextAt = 0;
     this.shutdown = new AbortController();
+    this.metrics = { requests: 0, completedSearches: 0, cacheHits: 0, failures: 0, searchMs: 0, lastSearchMs: 0 };
   }
   connectionKey() {
     const client = this.curate.immich;
@@ -65,7 +67,10 @@ export class CurateSimilaritySearch {
     const key = fingerprint([connection, referenceId, source]);
     for (const [id, value] of this.cache) if (value.checkedAt + SIMILARITY_LIMITS.cacheMs <= this.now()) this.cache.delete(id);
     const cached = this.cache.get(key);
-    if (cached) return { ...cached, ids: [...cached.ids], cached: true };
+    if (cached) {
+      this.metrics.cacheHits++;
+      return { ...cached, ids: [...cached.ids], cached: true };
+    }
     if (this.work)
       throw new CurateError('Another similarity search is running. Try again when it finishes.', 'similarity_busy', 503);
     if (this.nextAt > this.now())
@@ -83,7 +88,8 @@ export class CurateSimilaritySearch {
     } finally { this.work = null; this.controller = null; }
   }
   async run(client, referenceId, signal, connection, source) {
-    const started = performance.now();
+    const started = this.elapsedNow();
+    this.metrics.requests++;
     try {
       const response = await client.requestJson('/search/smart', {
         method: 'POST', body: { queryAssetId: referenceId, type: 'IMAGE', visibility: 'timeline',
@@ -102,8 +108,9 @@ export class CurateSimilaritySearch {
       // reference may be absent or appear anywhere in the returned order.
       const ids = items.filter(p => p.id !== referenceId).slice(0, SIMILARITY_LIMITS.results).map(p => p.id);
       return { referenceId, ids, limit: SIMILARITY_LIMITS.results, checkedAt: this.now(),
-        elapsedMs: Math.round(performance.now() - started) };
+        elapsedMs: Math.round(this.elapsedNow() - started) };
     } catch (error) {
+      this.metrics.failures++;
       this.nextAt = Math.max(this.nextAt, this.now() + SIMILARITY_LIMITS.failureIntervalMs);
       if (error instanceof CurateError) throw error;
       const message = signal.aborted ? 'Similarity search was interrupted or timed out. Try again when ready.'
@@ -113,6 +120,15 @@ export class CurateSimilaritySearch {
         : 'Could not load similarity ranks from Immich. Try again later.';
       // Never return upstream bodies, credentials, URLs, or unrelated photos.
       throw new CurateError(message, 'similarity_unavailable', 503);
+    } finally {
+      const elapsed = Math.max(0, this.elapsedNow() - started);
+      this.metrics.completedSearches++;
+      this.metrics.lastSearchMs = Math.round(elapsed);
+      this.metrics.searchMs += elapsed;
+      // Slow hosts get breathing room after each request. Fast searches keep
+      // the two-second start spacing; failures retain their longer cooldown.
+      if (elapsed >= SIMILARITY_LIMITS.minIntervalMs)
+        this.nextAt = Math.max(this.nextAt, this.now() + Math.min(elapsed, SIMILARITY_LIMITS.failureIntervalMs));
     }
   }
   async close() {

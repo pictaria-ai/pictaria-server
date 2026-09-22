@@ -2,7 +2,7 @@
 // ranks; unrelated search results stay in the existing short-lived search cache.
 import { CANDIDATE_METHOD } from './candidate.mjs';
 export const REFINEMENT_LIMITS = Object.freeze({ cohorts: 32, views: 200,
-  activeMs: 60_000, cacheMs: 10 * 60_000, requestsPerMinute: 8 });
+  activeMs: 60_000, attentionMs: 12_000, cacheMs: 10 * 60_000, requestsPerMinute: 30 });
 
 export class CurateRefinement {
   constructor(curate, { now = Date.now } = {}) {
@@ -13,6 +13,7 @@ export class CurateRefinement {
     this.requests = [];
     this.revision = 0;
     this.connection = curate.similarity.connectionKey();
+    this.metrics = { completedGroups: 0, completionMs: 0 };
   }
   enabled() {
     const c = this.curate;
@@ -46,7 +47,8 @@ export class CurateRefinement {
   }
   admit(scope) {
     if (!scope?.needsRanks || this.entries.has(scope.id) || this.entries.size >= REFINEMENT_LIMITS.cohorts) return;
-    this.entries.set(scope.id, { ...scope, rows: Object.create(null), coverage: Object.create(null), touchedAt: this.now(), complete: false });
+    this.entries.set(scope.id, { ...scope, rows: Object.create(null), coverage: Object.create(null),
+      admittedAt: this.now(), touchedAt: this.now(), complete: false });
   }
   demand(viewId, groups) {
     if (!this.enabled()) return;
@@ -89,6 +91,28 @@ export class CurateRefinement {
     }
     return ids;
   }
+  attention(viewId, groups, comparison = null) {
+    this.demand(viewId, [...(groups ?? []), ...(comparison ? [comparison] : [])]);
+    const view = this.views.get(viewId);
+    if (!view) return;
+    if (groups) view.visible = groups.map(g => g.ids[0]);
+    view.focus = comparison?.ids[0] ?? null;
+    view.attentionAt = this.now();
+  }
+  priorities() {
+    const priorities = new Map();
+    for (const view of this.views.values()) {
+      if (view.attentionAt + REFINEMENT_LIMITS.attentionMs <= this.now()) continue;
+      const scope = id => this.curate.current?.scopeByMember?.get(id)?.id;
+      for (const id of view.visible ?? []) {
+        const key = scope(id);
+        if (key && !priorities.has(key)) priorities.set(key, 1);
+      }
+      const focus = scope(view.focus);
+      if (focus) priorities.set(focus, 0);
+    }
+    return priorities;
+  }
   valid(entry) {
     if (!entry) return false;
     // The worker scope includes full membership, material revisions and human
@@ -101,8 +125,13 @@ export class CurateRefinement {
   groupStatus(group) {
     if (!this.enabled()) return null;
     const first = group.ids[0], current = this.curate.current?.byMember.get(first);
-    if (current?.id !== group.id)
-      return { state: 'updated' };
+    if (current?.id !== group.id) {
+      const pending = [...new Set(group.ids.map(id => this.curate.current?.scopeByMember?.get(id)))].filter(s => s?.needsRanks);
+      return { state: 'updated', pending: pending.length > 0,
+        checking: pending.some(s => s.id === this.running?.id || Object.keys(this.entries.get(s.id)?.rows ?? {}).length > 0),
+        paused: Boolean(pending.length && this.problem),
+        uncertain: group.ids.some(id => this.curate.current?.byMember.get(id)?.route === 'candidate-unconfirmed') };
+    }
     // Every unchanged candidate group is contained in one time scope.
     const scope = this.curate.current?.scopeByMember?.get(first), entry = this.entries.get(scope?.id);
     if (!scope || !current.ids.some(id => scope.referenceIds.includes(id)) || (!scope.needsRanks && !entry))
@@ -126,7 +155,16 @@ export class CurateRefinement {
       problem: (pending || limited) ? this.problem ?? null : null, pending, limited,
       totalGroups: active.size, checkedGroups: entries.filter(e => e.complete).length,
       ready: [...(view?.groups.values() ?? [])].filter(g => this.groupStatus(g)?.state === 'updated').length,
-      method: CANDIDATE_METHOD };
+      method: CANDIDATE_METHOD, metrics: this.measurements() };
+  }
+  measurements() {
+    const m = this.curate.similarity.metrics;
+    return { requests: m.requests, cacheHits: m.cacheHits, failures: m.failures,
+      completedSearches: m.completedSearches, lastSearchMs: m.lastSearchMs,
+      averageSearchMs: m.completedSearches ? Math.round(m.searchMs / m.completedSearches) : null,
+      completedGroups: this.metrics.completedGroups,
+      averageCompletionMs: this.metrics.completedGroups
+        ? Math.round(this.metrics.completionMs / this.metrics.completedGroups) : null };
   }
   async tick() {
     this.settingsChanged(); this.expire();
@@ -141,13 +179,16 @@ export class CurateRefinement {
     }
     if (!this.enabled() || this.problem || this.curate.metadata.work || this.curate.building) return;
     const lane = this.curate.similarity;
-    if (lane.owner || lane.work || lane.nextAt > lane.now()) return;
+    if (lane.owner || lane.work) return;
     this.requests = this.requests.filter(time => time + 60_000 > this.now());
-    if (this.requests.length >= REFINEMENT_LIMITS.requestsPerMinute) return;
-    const entry = [...active].map(id => this.entries.get(id)).find(e => e && this.needed(e) &&
-      e.referenceIds.some(id => !Object.hasOwn(e.rows, id)));
+    const priorities = this.priorities();
+    const entry = [...active].map(id => this.entries.get(id)).filter(e => e && this.needed(e) &&
+      e.referenceIds.some(id => !Object.hasOwn(e.rows, id)))
+      .sort((a, b) => (priorities.get(a.id) ?? 2) - (priorities.get(b.id) ?? 2))[0];
     if (!entry) return;
     const id = entry.referenceIds.find(id => !Object.hasOwn(entry.rows, id));
+    // A cached result costs no Immich work and should not wait on network pacing.
+    if (!lane.cached(id) && (lane.nextAt > lane.now() || this.requests.length >= REFINEMENT_LIMITS.requestsPerMinute)) return;
     const connection = this.connection;
     this.controller = new AbortController(); this.running = entry;
     const signal = this.controller.signal;
@@ -175,6 +216,8 @@ export class CurateRefinement {
         // mixture of queried and not-yet-queried directions from this pass.
         if (entry.referenceIds.every(id => Object.hasOwn(entry.rows, id))) {
           entry.complete = true;
+          this.metrics.completedGroups++;
+          this.metrics.completionMs += this.now() - entry.admittedAt;
           this.revision++;
           await this.curate.refresh();
         }

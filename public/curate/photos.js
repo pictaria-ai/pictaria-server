@@ -69,10 +69,29 @@ export function similarityLabel(status) {
     case 'checking': return `Checking nearby photos · ${status.done} of ${status.total}`;
     case 'paused': return 'Similarity check paused · Refresh to retry';
     case 'limited': return status.total ? 'Waiting for a check slot' : 'Similarity not checked · automatic limit';
-    case 'updated': return 'Updated grouping ready · Refresh to see';
+    case 'updated': return status.paused ? 'Grouping updated · similarity check paused'
+      : status.checking ? 'Grouping updated · checking nearby photos'
+      : status.pending ? 'Grouping updated · checks still pending' : 'Updated grouping ready · Refresh to see';
     case 'checked': return status.uncertain ? 'Check complete · similarity uncertain' : 'Similarity checked';
+    case 'local': return 'Ready · no similarity search needed';
+    case 'unavailable': return 'Similarity not checked';
     default: return '';
   }
+}
+
+export function similarityIndicator(status) {
+  const label = similarityLabel(status);
+  if (!label) return null;
+  const state = status.state;
+  const phase = status.paused ? 'attention' : state === 'checking' || status.checking ? 'checking'
+    : state === 'waiting' || (state === 'updated' && status.pending) ? 'waiting'
+    : ['paused', 'limited', 'unavailable'].includes(state) || status.uncertain ? 'attention' : 'done';
+  const indicator = node('span', phase === 'done' ? '✓' : phase === 'attention' ? '!' : '', 'similarity-indicator');
+  indicator.dataset.phase = phase;
+  indicator.setAttribute('role', 'img');
+  indicator.setAttribute('aria-label', label);
+  indicator.title = label;
+  return indicator;
 }
 
 export function groupCard(group, open) {
@@ -85,7 +104,8 @@ export function groupCard(group, open) {
   img.alt = '';
   img.loading = 'lazy';
   const chip = node('span', undefined, 'p-chip');
-  cover.append(img, chip);
+  const marker = node('span', undefined, 'similarity-marker');
+  cover.append(img, chip, marker);
   const caption = node('div', undefined, 'group-caption');
   caption.append(
     node('strong', group.memberCount > 1 ? 'Compare stack' : 'Review photo'),
@@ -97,9 +117,16 @@ export function groupCard(group, open) {
   caption.append(status);
   button.updateSimilarity = (value) => {
     group.similarity = value;
-    const provisional = value && (value.uncertain || !['checked', 'updated'].includes(value.state));
+    value ??= group.route === 'candidate-unconfirmed' ? { state: 'unavailable' }
+      : group.route === 'manual-budget' ? { state: 'limited' }
+      : ['candidate-supported', 'single'].includes(group.route) ? { state: 'local' } : null;
+    const provisional = value && (value.uncertain || !['checked', 'updated', 'local'].includes(value.state));
     chip.textContent = group.memberCount > 1 ? `${group.memberCount} photos` : provisional ? '1 photo' : 'Single photo';
-    status.textContent = similarityLabel(value);
+    const label = similarityLabel(value);
+    if (status.textContent !== label) status.textContent = label;
+    const indicator = similarityIndicator(value);
+    if (marker.firstChild?.title !== indicator?.title || marker.firstChild?.dataset.phase !== indicator?.dataset.phase)
+      marker.replaceChildren(...(indicator ? [indicator] : []));
     status.hidden = !status.textContent;
     button.dataset.similarity = value?.state ?? '';
     caption.querySelector('small').hidden = Boolean(status.textContent);

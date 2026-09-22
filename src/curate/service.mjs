@@ -143,12 +143,28 @@ export class CurateService {
     this.refinement?.retry();
     return this.page(lease.id);
   }
-  page(viewId, offset = 0, limit = 50) {
+  page(viewId, offset = 0, limit = 50, attention = null) {
     if (!Number.isSafeInteger(offset) || offset < 0 || !Number.isSafeInteger(limit) || limit < 1 || limit > 50)
       throw new CurateError('Invalid Curate page.', 'invalid_curate_query', 400);
     const view = this.store.getLease(viewId, 'view');
     const groups = this.store.viewGroups(viewId, offset, limit);
+    let visible = groups, comparison = null;
+    if (attention !== null) {
+      const ids = attention?.visibleGroupIds, focus = attention?.comparisonGroupId ?? null;
+      if (!Array.isArray(ids) || ids.length > 50 || new Set(ids).size !== ids.length ||
+          ids.some(id => typeof id !== 'string' || !id || id.length > 128) ||
+          (focus !== null && (typeof focus !== 'string' || !focus || focus.length > 128)))
+        throw new CurateError('Invalid Curate attention.', 'invalid_curate_query', 400);
+      const lookup = id => {
+        const group = this.store.viewGroup(viewId, id);
+        if (!group) throw new CurateError('Group is not in this view.', 'curate_group_missing', 404);
+        return group;
+      };
+      visible = ids.map(lookup);
+      comparison = focus === null ? null : lookup(focus);
+    }
     this.refinement?.demand(viewId, groups);
+    this.refinement?.attention(viewId, visible, comparison);
     const refinement = this.refinement?.status(viewId, groups) ?? null;
     return {
       viewId,
@@ -188,6 +204,7 @@ export class CurateService {
       contextIds: context.ids,
       contextOmitted: context.omitted,
     });
+    this.refinement?.attention(viewId, null, group);
     return {
       ...lease,
       photos: this.store.details(group.ids.slice(0, 50)),

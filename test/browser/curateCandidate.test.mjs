@@ -2,6 +2,8 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { launchChrome, findChrome } from './harness.mjs';
 import { curatePreviewFixture } from './curatePreviewFixture.mjs';
+import { writeFileSync } from 'node:fs';
+import { join } from 'node:path';
 
 test('hash-supported stack is searched and split only after explicit refresh, without changing an open selection',
   { timeout: 60000 }, async t => {
@@ -58,6 +60,8 @@ test('candidate preview refines automatically, preserves selections, explains re
     await page.evaluate('document.querySelector(".gate-backdrop input").value="smoke-secret";document.querySelector(".gate-backdrop button").click()');
     await page.waitFor('document.querySelectorAll(".group-card").length===1 && !document.querySelector("#refresh").disabled');
     await page.waitFor('document.querySelector(".group-card[data-similarity=checking]")');
+    assert.equal(await page.evaluate('document.querySelector(".similarity-indicator").dataset.phase'), 'checking');
+    assert.match(await page.evaluate('document.querySelector(".similarity-indicator").getAttribute("aria-label")'), /Checking/);
     assert.match(await page.evaluate('document.querySelector("#refinement").textContent'), /Marked cards may regroup/);
     await click('#refresh');
     await page.waitFor('!document.querySelector("#refresh").disabled');
@@ -77,6 +81,7 @@ test('candidate preview refines automatically, preserves selections, explains re
     await click('[data-close=comparison]'); await click('#show-updates');
     await page.waitFor('document.querySelectorAll(".group-card").length===1 && !document.querySelector("#refresh").disabled');
     assert.equal(await page.evaluate('document.querySelector(".group-card").dataset.similarity'), 'checked');
+    assert.equal(await page.evaluate('document.querySelector(".similarity-indicator").dataset.phase'), 'done');
     await click('#refresh');
     await page.waitFor('!document.querySelector("#refresh").disabled');
     assert.equal(await page.evaluate('document.querySelectorAll(".group-card").length'), 1);
@@ -96,4 +101,69 @@ test('candidate preview refines automatically, preserves selections, explains re
     }
     assert.equal(fixture.repo.db.prepare("SELECT count(*) n FROM curate_photos WHERE state='undecided'").get().n, 5);
     assert.equal(await page.evaluate('document.querySelector("#error").hidden'), true);
+  });
+
+test('status markers distinguish queued, checking, paused and uncertain work on desktop and mobile',
+  { timeout: 60000 }, async t => {
+    if (!findChrome()) return t.skip('Chrome required');
+    const fixture = await curatePreviewFixture({ stackSize: 3, singles: 1 });
+    // Seed the same metadata the fake endpoint returns. The deliberately held
+    // request below must not be invalidated by the first metadata refresh.
+    for (const asset of fixture.assets.filter(a => a.id !== fixture.contextId))
+      fixture.repo.curate.mergeMetadataAsset({ ...asset, tags: [] });
+    const browser = await launchChrome(), page = await browser.newPage();
+    let release, first = true;
+    t.after(async () => { release?.(); await browser.stop(); await fixture.stop(); });
+    for (let i = 1; i <= 3; i++) fixture.similarityResponses.set(fixture.id(i), async () => {
+      if (first) {
+        first = false;
+        await new Promise(resolve => { release = resolve; });
+        return { status: 503, body: {} };
+      }
+      return { status: 200, body: { assets: { items: [] } } };
+    });
+    // Retain the initial queued marker before the first scheduled tick/poll.
+    await page.send('Page.addScriptToEvaluateOnNewDocument', { source: `
+      window.queuedSeen = false;
+      new MutationObserver(() => { if (document.querySelector('.similarity-indicator[data-phase=waiting]')) window.queuedSeen = true; })
+        .observe(document, { childList:true, subtree:true });
+    ` });
+    const click = selector => page.evaluate(`document.querySelector(${JSON.stringify(selector)}).click()`);
+    await page.navigate(`${fixture.base}/curate-preview.html`);
+    await page.waitFor('document.querySelector(".gate-backdrop input")');
+    await page.evaluate('document.querySelector(".gate-backdrop input").value="smoke-secret";document.querySelector(".gate-backdrop button").click()');
+    try { await page.waitFor('document.querySelector(".similarity-indicator[data-phase=checking]")'); }
+    catch (error) {
+      t.diagnostic(await page.evaluate('JSON.stringify({groups:document.querySelector("#groups").innerHTML,error:document.querySelector("#error").textContent,progress:document.querySelector("#refinement").textContent})'));
+      t.diagnostic(JSON.stringify({ searches: fixture.similarityReads, details: fixture.detailReads }));
+      throw error;
+    }
+    assert.equal(await page.evaluate('window.queuedSeen'), true);
+    assert.match(await page.evaluate('document.querySelector(".similarity-indicator[data-phase=done]").title'), /no similarity search needed/);
+    if (process.env.PICTARIA_TEST_SCREENSHOTS) {
+      const { data } = await page.send('Page.captureScreenshot', { format: 'png' });
+      writeFileSync(join(process.env.PICTARIA_TEST_SCREENSHOTS, 'curate-checking-desktop.png'), Buffer.from(data, 'base64'));
+    }
+    release();
+    await page.waitFor('document.querySelector(".group-card[data-similarity=paused]")');
+    assert.equal(await page.evaluate('document.querySelector(".group-card[data-similarity=paused] .similarity-indicator").dataset.phase'), 'attention');
+    await click('.group-card[data-similarity=paused]');
+    await page.waitFor('document.querySelector("#comparison-similarity .similarity-indicator[data-phase=attention]")');
+    assert.match(await page.evaluate('document.querySelector("#comparison-similarity").textContent'), /paused/);
+    await click('[data-close=comparison]');
+    await page.send('Emulation.setDeviceMetricsOverride', { width: 390, height: 844, deviceScaleFactor: 1, mobile: true });
+    await page.send('Emulation.setEmulatedMedia', { features: [{ name: 'prefers-reduced-motion', value: 'reduce' }] });
+    assert.equal(await page.evaluate('document.documentElement.scrollWidth <= innerWidth'), true);
+    assert.equal(await page.evaluate('getComputedStyle(document.querySelector(".similarity-indicator")).animationName'), 'none');
+    if (process.env.PICTARIA_TEST_SCREENSHOTS) {
+      const { data } = await page.send('Page.captureScreenshot', { format: 'png' });
+      writeFileSync(join(process.env.PICTARIA_TEST_SCREENSHOTS, 'curate-paused-mobile.png'), Buffer.from(data, 'base64'));
+    }
+    // Explicit refresh resumes after the shared failure cooldown, without a
+    // retry loop. Successful empty results stay amber, never confident green.
+    await click('#refresh');
+    await page.waitFor('document.querySelector(".group-card[data-similarity=checked]")', { timeoutMs: 42000 });
+    assert.equal(fixture.similarityReads.length, 4);
+    assert.equal(await page.evaluate('document.querySelector(".group-card[data-similarity=checked] .similarity-indicator").dataset.phase'), 'attention');
+    assert.match(await page.evaluate('document.querySelector(".group-card[data-similarity=checked] .similarity-status").textContent'), /uncertain/);
   });

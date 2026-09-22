@@ -68,6 +68,17 @@ in this preview, its proposed partitions are never saved.
 - Save acceptance and Immich synchronization are separate. A failed sync can be
   retried without repeating the human decision or invoking AI.
 
+Cards have a small status circle: a muted spinner while queued, a blue spinner
+while checking, a green check when ready, and an amber attention marker when
+paused, limited, unavailable or still uncertain. Text labels explain each state;
+reduced-motion preferences stop the animation. Comparisons resolved locally say
+that no similarity search is needed. The open comparison uses the same markers.
+
+Searches stay sequential but can start two seconds apart, up to 30 new automatic
+requests per minute. Slow responses add breathing room. The open comparison gets
+the next turn, followed by visible cards and other admitted groups; changing
+focus never interrupts an in-flight search or alters a saved comparison.
+
 Cards show which nearby photos are waiting for a similarity check or being checked,
 with progress counts for uncertain pairs and any needed core-recovery context.
 Photos with distant ThumbHashes stay together provisionally until search evidence

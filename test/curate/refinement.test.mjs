@@ -150,6 +150,79 @@ test('no searches on rebuild/startup; visible preview demand admits only paced, 
   assert.equal(curate.repo.db.prepare('SELECT count(*) n FROM decision_operations').get().n, 0);
 });
 
+test('open comparisons take the next turn, then visible groups, without interrupting in-flight work', async t => {
+  let release;
+  const s = await setup(t, { n: 2, respond: (args, n) => n === 1
+    ? new Promise(resolve => { release = resolve; }) : { assets: { items: [] } } });
+  for (let group = 1; group <= 2; group++) for (let i = 0; i < 2; i++) {
+    const id = `extra-${group}-${i}`;
+    s.repo.upsertAsset({ id, fileCreatedAt: new Date(1767225600000 + group * 600_000 + i * 1000).toISOString() });
+    s.repo.reviewListAdd([id], 'test');
+  }
+  const view = await s.curate.openView();
+  const first = s.refine.tick();
+  s.curate.comparison(view.viewId, view.groups[2].id);
+  await s.refine.tick();
+  assert.equal(s.calls.length, 1);
+  assert.equal(s.calls[0].signal.aborted, false);
+  release({ assets: { items: [] } }); await first;
+  s.advance(1999); await s.refine.tick(); assert.equal(s.calls.length, 1);
+  s.advance(1); await s.refine.tick();
+  assert.equal(s.calls[1].body.queryAssetId, 'extra-2-0');
+  // Closing the comparison clears its priority; only the middle card is visible.
+  s.curate.page(view.viewId, 0, 50, { visibleGroupIds: [view.groups[1].id], comparisonGroupId: null });
+  s.advance(2000); await s.refine.tick();
+  assert.equal(s.calls[2].body.queryAssetId, 'extra-1-0');
+  // Lost/hidden-page attention expires even if the broader view is still leased.
+  s.advance(12_000); await s.refine.tick();
+  assert.equal(s.calls[3].body.queryAssetId, 'p1');
+  assert.deepEqual(s.curate.store.viewGroups(view.viewId, 0, 50).map(g => g.ids.length), [2,2,2]);
+});
+
+test('attention is bounded to groups in the saved view before any demand changes', async t => {
+  const s = await setup(t);
+  const view = await s.curate.openView();
+  const attention = { visibleGroupIds: [view.groups[0].id] };
+  assert.doesNotThrow(() => s.curate.page(view.viewId, 0, 50, attention));
+  const before = JSON.stringify([...s.refine.views]);
+  for (const invalid of [ { visibleGroupIds: Array(51).fill('a') },
+    { visibleGroupIds: [view.groups[0].id, view.groups[0].id] },
+    { visibleGroupIds: ['outside-view'] }, { visibleGroupIds: [], comparisonGroupId: 'outside-view' },
+    { visibleGroupIds: [], comparisonGroupId: {} } ])
+    assert.throws(() => s.curate.page(view.viewId, 0, 50, invalid));
+  assert.equal(JSON.stringify([...s.refine.views]), before);
+  assert.equal(s.calls.length, 0);
+});
+
+test('an old card reports uncertainty in any resulting subgroup, not just its first photo', async t => {
+  const s = await setup(t, { respond: () => ({ assets: { items: [] } }) });
+  const view = await s.curate.openView();
+  enrichCategories(s.repo, ['none','one','one']);
+  await s.curate.refresh();
+  assert.equal(s.curate.page(view.viewId).groups[0].similarity.pending, true);
+  await s.refine.tick(); s.advance(2000); await s.refine.tick();
+  const status = s.curate.page(view.viewId).groups[0].similarity;
+  assert.equal(status.state, 'updated');
+  assert.equal(status.pending, false);
+  assert.equal(status.uncertain, true);
+});
+
+test('cached evidence bypasses network pacing and counters expose bounded aggregate measurements', async t => {
+  const s = await setup(t);
+  for (const id of s.ids) { s.advance(2000); await s.curate.similarity.search(id); }
+  const view = await s.curate.openView();
+  s.refine.requests = Array(30).fill(s.curate.similarity.now());
+  for (const id of s.ids) await s.refine.tick();
+  assert.equal(s.calls.length, 3);
+  assert.equal(s.refine.snapshot()[s.curate.current.scopes[0].id].rows.p0.p1, 0);
+  const metrics = s.curate.page(view.viewId).refinement.metrics;
+  assert.equal(metrics.requests, 3); assert.equal(metrics.cacheHits, 3);
+  assert.equal(metrics.failures, 0); assert.equal(metrics.completedGroups, 1);
+  assert.equal(metrics.averageCompletionMs, 0);
+  assert.equal(typeof metrics.averageSearchMs, 'number');
+  assert.doesNotMatch(JSON.stringify(metrics), /synthetic|p0|http/);
+});
+
 test('background additions never enlarge an already inspected comparison silently', async t => {
   const { repo, curate } = await setup(t, { hashes: true });
   const view = await curate.openView(); assert.equal(view.groups.length, 1);
@@ -177,12 +250,16 @@ test('stacking off, replaced/idle views, connection changes and closing stop aut
   curate.store.releaseLease(replacement.viewId); advance(5000); await refine.tick(); assert.equal(calls.length, 2);
 });
 
-test('eight new searches per minute and 40 per cohort; known local similarity skips network', async t => {
-  const s = await setup(t, { n: 12 });
+test('thirty new searches per minute and 40 per cohort; known local similarity skips network', async t => {
+  const s = await setup(t, { n: 32 });
   const view = await s.curate.openView();
-  for (let i = 0; i < 12; i++) { s.curate.page(view.viewId); await s.refine.tick(); s.advance(5000); }
-  assert.equal(s.calls.length, 8);
-  await s.refine.tick(); assert.equal(s.calls.length, 9);
+  for (let i = 0; i < 30; i++) {
+    if (i) s.advance(2000);
+    s.curate.page(view.viewId); await s.refine.tick();
+  }
+  assert.equal(s.calls.length, 30);
+  await s.refine.tick(); assert.equal(s.calls.length, 30);
+  s.advance(2000); await s.refine.tick(); assert.equal(s.calls.length, 31);
   const local = await setup(t, { n: 2 });
   for (const id of local.ids) local.repo.upsertAsset({ id, fileCreatedAt: '2026-01-01', thumbhash: Buffer.alloc(21, 10).toString('base64') });
   await local.curate.openView(); await local.refine.tick(); assert.equal(local.calls.length, 0);

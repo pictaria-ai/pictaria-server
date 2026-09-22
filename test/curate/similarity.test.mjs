@@ -80,6 +80,23 @@ test('one lane across references; abort stops work and does not cache a late res
   assert.equal(calls.length, 1); assert.equal(search.cache.size, 0);
 });
 
+test('slow successful searches back off, then healthy responses restore two-second pacing', async t => {
+  let elapsed = 0;
+  const s = setup(t, (args, count) => {
+    if (count === 1) { elapsed += 6000; s.advance(6000); }
+    return { assets: { items: [item('b')] } };
+  }, { elapsedNow: () => elapsed });
+  await s.search.search('a');
+  assert.equal(s.search.nextAt - s.search.now(), 6000);
+  await assert.rejects(s.search.search('b'), { code: 'similarity_cooldown' });
+  assert.equal((await s.search.search('a')).cached, true);
+  s.advance(6000); await s.search.search('b');
+  assert.equal(s.search.nextAt - s.search.now(), 2000);
+  assert.equal(s.search.metrics.requests, 2);
+  assert.equal(s.search.metrics.cacheHits, 1);
+  assert.equal(s.search.metrics.searchMs, 6000);
+});
+
 test('cache has bounded size and lifetime; cached arrays cannot be mutated by callers', async t => {
   const { repo, search, calls, advance } = setup(t, () => ({ assets: { items: [item('b')] } }));
   const first = await search.search('a'); first.ids.push('injected');
@@ -178,7 +195,7 @@ test('group rank passes admit eight new requests, keep directions distinct, and 
   const waits = []; curate.lab.ranks.wait = async ms => { waits.push(ms); advance(ms); };
   const first = await rankPass(curate, body);
   assert.equal(first.plan.newSearches, 8); assert.equal(first.plan.remaining, 2);
-  assert.equal(calls.length, 8); assert.deepEqual(waits, Array(7).fill(5000));
+  assert.equal(calls.length, 8); assert.deepEqual(waits, Array(7).fill(limits.minIntervalMs));
   const rows = first.events.filter(e => e.type === 'row').map(e => e.row);
   assert.equal(rows[0].photos.find(p => p.id === 'b').rank, 2);
   assert.equal(rows[1].photos.find(p => p.id === 'a').rank, 1);

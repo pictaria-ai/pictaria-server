@@ -62,8 +62,9 @@ browser; unrelated result IDs and full asset metadata are not exposed.
 
 The reusable `CurateSimilaritySearch` service has one search lane per Pictaria
 instance, a 15-second deadline and 2 MiB response ceiling. Concurrent uncached
-checks return a busy message, rather than queueing. Starts are at least five
-seconds apart; a failure imposes a 30-second pause. Closing the dialog cancels
+checks return a busy message, rather than queueing. Starts are at least two
+seconds apart; a failure imposes a 30-second pause. Successful searches taking
+at least two seconds add a pause equal to their duration, up to 30 seconds. Closing the dialog cancels
 the request, and late answers cannot populate another experiment. Connection
 changes, changed reference-image evidence or removal from the review list
 invalidate reuse; changes during a read withhold the response.
@@ -92,7 +93,7 @@ original check time and search duration. Only selected-photo ranks reach the UI.
 
 A local-only preflight displays new searches, reusable cache rows and references
 left for later. Each explicit pass admits **at most eight uncached searches**,
-reserves the existing shared search lane and spaces request starts at least five
+reserves the existing shared search lane and spaces request starts at least two
 seconds apart. It streams progress and has a 180-second overall deadline. The
 per-request timeout, response cap, failure cooldown and cache limits still apply.
 If the cache estimate changes before admission, the pass does not start; the UI
