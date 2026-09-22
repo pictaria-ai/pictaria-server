@@ -1,5 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { setTimeout as delay } from 'node:timers/promises';
 import { launchChrome, findChrome } from './harness.mjs';
 import { curatePreviewFixture } from './curatePreviewFixture.mjs';
 
@@ -180,6 +181,20 @@ test(
     await page.evaluate(
       'document.querySelector(".gate-backdrop input").value="smoke-secret";document.querySelector(".gate-backdrop button").click()',
     );
+    await wait('document.querySelectorAll(".group-card").length===50 && !document.querySelector("#refresh").disabled');
+
+    // This scenario exercises human decisions on stable inputs. On slower hosts
+    // initial metadata can change between the two comparison-page reads, which
+    // correctly rejects the open as stale. Wait for the fixture's pending photos
+    // to finish refreshing instead of relying on the machine beating that race.
+    const deadline = Date.now() + 15000;
+    while (fixture.repo.db.prepare(`SELECT 1 FROM curate_photos p
+      LEFT JOIN curate_metadata m ON m.asset_id=p.asset_id
+      WHERE p.state='undecided' AND (m.outcome IS NULL OR m.outcome<>'refreshed') LIMIT 1`).get()) {
+      assert.ok(Date.now() < deadline, 'initial fixture metadata did not finish');
+      await delay(50);
+    }
+    await click('#refresh');
     await wait('document.querySelectorAll(".group-card").length===50 && !document.querySelector("#refresh").disabled');
 
     await t.test('paging adds cards, search matches whole stack and all 52 members load before save', async () => {
