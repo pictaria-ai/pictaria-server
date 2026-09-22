@@ -58,7 +58,10 @@
       </div>
       <div class="view-status">
         <span id="count" class="p-muted" aria-live="polite">Loading photos…</span
-        ><span id="updates" hidden>Updates available — refresh when you’re ready.</span>
+        >
+      </div>
+      <div id="updates" class="notice" hidden role="status">
+        <span id="updates-copy"></span><button id="show-updates" class="p-btn">Show updated stacks</button>
       </div>
       <p id="metadata" class="p-muted"></p>
       <p id="refinement" class="p-muted" role="status"></p>
@@ -96,6 +99,7 @@
             <ul id="stack-reasons"></ul>
           </details>
           <p id="comparison-state" class="p-muted" aria-live="polite"></p>
+          <p id="comparison-similarity" class="p-muted" role="status" hidden></p>
           <button id="metadata-retry" class="p-btn quiet" hidden>Retry photo information refresh</button>
           <div id="comparison-error" role="alert" hidden></div>
           <div id="comparison-recovery" class="notice" hidden>

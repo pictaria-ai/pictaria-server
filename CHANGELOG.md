@@ -10,7 +10,11 @@ All notable changes to Pictaria Server are documented here. This project follows
 - Curate Preview now tries a versioned candidate stacking algorithm: wider time
   candidates, contextual people evidence, positive ThumbHash and reciprocal
   Immich search ranks. Selective background searches are paced and cached; new
-  results appear through **Updates available**, preserving the opened view.
+  results appear through **Show updated stacks**, preserving the opened view.
+  Cards show waiting/checking progress and highlight ready updates. Search results
+  are applied only after the whole time candidate has been checked; completed
+  evidence stays cached while its view is active, preventing timed cache expiry
+  from repeatedly splitting and rejoining an unchanged stack.
   Comparisons include **Why this stack?**, and unconfirmed time groups are labeled.
   Exact rules, bounds and change history live in [the algorithm guide](docs/CURATE-ALGORITHM.md).
   The released Curate page and AI keeper recommendations are unchanged.

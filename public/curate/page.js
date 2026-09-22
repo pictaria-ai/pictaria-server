@@ -1,5 +1,5 @@
 import { CurateClient, request, decisionSummary } from './client.js';
-import { node, thumbnail, photoCard, groupCard } from './photos.js';
+import { node, thumbnail, photoCard, groupCard, similarityLabel } from './photos.js';
 
 const el = (id) => document.getElementById(id);
 const client = new CurateClient();
@@ -25,6 +25,19 @@ const state = {
   syncKind: null,
 };
 let failedPreviews = new Set();
+const cards = new Map(), visibleCards = new Set();
+const visibility = new IntersectionObserver(entries => {
+  for (const entry of entries) {
+    const id = entry.target.dataset.groupId;
+    entry.isIntersecting ? visibleCards.add(id) : visibleCards.delete(id);
+  }
+});
+function makeCard(group) {
+  const card = groupCard(group, g => run(() => compare(g)));
+  cards.set(group.id, card);
+  visibility.observe(card);
+  return card;
+}
 
 function error(error) {
   const target = el('comparison').open
@@ -59,6 +72,7 @@ function recovery() {
   el('retry-action').disabled = state.busy;
   const locked = state.busy || Boolean(client.saved.pending);
   el('refresh').disabled = locked || state.loading;
+  el('show-updates').disabled = locked || state.loading;
   el('search').disabled = locked || state.loading;
   el('sort').disabled = locked || state.loading;
   el('corrections').disabled = locked;
@@ -106,7 +120,8 @@ async function refresh() {
     state.view = view;
     state.groups = view.groups;
     state.next = view.nextOffset;
-    el('groups').replaceChildren(...view.groups.map((g) => groupCard(g, (g) => run(() => compare(g)))));
+    visibility.disconnect(); visibleCards.clear(); cards.clear();
+    el('groups').replaceChildren(...view.groups.map(makeCard));
     showViewStatus(view);
     el('empty').hidden = view.total !== 0;
     el('more').hidden = state.next === null;
@@ -120,6 +135,11 @@ async function refresh() {
 function showViewStatus(view) {
   el('count').textContent = `${state.groups.length} of ${view.total} comparisons shown`;
   el('updates').hidden = !view.updatesAvailable;
+  const refinement = view.refinement;
+  el('updates-copy').textContent = refinement?.ready
+    ? 'Updated grouping is ready for the highlighted cards.'
+    : 'Photo information changed. Refresh to load the latest.';
+  el('show-updates').textContent = refinement?.ready ? 'Show updated stacks' : 'Refresh photos';
   const metadata = view.metadata;
   if (state.view?.viewId === view.viewId) state.view.metadata = metadata;
   if (state.comparison) el('metadata-retry').hidden = !metadata?.problem;
@@ -129,11 +149,23 @@ function showViewStatus(view) {
       ? 'Refreshing photo information from Immich. Your open view stays in place.'
       : '';
   el('metadata').hidden = !el('metadata').textContent;
-  const refinement = view.refinement;
   el('refinement').textContent = refinement?.problem ||
-    (refinement?.pending ? 'Checking stack similarity in the background. Refresh when updates are ready.' :
-      refinement?.limited ? 'Automatic checks are at their current cache limit. You can keep curating.' : '');
+    (refinement?.pending || refinement?.limited
+      ? `Similarity checks: ${refinement.checkedGroups} of ${refinement.totalGroups} nearby groups finished. ` +
+        (refinement.limited ? 'Some are waiting for a check slot. ' : '') +
+        'Marked cards may regroup. You can review other photos while you wait.' : '');
   el('refinement').hidden = !el('refinement').textContent;
+  for (const group of view.groups) {
+    cards.get(group.id)?.updateSimilarity(group.similarity);
+    if (state.comparison?.groupId === group.id) showComparisonSimilarity(group.similarity);
+  }
+}
+function showComparisonSimilarity(status) {
+  const text = similarityLabel(status);
+  el('comparison-similarity').textContent = text + (status?.state === 'updated'
+    ? '. Close this comparison and use Show updated stacks when you’re ready.'
+    : text && status.state !== 'checked' ? '. This grouping is provisional.' : '');
+  el('comparison-similarity').hidden = !text;
 }
 async function more() {
   if (state.next === null || state.loading || client.saved.pending) return;
@@ -143,7 +175,7 @@ async function more() {
     const page = await client.page(state.view.viewId, state.next);
     state.groups.push(...page.groups);
     state.next = page.nextOffset;
-    el('groups').append(...page.groups.map((g) => groupCard(g, (g) => run(() => compare(g)))));
+    el('groups').append(...page.groups.map(makeCard));
     showViewStatus(page);
     el('more').hidden = state.next === null;
   } finally {
@@ -172,6 +204,7 @@ async function compare(group) {
   el('compact').checked = group.memberCount > 10;
   el('photos').classList.toggle('compact', el('compact').checked);
   el('comparison-state').textContent = 'Loading the complete comparison…';
+  el('comparison-similarity').hidden = true;
   el('metadata-retry').hidden = true;
   el('photos').replaceChildren();
   el('stack-reason').hidden = true;
@@ -182,6 +215,7 @@ async function compare(group) {
   const comparison = await client.comparison(state.view.viewId, group.id);
   if (generation !== state.dialogGeneration || !el('comparison').open) return;
   state.comparison = comparison;
+  showComparisonSimilarity(comparison.similarity);
   el('stack-reason').hidden = false;
   el('stack-reason').querySelector('summary').textContent = group.memberCount > 1 ? 'Why this stack?' : 'Why this photo is separate';
   el('stack-algorithm').textContent = comparison.algorithm === 'candidate-1'
@@ -373,6 +407,7 @@ async function corrections(append = false) {
 }
 
 el('refresh').onclick = () => run(refresh);
+el('show-updates').onclick = () => run(refresh);
 el('more').onclick = () => run(more);
 el('sort').onchange = () =>
   run(async () => {
@@ -541,7 +576,12 @@ setInterval(async () => {
   try {
     if (state.view) {
       const id = state.view.viewId;
-      const status = await client.page(id, 0, 1);
+      // Keep the visible cards (or the opened comparison) current, in a bounded
+      // 50-card read. Only status changes; memberships and selections stay put.
+      const index = state.comparison && el('comparison').open
+        ? state.groups.findIndex(g => g.id === state.comparison.groupId)
+        : state.groups.findIndex(g => visibleCards.has(g.id));
+      const status = await client.page(id, Math.floor(Math.max(0, index) / 50) * 50, 50);
       if (state.view?.viewId === id) showViewStatus(status);
     }
     if (state.syncId) {
@@ -567,7 +607,8 @@ setInterval(async () => {
   } catch (e) {
     if (e.code === 'curate_expired') {
       el('updates').hidden = false;
-      el('updates').textContent = 'This view expired. Refresh to continue.';
+      el('updates-copy').textContent = 'This view expired. Refresh to continue.';
+      el('show-updates').textContent = 'Refresh photos';
     }
   } finally {
     polling = false;

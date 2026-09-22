@@ -42,7 +42,10 @@ test('no searches on rebuild/startup; visible preview demand admits only paced, 
   advance(5000); await refine.tick(); assert.equal(calls.length, 3);
   await curate.refresh();
   const stable = curate.page(view.viewId);
-  assert.deepEqual(stable.groups, view.groups); assert.equal(stable.updatesAvailable, true);
+  const memberships = groups => groups.map(({ similarity, ...rest }) => rest);
+  assert.deepEqual(memberships(stable.groups), memberships(view.groups));
+  assert.equal(stable.groups[0].similarity.state, 'updated');
+  assert.equal(stable.updatesAvailable, true);
   assert.equal(curate.comparison(view.viewId, view.groups[0].id).ids.length, 3);
   const updated = await curate.openView({ replacesViewId: view.viewId });
   assert.equal(updated.groups[0].route, 'candidate-supported');
@@ -113,17 +116,113 @@ test('changed cohort after I/O discards result; no unrelated IDs in retained mat
   assert.equal(s.curate.page(view.viewId).groups[0].memberCount, 3);
 });
 
-test('cached ranks expire and source changes invalidate whole cohorts', async t => {
+test('inactive completed ranks expire and source changes invalidate whole cohorts', async t => {
   const s = await setup(t);
-  const view = await s.curate.openView(); await s.refine.tick();
+  const view = await s.curate.openView();
+  for (let i = 0; i < 3; i++) { await s.refine.tick(); s.advance(5000); }
   const oldRevision = s.refine.revision;
   s.advance(REFINEMENT_LIMITS.cacheMs); s.refine.snapshot();
   assert.equal(s.refine.entries.size, 0); assert.ok(s.refine.revision > oldRevision);
+  await s.curate.refresh();
   s.curate.page(view.viewId); await s.refine.tick();
   s.repo.upsertAsset({ id: 'p1', fileCreatedAt: '2026-01-01T00:00:01Z', checksum: 'changed' });
   await s.curate.refresh(); s.advance(5000); await s.refine.tick();
   assert.equal(s.refine.entries.size, 1, 'active view re-admits the revised candidate');
   assert.ok([...s.refine.entries.values()].every(e => s.refine.valid(e)));
+});
+
+test('publish the landscape matrix once; active completed evidence survives cache age and repeated Refresh', async t => {
+  const ranks = [[null,3,5,1,2], [2,null,1,3,4], [9,2,null,23,8], [1,3,5,null,2], [1,6,5,2,null]];
+  const s = await setup(t, { n: 5, hashes: true, respond: args => {
+    const reference = Number(args.body.queryAssetId.slice(1));
+    const items = Array.from({ length: 50 }, (_, n) => ({ id: `outside-${n}`, type: 'IMAGE' }));
+    ranks[reference].forEach((rank, n) => { if (rank) items[rank - 1] = { id: `p${n}`, type: 'IMAGE' }; });
+    return { assets: { items } };
+  } });
+  // Explicitly distant descriptors for this five-photo regression.
+  for (const [i, id] of s.ids.entries()) s.repo.updateAssetVisuals(id, { thumbhash: Buffer.alloc(21, i * 45).toString('base64') });
+  let view = await s.curate.openView();
+  const original = view.groups.map(g => g.id);
+  assert.equal(original.length, 5);
+  for (let i = 0; i < 4; i++) {
+    await s.refine.tick(); s.advance(5000);
+    assert.equal(s.refine.revision, 0);
+    assert.deepEqual(s.refine.snapshot(), {});
+    const status = s.curate.page(view.viewId);
+    assert.equal(status.updatesAvailable, false);
+    assert.deepEqual(status.groups[0].similarity, { state: 'checking', done: i + 1, total: 5 });
+    view = await s.curate.openView({ replacesViewId: view.viewId });
+    assert.deepEqual(view.groups.map(g => g.id), original, 'Refresh cannot publish a partial split');
+  }
+  await s.refine.tick();
+  assert.equal(s.refine.revision, 1);
+  assert.equal(s.curate.page(view.viewId).refinement.ready, 5);
+  view = await s.curate.openView({ replacesViewId: view.viewId });
+  assert.deepEqual(view.groups.map(g => g.memberCount), [5]);
+  assert.equal(view.groups[0].similarity.state, 'checked');
+  // Keep using the page beyond the original ten-minute admission lifetime.
+  for (let i = 0; i < 25; i++) {
+    s.advance(30_000); s.curate.page(view.viewId); await s.refine.tick();
+    view = await s.curate.openView({ replacesViewId: view.viewId });
+    assert.deepEqual(view.groups.map(g => g.memberCount), [5]);
+    assert.equal(view.updatesAvailable, false);
+  }
+  assert.equal(s.calls.length, 5, 'an active completed pass is not re-run on a timer');
+});
+
+test('finished checks that change no grouping and work in another view do not advertise irrelevant updates', async t => {
+  const s = await setup(t, { n: 3, hashes: true, respond: () => ({ assets: { items: [] } }) });
+  s.repo.upsertAsset({ id: 'alone', fileCreatedAt: '2026-02-01', originalPath: '/alone.jpg' });
+  s.repo.reviewListAdd(['alone'], 'test');
+  const view = await s.curate.openView();
+  const other = await s.curate.openView({ search: 'alone' });
+  assert.equal(other.groups.length, 1);
+  assert.equal(other.refinement.pending, 0);
+  for (let i = 0; i < 3; i++) { await s.refine.tick(); s.advance(5000); }
+  const checked = s.curate.page(view.viewId);
+  assert.equal(checked.groups[0].similarity.state, 'checked');
+  assert.equal(checked.refinement.ready, 0);
+  assert.equal(checked.updatesAvailable, false);
+  assert.equal(s.curate.page(other.viewId).updatesAvailable, false);
+});
+
+test('failed partial pass stays unpublished and resumes on explicit retry', async t => {
+  const s = await setup(t, { n: 3, hashes: true, respond: (args, n) => {
+    if (n === 2) throw Error('synthetic failure');
+    return { assets: { items: ['p0', 'p1', 'p2'].map(id => ({ id, type: 'IMAGE' })) } };
+  } });
+  let view = await s.curate.openView();
+  await s.refine.tick(); s.advance(5000); await s.refine.tick();
+  assert.equal(s.curate.page(view.viewId).groups[0].similarity.state, 'paused');
+  assert.deepEqual(s.refine.snapshot(), {});
+  assert.equal(s.refine.revision, 0);
+  s.advance(35_000); await s.refine.tick(); assert.equal(s.calls.length, 2);
+  view = await s.curate.openView({ replacesViewId: view.viewId });
+  await s.refine.tick(); s.advance(5000); await s.refine.tick();
+  assert.equal(s.refine.revision, 1);
+  assert.equal(s.curate.page(view.viewId).refinement.ready, 3);
+  assert.equal(s.calls.length, 4);
+});
+
+test('a finished merge prompts only its view; capacity limits are visible without exceeding the bound', async t => {
+  const s = await setup(t, { hashes: true });
+  s.repo.upsertAsset({ id: 'alone', fileCreatedAt: '2026-02-01', originalPath: '/alone.jpg' });
+  s.repo.reviewListAdd(['alone'], 'test');
+  const view = await s.curate.openView(), other = await s.curate.openView({ search: 'alone' });
+  for (let i = 0; i < 3; i++) { await s.refine.tick(); s.advance(5000); }
+  assert.equal(s.curate.page(view.viewId).refinement.ready, 3);
+  assert.equal(s.curate.page(other.viewId).updatesAvailable, false);
+  const many = await setup(t, { n: 2 });
+  for (let n = 1; n <= 32; n++) for (let i = 0; i < 2; i++) {
+    const id = `extra-${n}-${i}`;
+    many.repo.upsertAsset({ id, fileCreatedAt: new Date(1767225600000 + n * 600_000 + i * 1000).toISOString() });
+    many.repo.reviewListAdd([id], 'test');
+  }
+  const full = await many.curate.openView();
+  assert.equal(many.refine.entries.size, REFINEMENT_LIMITS.cohorts);
+  assert.equal(full.refinement.totalGroups, 33);
+  assert.equal(full.refinement.limited, true);
+  assert.equal(full.groups.at(-1).similarity.state, 'limited');
 });
 
 test('leases decode candidate singles across restart and old projections are upgraded lazily', async t => {

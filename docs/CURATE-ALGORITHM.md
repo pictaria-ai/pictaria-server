@@ -83,8 +83,10 @@ and fallback tests cover the complementary failure cases.
 Only opening/paging a **Curate Preview** view admits automatic searches, for
 unresolved time candidates represented on the pages requested. Opening the lab,
 released Curate, or starting the server does not admit this work. Local coherent
-matches need no extra lookup. Current candidate evidence is rechecked between
-requests, so resolved candidates stop needing further searches.
+matches need no extra lookup. For each admitted candidate, the scheduler collects
+all reference searches before publishing its matrix. Partial results are used
+only for progress, never for intermediate regrouping. Changed local evidence can
+still invalidate or resolve a candidate between requests.
 
 - One shared lane with the lab, at least **5 seconds** between new requests,
   at most **8 new requests per rolling minute**. No extra AI/provider calls.
@@ -93,10 +95,13 @@ requests, so resolved candidates stop needing further searches.
   Timeout **15 seconds**, response limit **2 MiB**, failure cooldown at least
   **30 seconds**. Permission/API/index failures leave manual Curate available.
 - At most **32 candidate cohorts** retained in the automatic scheduler, each at
-  most 40 photos, for **10 minutes** from admission. No unexpired entries are
-  evicted merely to start more work. At capacity, other cohorts wait until space
-  expires; this is shown in the page. Requests are sequential, and one cohort can
-  take several minutes. Evidence coverage can be partial between requests.
+  most 40 photos. Active views retain their evidence, including completed matrices
+  across explicit Refresh. Entries expire after **10 minutes without active view
+  demand or progress**, rather than ten minutes from admission. No retained entry
+  is evicted merely to start more work. At capacity, other cohorts wait until
+  space expires; this is shown on their cards. Requests are sequential, and one
+  candidate can take several minutes. Partial coverage is never published as a
+  completed grouping result.
 - The shared search cache holds at most **40 references for 10 minutes**. The
   automatic cache retains only candidate-member positions, not unrelated photos
   or response bodies. It is memory-only; restart begins a fresh bounded pass.
@@ -109,9 +114,19 @@ requests, so resolved candidates stop needing further searches.
   (Refresh, a filter change or post-action refresh) allows another attempt after
   the shared cooldown. A busy lab search merely delays the preview.
 
-Background evidence changes only the next grouping snapshot. **Updates available**
-does not move cards, change a comparison's members or clear keeper selections.
-Refresh when ready. A newly enlarged group can make an older smaller comparison
+Cards show **Waiting for similarity check**, **Checking nearby photos · N of M**,
+or **Updated grouping ready**. The count covers the original time candidate,
+which can currently appear as several cards. Initial groupings are provisional
+until the check finishes; an unsuccessful check is explicitly paused, not complete.
+The page summarizes checks for its own requested groups and highlights cards whose
+grouping changed. Checks that finish without changing grouping, or in an unrelated
+view, do not by themselves trigger a refresh prompt. Photo-information changes
+retain their separate refresh notice.
+
+Background evidence changes only the next grouping snapshot. **Show updated stacks**
+explicitly loads it; progress polling does not move cards, change a comparison's
+members or clear keeper selections. Polling reads at most 50 cards near the visible
+cards or open comparison, every four seconds. A newly enlarged group can make an older smaller comparison
 unsafe to save; the existing membership checks require a refresh in that case.
 Human decisions, revisions, whole-group application and Undo keep their existing
 contracts. No ranking changes human tags by itself.
@@ -141,6 +156,7 @@ and decision contract, not create a permanent second Curate pipeline.
 | Version | Date | Change / rationale | Tracking |
 | --- | --- | --- | --- |
 | `candidate-1` | 2026-09-21 | First integrated preview: wider time candidates, contextual people evidence, positive ThumbHash, reciprocal ranks and bounded core recovery; paced background searches and stable views. | PIC-382, under PIC-380 |
+| `candidate-1` publication / UX follow-up | 2026-09-21 | Publish only complete search matrices, retain evidence for active views, and show per-card progress plus an explicit updated-stacks action. Fixes partial-result and timed-expiry regrouping during repeated refreshes; final membership rules and thresholds are unchanged. | PIC-382 |
 
 When membership rules, thresholds or interpretation of signals change, increment
 the implementation identifier and add a row describing the behavioral change and

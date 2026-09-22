@@ -29,35 +29,46 @@ export class CurateRefinement {
   }
   retry() { this.problem = null; }
   expire() {
+    // Keep completed evidence for active views, including replacement views.
+    // Expiring a matrix and rebuilding it row by row made stacks split/rejoin.
+    this.active();
     let changed = false;
-    for (const [key, entry] of this.entries) if (entry.createdAt + REFINEMENT_LIMITS.cacheMs <= this.now()) {
-      this.entries.delete(key); changed ||= Object.keys(entry.rows).length > 0;
+    for (const [key, entry] of this.entries) if (entry.touchedAt + REFINEMENT_LIMITS.cacheMs <= this.now()) {
+      this.entries.delete(key); changed ||= entry.complete;
     }
     if (changed) this.revision++;
   }
   snapshot() {
     this.settingsChanged(); this.expire();
-    return Object.fromEntries([...this.entries].map(([id, e]) => [id, { rows: { ...e.rows } }]));
+    return Object.fromEntries([...this.entries].filter(([, e]) => e.complete)
+      .map(([id, e]) => [id, { rows: { ...e.rows } }]));
   }
   admit(scope) {
     if (!scope?.needsRanks || this.entries.has(scope.id) || this.entries.size >= REFINEMENT_LIMITS.cohorts) return;
-    this.entries.set(scope.id, { ...scope, rows: Object.create(null), createdAt: this.now() });
+    this.entries.set(scope.id, { ...scope, rows: Object.create(null), touchedAt: this.now(), complete: false });
   }
   demand(viewId, groups) {
     if (!this.enabled()) return;
     let view = this.views.get(viewId);
     if (!view) {
       if (this.views.size >= REFINEMENT_LIMITS.views) return;
-      view = { anchors: new Set(), touched: this.now() }; this.views.set(viewId, view);
+      view = { anchors: new Set(), groups: new Map(), touched: this.now() }; this.views.set(viewId, view);
     }
     view.touched = this.now();
     for (const group of groups) for (const id of group.ids) {
       const scope = this.curate.current?.scopeByMember?.get(id);
-      if (!scope?.needsRanks) continue;
-      this.admit(scope);
+      if (!scope || (!scope.needsRanks && !this.entries.has(scope.id))) continue;
       // Retain a bounded representative so a metadata refresh can renew the
       // cohort revision without requiring the user to page through it again.
-      if (view.anchors.size < REFINEMENT_LIMITS.cohorts) view.anchors.add(scope.ids[0]);
+      if (!view.anchors.has(scope.ids[0]) && view.anchors.size >= REFINEMENT_LIMITS.cohorts) continue;
+      view.anchors.add(scope.ids[0]);
+      // At most 32 * 40 displayed groups; the group's first member is enough
+      // to detect a changed membership ID without retaining whole old stacks.
+      if (view.groups.size < REFINEMENT_LIMITS.cohorts * 40)
+        view.groups.set(group.id, { id: group.id, ids: [group.ids[0]], route: group.route });
+      this.admit(scope);
+      const entry = this.entries.get(scope.id);
+      if (entry) entry.touchedAt = this.now();
     }
   }
   active() {
@@ -68,7 +79,11 @@ export class CurateRefinement {
       catch { this.views.delete(id); continue; }
       for (const anchor of view.anchors) {
         const scope = this.curate.current?.scopeByMember?.get(anchor);
-        if (scope?.needsRanks) { this.admit(scope); ids.add(scope.id); }
+        if (scope && (scope.needsRanks || this.entries.has(scope.id))) {
+          this.admit(scope); ids.add(scope.id);
+          const entry = this.entries.get(scope.id);
+          if (entry) entry.touchedAt = this.now();
+        }
       }
     }
     return ids;
@@ -82,19 +97,42 @@ export class CurateRefinement {
   needed(entry) {
     return this.valid(entry) && this.curate.current.scopeByMember.get(entry.ids[0]).needsRanks;
   }
-  status() {
-    const active = this.active(), entries = [...active].map(id => this.entries.get(id)).filter(e => e && this.needed(e));
-    const pending = entries.reduce((n, e) => n + e.ids.filter(id => !Object.hasOwn(e.rows, id)).length, 0);
-    return { state: this.problem ? 'paused' : this.work ? 'searching' : pending ? 'waiting' : 'idle',
-      problem: this.problem ?? null, pending,
-      limited: [...active].some(id => !this.entries.has(id)), method: 'candidate-1' };
+  groupStatus(group) {
+    if (!this.enabled()) return null;
+    const first = group.ids[0];
+    if (this.curate.current?.byMember.get(first)?.id !== group.id)
+      return { state: 'updated' };
+    // Every unchanged candidate group is contained in one time scope.
+    const scope = this.curate.current?.scopeByMember?.get(first), entry = this.entries.get(scope?.id);
+    if (!scope || (!scope.needsRanks && !entry))
+      return group.route === 'manual-budget' ? { state: 'limited' } : null;
+    const total = scope.ids.length, done = Object.keys(entry?.rows ?? {}).length;
+    return { state: done === total ? 'checked' : this.problem ? 'paused' :
+      !entry ? 'limited' : done || scope.id === this.running?.id ? 'checking' : 'waiting',
+      done, total };
+  }
+  status(viewId, groups = []) {
+    const all = this.active(), view = this.views.get(viewId);
+    const active = viewId ? new Set([...(view?.anchors ?? []), ...groups.map(g => g.ids[0])].flatMap(id => {
+      const scope = this.curate.current?.scopeByMember?.get(id);
+      return scope && (scope.needsRanks || this.entries.has(scope.id)) ? [scope.id] : [];
+    })) : all;
+    const entries = [...active].map(id => this.entries.get(id)).filter(Boolean);
+    const pending = entries.reduce((n, e) => n + e.ids.length - Object.keys(e.rows).length, 0);
+    const limited = [...active].some(id => !this.entries.has(id));
+    return { state: (pending || limited) && this.problem ? 'paused' :
+      this.work && active.has(this.running?.id) ? 'searching' : pending || limited ? 'waiting' : 'idle',
+      problem: (pending || limited) ? this.problem ?? null : null, pending, limited,
+      totalGroups: active.size, checkedGroups: entries.filter(e => e.complete).length,
+      ready: [...(view?.groups.values() ?? [])].filter(g => this.groupStatus(g)?.state === 'updated').length,
+      method: 'candidate-1' };
   }
   async tick() {
     this.settingsChanged(); this.expire();
     const active = this.active();
-    if (!this.curate.building) for (const [id, entry] of this.entries) if (!this.valid(entry)) {
+    if (!this.curate.building) for (const [id, entry] of this.entries) if (!this.valid(entry) || (!entry.complete && !this.needed(entry))) {
       this.entries.delete(id);
-      if (Object.keys(entry.rows).length) this.revision++;
+      if (entry.complete) this.revision++;
     }
     if (this.work) {
       if (!active.has(this.running?.id) || !this.valid(this.running)) this.controller?.abort();
@@ -130,7 +168,14 @@ export class CurateRefinement {
         // Empty successful results are a completed unknown observation, never a
         // mismatch and never an automatic reason to page/retry the search.
         entry.rows[id] = row;
-        this.revision++;
+        entry.touchedAt = this.now();
+        // Publish one complete matrix. A refreshed view must never consume a
+        // mixture of queried and not-yet-queried directions from this pass.
+        if (entry.ids.every(id => Object.hasOwn(entry.rows, id))) {
+          entry.complete = true;
+          this.revision++;
+          await this.curate.refresh();
+        }
       } catch (error) {
         if (!signal.aborted && !['similarity_busy', 'similarity_cooldown', 'similarity_reference_changed'].includes(error.code))
           this.problem = 'Similarity search paused. You can keep curating; Refresh retries when ready.';

@@ -149,6 +149,7 @@ export class CurateService {
     const view = this.store.getLease(viewId, 'view');
     const groups = this.store.viewGroups(viewId, offset, limit);
     this.refinement?.demand(viewId, groups);
+    const refinement = this.refinement?.status(viewId, groups) ?? null;
     return {
       viewId,
       expiresAt: view.expiresAt,
@@ -157,13 +158,14 @@ export class CurateService {
       immichUrl: this.config.immichPublicUrl || null,
       offset,
       metadata: this.metadata.status(),
-      refinement: this.refinement?.status() ?? null,
+      refinement,
       updatesAvailable:
         view.generation !== this.store.generation() ||
-        (view.evidenceRevision ?? 0) !== (this.refinement?.revision ?? 0) ||
+        Boolean(refinement?.ready) ||
         view.stacks !== (this.config.curateBurstGrouping !== false) ||
         Boolean(this.repo.db.prepare('SELECT 1 FROM curate_dirty LIMIT 1').get()),
       groups: groups.map((g) => ({ id: g.id, memberCount: g.ids.length, route: g.route,
+          similarity: this.refinement?.groupStatus(g) ?? null,
           photos: this.store.covers(g.ids.slice(0, 1)) })),
       nextOffset: offset + limit < view.total ? offset + limit : null,
     };
@@ -194,6 +196,7 @@ export class CurateService {
       contextReadOnly: true,
       automaticKeeperEligible: group.ids.length >= 2,
       algorithm: view.method,
+      similarity: this.refinement?.groupStatus(group) ?? null,
       // Reasons use the applicable current calculation. Old view membership is
       // never replaced by a newer machine proposal when a comparison opens.
       reasons: this.current?.byId.get(groupId)?.reasons ?? ['Membership preserved from the opened Curate view.'],

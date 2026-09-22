@@ -33,7 +33,7 @@ in this preview, its proposed partitions are never saved.
   Equal dates use deterministic first-member IDs (reversed for Newest first).
   Oldest first is the initial default; the choice is remembered in this browser.
   Changing sort resets pagination and opens a fresh view. Background arrivals
-  remain behind **Updates available** until you explicitly refresh.
+  remain behind a refresh notice until you explicitly load the updated view.
 - Open a stack, inspect its members and select zero, one or several keepers.
   Click an image to toggle Keep; **View larger** opens its detailed viewer.
   The action states the complete result, for example **Keep 2, mark 3 reviewed**.
@@ -66,8 +66,18 @@ in this preview, its proposed partitions are never saved.
 - Save acceptance and Immich synchronization are separate. A failed sync can be
   retried without repeating the human decision or invoking AI.
 
-Background work only advertises **Updates available**. It does not replace cards,
-comparison membership or the user's selection. Explicit refresh, filter/search
+Cards show which nearby photos are waiting for a similarity check or being checked,
+with progress counts. These groupings are provisional. A completed check highlights
+affected cards and offers **Show updated stacks**; checks that leave grouping
+unchanged do not ask for a refresh. Results are applied as a complete time-candidate
+matrix, never one search at a time. Completed evidence stays available while the
+view is active, so repeated Refresh does not restart checks on a ten-minute timer.
+After inactivity or a server restart, this bounded memory cache can be empty and
+a fresh pass may be needed. Changes to photos, people evidence or human corrections
+also require renewed checks for the affected candidate.
+
+Background progress does not replace cards, comparison membership or the user's
+selection. Explicit refresh, filter/search
 changes and successful local actions open a replacement view. Photo-information
 refresh status is separate from AI status, and failed metadata refresh can be
 requested again from the open comparison. Unknown metadata is not claimed complete.

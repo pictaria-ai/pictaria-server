@@ -140,6 +140,12 @@ button {
 .group-caption small {
   color: var(--p-muted);
 }
+.group-card[data-similarity='updated'] {
+  border-color: var(--p-accent);
+}
+.group-card[data-similarity='updated'] .similarity-status {
+  color: var(--p-accent);
+}
 .load-row {
   text-align: center;
   margin-top: 22px;

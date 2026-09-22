@@ -63,6 +63,18 @@ export function photoCard(
   return card;
 }
 
+export function similarityLabel(status) {
+  switch (status?.state) {
+    case 'waiting': return 'Waiting for similarity check';
+    case 'checking': return `Checking nearby photos · ${status.done} of ${status.total}`;
+    case 'paused': return 'Similarity check paused · Refresh to retry';
+    case 'limited': return status.total ? 'Waiting for a check slot' : 'Similarity not checked · automatic limit';
+    case 'updated': return 'Updated grouping ready · Refresh to see';
+    case 'checked': return 'Similarity checked';
+    default: return '';
+  }
+}
+
 export function groupCard(group, open) {
   const button = node('button', undefined, 'group-card');
   button.dataset.groupId = group.id;
@@ -72,7 +84,8 @@ export function groupCard(group, open) {
   img.src = thumbnail(photo.id);
   img.alt = '';
   img.loading = 'lazy';
-  cover.append(img, node('span', group.memberCount > 1 ? `${group.memberCount} photos` : 'Single photo', 'p-chip'));
+  const chip = node('span', undefined, 'p-chip');
+  cover.append(img, chip);
   const caption = node('div', undefined, 'group-caption');
   caption.append(
     node('strong', group.memberCount > 1 ? 'Compare stack' : 'Review photo'),
@@ -80,6 +93,18 @@ export function groupCard(group, open) {
     node('small', group.route === 'candidate-unconfirmed' || group.route === 'manual-budget'
       ? 'Time group · similarity unconfirmed' : group.memberCount > 1 ? 'Choose one or more keepers' : 'Choose what to keep'),
   );
+  const status = node('small', undefined, 'similarity-status');
+  caption.append(status);
+  button.updateSimilarity = (value) => {
+    group.similarity = value;
+    const provisional = value && !['checked', 'updated'].includes(value.state);
+    chip.textContent = group.memberCount > 1 ? `${group.memberCount} photos` : provisional ? '1 photo' : 'Single photo';
+    status.textContent = similarityLabel(value);
+    status.hidden = !status.textContent;
+    button.dataset.similarity = value?.state ?? '';
+    caption.querySelector('small').hidden = Boolean(status.textContent);
+  };
+  button.updateSimilarity(group.similarity);
   button.append(cover, caption);
   button.onclick = () => open(group);
   return button;
