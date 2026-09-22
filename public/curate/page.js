@@ -129,6 +129,11 @@ function showViewStatus(view) {
       ? 'Refreshing photo information from Immich. Your open view stays in place.'
       : '';
   el('metadata').hidden = !el('metadata').textContent;
+  const refinement = view.refinement;
+  el('refinement').textContent = refinement?.problem ||
+    (refinement?.pending ? 'Checking stack similarity in the background. Refresh when updates are ready.' :
+      refinement?.limited ? 'Automatic checks are at their current cache limit. You can keep curating.' : '');
+  el('refinement').hidden = !el('refinement').textContent;
 }
 async function more() {
   if (state.next === null || state.loading || client.saved.pending) return;
@@ -169,12 +174,19 @@ async function compare(group) {
   el('comparison-state').textContent = 'Loading the complete comparison…';
   el('metadata-retry').hidden = true;
   el('photos').replaceChildren();
+  el('stack-reason').hidden = true;
+  el('stack-reason').open = false;
   el('context').hidden = true;
   el('comparison').showModal();
   recovery();
   const comparison = await client.comparison(state.view.viewId, group.id);
   if (generation !== state.dialogGeneration || !el('comparison').open) return;
   state.comparison = comparison;
+  el('stack-reason').hidden = false;
+  el('stack-reason').querySelector('summary').textContent = group.memberCount > 1 ? 'Why this stack?' : 'Why this photo is separate';
+  el('stack-algorithm').textContent = comparison.algorithm === 'candidate-1'
+    ? 'Candidate algorithm 1 · no AI stack check' : 'Grouping from this saved view';
+  el('stack-reasons').replaceChildren(...(comparison.reasons ?? []).map(reason => node('li', reason)));
   state.outcomes = comparison.oversized ? {} : Object.fromEntries(comparison.ids.map((id) => [id, 'reviewed']));
   state.photoList = [...comparison.photos, ...comparison.context];
   el('comparison-state').textContent = comparison.oversized

@@ -7,6 +7,14 @@ All notable changes to Pictaria Server are documented here. This project follows
 
 ### Development
 
+- Curate Preview now tries a versioned candidate stacking algorithm: wider time
+  candidates, contextual people evidence, positive ThumbHash and reciprocal
+  Immich search ranks. Selective background searches are paced and cached; new
+  results appear through **Updates available**, preserving the opened view.
+  Comparisons include **Why this stack?**, and unconfirmed time groups are labeled.
+  Exact rules, bounds and change history live in [the algorithm guide](docs/CURATE-ALGORITHM.md).
+  The released Curate page and AI keeper recommendations are unchanged.
+
 - The stacking lab now compares directional Immich search ranks from multiple
   reference photos, with request estimates, progress, cancellation and explicit
   partial coverage. Each pass makes at most eight new paced searches; the matrix

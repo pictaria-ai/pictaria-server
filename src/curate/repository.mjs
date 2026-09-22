@@ -205,6 +205,13 @@ export class CurateRepository {
       `SELECT asset_id id,captured_ms time,checksum,duplicate_id duplicateId,rendition_key renditionKey,people_count peopleCount,recognized_count recognizedCount,availability FROM curate_photos WHERE state='undecided' ORDER BY captured_ms,asset_id`,
     ).all();
   }
+  candidateRows() {
+    return this.prepare(`SELECT ${HOT},
+      json_extract(evidence_json,'$.category.peopleCategory') peopleCategory,
+      json_extract(evidence_json,'$.recognition') recognition,
+      json_extract(evidence_json,'$.image.thumbhash') thumbhash
+      FROM curate_photos WHERE state='undecided' ORDER BY captured_ms,asset_id`).all();
+  }
   separations() {
     const rows = this.prepare(
       `SELECT m.separation_id,m.asset_id,m.partition_no FROM curate_separation_members m
@@ -401,15 +408,15 @@ export class CurateRepository {
       return this.lease('comparison', completeScope);
     });
   }
-  encodedGroup(group) {
+  encodedGroup(group, method = GROUPING_METHOD) {
     // Do not store a synthetic single group ID plus a second copy of its UUID.
-    return group.ids.length === 1 && group.id === `single:${GROUPING_METHOD}:${group.ids[0]}`
+    return group.ids.length === 1 && group.id === `single:${method}:${group.ids[0]}`
       ? [group.ids[0], '', group.route]
       : [group.id, JSON.stringify(group.ids), group.route];
   }
-  decodedGroup(row) {
+  decodedGroup(row, method = GROUPING_METHOD) {
     return row.ids_json === ''
-      ? { id: `single:${GROUPING_METHOD}:${row.id}`, ids: [row.id], route: row.route }
+      ? { id: `single:${method}:${row.id}`, ids: [row.id], route: row.route }
       : { id: row.id, ids: JSON.parse(row.ids_json), route: row.route };
   }
   pruneScopes(now) {
@@ -437,11 +444,12 @@ export class CurateRepository {
     // Identical ordered memberships share an immutable SQLite snapshot across
     // tabs, retries and filters. They never page a moving current index. Hashing
     // and persistence yield, and all retained snapshot bytes count toward 5 MiB.
-    const hash = createHash('sha256').update(GROUPING_METHOD);
+    const method = current.method ?? GROUPING_METHOD;
+    const hash = createHash('sha256').update(method);
     let bytes = 0,
       started = performance.now();
     for (const group of groups) {
-      const encoded = JSON.stringify(this.encodedGroup(group));
+      const encoded = JSON.stringify(this.encodedGroup(group, method));
       bytes += Buffer.byteLength(encoded) + 4;
       hash.update(encoded).update('\n');
       if (performance.now() - started >= 4) {
@@ -485,6 +493,8 @@ export class CurateRepository {
       }
       const scope = {
         generation: current.generation,
+        method,
+        evidenceRevision: current.evidenceRevision ?? 0,
         stacks: current.stacks,
         total: groups.length,
         sort,
@@ -497,7 +507,7 @@ export class CurateRepository {
       return { lease, fresh };
     });
     if (fresh) {
-      const work = this.writeViewSnapshot(snapshotId, groups);
+      const work = this.writeViewSnapshot(snapshotId, groups, method);
       this.viewBuilds.set(snapshotId, work);
       try {
         await work;
@@ -510,14 +520,14 @@ export class CurateRepository {
     }
     return lease;
   }
-  async writeViewSnapshot(snapshotId, groups) {
+  async writeViewSnapshot(snapshotId, groups, method = GROUPING_METHOD) {
     const insert = this.prepare('INSERT INTO curate_view_groups VALUES(?,?,?,?,?)');
     let position = 0;
     while (position < groups.length) {
       const started = performance.now();
       this.repo.transaction(() => {
         do {
-          insert.run(snapshotId, position, ...this.encodedGroup(groups[position]));
+          insert.run(snapshotId, position, ...this.encodedGroup(groups[position], method));
           position++;
         } while (position < groups.length && performance.now() - started < 4);
       });
@@ -531,13 +541,13 @@ export class CurateRepository {
       'SELECT group_id id,ids_json,route FROM curate_view_groups WHERE view_id=? AND position>=? ORDER BY position LIMIT ?',
     )
       .all(view.snapshotId ?? id, offset, limit)
-      .map((row) => this.decodedGroup(row));
+      .map((row) => this.decodedGroup(row, view.method));
   }
   viewGroup(id, groupId) {
     const view = this.getLease(id, 'view');
     const key =
-      view.snapshotId && typeof groupId === 'string' && groupId.startsWith(`single:${GROUPING_METHOD}:`)
-        ? groupId.slice(`single:${GROUPING_METHOD}:`.length)
+      view.snapshotId && typeof groupId === 'string' && groupId.startsWith(`single:${view.method ?? GROUPING_METHOD}:`)
+        ? groupId.slice(`single:${view.method ?? GROUPING_METHOD}:`.length)
         : groupId;
     const row =
       typeof key === 'string' &&
@@ -545,7 +555,7 @@ export class CurateRepository {
         view.snapshotId ?? id,
         key,
       );
-    return row ? this.decodedGroup(row) : null;
+    return row ? this.decodedGroup(row, view.method) : null;
   }
   getLease(id, kind, now = Date.now()) {
     const row =

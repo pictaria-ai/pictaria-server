@@ -5,7 +5,12 @@ implementation branch. It uses the normal password gate, library, persistent
 grouping and decision service. **Choices are real:** saving a decision updates
 local human tags and queues their synchronization to Immich. Use a test instance
 for initial review. Merely opening the page starts bounded read-only metadata
-refresh, not AI requests or human decisions.
+refresh and selective, paced Immich similarity searches, not AI requests or human decisions.
+
+PIC-382 adds [candidate stacking algorithm 1](CURATE-ALGORITHM.md): wider time
+candidates, contextual people signals, positive ThumbHash and reciprocal search
+ranks. The linked document owns exact rules, bounds and version history. Open
+**Why this stack?** in a comparison for a concise explanation.
 
 The current `/curate.html` remains the default during this staging step. The
 preview links back to it for Decided and existing workflows. This temporary entry
@@ -96,7 +101,8 @@ block Save until the previews can be retried.
   expansion. Comparison details remain paged at 50. `GET .../separations` lists up
   to 50 active corrections; `?id=…` reads current state. The metadata retry route
   takes a saved comparison ID and bounded offset, never arbitrary client IDs.
-- Provider, settings defaults and grouping thresholds are unchanged.
+- Provider and saved settings defaults are unchanged. Preview grouping now uses
+  candidate 1; the released page and strict lab controls keep their existing rules.
 - Enrichment schema **15** / persistent-state contract **18** adds optional
   correction-action metadata without rewriting existing partitions or decisions.
   The action is saved atomically with the separation; exact retries must preserve
@@ -129,7 +135,7 @@ ranks are not valid new comparison advice. Production check/keeper integration,
 applicable versus historical advice states and full-set Apply AI advice belong to
 the PIC-116/PIC-370/PIC-346 integration. PIC-369 stays open for that integration
 and final default-page UX. Broader sorting choices, top-level bulk selection, tag editing and
-the stack explanation surface keep their separately tracked scopes.
+a fuller persisted stack audit keep their separately tracked scopes.
 
 Full production mixed-load/incremental-memory gates, 30k repeated browser workflow
 acceptance, operational migration/cutover and owner visual review remain required

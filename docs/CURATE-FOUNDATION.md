@@ -10,6 +10,13 @@ before AI integration and default-page cutover. It is not linked from the main n
 
 ## Grouping and evidence
 
+**Preview update:** PIC-382 now wires [candidate algorithm 1](CURATE-ALGORITHM.md)
+into the server's Curate Preview service. That versioned document defines the
+active preview policy. The `standard-1` rules below describe the retained initial
+foundation implementation and its baseline tests, not the new preview defaults.
+This staging choice adds no alternate user mode or permanent second pipeline.
+
+
 A stack represents plausible alternatives, rather than simply a shared moment.
 Standard grouping works without Enrich or an AI provider. Capture-time candidates
 use a 15-second gap and a 180-second total span, at most 32 recent candidates,

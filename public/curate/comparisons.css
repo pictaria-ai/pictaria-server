@@ -456,3 +456,8 @@ dialog::backdrop {
     padding: 8px;
   }
 }
+
+.stack-reason { margin: .5rem 0; }
+.stack-reason summary { cursor: pointer; font-weight: 600; }
+.stack-reason ul { margin: .5rem 0; padding-left: 1.25rem; }
+.stack-reason li { margin: .25rem 0; }

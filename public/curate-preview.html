@@ -31,8 +31,8 @@
         <a class="p-btn" href="/curate.html">Current Curate &amp; decided photos</a>
       </div>
       <p class="preview-note">
-        Try the new manual comparison flow. Choices here are saved to your library. AI recommendations will be added in
-        a later preview.
+        Try the first candidate stacking algorithm. Choices here are saved to your library.
+        AI recommendations will be added in a later preview.
       </p>
       <div class="toolbar">
         <nav id="filters" class="p-tabs" aria-label="Photo groups">
@@ -61,6 +61,7 @@
         ><span id="updates" hidden>Updates available — refresh when you’re ready.</span>
       </div>
       <p id="metadata" class="p-muted"></p>
+      <p id="refinement" class="p-muted" role="status"></p>
       <div id="error" role="alert" hidden></div>
       <div id="recovery" class="notice" hidden role="status">
         <span>The last action’s response is uncertain. Retry it safely before continuing.</span
@@ -89,6 +90,11 @@
             Select the photos you want to keep. The rest will be marked reviewed. Reviewed photos are not deleted or
             marked Never show.
           </p>
+          <details id="stack-reason" class="stack-reason">
+            <summary>Why this stack?</summary>
+            <p id="stack-algorithm" class="p-muted"></p>
+            <ul id="stack-reasons"></ul>
+          </details>
           <p id="comparison-state" class="p-muted" aria-live="polite"></p>
           <button id="metadata-retry" class="p-btn quiet" hidden>Retry photo information refresh</button>
           <div id="comparison-error" role="alert" hidden></div>

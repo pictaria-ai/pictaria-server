@@ -5,8 +5,8 @@ export const SIMILARITY_LIMITS = Object.freeze({
   cacheEntries: 40, cacheMs: 10 * 60_000, minIntervalMs: 5_000, failureIntervalMs: 30_000,
 });
 
-// An explicit, read-only search lane shared by Curate callers. No polling,
-// pagination, fallback, retry, or connection to grouping/keeper decisions.
+// Shared read-only search lane. Callers own demand and composition policy; this
+// transport never paginates, retries, calls AI or makes human decisions.
 export class CurateSimilaritySearch {
   constructor({ curate, now = Date.now, timeoutMs = SIMILARITY_LIMITS.timeoutMs }) {
     this.curate = curate;
@@ -29,8 +29,8 @@ export class CurateSimilaritySearch {
     }
   }
   sourceKey(id) {
-    const row = this.curate.repo.db.prepare(`SELECT checksum,file_modified_at,thumbhash,missing_since
-      FROM assets WHERE asset_id=?`).get(id);
+    const row = this.curate.repo.db.prepare(`SELECT a.checksum,a.file_modified_at,a.thumbhash,a.missing_since,p.image_key
+      FROM assets a LEFT JOIN curate_photos p ON p.asset_id=a.asset_id WHERE a.asset_id=?`).get(id);
     if (!row || row.missing_since || !this.curate.repo.reviewListMembership([id]).has(id))
       throw new CurateError('The reference photo is no longer available for this experiment. Rebuild time groups.', 'similarity_reference_changed');
     return fingerprint(row);

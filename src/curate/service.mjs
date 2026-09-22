@@ -1,12 +1,14 @@
 import { Worker } from 'node:worker_threads';
 import { groupPhotos } from './grouping.mjs';
+import { candidateGroups } from './candidate.mjs';
+import { CurateRefinement } from './refinement.mjs';
 import { CurateError } from './contracts.mjs';
 import { CurateMetadataRefresher } from './metadata.mjs';
 import { StackingLab } from './lab.mjs';
 import { CurateSimilaritySearch } from './similarity.mjs';
 
 export class CurateService {
-  constructor({ repo, config = {}, immich = null, metadataOptions = {} }) {
+  constructor({ repo, config = {}, immich = null, metadataOptions = {}, candidateOptions = {} }) {
     this.repo = repo;
     this.store = repo.curate;
     this.config = config;
@@ -20,10 +22,24 @@ export class CurateService {
     this.metadata = new CurateMetadataRefresher({ curate: this, ...metadataOptions });
     this.similarity = new CurateSimilaritySearch({ curate: this });
     this.lab = new StackingLab(this);
+    this.candidateEnabled = candidateOptions.enabled === true;
+    this.refinement = this.candidateEnabled ? new CurateRefinement(this, candidateOptions) : null;
+    if (this.candidateEnabled) this.repo.db.prepare(`INSERT OR IGNORE INTO curate_dirty(asset_id)
+      SELECT asset_id FROM curate_photos WHERE json_type(evidence_json,'$.category') IS NULL`).run();
   }
   async refresh() {
     if (this.closed) throw new CurateError('Curate is stopping.', 'curate_unavailable', 503);
-    if (this.building) return this.building;
+    if (this.building) {
+      await this.building;
+      // A background worker may have taken its read snapshot before the caller
+      // saved/undid a decision. Do not open a replacement view from that older
+      // result. This also catches newly queued source changes during the read.
+      if (this.current?.generation !== this.store.generation() ||
+          this.current.stacks !== (this.config.curateBurstGrouping !== false) ||
+          this.current.evidenceRevision !== (this.refinement?.revision ?? 0) ||
+          this.repo.db.prepare('SELECT 1 FROM curate_dirty LIMIT 1').get()) return this.refresh();
+      return this.current;
+    }
     this.building = this.rebuild().finally(() => {
       this.building = null;
     });
@@ -38,18 +54,22 @@ export class CurateService {
       },
     });
     const stacks = this.config.curateBurstGrouping !== false;
-    if (this.current?.generation === this.store.generation() && this.current.stacks === stacks) return this.current;
+    const ranks = this.refinement?.snapshot() ?? {};
+    const evidenceRevision = this.refinement?.revision ?? 0;
+    if (this.current?.generation === this.store.generation() && this.current.stacks === stacks &&
+        this.current.evidenceRevision === evidenceRevision) return this.current;
     let result;
     if (this.repo.databasePath === ':memory:') {
       // test-only SQLite cannot be shared with a read-only worker
       result = {
         generation: this.store.generation(),
-        ...groupPhotos(this.store.pending(), { stacks, separations: this.store.separations() }),
+        ...(this.candidateEnabled ? candidateGroups(this.store.candidateRows(), { stacks, separations: this.store.separations(), ranks })
+          : groupPhotos(this.store.pending(), { stacks, separations: this.store.separations() })),
       };
     } else
       result = await new Promise((resolve, reject) => {
         const worker = new Worker(new URL('./worker.mjs', import.meta.url), {
-          workerData: { path: this.repo.databasePath, stacks },
+          workerData: { path: this.repo.databasePath, stacks, candidate: this.candidateEnabled, ranks },
           // Server/test-runner flags (including --input-type) need not be valid worker flags.
           execArgv: [],
         });
@@ -74,7 +94,9 @@ export class CurateService {
       byId.set(group.id, group);
       for (const id of group.ids) byMember.set(id, group);
     }
-    this.current = { ...result, stacks, byId, byMember };
+    const scopeByMember = new Map();
+    for (const scope of result.scopes ?? []) for (const id of scope.ids) scopeByMember.set(id, scope);
+    this.current = { ...result, stacks, byId, byMember, scopeByMember, evidenceRevision };
     this.metrics.rebuildMs = performance.now() - start;
     return this.current;
   }
@@ -118,12 +140,15 @@ export class CurateService {
     // Capacity failure is explicit; no page silently drops part of a stack.
     const lease = await this.store.createView(current, groups, { replacesViewId, sort });
     this.metadata.wake();
+    this.refinement?.retry();
     return this.page(lease.id);
   }
   page(viewId, offset = 0, limit = 50) {
     if (!Number.isSafeInteger(offset) || offset < 0 || !Number.isSafeInteger(limit) || limit < 1 || limit > 50)
       throw new CurateError('Invalid Curate page.', 'invalid_curate_query', 400);
     const view = this.store.getLease(viewId, 'view');
+    const groups = this.store.viewGroups(viewId, offset, limit);
+    this.refinement?.demand(viewId, groups);
     return {
       viewId,
       expiresAt: view.expiresAt,
@@ -132,13 +157,13 @@ export class CurateService {
       immichUrl: this.config.immichPublicUrl || null,
       offset,
       metadata: this.metadata.status(),
+      refinement: this.refinement?.status() ?? null,
       updatesAvailable:
         view.generation !== this.store.generation() ||
+        (view.evidenceRevision ?? 0) !== (this.refinement?.revision ?? 0) ||
         view.stacks !== (this.config.curateBurstGrouping !== false) ||
         Boolean(this.repo.db.prepare('SELECT 1 FROM curate_dirty LIMIT 1').get()),
-      groups: this.store
-        .viewGroups(viewId, offset, limit)
-        .map((g) => ({ id: g.id, memberCount: g.ids.length, route: g.route,
+      groups: groups.map((g) => ({ id: g.id, memberCount: g.ids.length, route: g.route,
           photos: this.store.covers(g.ids.slice(0, 1)) })),
       nextOffset: offset + limit < view.total ? offset + limit : null,
     };
@@ -168,6 +193,7 @@ export class CurateService {
       context: this.store.details(context.ids),
       contextReadOnly: true,
       automaticKeeperEligible: group.ids.length >= 2,
+      algorithm: view.method,
       // Reasons use the applicable current calculation. Old view membership is
       // never replaced by a newer machine proposal when a comparison opens.
       reasons: this.current?.byId.get(groupId)?.reasons ?? ['Membership preserved from the opened Curate view.'],
@@ -242,6 +268,7 @@ export class CurateService {
     if (this.timer || this.closed) return;
     this.timer = setInterval(() => {
       this.metadata.settingsChanged();
+      void this.refinement?.tick().catch(() => {});
       if (!this.metadata.demanded()) return;
       void this.refresh()
         .then(() => {
@@ -257,6 +284,7 @@ export class CurateService {
   settingsChanged() {
     this.metadata.settingsChanged();
     this.similarity.settingsChanged();
+    this.refinement?.settingsChanged();
   }
   requestMetadataRefresh(ids) {
     this.store.metadata.request(ids, this.metadata.now(), { force: true });
@@ -268,6 +296,7 @@ export class CurateService {
     this.closed = true;
     this.abort.abort();
     await this.similarity.close();
+    await this.refinement?.close();
     await this.lab.close();
     await this.metadata.close();
     if (this.worker) await this.worker.terminate();

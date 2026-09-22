@@ -77,7 +77,8 @@ export function groupCard(group, open) {
   caption.append(
     node('strong', group.memberCount > 1 ? 'Compare stack' : 'Review photo'),
     node('span', photo.caption || photo.filename, 'filename'),
-    node('small', group.memberCount > 1 ? 'Choose one or more keepers' : 'Choose what to keep'),
+    node('small', group.route === 'candidate-unconfirmed' || group.route === 'manual-budget'
+      ? 'Time group · similarity unconfirmed' : group.memberCount > 1 ? 'Choose one or more keepers' : 'Choose what to keep'),
   );
   button.append(cover, caption);
   button.onclick = () => open(group);
