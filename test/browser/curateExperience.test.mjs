@@ -31,7 +31,7 @@ test(
       'document.querySelectorAll(".group-card").length===4 && !document.querySelector("#refresh").disabled',
     );
     assert.equal(await page.evaluate('document.querySelectorAll(".is-stack [data-select]").length'), 0);
-    // Images enlarge, explicit Keep controls select. Y never commits a stack member.
+    // Images enlarge; explicit choices update drafts. Y never commits a stack member.
     await click('.is-stack .cover');
     await wait(
       'document.querySelectorAll("#photos [data-keeper]").length===3 && !document.querySelector("#apply").disabled',
@@ -140,7 +140,7 @@ test(
   { timeout: 45000 },
   async (t) => {
     if (!findChrome()) return t.skip('Chrome required');
-    const fixture = await curatePreviewFixture({ stackSize: 1, singles: 0 }),
+    const fixture = await curatePreviewFixture({ stackSize: 1, singles: 0, metadataReady: true }),
       browser = await launchChrome(),
       page = await browser.newPage();
     t.after(async () => {

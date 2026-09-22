@@ -258,7 +258,7 @@ test('lab distinguishes empty, omitted and failed recognition; closing a refresh
 
 test('multi-reference ranks stream progress, preserve partial cancellation, and feed an explicit combined experiment', { timeout: 60000 }, async t => {
   if (!findChrome()) return t.skip('Chrome required');
-  const fixture = await curatePreviewFixture({ stackSize: 3, singles: 0 });
+  const fixture = await curatePreviewFixture({ stackSize: 3, singles: 0, metadataReady: true });
   const browser = await launchChrome(), page = await browser.newPage();
   t.after(async () => { await browser.stop(); await fixture.stop(); });
   const click = selector => page.evaluate(`document.querySelector(${JSON.stringify(selector)}).click()`);

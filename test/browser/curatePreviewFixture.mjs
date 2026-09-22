@@ -5,7 +5,7 @@ import { join } from 'node:path';
 import { Repository } from '../../src/enrich/repository.mjs';
 import { bootServer } from './harness.mjs';
 
-export async function curatePreviewFixture({ stackSize = 52, singles = 52 } = {}) {
+export async function curatePreviewFixture({ stackSize = 52, singles = 52, metadataReady = false } = {}) {
   const dir = mkdtempSync(join(tmpdir(), 'curate-preview-'));
   const repo = new Repository(join(dir, 'enrichment.sqlite'));
   repo.initSchema();
@@ -37,6 +37,17 @@ export async function curatePreviewFixture({ stackSize = 52, singles = 52 } = {}
   repo.setManualFrameTags({ assetIds: [contextId], addTags: ['frame/eligible'], removeTags: [], action: 'approve' });
   photoTags.get(contextId).add('frame/eligible');
   tags.set('frame/eligible', 'frame/eligible');
+  // Seed the same facts that detail requests return, so unrelated interaction
+  // tests do not race an initial source change. Refresh still runs normally.
+  // Metadata/concurrency tests retain the default unobserved source projection.
+  if (metadataReady) {
+    for (const asset of assets) {
+      repo.curate.mergeMetadataAsset({
+        ...asset,
+        tags: [...photoTags.get(asset.id)].map(value => ({ id: value, value })),
+      });
+    }
+  }
   const fake = createServer(async (request, response) => {
     let text = '';
     for await (const c of request) text += c;

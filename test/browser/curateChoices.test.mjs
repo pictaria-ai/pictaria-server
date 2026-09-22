@@ -8,13 +8,7 @@ test(
   { timeout: 60000 },
   async (t) => {
     if (!findChrome()) return t.skip('Chrome required');
-    const fixture = await curatePreviewFixture({ stackSize: 4, singles: 1 });
-    fixture.repo.db.exec('PRAGMA busy_timeout = 5000');
-    for (const asset of fixture.assets)
-      fixture.repo.curate.mergeMetadataAsset({
-        ...asset,
-        tags: asset.id === fixture.contextId ? [{ id: 'frame/eligible', value: 'frame/eligible' }] : [],
-      });
+    const fixture = await curatePreviewFixture({ stackSize: 4, singles: 1, metadataReady: true });
     const browser = await launchChrome(),
       page = await browser.newPage();
     t.after(async () => {
