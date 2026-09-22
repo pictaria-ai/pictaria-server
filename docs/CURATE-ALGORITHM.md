@@ -212,8 +212,9 @@ existing membership checks require a refresh in that case. Human decisions,
 revisions, whole-group application and Undo keep their existing contracts. No
 ranking changes human tags by itself. See [preview behavior](CURATE-PREVIEW.md).
 
-**Why this stack?** shows the rules that supported the current comparison, with
-its algorithm version. If the opened view predates the applicable calculation,
+**Why?** beside the similarity status shows the rules that supported the current
+comparison, with its algorithm version. Hover, focus or tap opens a read-only
+overlay without reflowing the photos. If the opened view predates the applicable calculation,
 the explanation says membership was preserved rather than inventing historical
 reasoning. This initial explanation is a summary, not a persisted per-pair audit
 log. Detailed signal inspection remains in the lab.

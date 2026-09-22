@@ -11,8 +11,14 @@ All notable changes to Pictaria Server are documented here. This project follows
   compact card actions, and explicit bulk selection of single photos. Clicking
   a photo opens a production-style full-screen lightbox with tags and details
   beside it. Singles regain keyboard decisions, automatic advance and Undo;
-  stack keepers use separate selection controls and save together. Already-kept
-  references remain read-only, and uncertain responses retain exact safe retry.
+  **Yes / Skip / Fav / No** appear under photos and in their lightboxes. Stack
+  choices remain drafts until Save choices; independent checkboxes expose the
+  same four actions for a batch. The footer counts every outcome. Long filenames
+  are omitted, and the grey Why? explanation overlays photos on hover, focus or
+  tap. The shared Settings gear opens the current feature’s settings; stacking
+  wording now describes similar photos rather than just the same moment.
+  Already-kept references remain read-only, and uncertain responses retain exact
+  safe retry.
   Stacks are now just a comparison aid: Remove from stack, Split into singles and
   Stack corrections controls are removed; existing saved corrections remain intact.
   Background updates appear at idle boundaries while open comparisons and selected

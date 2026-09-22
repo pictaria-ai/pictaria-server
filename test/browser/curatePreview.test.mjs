@@ -126,7 +126,7 @@ test(
     await click('#context-photos [data-view]');
     assert.equal(await page.evaluate('document.querySelector("#photo-keep").hidden'), true);
     await page.send('Input.dispatchKeyEvent', { type: 'keyDown', key: 'k', code: 'KeyK' });
-    assert.equal(await page.evaluate('document.querySelectorAll("#photos [aria-pressed=true]").length'), 0);
+    assert.equal(await page.evaluate('document.querySelectorAll("#photos [data-keeper][aria-pressed=true]").length'), 0);
     await click('[data-close=photo-view]');
     await click('[data-close=comparison]');
     fixture.repo.setManualFrameTags({
@@ -151,7 +151,7 @@ test(
     );
     for (const id of ['select-all', 'select-none'])
       assert.equal(await page.evaluate(`document.getElementById('${id}').hidden`), true);
-    assert.equal(await page.evaluate('document.querySelector("#apply").textContent'), 'Mark reviewed');
+    assert.equal(await page.evaluate('document.querySelector("#apply").textContent'), 'Save choices');
     assert.equal(await page.evaluate('document.querySelector("#apply").classList.contains("primary")'), false);
     await page.waitFor('document.querySelector("#photo-view").open');
     await click('[data-photo-action=approve]');
@@ -215,7 +215,7 @@ test(
       assert.equal(await page.evaluate('document.querySelectorAll("#context-photos .photo-card").length'), 1);
       await click('[data-keeper="' + fixture.id(1) + '"]');
       await click('[data-keeper="' + fixture.id(52) + '"]');
-      assert.equal(await page.evaluate('document.querySelector("#apply").textContent'), 'Keep 2, mark 50 reviewed');
+      assert.equal(await page.evaluate('document.querySelector("#selection-count").textContent'), '2 Yes · 50 Skip');
     });
     await t.test('background additions advertise updates without changing open membership or keepers', async () => {
       fixture.add(2000, 900000, 'new-unrelated');
@@ -292,12 +292,10 @@ test(
         await page.evaluate('document.querySelectorAll("#photos [data-keeper][aria-pressed=true]").length'),
         1,
       );
-      await page.evaluate(
-        'document.querySelector("#photo-outcome").value="favorite";document.querySelector("#photo-outcome").dispatchEvent(new Event("change"))',
-      );
+      await click('[data-stack-choice=favorite]');
       assert.equal(
-        await page.evaluate('document.querySelectorAll("#photos .photo-outcome")[1].textContent'),
-        '★ Favorite',
+        await page.evaluate('document.querySelectorAll("#photos .photo-card")[1].querySelector("[data-choice=favorite]").getAttribute("aria-pressed")'),
+        'true',
       );
       await page.send('Input.dispatchKeyEvent', {
         type: 'keyDown',
@@ -310,7 +308,7 @@ test(
     });
     await t.test('stack management is absent while decisions and read-only explanations remain', async () => {
       assert.equal(await page.evaluate('document.querySelector("#photo-remove,#split,#corrections,#correction-dialog")'), null);
-      assert.equal(await page.evaluate('document.querySelector("#stack-reason").hidden'), false);
+      assert.equal(await page.evaluate('document.querySelector(".why-trigger")!==null'), true);
       assert.equal(fixture.repo.curate.corrections().corrections.length, 0);
       await click('[data-close=comparison]');
     });
@@ -364,7 +362,7 @@ test(
         await wait(
           'document.querySelectorAll("#photos .photo-card").length===51 && !document.querySelector("#apply").disabled',
         );
-        assert.equal(await page.evaluate('document.querySelector("#apply").textContent'), 'Mark all 51 reviewed');
+        assert.equal(await page.evaluate('document.querySelector("#selection-count").textContent'), '51 Skip');
         await click('#apply');
         await wait('!document.querySelector("#comparison").open && !document.querySelector("#refresh").disabled');
         const tags = fixture.repo.db

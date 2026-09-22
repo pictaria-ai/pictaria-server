@@ -38,11 +38,12 @@ test(
     );
     await click('#photos .photo-image');
     await wait('document.querySelector("#photo-view").open');
-    assert.equal(await page.evaluate('document.querySelectorAll("#photos [aria-pressed=true]").length'), 0);
+    assert.equal(await page.evaluate('document.querySelectorAll("#photos [data-keeper][aria-pressed=true]").length'), 0);
     await key('y');
     assert.equal(fixture.repo.db.prepare('SELECT COUNT(*) n FROM decision_operations').get().n, 0);
-    await key('k');
-    assert.equal(await page.evaluate('document.querySelectorAll("#photos [aria-pressed=true]").length'), 1);
+    assert.equal(await page.evaluate('document.querySelectorAll("#photos [data-keeper][aria-pressed=true]").length'), 1); // Y changes only the draft
+    await key('s');
+    assert.equal(await page.evaluate('document.querySelectorAll("#photos [data-keeper][aria-pressed=true]").length'), 0);
     await click('#back-comparison');
     await click('[data-close=comparison]');
     // Full-height desktop image and side information, followed by explicit save/advance.
@@ -119,7 +120,7 @@ test(
     await wait(`document.querySelector('#photo-view').open && ${photo(1001)}`);
     await key('n');
     await wait(
-      `${photo(1001)} && !document.querySelector('[data-photo-action=approve]').disabled && document.querySelector('.group-card[data-group-id="single:decided:${fixture.id(1001)}"] .p-chip').textContent==='Never show'`,
+      `${photo(1001)} && !document.querySelector('[data-photo-action=approve]').disabled && document.querySelector('.group-card[data-group-id="single:decided:${fixture.id(1001)}"] .p-chip').textContent==='No'`,
     );
     // Re-open waits for the accepted decision; an older matching image is not completion.
     await wait('!document.querySelector("#photo-undo").disabled');
@@ -227,6 +228,6 @@ test(
     await page.waitFor(
       'document.querySelector("#comparison").open && !document.querySelector("#photo-view").open && document.querySelectorAll("#photos [data-keeper]").length===2',
     );
-    assert.equal(await page.evaluate('document.querySelectorAll("#photos [aria-pressed=true]").length'), 0);
+    assert.equal(await page.evaluate('document.querySelectorAll("#photos [data-keeper][aria-pressed=true]").length'), 0);
   },
 );

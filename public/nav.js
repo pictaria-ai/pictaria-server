@@ -5,6 +5,14 @@
     const topbar = document.querySelector('.p-topbar');
     const nav = topbar ? topbar.querySelector('.p-nav') : null;
     if (!topbar || !nav) return;
+    // Keep the one Settings entry point, landing in the current feature's section.
+    const section = {
+      '/curate.html': 'curate', '/curate-preview.html': 'curate', '/curate-stacking-lab.html': 'curate',
+      '/enrich.html': 'enrich', '/enrich-performance.html': 'enrich',
+      '/insights.html': 'insights', '/metrics.html': 'devices', '/remote.html': 'devices',
+    }[location.pathname];
+    const gear = topbar.querySelector('.p-gear');
+    if (gear && section) gear.href = `/settings.html#sec-${section}`;
     const button = document.createElement('button');
     button.className = 'p-nav-burger';
     button.type = 'button';

@@ -12,7 +12,8 @@ candidates, contextual people signals, positive ThumbHash and reciprocal search
 ranks. Repeated searches that strongly favor two separate subgroups can now
 override a misleading ThumbHash match. The linked document owns exact rules,
 bounds and version history. Open
-**Why this stack?** in a comparison for a concise explanation.
+**Why?** beside the similarity status for a concise explanation. It appears on
+hover, keyboard focus or tap without moving the photos.
 
 The current `/curate.html` remains the default during this staging step. The
 preview now includes **To curate** and **Decided**; **More → Production Curate**
@@ -37,14 +38,16 @@ in this preview, its proposed partitions are never saved.
   and date order. Open a photo or use its card actions to change that choice.
   A newer concurrent decision invalidates the old action scope; it cannot be
   silently overwritten. This view does not request stack similarity searches.
-- Cards show a cover, caption (filename when unavailable), date and stack size.
-  **Keep** and **Mark reviewed** are direct actions for single photos. **More**
-  exposes Favorite and Never show. Click the image for large inspection; a stack
-  opens its comparison first.
+- Cards show a cover, available caption, date and stack size. Filenames are omitted.
+  **Yes / Skip / Fav / No** are direct actions for single photos: Yes selects a
+  photo, Skip marks it reviewed without selecting it, Fav selects it as a favorite,
+  and No marks it Never show. None of these deletes the photo. Click the image for
+  large inspection; a stack opens its comparison first. The shared Settings gear
+  opens the Curate section, without a second settings button on the page.
 - **Select single photos** selects the singles currently loaded, excluding stacks.
   In Singles and Decided it reads **Select shown photos**; Stacks hides it.
-  Loading more does not add photos to the selection. Selected singles can be
-  kept, favorited, marked reviewed or marked Never show in one undoable operation
+  Loading more does not add photos to the selection. Selected singles expose the same
+  **Yes / Skip / Fav / No** actions in one undoable operation
   (up to 1,000 photos). The server verifies these are still single photos at both
   operation creation and save; a regrouped photo requires a refresh.
 - **Date taken → Oldest first / Newest first** orders the full result set before
@@ -55,11 +58,15 @@ in this preview, its proposed partitions are never saved.
   Changing sort resets pagination and opens a fresh view. Background arrivals
   appear automatically when browsing pauses, preserving date order and your place.
   Open comparisons and bulk selections keep their current view.
-- Open a stack, inspect its members and select zero, one or several keepers.
-  Click an image to enlarge it; the separate **Keep** button selects it.
-  The action states the complete result, for example **Keep 2, mark 3 reviewed**.
-  Unselected photos default to reviewed; this is neither deletion nor Never show.
-  Zero-keeper saves have neutral styling.
+- Open a stack and use **Yes / Skip / Fav / No** beneath each photo. Click an
+  image to enlarge it. These choices remain a draft until **Save choices**; the
+  footer counts each outcome separately. Unmarked photos default to Skip, which
+  is neither deletion nor Never show. Saves with no Yes or Fav choices are neutral.
+- Stack checkboxes select photos for batch actions independently of their outcome.
+  **Select all** checks all actionable photos; it does not mark them Yes. When any
+  photos are checked, the same four choices appear beside the selection count.
+  Applying one changes only those photos; **Clear selection** clears the checkboxes
+  without undoing any draft choices. Nearby reference photos cannot be selected.
 - Comparisons with more than ten photos open in a compact grid; **Compact grid**
   can be turned off for larger images.
 - The lightbox follows the production layout: the photo fills the available
@@ -67,22 +74,24 @@ in this preview, its proposed partitions are never saved.
   producing model/profile when available, and an Immich link. On narrow screens
   the information panel scrolls below the photo.
 - For **single photos**, buttons and production keyboard shortcuts save immediately:
-  **Y/A** Keep, **F** Favorite, **S/V** Mark reviewed, **N/R** Never show.
+  **Y/A** Yes, **S/V** Skip, **F** Fav, **N/R** No.
   In To curate, an accepted decision advances to the next loaded card (loading the next page
   when necessary); reaching a stack opens its complete comparison. Arrow keys
   browse without deciding. **Z** undoes the last accepted action, and **Escape**
   closes the viewer. Decided edits stay on the same photo for inspection. Modified/repeated keystrokes and typing in fields do not
   trigger decisions. A lost response holds the current photo and offers exact retry.
-- In a **stack lightbox**, **K** toggles Keep and arrows browse members. Favorite
-  and Never show choices also remain a draft until the complete comparison is
-  saved. Escape or Back to comparison returns to that draft. Single-photo
-  decision shortcuts do not save individual stack members.
+- In a **stack lightbox**, the same four buttons and **Y / S / F / N** keys change
+  the draft choice; arrows browse members. **K** also toggles Yes/Skip for existing
+  keyboard users. Escape or Back to comparison returns to that draft. No shortcut
+  saves an individual stack member; use **Save choices** for the whole comparison.
 - Already-kept nearby photos are bounded reference context. They have no decision
   controls and are excluded from every outcome payload. Singles expose
   these references as sidebar thumbnails, with a return button to the pending photo.
 - Stacks are a comparison aid. Choose any number of keepers without editing the
   stack first. There are no Remove from stack, Split into singles or Stack
-  corrections controls. **Why this stack?** remains a read-only explanation.
+  corrections controls. The grey **Why?** beside the similarity status is a
+  read-only overlay, available on hover, focus or tap. Escape dismisses the overlay
+  before closing the comparison.
   Saved separations from earlier preview builds remain respected; removing these
   controls does not erase their data or change existing human decisions.
 - Immediate Undo is conditional on no newer human decision on any affected photo.
@@ -154,7 +163,8 @@ block Save until the previews can be retried.
 
 - `public/curate/client.js` owns serialized view/comparison opens, tab ownership
   and the operation outbox; `photos.js` renders photo/group controls; `page.js`
-  coordinates the view. Layout is isolated in `comparisons.css`.
+  coordinates the view; `explanation.js` owns the accessible explanation overlay.
+  Layout is isolated in `comparisons.css`.
 - The latest view ID is retained in session storage and passed as
   `replacesViewId` on reload, navigation return, filtering and post-action refresh.
   The selected order is recorded in the view lease and its immutable paged

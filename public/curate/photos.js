@@ -6,59 +6,59 @@ export function node(tag, text, className) {
 }
 export const thumbnail = (id) => `/api/review/thumbnail/${encodeURIComponent(id)}`;
 
+export const choices = [
+  ['approve', 'Yes', 'Include in selected photos'],
+  ['reviewed', 'Skip', 'Mark reviewed without selecting'],
+  ['favorite', 'Fav', 'Select as a favorite'],
+  ['reject', 'No', 'Never show'],
+];
 export function photoCard(
   photo,
-  { readOnly = false, outcome = () => 'reviewed', change, open, imageState = () => {} },
+  { readOnly = false, label = 'Photo', outcome = () => 'reviewed', change, open,
+    selected = () => false, select, imageState = () => {} },
 ) {
   const card = node('article', undefined, 'photo-card');
   card.dataset.photoId = photo.id;
   const imageButton = node('button', undefined, 'photo-image');
   imageButton.type = 'button';
   const img = node('img');
-  img.src = thumbnail(photo.id);
-  img.alt = photo.caption || photo.filename;
-  img.loading = 'lazy';
-  const badge = node('span', undefined, 'photo-outcome');
-  imageButton.append(img, badge);
-  const info = node('div', undefined, 'photo-info');
-  const file = node('strong', photo.filename, 'filename');
-  file.title = photo.filename;
-  info.append(file);
+  img.src = thumbnail(photo.id); img.alt = photo.caption || label; img.loading = 'lazy';
+  imageButton.append(img);
   imageButton.dataset.view = photo.id;
-  imageButton.setAttribute('aria-label', `View ${photo.filename}`);
+  imageButton.setAttribute('aria-label', `View ${label}`);
   imageButton.onclick = () => open(photo);
-  const select = node('button', 'Keep', 'p-btn');
-  if (!readOnly) {
-    select.dataset.keeper = photo.id;
-    select.setAttribute('aria-label', `Keep ${photo.filename}`);
-    select.onclick = () => change(['approve', 'favorite'].includes(outcome()) ? 'reviewed' : 'approve');
-    info.append(select);
+  const info = node('div', undefined, 'photo-info');
+  let checkbox;
+  if (readOnly) {
+    imageButton.append(node('span', 'Already selected', 'photo-outcome'));
+  } else {
+    const selection = node('label', undefined, 'photo-selection');
+    checkbox = node('input'); checkbox.type = 'checkbox'; checkbox.dataset.compareSelect = photo.id;
+    checkbox.setAttribute('aria-label', `Select ${label}`);
+    checkbox.onchange = () => select?.(checkbox.checked);
+    selection.append(checkbox); card.append(selection);
+    const actions = node('div', undefined, 'photo-choices');
+    actions.setAttribute('role', 'group'); actions.setAttribute('aria-label', `Choices for ${label}`);
+    for (const [value, text, title] of choices) {
+      const button = node('button', text, `p-btn${value === 'favorite' ? ' gold' : value === 'reject' ? ' danger' : ''}`);
+      button.dataset.choice = value; button.title = title;
+      if (value === 'approve') button.dataset.keeper = photo.id;
+      button.onclick = () => change(value);
+      actions.append(button);
+    }
+    info.append(actions);
   }
   const imageError = node('span', 'Preview unavailable. Try opening it in Immich.', 'p-muted');
   imageError.hidden = true;
-  img.onerror = () => {
-    imageError.hidden = false;
-    imageState(false);
-  };
-  img.onload = () => {
-    imageError.hidden = true;
-    imageState(true);
-  };
+  img.onerror = () => { imageError.hidden = false; imageState(false); };
+  img.onload = () => { imageError.hidden = true; imageState(true); };
   info.append(imageError);
-  if (readOnly) {
-    imageButton.setAttribute('aria-label', `View ${photo.filename}`);
-    badge.textContent = 'Already kept';
-    imageButton.onclick = () => open(photo);
-  }
   card.syncSelection = () => {
     if (readOnly) return;
-    const selected = ['approve', 'favorite'].includes(outcome());
-    select.setAttribute('aria-pressed', String(selected));
-    select.textContent = selected ? '✓ Keep' : 'Keep';
-    card.classList.toggle('selected', selected);
-    badge.textContent = { approve: '✓ Keep', favorite: '★ Favorite', reviewed: 'Not selected', reject: 'Never show' }[
-      outcome()
-    ];
+    for (const button of info.querySelectorAll('[data-choice]'))
+      button.setAttribute('aria-pressed', String(button.dataset.choice === outcome()));
+    card.classList.toggle('selected', ['approve', 'favorite'].includes(outcome()));
+    card.classList.toggle('batch-selected', selected()); checkbox.checked = selected();
   };
   card.syncSelection();
   card.append(imageButton, info);
@@ -96,19 +96,19 @@ export function similarityIndicator(status) {
   return indicator;
 }
 
-export function groupCard(group, open, { decide, select, selected = false, decided = false } = {}) {
+export function groupCard(group, open, { decide, select, selected = false, decided = false, label = 'Photo' } = {}) {
   const card = node('article', undefined, 'group-card');
   card.dataset.groupId = group.id;
   const photo = group.photos[0];
   const cover = node('button', undefined, 'cover');
   cover.type = 'button';
-  cover.setAttribute('aria-label', group.memberCount > 1 ? `Compare ${group.memberCount} photos: ${photo.caption || photo.filename}` : `View ${photo.caption || photo.filename}`);
+  cover.setAttribute('aria-label', group.memberCount > 1 ? `Compare ${group.memberCount} photos: ${photo.caption || label}` : `View ${photo.caption || label}`);
   const img = node('img'); img.src = thumbnail(photo.id); img.alt = ''; img.loading = 'lazy';
   const chip = node('span', undefined, 'p-chip');
   const marker = node('span', undefined, 'similarity-marker');
   cover.append(img, chip, marker);
   const caption = node('div', undefined, 'group-caption');
-  caption.append(node('span', photo.caption || photo.filename, 'filename'));
+  if (photo.caption) caption.append(node('span', photo.caption, 'photo-caption'));
   if (photo.capturedAt) caption.append(node('small', new Date(photo.capturedAt).toLocaleDateString()));
   const status = node('small', undefined, 'similarity-status');
   caption.append(status);
@@ -117,24 +117,19 @@ export function groupCard(group, open, { decide, select, selected = false, decid
     card.classList.add('is-stack');
     const compare = node('button', 'Compare', 'p-btn'); compare.onclick = () => open(group); actions.append(compare);
   } else {
-    for (const [value,label] of [['approve','Keep'],['reviewed','Mark reviewed']]) {
-      const button = node('button', label, `p-btn${value === 'approve' ? ' primary' : ''}`);
-      button.dataset.quick = value; button.onclick = () => decide?.(group,value); actions.append(button);
+    for (const [value,text,title] of choices) {
+      const button = node('button', text, `p-btn${value === 'approve' ? ' primary' : value === 'favorite' ? ' gold' : value === 'reject' ? ' danger' : ''}`);
+      button.dataset.quick = value; button.title = title; button.onclick = () => decide?.(group,value); actions.append(button);
     }
-    const menu = node('details', undefined, 'card-menu'); menu.append(node('summary', 'More', 'p-btn'));
-    for (const [value,label] of [['favorite','Favorite'],['reject','Never show']]) {
-      const button = node('button',label,'p-btn'); button.onclick = () => decide?.(group,value); menu.append(button);
-    }
-    actions.append(menu);
-    const label = node('label',undefined,'card-selection'), check = node('input');
+    const selection = node('label',undefined,'card-selection'), check = node('input');
     check.type = 'checkbox'; check.checked = selected; check.dataset.select = group.id;
-    check.setAttribute('aria-label',`Select ${photo.caption || photo.filename}`);
-    check.onchange = () => select?.(group,check.checked); label.append(check); card.append(label);
+    check.setAttribute('aria-label',`Select ${photo.caption || label}`);
+    check.onchange = () => select?.(group,check.checked); selection.append(check); card.append(selection);
   }
   caption.append(actions);
   card.updateSimilarity = (value) => {
     if (decided) {
-      chip.textContent = {approved:'Kept',reviewed:'Reviewed',rejected:'Never show'}[photo.state] || 'Decided';
+      chip.textContent = {approved:photo.tags?.includes('frame/favorite') ? 'Fav' : 'Yes',reviewed:'Skip',rejected:'No'}[photo.state] || 'Decided';
       status.hidden = true; return;
     }
     group.similarity = value;

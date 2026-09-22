@@ -35,7 +35,7 @@ test('hash-supported stack updates automatically after closing, without changing
     await page.waitFor('document.querySelectorAll(".group-card").length===2 && !document.querySelector("#refresh").disabled');
     await click('.group-card');
     await page.waitFor('document.querySelectorAll("#photos [data-keeper]").length===2 && !document.querySelector("#apply").disabled');
-    await click('#stack-reason summary');
+    await click('#comparison-similarity .why-trigger');
     assert.match(await page.evaluate('document.querySelector("#stack-reasons").textContent'), /contrast outweighs/);
     assert.equal(await page.evaluate('document.querySelector("#error").hidden'), true);
   });
@@ -86,7 +86,7 @@ test('candidate preview refines automatically, preserves selections, explains re
     await page.waitFor('!document.querySelector("#refresh").disabled');
     assert.equal(await page.evaluate('document.querySelectorAll(".group-card").length'), 1);
     await click('.group-card'); await page.waitFor('document.querySelectorAll("#photos [data-keeper]").length===5');
-    await click('#stack-reason summary');
+    await click('#comparison-similarity .why-trigger');
     assert.match(await page.evaluate('document.querySelector("#stack-reason").textContent'), /Candidate algorithm 3/);
     assert.match(await page.evaluate('document.querySelector("#stack-reasons").textContent'), /established core/);
     await click(`[data-keeper="${fixture.id(1)}"]`); await click(`[data-keeper="${fixture.id(3)}"]`);

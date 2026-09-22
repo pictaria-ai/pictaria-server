@@ -21,7 +21,7 @@
         ><a href="/metrics.html">Frame</a><a href="/remote.html">Remote</a>
       </nav>
       <div class="p-grow"></div>
-      <a class="p-gear" href="/settings.html" aria-label="Settings">⚙</a>
+      <a class="p-gear" href="/settings.html#sec-curate" aria-label="Settings">⚙</a>
     </header>
     <main>
       <div class="heading">
@@ -29,7 +29,6 @@
           <h1>Curate <span class="p-chip">Preview</span></h1>
           <p class="p-muted">Choose good photos without keeping every repeat.</p>
         </div>
-        <a class="p-btn" href="/settings.html#sec-curate">Curate settings</a>
       </div>
       <nav id="sections" class="p-tabs section-tabs" aria-label="Review status">
         <button class="p-tab active" data-section="pending">To curate</button>
@@ -91,10 +90,10 @@
       </div>
       <div id="bulk-actions" class="notice" hidden>
         <strong id="bulk-count"></strong>
-        <button class="p-btn primary" data-bulk="approve">Keep</button>
-        <button class="p-btn" data-bulk="reviewed">Mark reviewed</button>
-        <button class="p-btn" data-bulk="favorite">Favorite</button>
-        <button class="p-btn" data-bulk="reject">Never show</button>
+        <button class="p-btn primary" data-bulk="approve" title="Include in selected photos">Yes</button>
+        <button class="p-btn" data-bulk="reviewed" title="Mark reviewed without selecting">Skip</button>
+        <button class="p-btn gold" data-bulk="favorite" title="Select as a favorite">Fav</button>
+        <button class="p-btn danger" data-bulk="reject" title="Never show">No</button>
         <button id="clear-bulk" class="p-btn">Clear</button>
       </div>
       <section id="groups" class="group-grid" aria-label="Photos to curate"></section>
@@ -112,15 +111,7 @@
         </header>
         <div class="dialog-body">
           <div id="comparison-similarity" class="check-notice" role="status" hidden></div>
-          <p id="comparison-help">
-            Select the photos you want to keep. The rest will be marked reviewed. Reviewed photos are not
-            deleted or marked Never show.
-          </p>
-          <details id="stack-reason" class="stack-reason">
-            <summary>Why this stack?</summary>
-            <p id="stack-algorithm" class="p-muted"></p>
-            <ul id="stack-reasons"></ul>
-          </details>
+          <p id="comparison-help">Mark each photo Yes, Skip, Fav or No, then save. Unmarked photos default to Skip.</p>
           <p id="comparison-state" class="p-muted" aria-live="polite"></p>
           <button id="metadata-retry" class="p-btn quiet" hidden>Retry photo information refresh</button>
           <div id="comparison-error" role="alert" hidden></div>
@@ -136,6 +127,13 @@
           <div class="compare-tools">
             <button id="select-all" class="p-btn">Select all</button
             ><button id="select-none" class="p-btn">Clear selection</button>
+            <div id="comparison-bulk" class="choice-batch" hidden>
+              <strong id="comparison-bulk-count"></strong>
+              <button class="p-btn" data-comparison-bulk="approve" title="Include selected photos">Yes</button>
+              <button class="p-btn" data-comparison-bulk="reviewed" title="Mark selected photos reviewed">Skip</button>
+              <button class="p-btn gold" data-comparison-bulk="favorite" title="Select as favorites">Fav</button>
+              <button class="p-btn danger" data-comparison-bulk="reject" title="Never show selected photos">No</button>
+            </div>
             <div class="p-grow"></div>
             <label id="compact-label" hidden><input id="compact" type="checkbox" /> Compact grid</label>
           </div>
@@ -167,7 +165,7 @@
             <button class="p-btn" data-close="photo-view">Close</button>
           </div>
           <span id="photo-position" class="p-muted"></span>
-          <h2 id="photo-title"></h2>
+          <h2 id="photo-title" class="sr-only">Photo</h2>
           <p id="photo-date" class="p-muted"></p>
           <div id="photo-error" role="alert" hidden></div>
           <button id="photo-refresh" class="p-btn" hidden>Close and refresh</button>
@@ -176,26 +174,20 @@
             <button id="photo-retry" class="p-btn">Retry decision</button>
           </div>
           <div id="single-actions" class="lightbox-actions">
-            <button class="p-btn" data-photo-action="favorite">Favorite (F)</button>
-            <button class="p-btn primary" data-photo-action="approve">Keep (Y)</button>
-            <button class="p-btn" data-photo-action="reviewed">Reviewed (S)</button>
-            <button class="p-btn" data-photo-action="reject">Never show (N)</button>
+            <button class="p-btn primary" data-photo-action="approve" title="Include in selected photos">Yes (Y)</button>
+            <button class="p-btn" data-photo-action="reviewed" title="Mark reviewed without selecting">Skip (S)</button>
+            <button class="p-btn gold" data-photo-action="favorite" title="Select as a favorite">Fav (F)</button>
+            <button class="p-btn danger" data-photo-action="reject" title="Never show">No (N)</button>
           </div>
           <div id="photo-similarity" class="check-notice" role="status" hidden></div>
           <div id="stack-actions">
-            <button id="photo-keep" class="p-btn" aria-pressed="false">Keep (K)</button>
-            <div id="photo-secondary" class="viewer-secondary">
-              <label
-                >Choice
-                <select id="photo-outcome">
-                  <option value="reviewed">Mark reviewed</option>
-                  <option value="approve">Keep</option>
-                  <option value="favorite">Keep as favorite</option>
-                  <option value="reject">Never show</option>
-                </select></label
-              >
+            <div class="lightbox-actions">
+              <button id="photo-keep" class="p-btn" data-stack-choice="approve" title="Include in selected photos">Yes (Y)</button>
+              <button class="p-btn" data-stack-choice="reviewed" title="Mark reviewed without selecting">Skip (S)</button>
+              <button class="p-btn gold" data-stack-choice="favorite" title="Select as a favorite">Fav (F)</button>
+              <button class="p-btn danger" data-stack-choice="reject" title="Never show">No (N)</button>
             </div>
-            <p class="p-muted">Your selection is saved when you save the stack.</p>
+            <p class="p-muted">Save your choices in the stack comparison.</p>
             <button id="back-comparison" class="p-btn">Back to comparison</button>
           </div>
           <span id="photo-readonly" class="p-muted" hidden>Already kept · reference only</span>

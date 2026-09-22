@@ -1,4 +1,5 @@
 import { CurateClient, request, decisionSummary } from './client.js';
+import { explanation } from './explanation.js';
 import { node, thumbnail, photoCard, groupCard, similarityLabel, similarityIndicator } from './photos.js';
 
 const el = (id) => document.getElementById(id);
@@ -15,7 +16,7 @@ const state = {
   next: null,
   loading: false,
   comparison: null,
-  outcomes: {},
+  outcomes: {}, batchPhotos: new Set(),
   busy: false,
   undo: null,
   syncId: null,
@@ -34,11 +35,12 @@ const visibility = new IntersectionObserver(entries => {
     entry.isIntersecting ? visibleCards.add(id) : visibleCards.delete(id);
   }
 });
-function makeCard(group) {
+function makeCard(group, index = 0) {
   const card = groupCard(group, g => run(() => compare(g)), {
     decide: (g, outcome) => run(() => quickDecision([g], outcome)),
     select: (g, checked) => { checked ? state.selected.add(g.id) : state.selected.delete(g.id); bulkSelection(); },
     selected: state.selected.has(group.id), decided: state.section === 'decided',
+    label: `Photo ${index + 1}`,
   });
   cards.set(group.id, card);
   visibility.observe(card);
@@ -82,7 +84,7 @@ function recovery() {
   el('more').disabled = locked || state.loading;
   for (const button of document.querySelectorAll('#filters button, #sections button, .group-card button, .group-card input'))
     button.disabled = locked || state.loading || state.autoUpdateFailed;
-  for (const input of document.querySelectorAll('#photos [data-keeper], .compare-tools button'))
+  for (const input of document.querySelectorAll('#photos [data-choice], #photos [data-compare-select], .compare-tools button'))
     input.disabled = locked || !state.comparison || state.comparison.oversized;
   el('undo').disabled = locked;
   selection();
@@ -92,9 +94,11 @@ function recovery() {
 function selection() {
   const values = Object.values(state.outcomes),
     keep = values.filter((v) => ['approve', 'favorite'].includes(v)).length;
-  el('selection-count').textContent = values.length > 1 ? `${keep} of ${values.length} selected to keep` : '';
+  el('selection-count').textContent = state.comparison ? decisionSummary(state.outcomes) : '';
+  el('comparison-bulk').hidden = !state.batchPhotos.size;
+  el('comparison-bulk-count').textContent = `${state.batchPhotos.size} selected`;
   el('apply').textContent = state.comparison
-    ? decisionSummary(state.outcomes)
+    ? 'Save choices'
     : state.openFailed
       ? 'Refresh to continue'
       : 'Loading comparison…';
@@ -189,11 +193,15 @@ function showComparisonSimilarity(status) {
           ? 'This stack has not been fully checked. You can still make your own selection.' : '';
   for (const id of ['comparison-similarity','photo-similarity']) {
     const target = el(id);
-    target.hidden = !title || (id === 'photo-similarity' && state.viewerMode === 'single');
-    const signature = JSON.stringify(status);
+    target.hidden = (!title && !(state.comparison?.ids.length > 1)) || (id === 'photo-similarity' && state.viewerMode === 'single');
+    const signature = JSON.stringify([state.comparison?.id, status]);
     if (target.dataset.status === signature) continue;
     target.dataset.status = signature;
-    const copy = node('div'); copy.append(node('strong', title || ''));
+    const copy = node('div'), heading = node('div', undefined, 'check-heading');
+    heading.append(node('strong', title || 'Stack comparison'));
+    if (state.comparison?.ids.length > 1)
+      heading.append(explanation(state.comparison, id === 'comparison-similarity' ? 'stack-reason' : 'photo-stack-reason'));
+    copy.append(heading);
     if (detail) copy.append(node('p', detail));
     const indicator = similarityIndicator(status);
     target.replaceChildren(...(indicator ? [indicator] : []), copy);
@@ -222,6 +230,7 @@ async function compare(group) {
   clearErrors();
   const generation = ++state.dialogGeneration;
   state.viewerMode = group.memberCount === 1 ? 'single' : 'stack';
+  state.batchPhotos.clear();
   state.comparison = null;
   state.outcomes = {};
   state.openFailed = false;
@@ -232,8 +241,8 @@ async function compare(group) {
     `${group.memberCount} ${group.memberCount === 1 ? 'photo' : 'photos'} in this comparison`;
   el('comparison-help').textContent =
     group.memberCount > 1
-      ? 'Click a photo to enlarge it. Select Keep beneath each photo you want. The rest will be marked reviewed when you save.'
-      : 'Choose whether to keep this photo. Mark reviewed leaves it out of your keepers without deleting it or marking it Never show.';
+      ? 'Mark photos Yes, Skip, Fav or No, then save. Check boxes to mark several at once. Unmarked photos default to Skip.'
+      : 'Yes selects the photo; Skip marks it reviewed; Fav selects it as a favorite; No means Never show. Photos are not deleted.';
   el('select-all').hidden = el('select-none').hidden = group.memberCount < 2;
   el('compact-label').hidden = group.memberCount <= 10;
   el('compact').checked = group.memberCount > 10;
@@ -242,8 +251,6 @@ async function compare(group) {
   el('comparison-similarity').hidden = true;
   el('metadata-retry').hidden = true;
   el('photos').replaceChildren();
-  el('stack-reason').hidden = true;
-  el('stack-reason').open = false;
   el('context').hidden = true;
   el('comparison').showModal();
   recovery();
@@ -251,11 +258,6 @@ async function compare(group) {
   if (generation !== state.dialogGeneration || !el('comparison').open) return;
   state.comparison = comparison;
   showComparisonSimilarity(comparison.similarity);
-  el('stack-reason').hidden = false;
-  el('stack-reason').querySelector('summary').textContent = group.memberCount > 1 ? 'Why this stack?' : 'Why this photo is separate';
-  el('stack-algorithm').textContent = /^candidate-\d+$/.test(comparison.algorithm)
-    ? `Candidate algorithm ${comparison.algorithm.split('-')[1]} · no AI stack check` : 'Grouping from this saved view';
-  el('stack-reasons').replaceChildren(...(comparison.reasons ?? []).map(reason => node('li', reason)));
   state.outcomes = comparison.oversized ? {} : Object.fromEntries(comparison.ids.map((id) => [id, 'reviewed']));
   state.photoList = [...comparison.photos, ...comparison.context];
   el('comparison-state').textContent = comparison.oversized
@@ -265,8 +267,14 @@ async function compare(group) {
       : '';
   el('metadata-retry').hidden = !state.view.metadata?.problem;
   el('photos').replaceChildren(
-    ...comparison.photos.map((photo) =>
+    ...comparison.photos.map((photo, index) =>
       photoCard(photo, {
+        label: `Photo ${index + 1}`,
+        selected: () => state.batchPhotos.has(photo.id),
+        select: (selected) => {
+          selected ? state.batchPhotos.add(photo.id) : state.batchPhotos.delete(photo.id);
+          repaintSelection();
+        },
         outcome: () => state.outcomes[photo.id] || 'reviewed',
         change: (value) => setOutcome(photo.id, value),
         imageState: (ok) => {
@@ -290,9 +298,9 @@ async function compare(group) {
 function showPhoto(photo) {
   if (!photo) return;
   state.photoIndex = state.photoList.findIndex((p) => p.id === photo.id);
-  el('photo-title').textContent = photo.filename;
+  el('photo-title').textContent = 'Photo';
   el('photo-large').src = thumbnail(photo.id);
-  el('photo-large').alt = photo.caption || photo.filename;
+  el('photo-large').alt = photo.caption || `Photo ${state.photoIndex + 1}`;
   el('photo-caption').textContent = photo.caption || '';
   el('photo-date').textContent = photo.capturedAt ? new Date(photo.capturedAt).toLocaleString() : '';
   el('photo-score').textContent = Number.isFinite(photo.frameScore) ? `Enrichment score: ${photo.frameScore.toFixed(2)}` : '';
@@ -303,8 +311,8 @@ function showPhoto(photo) {
   el('photo-context').hidden = !references.length;
   el('photo-context-images').replaceChildren(...references.map(reference => {
     const button = node('button', undefined, 'reference-photo');
-    const img = node('img'); img.src = thumbnail(reference.id); img.alt = reference.caption || reference.filename;
-    button.setAttribute('aria-label', `Inspect already kept photo: ${reference.filename}`);
+    const img = node('img'); img.src = thumbnail(reference.id); img.alt = reference.caption || 'Already selected photo';
+    button.setAttribute('aria-label', 'Inspect already selected photo');
     button.append(img); button.onclick = () => showPhoto(reference); return button;
   }));
   const base = state.view?.immichUrl;
@@ -328,18 +336,11 @@ async function fullCaption(photo) {
     el('photo-model').hidden = !info.model;
   } catch { /* The saved caption remains available. */ }
 }
-function setOutcome(id, value) {
-  if (
-    state.busy ||
-    client.saved.pending ||
-    !state.comparison ||
-    state.comparison.oversized ||
-    !Object.hasOwn(state.outcomes, id)
-  )
-    return;
-  state.outcomes[id] = value;
-  repaintSelection();
-  syncViewer();
+function setOutcome(id, value) { setOutcomes([id], value); }
+function setOutcomes(ids, value) {
+  if (state.busy || client.saved.pending || !state.comparison || state.comparison.oversized) return;
+  for (const id of ids) if (Object.hasOwn(state.outcomes, id)) state.outcomes[id] = value;
+  repaintSelection(); syncViewer();
 }
 function syncViewer() {
   const photo = state.photoList[state.photoIndex];
@@ -352,14 +353,14 @@ function syncViewer() {
     : `${state.photoIndex + 1} of ${state.photoList.length} photos`;
   el('single-actions').hidden = !single || !actionable;
   el('stack-actions').hidden = single || !actionable;
-  el('photo-secondary').hidden = el('photo-keep').hidden = single || !actionable;
+  el('photo-keep').hidden = single || !actionable;
   el('photo-readonly').hidden = actionable;
   el('photo-readonly').textContent = photo?.state === 'approved' ? 'Already kept · reference only' : 'Decision unavailable for this comparison';
   el('back-pending-photo').hidden = !single || actionable;
   el('photo-reason').hidden = !single || !actionable || state.section === 'decided';
   el('photo-reasons').replaceChildren(...(state.comparison?.reasons ?? []).map(reason => node('li', reason)));
   const locked = state.busy || state.loading || Boolean(client.saved.pending) || state.comparison?.oversized;
-  for (const control of document.querySelectorAll('#photo-keep, #photo-outcome, [data-photo-action]'))
+  for (const control of document.querySelectorAll('[data-stack-choice], [data-photo-action]'))
     control.disabled = locked || !actionable;
   el('photo-prev').disabled = locked || (single ? !actionable || at <= 0 : state.photoIndex <= 0);
   el('photo-next').disabled = locked || (single ? !actionable || at < 0 || at >= state.groups.length - 1 && state.next === null : state.photoIndex >= state.photoList.length - 1);
@@ -367,18 +368,15 @@ function syncViewer() {
   el('back-pending-photo').disabled = locked;
   el('photo-keys').hidden = !actionable;
   el('photo-keys').textContent = single
-    ? 'Y keep · F favorite · S reviewed · N never show · Z undo · ← → browse · Esc close. Decisions save immediately.'
-    : 'K toggles Keep · ← → browse · Esc returns to comparison. Save your choices there.';
+    ? 'Y Yes · S Skip · F Fav · N No · Z Undo · ← → browse · Esc close. Choices save immediately.'
+    : 'Y Yes · S Skip · F Fav · N No · ← → browse · Esc returns to comparison. Save your choices there.';
   el('photo-receipt').hidden = !state.undo;
   el('photo-receipt-text').textContent = el('receipt-text').textContent;
   el('photo-undo').disabled = locked || !state.undo;
   if (!actionable) return;
-  const value = state.outcomes[photo.id],
-    keep = ['approve', 'favorite'].includes(value);
-  el('photo-keep').setAttribute('aria-pressed', String(keep));
-  el('photo-keep').classList.toggle('primary', keep);
-  el('photo-keep').textContent = keep ? '✓ Keep (K)' : 'Keep (K)';
-  el('photo-outcome').value = value;
+  const value = state.outcomes[photo.id];
+  for (const button of document.querySelectorAll('[data-stack-choice]'))
+    button.setAttribute('aria-pressed', String(button.dataset.stackChoice === value));
 }
 async function action(work, context = null) {
   if (state.busy || client.saved.pending) return;
@@ -631,13 +629,12 @@ el('clear-bulk').onclick = () => { state.selected.clear(); bulkSelection(); };
 for (const button of document.querySelectorAll('[data-bulk]')) button.onclick = () => run(() =>
   quickDecision(state.groups.filter(g => state.selected.has(g.id)),button.dataset.bulk));
 el('select-all').onclick = () => {
-  for (const id of state.comparison.ids) state.outcomes[id] = 'approve';
+  state.batchPhotos = new Set(Object.keys(state.outcomes));
   repaintSelection();
 };
-el('select-none').onclick = () => {
-  for (const id of state.comparison.ids) state.outcomes[id] = 'reviewed';
-  repaintSelection();
-};
+el('select-none').onclick = () => { state.batchPhotos.clear(); repaintSelection(); };
+for (const button of document.querySelectorAll('[data-comparison-bulk]')) button.onclick = () =>
+  setOutcomes(state.batchPhotos, button.dataset.comparisonBulk);
 function repaintSelection() {
   for (const card of el('photos').children) card.syncSelection();
   selection();
@@ -706,11 +703,10 @@ el('photo-retry').onclick = () => el('retry-action').click();
 el('photo-refresh').onclick = () => run(refresh);
 el('photo-large').onerror = () => { el('photo-image-error').hidden = false; };
 for (const button of document.querySelectorAll('[data-photo-action]')) button.onclick = () => run(() => decideSingle(button.dataset.photoAction));
-el('photo-keep').onclick = () => {
-  const id = state.photoList[state.photoIndex]?.id;
-  if (id) setOutcome(id, ['approve', 'favorite'].includes(state.outcomes[id]) ? 'reviewed' : 'approve');
+for (const button of document.querySelectorAll('[data-stack-choice]')) button.onclick = () => {
+  const photo = state.photoList[state.photoIndex];
+  if (photo) setOutcome(photo.id, button.dataset.stackChoice);
 };
-el('photo-outcome').onchange = () => setOutcome(state.photoList[state.photoIndex].id, el('photo-outcome').value);
 for (const button of document.querySelectorAll('[data-close]')) button.onclick = () => el(button.dataset.close).close();
 for (const dialog of document.querySelectorAll('dialog'))
   dialog.addEventListener('click', (e) => {
@@ -731,10 +727,16 @@ document.addEventListener('keydown', (event) => {
   const key = event.key.toLowerCase();
   if (key === 'z' && state.undo && !el('photo-undo').disabled) { event.preventDefault(); el('photo-undo').click(); return; }
   const outcome = {y:'approve',a:'approve',f:'favorite',s:'reviewed',v:'reviewed',n:'reject',r:'reject'}[key];
-  if (state.viewerMode === 'single' && outcome) { event.preventDefault(); run(() => decideSingle(outcome)); return; }
+  if (outcome) {
+    event.preventDefault();
+    if (state.viewerMode === 'single') run(() => decideSingle(outcome));
+    else if (state.photoList[state.photoIndex]) setOutcome(state.photoList[state.photoIndex].id, outcome);
+    return;
+  }
   if (event.key.toLowerCase() === 'k' && !el('photo-keep').hidden && !el('photo-keep').disabled) {
     event.preventDefault();
-    el('photo-keep').click();
+    const id = state.photoList[state.photoIndex]?.id;
+    if (id) setOutcome(id, ['approve', 'favorite'].includes(state.outcomes[id]) ? 'reviewed' : 'approve');
   }
   if (event.key === 'ArrowRight' && !el('photo-next').disabled) {
     event.preventDefault();
