@@ -53,7 +53,8 @@ in this preview, its proposed partitions are never saved.
   Equal dates use deterministic first-member IDs (reversed for Newest first).
   Oldest first is the initial default; the choice is remembered in this browser.
   Changing sort resets pagination and opens a fresh view. Background arrivals
-  remain behind a refresh notice until you explicitly load the updated view.
+  appear automatically when browsing pauses, preserving date order and your place.
+  Open comparisons and bulk selections keep their current view.
 - Open a stack, inspect its members and select zero, one or several keepers.
   Click an image to enlarge it; the separate **Keep** button selects it.
   The action states the complete result, for example **Keep 2, mark 3 reviewed**.
@@ -74,19 +75,16 @@ in this preview, its proposed partitions are never saved.
   trigger decisions. A lost response holds the current photo and offers exact retry.
 - In a **stack lightbox**, **K** toggles Keep and arrows browse members. Favorite
   and Never show choices also remain a draft until the complete comparison is
-  saved. Escape or Back to comparison returns to that draft. **Remove from stack**
-  is an immediate persistent correction. Single-photo decision shortcuts do not
-  save individual stack members.
+  saved. Escape or Back to comparison returns to that draft. Single-photo
+  decision shortcuts do not save individual stack members.
 - Already-kept nearby photos are bounded reference context. They have no decision
-  controls and are excluded from every outcome/correction payload. Singles expose
+  controls and are excluded from every outcome payload. Singles expose
   these references as sidebar thumbnails, with a return button to the pending photo.
-- Remove from stack separates that member from its current peers. Split into
-  singles separates all current members. The photos remain pending. These
-  constraints persist across refreshes and restarts. Stack corrections lists
-  active corrections with the removed photo or explicit split action and a reset
-  action. Older records without action metadata use a generic partition summary
-  instead of guessing which action created them. Resetting
-  does not undo human decisions or promise that grouping will recreate a stack.
+- Stacks are a comparison aid. Choose any number of keepers without editing the
+  stack first. There are no Remove from stack, Split into singles or Stack
+  corrections controls. **Why this stack?** remains a read-only explanation.
+  Saved separations from earlier preview builds remain respected; removing these
+  controls does not erase their data or change existing human decisions.
 - Immediate Undo is conditional on no newer human decision on any affected photo.
   The last action remains undoable until its server deadline (30 minutes).
   The visible Undo affordance does not survive a page reload; saved decisions and
@@ -100,7 +98,10 @@ Cards have a small status circle: a muted spinner while queued, a blue spinner
 while checking, a green check when ready, and an amber attention marker when
 paused, limited, unavailable or still uncertain. Text labels explain each state;
 reduced-motion preferences stop the animation. Comparisons resolved locally say
-that no similarity search is needed. The open comparison uses the same markers.
+that no similarity search is needed. The open comparison and stack lightbox put the status near the top. Pending,
+inconclusive or incomplete checks explain that manual choices are still possible.
+If an updated grouping becomes available, the notice explains that the current
+comparison stays fixed and closing it lets the grid update.
 
 Searches stay sequential but can start two seconds apart, up to 30 new automatic
 requests per minute. Slow responses add breathing room. The open comparison gets
@@ -113,8 +114,9 @@ Photos with distant ThumbHashes stay together provisionally until search evidenc
 can resolve them; strong people differences and saved manual separations still
 apply immediately. Larger hash-supported groups also receive verification
 searches; small locally resolved comparisons and exact renditions can skip them. A completed check highlights
-affected cards and offers **Show updated stacks**; checks that leave grouping
-unchanged do not ask for a refresh. Results are applied as a complete time-candidate
+affected cards; the grid adopts the result when browsing pauses. A single
+**Refresh** button remains available and is highlighted when updates are waiting.
+Checks that leave grouping unchanged do not request a new view. Results are applied as a complete time-candidate
 pass, never one search at a time. Missing targets and successful empty results
 remain unknown unless repeated subgroup evidence resolves the relationship.
 **Check complete · similarity uncertain** keeps the compatible
@@ -125,18 +127,25 @@ After inactivity or a server restart, this bounded memory cache can be empty and
 a fresh pass may be needed. Changes to photos, people evidence or human corrections
 also require renewed checks for the affected candidate.
 
-Background progress does not replace cards, comparison membership or the user's
-selection. Explicit refresh, filter/search
-changes open a replacement view. Accepted pending decisions remove only their
-cards from the displayed snapshot and Undo restores them there; this preserves
-navigation order while working through singles. Other cards do not regroup as a
-side effect of a decision. Corrections, Decided edits and Undo after changing views
-reload a fresh view. Photo-information
+Background updates appear automatically after a short browsing pause, at most
+once every five seconds. Open comparisons/lightboxes, selected batches, open
+menus, edited fields and pending action receipts prevent automatic replacement.
+Closing a comparison allows updates to appear; its membership and keeper draft
+never change underneath the user. Automatic updates retain the number of loaded
+pages where possible and anchor the scroll position to a surviving card. A failed
+update stops automatic replacement and asks for **Refresh**, disabling decisions
+until the view is reconciled. Automatic view replacement does **not** retry failed
+similarity searches; explicit Refresh still permits retry after the shared cooldown.
+
+Accepted pending decisions remove only their cards from the displayed snapshot
+and Undo restores them there; this preserves navigation order while working
+through singles. Other cards do not regroup during an open comparison or viewer.
+Decided edits and Undo after changing views reload a fresh view. Photo-information
 refresh status is separate from AI status, and failed metadata refresh can be
 requested again from the open comparison. Unknown metadata is not claimed complete.
 
 The decision limit is 1,000 photos. A larger logical group remains intact; the
-preview displays its first 50 photos with decisions and corrections disabled,
+preview displays its first 50 photos with decisions disabled,
 and explains that turning stacks off allows individual review. It never saves a
 page-sized subset as though it were the whole stack. Known thumbnail failures
 block Save until the previews can be retried.
@@ -157,7 +166,8 @@ block Save until the previews can be retried.
   response locks further mutations and offers safe retry, including after reload.
   No new operation ID or changed keeper set is substituted. Deterministic rejected
   requests can be refreshed; storage failure prevents sending the mutation.
-- Separation receipts remain immutable. Undo availability is obtained from current
+- Legacy separation receipts remain immutable and recoverable even though the
+  preview no longer exposes stack-editing controls. Undo availability is obtained from current
   active/revision state, not inferred from the receipt. A lost reset acknowledgment
   can be reconciled against that current state.
 - Group pages add only one compact cover record per group, with no evidence
@@ -183,9 +193,11 @@ block Save until the previews can be retried.
 Automated coverage includes a filtered 52-photo comparison spanning API pages,
 multi/zero keeper operations, read-only kept context, background stability,
 lost-response recovery across reload, conflicting newer human intent, Undo,
-persistent Remove/Split/reset, duplicated tabs, keyboard interaction and a
+legacy separation persistence/reset at the API layer, duplicated tabs, keyboard interaction and a
 390-pixel viewport. Viewer keyboard selection, compact grids, single-photo
-controls, correction action history and failed-open recovery are also covered.
+controls and failed-open recovery are also covered. Automatic-update tests cover
+open comparisons, bulk selections, pagination/scroll preservation, a failed
+replacement without retry loops, and explicit retry of paused similarity work.
 Date-order coverage includes pagination, duplicate stacks spanning distant dates,
 missing/equal dates, filters/search, browser preference, failed replacement,
 background arrivals, decisions/Undo and persisted view order after restart.

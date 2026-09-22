@@ -73,7 +73,7 @@ export function createCurateRoutes({ curate, review = null }) {
         result = await curate.openView({
           kind: body.kind,
           search: body.search,
-          sort: body.sort, section: body.section, category: body.category,
+          sort: body.sort, section: body.section, category: body.category, retryChecks: body.retryChecks,
           replacesViewId: body.replacesViewId,
         });
       } else if (request.method === 'POST' && path === 'selection') {

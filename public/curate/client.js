@@ -72,9 +72,9 @@ export class CurateClient {
     }
     this.save({ tabId });
   }
-  open(filters) {
+  open(filters, { retryChecks = true } = {}) {
     const run = async () => {
-      const view = await this.api('groups', { ...filters, replacesViewId: this.saved.viewId || null });
+      const view = await this.api('groups', { ...filters, ...(!retryChecks ? { retryChecks: false } : {}), replacesViewId: this.saved.viewId || null });
       this.save({ viewId: view.viewId, filters });
       return view;
     };

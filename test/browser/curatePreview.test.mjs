@@ -4,7 +4,7 @@ import { setTimeout as delay } from 'node:timers/promises';
 import { launchChrome, findChrome } from './harness.mjs';
 import { curatePreviewFixture } from './curatePreviewFixture.mjs';
 
-test('Curate preview date order is global, remembered and stable until refresh', { timeout: 60000 }, async (t) => {
+test('Curate preview date order is global and remembered across automatic updates', { timeout: 60000 }, async (t) => {
   if (!findChrome()) return t.skip('Chrome required');
   const fixture = await curatePreviewFixture({ stackSize: 3, singles: 52 });
   const browser = await launchChrome(),
@@ -44,9 +44,7 @@ test('Curate preview date order is global, remembered and stable until refresh',
   assert.equal(await page.evaluate('document.querySelector("#sort").value'), 'newest');
   assert.deepEqual(await cards(), [...original].reverse().slice(0, 50));
   fixture.add(3000, 900000, 'latest-arrival');
-  await page.waitFor('!document.querySelector("#updates").hidden');
-  assert.deepEqual(await cards(), [...original].reverse().slice(0, 50));
-  await click('#refresh');
+  await page.waitFor(`document.querySelector('.group-card').dataset.groupId.includes('${fixture.id(3000)}') && !document.querySelector('#refresh').disabled`);
   await ready(50);
   assert.match((await cards())[0], new RegExp(fixture.id(3000)));
   await click('[data-kind=stacks]');
@@ -151,7 +149,7 @@ test(
     await page.waitFor(
       'document.querySelectorAll("#photos .photo-card").length===1 && !document.querySelector("#apply").disabled',
     );
-    for (const id of ['select-all', 'select-none', 'split'])
+    for (const id of ['select-all', 'select-none'])
       assert.equal(await page.evaluate(`document.getElementById('${id}').hidden`), true);
     assert.equal(await page.evaluate('document.querySelector("#apply").textContent'), 'Mark reviewed');
     assert.equal(await page.evaluate('document.querySelector("#apply").classList.contains("primary")'), false);
@@ -163,7 +161,7 @@ test(
 );
 
 test(
-  'Curate preview: complete scopes, stable selections, corrections, conflict and replay',
+  'Curate preview: complete scopes, stable selections, simple controls, conflict and replay',
   { timeout: 90000 },
   async (t) => {
     if (!findChrome()) return t.skip('Chrome required');
@@ -310,33 +308,11 @@ test(
       await wait('!document.querySelector("#photo-view").open && document.querySelector("#comparison").open');
       await page.send('Emulation.clearDeviceMetricsOverride');
     });
-    await t.test('Remove from stack persists; reset is read from current correction state', async () => {
-      await click('[data-view="' + fixture.id(1) + '"]');
-      await click('#photo-remove');
-      await wait('!document.querySelector("#comparison").open && !document.querySelector("#refresh").disabled');
-      assert.equal(fixture.repo.curate.corrections().corrections.length, 1);
-      assert.equal(fixture.repo.curate.photo(fixture.id(1)).state, 'undecided');
-      await page.navigate(`${fixture.base}/curate-preview.html`);
-      await wait('document.querySelectorAll(".group-card").length===1 && !document.querySelector("#refresh").disabled');
-      await click('#corrections');
-      await wait('document.querySelector(".correction-row button")');
-      assert.match(
-        await page.evaluate('document.querySelector(".correction-row strong").textContent'),
-        /target-portrait.jpg removed from a stack of 52/,
-      );
-      await click('.correction-row button');
-      await wait('!document.querySelector("#correction-dialog").open && !document.querySelector("#refresh").disabled');
+    await t.test('stack management is absent while decisions and read-only explanations remain', async () => {
+      assert.equal(await page.evaluate('document.querySelector("#photo-remove,#split,#corrections,#correction-dialog")'), null);
+      assert.equal(await page.evaluate('document.querySelector("#stack-reason").hidden'), false);
       assert.equal(fixture.repo.curate.corrections().corrections.length, 0);
-      await click('.group-card');
-      await wait(
-        'document.querySelectorAll("#photos .photo-card").length===52 && !document.querySelector("#apply").disabled',
-      );
-      await click('#split');
-      await wait('!document.querySelector("#comparison").open && !document.querySelector("#refresh").disabled');
-      assert.equal(fixture.repo.curate.corrections().corrections[0].memberCount, 52);
-      assert.equal(fixture.repo.curate.corrections().corrections[0].action.kind, 'split');
-      await click('#undo');
-      await wait('!document.querySelector("#refresh").disabled && document.querySelectorAll(".group-card").length===1');
+      await click('[data-close=comparison]');
     });
     await t.test('a duplicated tab gets its own view; refreshes do not expire the original tab', async () => {
       const oldSaved = await page.evaluate('sessionStorage.getItem("pictaria.curate.preview")');

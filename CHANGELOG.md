@@ -13,13 +13,19 @@ All notable changes to Pictaria Server are documented here. This project follows
   beside it. Singles regain keyboard decisions, automatic advance and Undo;
   stack keepers use separate selection controls and save together. Already-kept
   references remain read-only, and uncertain responses retain exact safe retry.
+  Stacks are now just a comparison aid: Remove from stack, Split into singles and
+  Stack corrections controls are removed; existing saved corrections remain intact.
+  Background updates appear at idle boundaries while open comparisons and selected
+  batches stay fixed. Loaded pages and scroll position are preserved. One Refresh
+  button handles manual updates/recovery without automatic retries of failed searches.
+  Open comparisons clearly show unfinished checks; the More menu is aligned.
   This iteration remains at `/curate-preview.html`; AI referee integration and
   the default-page cutover are still pending. [Review flow](docs/CURATE-PREVIEW.md).
 
 - Curate Preview now tries a versioned candidate stacking algorithm: wider time
   candidates, contextual people evidence, positive ThumbHash and reciprocal
   Immich search ranks. Selective background searches are paced and cached; new
-  results appear through **Show updated stacks**, preserving the opened view.
+  results appear automatically when idle, preserving open comparisons and selections.
   Cards show waiting/checking progress and highlight ready updates. Search results
   are applied only after all required references have been checked; completed
   evidence stays cached while its view is active, preventing timed cache expiry
@@ -33,7 +39,7 @@ All notable changes to Pictaria Server are documented here. This project follows
   separate different compositions despite similar ThumbHashes. Larger hash-only
   groups get bounded verification searches; isolated missing results, failed
   checks and partial passes cannot trigger the contrast rule. Search size stays
-  at 50; opened comparisons and selections remain fixed until refresh.
+  at 50; comparisons remain fixed throughout the open comparison.
   Healthy searches now start two seconds apart (up to 30 automatic requests per
   minute), with extra delay on slow responses. Open comparisons and visible
   cards take priority; cached evidence avoids network waits. Small queued/checking
@@ -86,15 +92,15 @@ All notable changes to Pictaria Server are documented here. This project follows
   Stack membership, keeper choices and photo order inside comparisons are unchanged.
 - Added an opt-in human-only Curate comparison preview at `/curate-preview.html`:
   stable complete stacks, multiple keeper selection, explicit reviewed remainder,
-  persistent Remove from stack / Split into singles corrections, reset, conditional
-  Undo and saved-versus-synced feedback. Interrupted actions can be retried safely
+  conditional Undo and saved-versus-synced feedback. Earlier saved manual stack
+  separations remain respected; their editing controls have since been removed. Interrupted actions can be retried safely
   after a reload. This is an implementation preview, not the v1.3 default-page or
   AI cutover. Photos toggle Keep directly; large comparisons default to a compact
   grid, and the large viewer supports Keep (K), Favorite and Never show. Singles
   have simpler controls; zero-keeper saves are neutral; Undo and conflict messages
-  explain the current state. Correction history identifies the removed photo or
-  split action. Enrichment schema 15 / persistent-state contract 18 adds this
-  action history and requires checkpoint restoration for rollback. See
+  explain the current state. Enrichment schema 15 / persistent-state contract 18
+  retains earlier correction action history and requires checkpoint restoration
+  for rollback. See
   [preview scope and testing](docs/CURATE-PREVIEW.md).
 - Added coherent Curate keeper/remainder operations, exact retry receipts,
   conditional Undo and synchronization status. The existing Keep best and Undo

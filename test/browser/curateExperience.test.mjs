@@ -193,6 +193,11 @@ test(
       browser = await launchChrome(),
       page = await browser.newPage();
     fixture.add(2001, 51 * 600 + 1, 'last-stack-1'); // candidate merges with final single
+    // This test exercises navigation, not an initial metadata refresh racing Save.
+    // Material-input conflicts are covered separately; settle this fixture first.
+    for (const asset of fixture.assets) fixture.repo.curate.mergeMetadataAsset({
+      ...asset, tags: asset.id === fixture.contextId ? [{ id: 'frame/eligible', value: 'frame/eligible' }] : [],
+    });
     t.after(async () => {
       await browser.stop();
       await fixture.stop();

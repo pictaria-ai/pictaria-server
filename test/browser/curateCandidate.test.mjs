@@ -5,7 +5,7 @@ import { curatePreviewFixture } from './curatePreviewFixture.mjs';
 import { writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 
-test('hash-supported stack is searched and split only after explicit refresh, without changing an open selection',
+test('hash-supported stack updates automatically after closing, without changing an open selection',
   { timeout: 60000 }, async t => {
     if (!findChrome()) return t.skip('Chrome required');
     const fixture = await curatePreviewFixture({ stackSize: 4, singles: 0 });
@@ -31,7 +31,7 @@ test('hash-supported stack is searched and split only after explicit refresh, wi
     assert.equal(await page.evaluate('document.querySelectorAll(".group-card").length'), 1);
     assert.equal(await page.evaluate('document.querySelectorAll("#photos .selected").length'), 1);
     assert.equal(await page.evaluate('document.querySelectorAll("#photos [data-keeper]").length'), 4);
-    await click('[data-close=comparison]'); await click('#show-updates');
+    await click('[data-close=comparison]');
     await page.waitFor('document.querySelectorAll(".group-card").length===2 && !document.querySelector("#refresh").disabled');
     await click('.group-card');
     await page.waitFor('document.querySelectorAll("#photos [data-keeper]").length===2 && !document.querySelector("#apply").disabled');
@@ -76,11 +76,11 @@ test('candidate preview refines automatically, preserves selections, explains re
     assert.equal(await page.evaluate('document.querySelectorAll("#photos .selected").length'), 1);
     assert.equal(await page.evaluate('document.querySelectorAll("#photos [data-keeper]").length'), 5);
     assert.equal(await page.evaluate('document.querySelectorAll(".group-card[data-similarity=updated]").length'), 1);
-    assert.match(await page.evaluate('document.querySelector("#comparison-similarity").textContent'), /Updated grouping ready/);
-    assert.equal(await page.evaluate('document.querySelector("#show-updates").textContent'), 'Show updated stacks');
-    await click('[data-close=comparison]'); await click('#show-updates');
-    await page.waitFor('document.querySelectorAll(".group-card").length===1 && !document.querySelector("#refresh").disabled');
-    assert.equal(await page.evaluate('document.querySelector(".group-card").dataset.similarity'), 'checked');
+    assert.match(await page.evaluate('document.querySelector("#comparison-similarity").textContent'), /Updated grouping available/);
+    assert.equal(await page.evaluate('document.querySelector("#show-updates")'), null);
+    await click('[data-close=comparison]');
+    await page.waitFor('document.querySelector(".group-card[data-similarity=checked]") && !document.querySelector("#refresh").disabled');
+    assert.equal(await page.evaluate('document.querySelectorAll(".group-card").length'), 1);
     assert.equal(await page.evaluate('document.querySelector(".similarity-indicator").dataset.phase'), 'done');
     await click('#refresh');
     await page.waitFor('!document.querySelector("#refresh").disabled');

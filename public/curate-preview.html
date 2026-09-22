@@ -59,11 +59,11 @@
           </select>
         </label>
         <div class="p-grow"></div>
+        <span id="updates" class="p-muted" hidden role="status"><span id="updates-copy"></span></span>
         <button id="refresh" class="p-btn">Refresh</button>
         <details class="page-tools">
           <summary class="p-btn">More</summary>
           <div>
-            <button id="corrections" class="p-btn">Stack corrections</button>
             <a class="p-btn" href="/curate-stacking-lab.html">Stacking lab</a>
             <a class="p-btn" href="/curate.html">Production Curate</a>
           </div>
@@ -76,9 +76,6 @@
           ></label
         >
         <span id="count" class="p-muted" aria-live="polite">Loading photos…</span>
-      </div>
-      <div id="updates" class="notice" hidden role="status">
-        <span id="updates-copy"></span><button id="show-updates" class="p-btn">Show updated stacks</button>
       </div>
       <p id="metadata" class="p-muted"></p>
       <p id="refinement" class="p-muted" role="status"></p>
@@ -114,6 +111,7 @@
           <button class="p-btn" data-close="comparison">Close</button>
         </header>
         <div class="dialog-body">
+          <div id="comparison-similarity" class="check-notice" role="status" hidden></div>
           <p id="comparison-help">
             Select the photos you want to keep. The rest will be marked reviewed. Reviewed photos are not
             deleted or marked Never show.
@@ -124,7 +122,6 @@
             <ul id="stack-reasons"></ul>
           </details>
           <p id="comparison-state" class="p-muted" aria-live="polite"></p>
-          <p id="comparison-similarity" class="p-muted" role="status" hidden></p>
           <button id="metadata-retry" class="p-btn quiet" hidden>Retry photo information refresh</button>
           <div id="comparison-error" role="alert" hidden></div>
           <div id="comparison-recovery" class="notice" hidden>
@@ -141,7 +138,6 @@
             ><button id="select-none" class="p-btn">Clear selection</button>
             <div class="p-grow"></div>
             <label id="compact-label" hidden><input id="compact" type="checkbox" /> Compact grid</label>
-            <button id="split" class="p-btn">Split into singles</button>
           </div>
           <section id="photos" class="photo-grid" aria-label="Comparison photos"></section>
           <section id="context" hidden>
@@ -185,6 +181,7 @@
             <button class="p-btn" data-photo-action="reviewed">Reviewed (S)</button>
             <button class="p-btn" data-photo-action="reject">Never show (N)</button>
           </div>
+          <div id="photo-similarity" class="check-notice" role="status" hidden></div>
           <div id="stack-actions">
             <button id="photo-keep" class="p-btn" aria-pressed="false">Keep (K)</button>
             <div id="photo-secondary" class="viewer-secondary">
@@ -197,7 +194,6 @@
                   <option value="reject">Never show</option>
                 </select></label
               >
-              <button id="photo-remove" class="p-btn">Remove from stack</button>
             </div>
             <p class="p-muted">Your selection is saved when you save the stack.</p>
             <button id="back-comparison" class="p-btn">Back to comparison</button>
@@ -224,26 +220,6 @@
           </section>
           <a id="immich" class="p-btn" target="_blank" rel="noopener" hidden>Open in Immich ↗</a>
         </aside>
-      </div>
-    </dialog>
-    <dialog id="correction-dialog" aria-labelledby="correction-title">
-      <div class="dialog-frame">
-        <header class="dialog-head">
-          <h2 id="correction-title">Stack corrections</h2>
-          <button class="p-btn" data-close="correction-dialog">Close</button>
-        </header>
-        <div class="dialog-body">
-          <p>
-            These separations stay in place as your library changes. Resetting a correction allows photos to
-            group again; it doesn’t change your keeper decisions.
-          </p>
-          <div id="correction-list"></div>
-          <div id="correction-error" role="alert" hidden></div>
-          <p id="correction-recovery" class="notice" hidden>
-            The response is uncertain. Close this window and use Retry last action to continue safely.
-          </p>
-          <button id="correction-more" class="p-btn" hidden>Load more</button>
-        </div>
       </div>
     </dialog>
     <script type="module" src="/curate/page.js"></script>

@@ -169,7 +169,8 @@ still invalidate or resolve a candidate between requests.
   and after I/O; unseen remote changes cannot be guaranteed absent.
 - Failures pause automatic work without repeated retry. An explicit new view
   (Refresh, a filter change or post-action refresh) allows another attempt after
-  the shared cooldown. A busy lab search merely delays the preview.
+  the shared cooldown. Automatic idle view replacement does not clear this pause.
+  A busy lab search merely delays the preview.
 
 Cards show **Waiting for similarity check**, **Checking nearby photos · N of M**,
 or **Updated grouping ready**. Counts cover the required references for the
@@ -197,16 +198,19 @@ These are diagnostic counters, not persistent performance history or a new UI.
 
 The page summarizes checks for its own requested groups and highlights cards whose
 grouping changed. Checks that finish without changing grouping, or in an unrelated
-view, do not by themselves trigger a refresh prompt. Photo-information changes
-retain their separate refresh notice.
+view, do not by themselves request a replacement view. The single **Refresh**
+button highlights waiting updates, including changed photo information.
 
-Background evidence changes only the next grouping snapshot. **Show updated stacks**
-explicitly loads it; progress polling does not move cards, change a comparison's
-members or clear keeper selections. Polling reads at most 50 cards near the visible
-cards or open comparison, every four seconds. A newly enlarged group can make an older smaller comparison
-unsafe to save; the existing membership checks require a refresh in that case.
-Human decisions, revisions, whole-group application and Undo keep their existing
-contracts. No ranking changes human tags by itself.
+Background evidence changes only the next grouping snapshot. The grid adopts
+that snapshot automatically when browsing pauses, preserving loaded pages and a
+surviving scroll anchor. Open comparisons/lightboxes, selected batches and pending
+operations keep their current view fixed. A failed automatic update requires
+explicit Refresh and does not silently retry failed searches. Polling reads at
+most 50 cards near the visible cards or open comparison, every four seconds.
+A newly enlarged group can make an older smaller comparison unsafe to save; the
+existing membership checks require a refresh in that case. Human decisions,
+revisions, whole-group application and Undo keep their existing contracts. No
+ranking changes human tags by itself. See [preview behavior](CURATE-PREVIEW.md).
 
 **Why this stack?** shows the rules that supported the current comparison, with
 its algorithm version. If the opened view predates the applicable calculation,
@@ -246,6 +250,7 @@ and decision contract, not create a permanent second Curate pipeline.
 | `candidate-2` | 2026-09-21 | Review follow-up: retain compatible uncertainty provisionally while searches are pending, failed or missing targets; separate Group from None/One; query unresolved, nonconflicting pairs and their potential core-recovery context. Preserve complete-pass publication, original-cohort outside counts and existing thresholds. | PIC-382 / PIC-380 |
 | `candidate-3` | 2026-09-21 | Owner scene/couple counterexample: repeated contrast between reciprocal subgroups can override hash support and provisional unknown joins. Preserve bounded result-window counts; verify larger hash-only groups so contrary evidence can arrive. Keep 50 results, pacing, complete-pass publication, and the landscape recovery rule. | PIC-382 / PIC-380 |
 | `candidate-3` scheduling / status follow-up | 2026-09-22 | Two-second healthy pacing, 30 automatic requests/minute, slow-response backoff, open/visible priority, immediate cached reuse and aggregate diagnostics. Visual queued/checking/done/attention markers; grouping rules, reference selection and result depth unchanged. | PIC-382 |
+| `candidate-3` review UX follow-up | 2026-09-22 | Automatically adopt complete snapshots at idle boundaries; freeze open comparisons and selections, preserve browsing position, and retain explicit Refresh for recovery. Remove manual stack-management controls; existing saved separations remain respected. No membership-rule or search-threshold change. | PIC-384 |
 
 When membership rules, thresholds or interpretation of signals change, increment
 the implementation identifier and add a row describing the behavioral change and

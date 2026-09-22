@@ -273,7 +273,11 @@ test('failure pauses without automatic retries; explicit Refresh retries after l
   const view = await curate.openView(); await refine.tick();
   assert.equal(refine.status().state, 'paused'); assert.doesNotMatch(JSON.stringify(curate.page(view.viewId)), /private upstream/);
   advance(35000); await refine.tick(); assert.equal(calls.length, 1);
-  await curate.openView({ replacesViewId: view.viewId }); await refine.tick(); assert.equal(calls.length, 2);
+  const automatic = await curate.openView({ replacesViewId: view.viewId, retryChecks: false });
+  await refine.tick(); assert.equal(calls.length, 1);
+  assert.equal(refine.status().state, 'paused', 'automatic replacement must not restart failed searches');
+  await assert.rejects(curate.openView({ retryChecks: 'false' }), /Invalid/);
+  await curate.openView({ replacesViewId: automatic.viewId }); await refine.tick(); assert.equal(calls.length, 2);
 });
 
 test('changed cohort after I/O discards result; no unrelated IDs in retained matrix', async t => {

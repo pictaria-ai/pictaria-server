@@ -73,7 +73,7 @@ export function similarityLabel(status) {
     case 'limited': return status.total ? 'Waiting for a check slot' : 'Similarity not checked · automatic limit';
     case 'updated': return status.paused ? 'Grouping updated · similarity check paused'
       : status.checking ? 'Grouping updated · checking nearby photos'
-      : status.pending ? 'Grouping updated · checks still pending' : 'Updated grouping ready · Refresh to see';
+      : status.pending ? 'Grouping updated · checks still pending' : 'Updated grouping available';
     case 'checked': return status.uncertain ? 'Check complete · similarity uncertain' : 'Similarity checked';
     case 'local': return 'Ready · no similarity search needed';
     case 'unavailable': return 'Similarity not checked';

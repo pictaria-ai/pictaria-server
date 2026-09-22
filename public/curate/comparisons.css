@@ -355,16 +355,6 @@ dialog::backdrop {
   border-radius: 5px;
   font-size: 12px;
 }
-#correction-dialog {
-  width: min(760px, calc(100vw - 40px));
-}
-.correction-row {
-  padding: 16px 0;
-  border-bottom: 1px solid var(--p-line);
-}
-.correction-row p {
-  overflow-wrap: anywhere;
-}
 .sr-only {
   position: absolute;
   width: 1px;
@@ -532,3 +522,23 @@ dialog::backdrop {
 #photo-context-images { display: flex; flex-wrap: wrap; gap: 8px; }
 .reference-photo { border: 0; padding: 0; background: transparent; cursor: pointer; }
 .reference-photo img { display: block; width: 74px; height: 74px; object-fit: cover; border-radius: 5px; }
+
+/* More uses the same button geometry; dropdown links are aligned menu rows. */
+.page-tools summary, .card-menu summary {
+  display: flex; align-items: center; justify-content: center;
+  box-sizing: border-box; line-height: 1.2;
+}
+.page-tools summary::-webkit-details-marker, .card-menu summary::-webkit-details-marker { display: none; }
+.page-tools > div { margin-top: 4px; padding: 6px; gap: 2px; }
+.page-tools > div .p-btn {
+  display: flex; align-items: center; justify-content: flex-start;
+  padding: 9px 10px; height: auto; min-height: 36px;
+  text-decoration: none; line-height: 1.3; background: transparent; border: 0;
+}
+.page-tools > div .p-btn:hover { background: var(--p-panel-2); }
+#updates { font-size: 12px; }
+#refresh.updates-ready { border-color: var(--p-accent); color: var(--p-accent); }
+.check-notice { display: flex; align-items: center; gap: 12px; margin: 12px 0; font-size: 13px; }
+.check-notice p { margin: 4px 0 0; color: var(--p-muted); line-height: 1.5; }
+.check-notice.check-pending { padding: 12px; background: var(--p-panel-2); border: 1px solid var(--p-line); border-radius: 8px; }
+.lightbox-side .check-notice { margin: 0; }
