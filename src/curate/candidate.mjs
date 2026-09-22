@@ -2,11 +2,12 @@ import { fingerprint } from './contracts.mjs';
 import { groupPhotos } from './grouping.mjs';
 import { thumbhashDistance } from '../enrich/reviewService.mjs';
 import { recognizedIds } from './evidence.mjs';
+import { rankContrasts } from './rank-contrast.mjs';
 
 // Membership-affecting changes require a new version and a docs/CURATE-ALGORITHM.md entry.
-export const CANDIDATE_METHOD = 'candidate-2';
+export const CANDIDATE_METHOD = 'candidate-3';
 export const CANDIDATE_LIMITS = Object.freeze({ gapMs: 90_000, spanMs: 180_000,
-  photos: 40, comparisons: 600_000, hashDistance: 0.10, nearOutside: 3, moderateOutside: 8 });
+  photos: 40, comparisons: 600_000, hashDistance: 0.10, nearOutside: 3, moderateOutside: 8, farOutside: 12 });
 const small = { none: 0, one: 1, couple: 2 };
 function hash(value) {
   if (typeof value !== 'string' || !value || value.length > 88 || value.length % 4 === 1 ||
@@ -112,6 +113,13 @@ export function candidateGroups(rows, { stacks = true, separations = [], ranks =
         if (!conflict && !localSupported) { references.add(a.id); references.add(b.id); }
       }
     }
+    // Two independent subgroups need at least four compatible photos. Verify
+    // larger hash-only compositions too, or contradictory ranks never arrive.
+    // Exact renditions and pairs resolved by people/humans need no such work.
+    for (const p of members) {
+      const compatible = members.filter(q => q !== p && !at(p, q).conflict);
+      if (compatible.length >= 3 && compatible.some(q => !at(p, q).exact)) references.add(p.id);
+    }
     // Recovery against a core of >=3 can depend on directions from locally
     // supported neighbors too. Preserve that context when a candidate has at
     // least four members; querying only unsupported endpoints can miss a valid
@@ -129,6 +137,10 @@ export function candidateGroups(rows, { stacks = true, separations = [], ranks =
       pair.supported = !pair.conflict && (pair.localSupported || pair.reciprocal);
       pair.unknown = !pair.conflict && !pair.supported &&
         (!complete || outside(a, b) === null || outside(b, a) === null);
+    }
+    if (complete) for (const pair of rankContrasts(members, { pair: at, near, outside,
+      coverage: evidence.coverage ?? {}, farOutside: limits.farOutside })) {
+      pair.rankConflict = true; pair.conflict = true; pair.supported = false; pair.unknown = false;
     }
     scopes.push({ id: scopeId, ids, referenceIds, materialKeys: cohort.map(p => p.materialKey),
       needsRanks: referenceIds.length > 0 && !complete });
@@ -184,6 +196,8 @@ export function candidateGroups(rows, { stacks = true, separations = [], ranks =
       if (pairs.some(p => p.hashClose)) why.push('Close ThumbHash descriptors support visual similarity.');
       if (pairs.some(p => p.reciprocal)) why.push('Reciprocal nearby Immich search ranks support this composition.');
       if (recovered) why.push('An asymmetric search match was retained through strong support from the established core.');
+      if (g.some(p => members.some(q => q !== p && at(p, q).rankConflict)))
+        why.push('Repeated Immich searches favor separate subgroups; this contrast outweighs ThumbHash similarity and provisional joins.');
       if (g.some(p => labels.has(p.id))) why.push('Saved human separations were respected.');
       why.push('Distant ThumbHash values or missing search results alone are not evidence of a different subject.');
       emit(g, provisional ? 'candidate-unconfirmed' : g.length > 1 ? 'candidate-supported' : 'single', why);

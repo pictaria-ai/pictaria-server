@@ -42,11 +42,11 @@ export class CurateRefinement {
   snapshot() {
     this.settingsChanged(); this.expire();
     return Object.fromEntries([...this.entries].filter(([, e]) => e.complete)
-      .map(([id, e]) => [id, { rows: { ...e.rows } }]));
+      .map(([id, e]) => [id, { rows: { ...e.rows }, coverage: { ...e.coverage } }]));
   }
   admit(scope) {
     if (!scope?.needsRanks || this.entries.has(scope.id) || this.entries.size >= REFINEMENT_LIMITS.cohorts) return;
-    this.entries.set(scope.id, { ...scope, rows: Object.create(null), touchedAt: this.now(), complete: false });
+    this.entries.set(scope.id, { ...scope, rows: Object.create(null), coverage: Object.create(null), touchedAt: this.now(), complete: false });
   }
   demand(viewId, groups) {
     if (!this.enabled()) return;
@@ -169,6 +169,7 @@ export class CurateRefinement {
         // Empty successful results are a completed unknown observation, never a
         // mismatch and never an automatic reason to page/retry the search.
         entry.rows[id] = row;
+        entry.coverage[id] = { returned: result.ids.length, limit: result.limit, outside };
         entry.touchedAt = this.now();
         // Publish one complete matrix. A refreshed view must never consume a
         // mixture of queried and not-yet-queried directions from this pass.

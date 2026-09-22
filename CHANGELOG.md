@@ -15,11 +15,16 @@ All notable changes to Pictaria Server are documented here. This project follows
   are applied only after all required references have been checked; completed
   evidence stays cached while its view is active, preventing timed cache expiry
   from repeatedly splitting and rejoining an unchanged stack.
-  Candidate 2 keeps compatible uncertain photos together provisionally while
+  Compatible uncertain photos stay together provisionally while
   searches are pending, unavailable or missing results. Enrich Group separates
   from None/One (Group vs Couple remains ambiguous). Searches skip references
   that cannot resolve uncertainty or support core recovery; rank counts use the original
   time group. Completed inconclusive checks are explicitly labeled uncertain.
+  Candidate 3 uses repeated rank contrast between internally close subgroups to
+  separate different compositions despite similar ThumbHashes. Larger hash-only
+  groups get bounded verification searches; isolated missing results, failed
+  checks and partial passes cannot trigger the contrast rule. Search size stays
+  at 50; opened comparisons and selections remain fixed until refresh.
   Comparisons include **Why this stack?**, and unconfirmed time groups are labeled.
   Exact rules, bounds and change history live in [the algorithm guide](docs/CURATE-ALGORITHM.md).
   The released Curate page and AI keeper recommendations are unchanged.

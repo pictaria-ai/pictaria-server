@@ -7,6 +7,7 @@ import { Repository } from '../../src/enrich/repository.mjs';
 import { CurateService } from '../../src/curate/service.mjs';
 import { CurateSimilaritySearch } from '../../src/curate/similarity.mjs';
 import { REFINEMENT_LIMITS } from '../../src/curate/refinement.mjs';
+import { observedRanks, searchItems } from './fixtures/rankContrast.mjs';
 
 async function setup(t, { n = 3, respond, hashes = false } = {}) {
   const dir = mkdtempSync(join(tmpdir(), 'curate-candidate-'));
@@ -87,6 +88,43 @@ test('unconfigured similarity search keeps distant hashes provisionally together
   assert.equal(view.groups.length, 1);
   assert.equal(view.groups[0].memberCount, 3);
   assert.equal(view.groups[0].route, 'candidate-unconfirmed');
+});
+
+test('completed rank contrast separates hash-matched compositions, preserving the original view and bounded evidence', async t => {
+  // Only the first eight rows are observed. This ninth row is a synthetic
+  // completion with close couple peers; no private photo metadata is used.
+  const matrix = [...observedRanks.slice(0, 8), [null,null,null,null,null,null,1,2,null]];
+  const ids = Array.from({ length: 9 }, (_, i) => `p${i}`);
+  const s = await setup(t, { n: 9, respond: args => ({ assets: {
+    items: searchItems(matrix[Number(args.body.queryAssetId.slice(1))], ids),
+  } }) });
+  enrichCategories(s.repo, ['group','group','group','one','one','one','couple','couple','couple']);
+  for (const id of ids) s.repo.updateAssetVisuals(id, { thumbhash: Buffer.alloc(21, 0).toString('base64') });
+  const view = await s.curate.openView();
+  assert.deepEqual(view.groups.map(g => g.memberCount), [6,3]);
+  assert.equal(view.refinement.pending, 6);
+  const comparison = s.curate.comparison(view.viewId, view.groups[0].id);
+  for (let i = 0; i < 5; i++) {
+    await s.refine.tick(); s.advance(5000);
+    assert.deepEqual(s.refine.snapshot(), {});
+    assert.equal(s.curate.page(view.viewId).updatesAvailable, false);
+  }
+  await s.refine.tick();
+  assert.deepEqual(s.calls.map(c => c.body.queryAssetId), ['p0','p1','p2','p6','p7','p8']);
+  assert.ok(s.calls.every(c => c.body.size === 51));
+  const evidence = Object.values(s.refine.snapshot())[0];
+  assert.deepEqual(evidence.coverage.p0, { returned: 50, limit: 50, outside: 44 });
+  assert.equal(evidence.rows.p0.p6, 22, 'original nine-member scope defines outside ranks');
+  assert.doesNotMatch(JSON.stringify(evidence), /outside-|originalPath|apiKey/);
+  const old = s.curate.page(view.viewId);
+  assert.deepEqual(old.groups.map(g => g.memberCount), [6,3]);
+  assert.equal(old.refinement.ready, 1);
+  assert.equal(s.curate.comparison(view.viewId, view.groups[0].id).ids.length, 6);
+  assert.equal(comparison.ids.length, 6);
+  const refreshed = await s.curate.openView({ replacesViewId: view.viewId });
+  assert.deepEqual(refreshed.groups.map(g => g.memberCount), [3,3,3]);
+  assert.match(s.curate.comparison(refreshed.viewId, refreshed.groups[0].id).reasons.join(' '), /contrast outweighs/);
+  s.advance(5000); await s.refine.tick(); assert.equal(s.calls.length, 6);
 });
 
 test('no searches on rebuild/startup; visible preview demand admits only paced, cached requests', async t => {
@@ -295,7 +333,7 @@ test('leases decode candidate singles across restart and old projections are upg
   const next = new CurateService({ repo: s.repo, candidateOptions: { enabled: true }, metadataOptions: { automatic: false } });
   next.start = () => {}; t.after(() => next.close());
   const view = await next.openView();
-  assert.match(view.groups[0].id, /single:candidate-2:/);
+  assert.match(view.groups[0].id, /single:candidate-3:/);
   assert.equal(next.comparison(view.viewId, view.groups[0].id).ids[0], 'p0');
   assert.equal(s.repo.db.prepare("SELECT json_type(evidence_json,'$.category') type FROM curate_photos").get().type, 'object');
 });

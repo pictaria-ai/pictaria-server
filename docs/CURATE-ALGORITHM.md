@@ -1,8 +1,8 @@
 # Curate stacking algorithm
 
-**Status: candidate 2, in Curate Preview only (PIC-382 / PIC-380).** These are
+**Status: candidate 3, in Curate Preview only (PIC-382 / PIC-380).** These are
 starting rules for evaluation, not calibrated accuracy claims or the released
-Curate algorithm. The implementation identifier is `candidate-2`. The current
+Curate algorithm. The implementation identifier is `candidate-3`. The current
 `/curate.html` and its AI referee are unchanged.
 
 ## What a stack means
@@ -30,9 +30,10 @@ The optional Stack Referee and Keeper Referee remain separate future integration
 “Supported” below describes this rule's evidence, **not** an AI check or permission
 to bypass one. The preview's keeper decisions are still entirely human.
 
-## Candidate 2: precise rules
+## Candidate 3: precise rules
 
-All membership rules live in `src/curate/candidate.mjs`. They run in the existing
+Membership rules live in `src/curate/candidate.mjs`, with subgroup contrast in
+`src/curate/rank-contrast.mjs`. They run in the existing
 background grouping worker; the page renders immutable views of its output.
 
 | Stage | Rule |
@@ -44,16 +45,18 @@ background grouping worker; the page renders immutable views of its output.
 | People composition conflict | Different supported **None / One / Couple** categories; or changed nonempty recognized identity sets when each set's size agrees with its supported small Enrich category. **Group vs None/One** is also a conflict. **Group vs Couple** remains ambiguous because background people can change the category; Group is not a precise count. |
 | Recognition uncertainty | Different nonempty identity sets without that count corroboration block a ThumbHash-only match, but reciprocal ranks may support it. Recognition missing in one image, including an observed empty list, is not proof of different people. Identity lists are never claimed complete. |
 | Exact rendition support | Equal original checksums **and** compatible recorded rendition keys support grouping, within time/human constraints. An original checksum alone or an approximate Immich duplicate-group ID does not force membership. |
-| ThumbHash support | Normalized mean absolute difference of descriptor bytes **≤ 0.10** supports a pair absent people conflict/recognition uncertainty. This is the existing comparator, not a semantic embedding distance. Missing/malformed descriptors are unknown; unequal descriptor lengths do not supply close support. Larger distance alone is not a separation veto. |
+| ThumbHash support | Normalized mean absolute difference of descriptor bytes **≤ 0.10** supports a pair absent people conflict/recognition uncertainty or established subgroup rank contrast. This is the existing comparator, not a semantic embedding distance. Missing/malformed descriptors are unknown; unequal descriptor lengths do not supply close support. Larger distance alone is not a separation veto. |
 | Search support | For each direction, count photos **outside the entire original time candidate** ranked ahead of the target. Both directions with **≤ 3 outside** support a pair. An unreturned target, failed search or unqueried direction is unknown. There is no absolute similarity score. |
+| Subgroup rank contrast | After the complete pass, form separate **reciprocal-near cores of at least 2** without human/people conflicts, using the same deterministic clique ordering as normal cores. A previously single member can belong to one contrast subgroup if at least **2 and 75%** of its frozen core rank it near, it has no far outgoing relation to that core, and it conflicts with no member. Attachments never vote or anchor further attachments. Two qualifying cores are ambiguous. Require at least **2 and 75%** of each core’s reference searches to rank **every** member of the other subgroup at **12 or more outside photos ahead**, or omit it under the bounded-absence rule below. Any close cross-direction or compatible exact rendition blocks this contrast rule. Established contrast overrides ThumbHash support and prevents provisional joins and asymmetric recovery across the boundary. |
+| Bounded absence | A missing target can contribute only to the subgroup rule: the successful row must contain the **full 50 results**, with at least **12 outside-candidate results** retained. The target must already have positive membership evidence in the other reciprocal core/subgroup. Store these counts, not unrelated IDs. Failed/unqueried rows, empty/short results, unknown targets and isolated misses cannot establish this contrast. Absence is never assigned an exact rank or similarity distance. |
 | Strong separations | Human separations and the supported people conflicts above prevent grouping, including when a supplied search row is close. Do not search a pair whose separation cannot change. Uncorroborated recognition changes remain uncertainty, not a strong separation. |
 | Core grouping | Order by number of supported neighbors, then capture time/ID. Greedily form cores where every pair is supported. A–B and B–C support alone cannot establish A–B–C. |
 | Asymmetric recovery | An initially single photo may attach to exactly one **frozen core of at least 3**: at least **75%** of core members rank it within 3 outside; it ranks at least one core member within 3 outside and at least **50%** within **8 outside**. Round required counts up. No people conflict or human separation with any member, including other attachments. Attachments cannot act as further attachment anchors. Two competing cores remain ambiguous. |
-| Pending or missing evidence | Keep supported cores intact, then combine cores provisionally only when **every cross-pair is supported or unknown**. Until all required searches finish, unsupported nonconflicting pairs are unknown. Completed empty rows or absent targets also stay unknown. A distant ThumbHash alone never fragments a candidate. Strong people differences and human separations apply immediately. |
+| Pending or missing evidence | Keep supported cores intact, then combine cores provisionally only when **every cross-pair is supported or unknown**. Until all required searches finish, unsupported nonconflicting pairs are unknown. Completed empty rows or absent targets stay unknown unless the collective subgroup-contrast rule resolves the relationship. A distant ThumbHash alone never fragments a candidate. Strong people differences and human separations apply immediately. |
 | Completed evidence | Apply core grouping and asymmetric recovery using the completed pass. If an unsupported pair has both directional observations, it cannot be joined provisionally through an unknown bridge. Remaining unknown-compatible photos may still form a labeled provisional group. Separate comparisons mean insufficient support under these rules, not proof of different subjects. |
 
 These bounds intentionally do not reproduce the older foundation's out-of-window
-checksum/duplicate lookback. Candidate 2 uses one time-bounded composition scope.
+checksum/duplicate lookback. Candidate 3 uses one time-bounded composition scope.
 Scene tags, descriptions, detected-face counts, direct embeddings and AI judgments
 are not inputs in this version. The stricter **Same recognized people** lab
 checkbox remains an independent experimental rule, not the preview's policy.
@@ -75,23 +78,52 @@ The anonymized regression records outside counts (row → column):
 | 4 | 0 | 0 | 1 | — | 0 |
 | 5 | 0 | 2 | 2 | 0 | — |
 
-Candidate 2 retains all five. This is one useful acceptance example, not evidence
+Candidate 3 retains all five. This is one useful acceptance example, not evidence
 that the thresholds generalize. Synthetic bridge, recognition, human-correction
 and fallback tests cover the complementary failure cases.
+
+### Why subgroup contrast exists
+
+In a nine-photo lab comparison, the owner identified photos 1–3 as scene views
+and 7–9 as couple portraits; photos 4–6 were already separated by other evidence.
+The observed searches rank 1–3 close to each other and 7–8 close to their couple
+peers, including 9. Across those sets, targets are absent from the full top 50,
+except 1 → 7 at 22 outside photos ahead. This repeated contrast should separate
+the two sets despite a common background or close ThumbHashes.
+
+The anonymized regression preserves the **eight observed rows**. Row 9 was not
+queried in the lab screenshot and remains unqueried in that fixture. It cannot
+publish a completed pass. Separate, explicitly synthetic completions test the
+final split, including a ninth row with close peers and an empty ninth response
+whose photo still has two positive incoming witnesses. No private images, asset
+IDs or source metadata are included. The middle trio’s synthetic people evidence
+models its existing separation; it is not a claim about its real Enrich output.
+
+This complements the five-photo landscape regression above: one unevenly ranked
+member does not make two independently supported subgroups, so the existing
+recovery remains available. Human separations and exact-rendition safeguards
+remain intact.
 
 ## Automatic searches and stable views
 
 Only opening/paging a **Curate Preview** view admits automatic searches, for
 unresolved time candidates represented on the pages requested. Opening the lab,
-released Curate, or starting the server does not admit this work. Local coherent
-matches need no extra lookup. Required references are the endpoints of locally
+released Curate, or starting the server does not admit this work. Small locally
+resolved comparisons and compatible exact renditions need no extra lookup.
+Larger ThumbHash-supported compositions also need verification: admit a photo
+with at least three nonconflicting neighbors when at least one of those pairs
+is not an exact rendition match. This enables the two-subgroup contrast rule
+instead of allowing hash support to suppress the evidence that could contradict
+it. It can increase requests on larger hash-only groups, within the same bounds.
+
+Other required references are the endpoints of locally
 unsupported pairs without a human or strong people conflict. In candidates of
 four or more photos, also include nonconflicting neighbors of those endpoints:
 a locally supported neighbor can still supply a rank needed for asymmetric
 recovery against a core. This deliberately favors preserving useful recovery
 evidence over the smallest possible request count. For example, a
 landscape/solo/couple candidate already resolved by people categories needs zero
-searches. A resolved couple in a larger candidate need not be queried when only
+searches. A resolved two-photo couple in a larger candidate need not be queried when only
 the solo photos are uncertain. Filtering to just that resolved couple does not
 admit searches for the hidden solo group. Outside-rank counts still exclude the
 **entire original time candidate**, including members not queried.
@@ -116,7 +148,8 @@ still invalidate or resolve a candidate between requests.
   candidate can take several minutes. Partial coverage is never published as a
   completed grouping result.
 - The shared search cache holds at most **40 references for 10 minutes**. The
-  automatic cache retains only candidate-member positions, not unrelated photos
+  automatic cache retains only candidate-member positions and result-window
+  counts (returned, limit, outside), not unrelated photos
   or response bodies. It is memory-only; restart begins a fresh bounded pass.
 - Preview polling renews demand. After **60 seconds** without visible-page
   activity, demand stops. Expired/replaced views, stacking off, connection changes,
@@ -163,11 +196,13 @@ existing human-flow tests and verify bounded demand/cancellation, stale decision
 cache expiry, partial/failing searches and shared-lane contention.
 
 The **0.10 ThumbHash** cutoff remains an uncalibrated positive-support rule.
-Similar backgrounds can produce close descriptors for different scenes; the
-review identified this as a calibration concern, not a demonstrated real-photo
-regression. Returned distant ranks do not currently cancel that local support.
-Keep collecting real-photo wrong-merge examples before changing the cutoff or
-adding another veto.
+An owner-observed scene/couple example now supplies a concrete false-merge case.
+Candidate 2 allowed ThumbHash support or provisional missing ranks to retain
+such a grouping; the private descriptors/cache were not inspected. Candidate 3 lets repeated subgroup rank contrast outweigh that support;
+a single distant direction or an isolated omission still cannot do so. The new
+12-outside contrast threshold and subgroup requirements are explicit starting
+choices, not measured accuracy guarantees. Keep evaluating both wrong merges and
+unnecessary splits, especially in libraries with many similar scenes.
 
 The numerical limits are explicit starting choices. Owner testing, complete-server
 mixed-load/memory measurements and v1.3 rollout acceptance remain outstanding.
@@ -182,6 +217,7 @@ and decision contract, not create a permanent second Curate pipeline.
 | `candidate-1` | 2026-09-21 | First integrated preview: wider time candidates, contextual people evidence, positive ThumbHash, reciprocal ranks and bounded core recovery; paced background searches and stable views. | PIC-382, under PIC-380 |
 | `candidate-1` publication / UX follow-up | 2026-09-21 | Publish only complete search matrices, retain evidence for active views, and show per-card progress plus an explicit updated-stacks action. Fixes partial-result and timed-expiry regrouping during repeated refreshes; final membership rules and thresholds are unchanged. | PIC-382 |
 | `candidate-2` | 2026-09-21 | Review follow-up: retain compatible uncertainty provisionally while searches are pending, failed or missing targets; separate Group from None/One; query unresolved, nonconflicting pairs and their potential core-recovery context. Preserve complete-pass publication, original-cohort outside counts and existing thresholds. | PIC-382 / PIC-380 |
+| `candidate-3` | 2026-09-21 | Owner scene/couple counterexample: repeated contrast between reciprocal subgroups can override hash support and provisional unknown joins. Preserve bounded result-window counts; verify larger hash-only groups so contrary evidence can arrive. Keep 50 results, pacing, complete-pass publication, and the landscape recovery rule. | PIC-382 / PIC-380 |
 
 When membership rules, thresholds or interpretation of signals change, increment
 the implementation identifier and add a row describing the behavioral change and
