@@ -128,6 +128,7 @@ test(
       ),
       'true',
     );
+    await key('ArrowLeft'); // A keyboard mark advanced to photo 2.
     await key('f');
     assert.equal(operations(), 0);
     assert.doesNotMatch(

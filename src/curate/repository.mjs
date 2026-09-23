@@ -254,9 +254,11 @@ export class CurateRepository {
     // Bounded display projection: never expand evidence or a whole stack just
     // to paint its card. Missing source rows do not change saved membership.
     return ids.map(id => {
-      const row = this.prepare(`SELECT a.original_path,a.file_created_at,ls.short_caption,p.state FROM assets a LEFT JOIN curate_photos p ON p.asset_id=a.asset_id
+      const row = this.prepare(`SELECT a.original_path,a.file_created_at,ls.short_caption,p.state,
+        EXISTS(SELECT 1 FROM asset_tags t WHERE t.asset_id=a.asset_id AND t.tag='frame/favorite') favorite
+        FROM assets a LEFT JOIN curate_photos p ON p.asset_id=a.asset_id
         LEFT JOIN latest_success ls ON ls.asset_id=a.asset_id WHERE a.asset_id=?`).get(id);
-      return { id, filename: row?.original_path?.split('/').pop() || id, caption: row?.short_caption ?? '', capturedAt: row?.file_created_at ?? null, state: row?.state ?? 'undecided' };
+      return { id, filename: row?.original_path?.split('/').pop() || id, caption: row?.short_caption ?? '', capturedAt: row?.file_created_at ?? null, state: row?.state ?? 'undecided', favorite: Boolean(row?.favorite) };
     });
   }
   corrections(offset = 0, limit = 50) {

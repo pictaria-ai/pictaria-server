@@ -1,13 +1,14 @@
 import { CurateClient, request, decisionSummary } from './client.js';
+import { comesAfter } from './order.js';
 import { explanation } from './explanation.js';
-import { node, thumbnail, photoCard, groupCard, similarityLabel, similarityIndicator } from './photos.js';
+import { node, thumbnail, photoCard, groupCard, savedOutcome, outcomeLabel, similarityLabel, similarityIndicator } from './photos.js';
 
 const el = (id) => document.getElementById(id);
 const client = new CurateClient();
 const SORT_PREFERENCE = 'pictaria.curate.sort';
 const state = {
   section: 'pending', category: 'all', selected: new Set(), removed: new Map(),
-  viewerMode: 'stack', actionContext: null,
+  viewerMode: 'stack', actionContext: null, continuing: false,
   kind: 'all',
   search: '',
   sort: 'oldest',
@@ -77,7 +78,7 @@ function recovery() {
   el('comparison-recovery').hidden = !client.saved.pending;
   el('comparison-retry').disabled = state.busy;
   el('retry-action').disabled = state.busy;
-  const locked = state.busy || Boolean(client.saved.pending);
+  const locked = state.busy || state.continuing || Boolean(client.saved.pending);
   el('refresh').disabled = locked || state.loading;
   el('search').disabled = locked || state.loading;
   el('sort').disabled = el('category').disabled = locked || state.loading;
@@ -96,13 +97,13 @@ function selection() {
     keep = values.filter((v) => ['approve', 'favorite'].includes(v)).length;
   el('selection-count').textContent = state.comparison ? decisionSummary(state.outcomes) : '';
   el('comparison-bulk').hidden = !state.batchPhotos.size;
-  el('comparison-bulk-count').textContent = `${state.batchPhotos.size} selected`;
+  el('comparison-bulk-count').textContent = `${state.batchPhotos.size} checked`;
   el('apply').textContent = state.comparison
     ? 'Save choices'
     : state.openFailed
       ? 'Refresh to continue'
       : 'Loading comparison…';
-  el('apply').classList.toggle('primary', keep > 0);
+  el('apply-next').classList.toggle('primary', keep > 0);
   if (state.comparison?.oversized) el('apply').textContent = 'Comparison too large';
   el('apply').disabled =
     !state.comparison ||
@@ -110,6 +111,8 @@ function selection() {
     Boolean(client.saved.pending) ||
     state.comparison.oversized ||
     failedPreviews.size > 0;
+  el('apply-next').disabled = el('apply').disabled;
+  el('apply-next').hidden = state.section !== 'pending';
 }
 function closeComparison() {
   state.dialogGeneration++;
@@ -170,7 +173,7 @@ function showViewStatus(view) {
   const paused = refinement?.state === 'paused' || refinement?.state === 'limited';
   const checking = Boolean(refinement?.remainingGroups);
   const status = paused ? 'Checks paused' : checking
-    ? `Checks: ${refinement.checkedGroups}/${refinement.totalGroups}`
+    ? 'Checking stacks…'
     : metadata?.problem ? 'Photo information paused'
     : metadata?.state === 'refreshing' ? 'Refreshing photo information' : '';
   el('refinement').textContent = status;
@@ -198,10 +201,10 @@ function showComparisonSimilarity(status) {
   const detail = status?.state === 'updated'
     ? 'Your open comparison stays unchanged. Close it to see the updated grouping.'
     : ['waiting', 'checking'].includes(status?.state)
-      ? 'This stack may change after checking. You can still make your own selection.'
+      ? 'This stack may change after checking. You can still choose which photos to keep.'
       : status?.uncertain ? 'The evidence is inconclusive. You can still choose which photos to keep.'
         : ['paused', 'limited', 'unavailable'].includes(status?.state)
-          ? 'This stack has not been fully checked. You can still make your own selection.' : '';
+          ? 'This stack has not been fully checked. You can still choose which photos to keep.' : '';
   for (const id of ['comparison-similarity','photo-similarity']) {
     const target = el(id);
     target.hidden = (!title && !(state.comparison?.ids.length > 1)) || (id === 'photo-similarity' && state.viewerMode === 'single');
@@ -253,7 +256,7 @@ async function compare(group) {
   el('comparison-help').textContent =
     group.memberCount > 1
       ? 'Mark photos Yes, Skip, Fav or No, then save. Check boxes to mark several at once. Unmarked photos default to Skip.'
-      : 'Yes selects the photo; Skip marks it reviewed; Fav selects it as a favorite; No means Never show. Photos are not deleted.';
+      : 'Yes keeps the photo; Skip marks it reviewed; Fav keeps it as a favorite; No means Never show. Photos are not deleted.';
   el('select-all').hidden = el('select-none').hidden = group.memberCount < 2;
   el('compact-label').hidden = group.memberCount <= 10;
   el('compact').checked = group.memberCount > 10;
@@ -269,7 +272,8 @@ async function compare(group) {
   if (generation !== state.dialogGeneration || !el('comparison').open) return;
   state.comparison = comparison;
   showComparisonSimilarity(comparison.similarity);
-  state.outcomes = comparison.oversized ? {} : Object.fromEntries(comparison.ids.map((id) => [id, 'reviewed']));
+  state.outcomes = comparison.oversized ? {} : Object.fromEntries(comparison.photos.map(photo =>
+    [photo.id, savedOutcome(photo) || 'reviewed']));
   state.photoList = [...comparison.photos, ...comparison.context];
   el('comparison-state').textContent = comparison.oversized
     ? 'This group exceeds the 1,000-photo decision limit. Only the first 50 previews are shown; decisions are disabled. Turn off stacks in Settings to review these photos individually.'
@@ -305,6 +309,7 @@ async function compare(group) {
   );
   recovery();
   if (state.viewerMode === 'single') { el('comparison').close(); showPhoto(comparison.photos[0]); }
+  else el('photos').firstElementChild?.focus({ preventScroll: true });
 }
 function showPhoto(photo) {
   if (!photo) return;
@@ -322,8 +327,8 @@ function showPhoto(photo) {
   el('photo-context').hidden = !references.length;
   el('photo-context-images').replaceChildren(...references.map(reference => {
     const button = node('button', undefined, 'reference-photo');
-    const img = node('img'); img.src = thumbnail(reference.id); img.alt = reference.caption || 'Already selected photo';
-    button.setAttribute('aria-label', 'Inspect already selected photo');
+    const img = node('img'); img.src = thumbnail(reference.id); img.alt = reference.caption || 'Already kept photo';
+    button.setAttribute('aria-label', 'Inspect already kept photo');
     button.append(img); button.onclick = () => showPhoto(reference); return button;
   }));
   const base = state.view?.immichUrl;
@@ -360,7 +365,7 @@ function syncViewer() {
   );
   const single = state.viewerMode === 'single';
   const at = state.groups.findIndex(g => g.id === state.comparison?.groupId);
-  el('photo-position').textContent = single ? `${at + 1} of ${state.groups.length} shown cards`
+  el('photo-position').textContent = single ? `Photo · ${at + 1} of ${state.groups.length} ${state.next !== null ? 'loaded ' : ''}comparisons`
     : `${state.photoIndex + 1} of ${state.photoList.length} photos`;
   el('single-actions').hidden = !single || !actionable;
   el('stack-actions').hidden = single || !actionable;
@@ -369,7 +374,13 @@ function syncViewer() {
   el('photo-readonly').textContent = photo?.state === 'approved' ? 'Already kept · reference only' : 'Decision unavailable for this comparison';
   el('back-pending-photo').hidden = !single || actionable;
   el('photo-reason').hidden = !single || !actionable || state.section === 'decided';
-  el('photo-reasons').replaceChildren(...(state.comparison?.reasons ?? []).map(reason => node('li', reason)));
+  if (state.comparison && el('photo-reason').dataset.comparison !== state.comparison.id) {
+    el('photo-reason').dataset.comparison = state.comparison.id;
+    el('photo-reason').replaceChildren(explanation(state.comparison, 'single-reason'));
+  }
+  el('photo-outcome').textContent = single || !actionable
+    ? `Current: ${outcomeLabel(savedOutcome(photo))}`
+    : `Draft: ${outcomeLabel(state.outcomes[photo.id])} · not saved`;
   const locked = state.busy || state.loading || Boolean(client.saved.pending) || state.comparison?.oversized;
   for (const control of document.querySelectorAll('[data-stack-choice], [data-photo-action]'))
     control.disabled = locked || !actionable;
@@ -380,10 +391,12 @@ function syncViewer() {
   el('photo-keys').hidden = !actionable;
   el('photo-keys').textContent = single
     ? 'Y Yes · S Skip · F Fav · N No · Z Undo · ← → browse · Esc close. Choices save immediately.'
-    : 'Y Yes · S Skip · F Fav · N No · ← → browse · Esc returns to comparison. Save your choices there.';
+    : 'Y Yes · S Skip · F Fav · N No: mark & next. ← → browse. Esc returns to comparison. Choices are not saved until you save the stack.';
   el('photo-receipt').hidden = !state.undo;
   el('photo-receipt-text').textContent = el('receipt-text').textContent;
   el('photo-undo').disabled = locked || !state.undo;
+  for (const button of document.querySelectorAll('[data-photo-action]'))
+    button.setAttribute('aria-pressed', String(button.dataset.photoAction === savedOutcome(photo)));
   if (!actionable) return;
   const value = state.outcomes[photo.id];
   for (const button of document.querySelectorAll('[data-stack-choice]'))
@@ -450,6 +463,7 @@ async function accepted({ kind, result }) {
   // The accepted result is shown before refreshing, so a failed read cannot
   // turn a saved action into an apparent failure or a second operation.
   state.busy = false;
+  state.actionContext = null;
   if (state.view && kind === 'decision' && context?.ids && state.section === 'pending') {
     const ids = new Set(context.ids);
     const removed = state.groups.map((group,index) => ({group,index})).filter(({group}) => ids.has(group.photos[0].id));
@@ -457,7 +471,9 @@ async function accepted({ kind, result }) {
     for (const {group} of removed) { state.removed.set(group.id, group); state.selected.delete(group.id); }
     state.groups = state.groups.filter(g => !state.removed.has(g.id));
     renderGroups(); showViewStatus(state.view);
-    if (context.advance) {
+    if (context.latest) {
+      await continueReview(context.anchor);
+    } else if (context.advance) {
       if (index >= state.groups.length && state.next !== null) await more();
       if (state.groups[index]) await compare(state.groups[index]);
     }
@@ -501,15 +517,15 @@ function setControls(view) {
 }
 function bulkSelection() {
   const singles = state.groups.filter(g => g.memberCount === 1);
-  const locked = state.loading || state.busy || state.autoUpdateFailed || Boolean(client.saved.pending);
+  const locked = state.loading || state.busy || state.continuing || state.autoUpdateFailed || Boolean(client.saved.pending);
   el('bulk-label').hidden = state.section === 'pending' && state.kind === 'stacks';
-  el('bulk-label-text').textContent = state.section === 'decided' || state.kind === 'singles' ? 'Select shown photos' : 'Select single photos';
+  el('bulk-label-text').textContent = state.section === 'decided' || state.kind === 'singles' ? 'Check shown photos' : 'Check single photos';
   const count = singles.filter(g => state.selected.has(g.id)).length;
   el('select-shown').checked = count > 0 && count === singles.length;
   el('select-shown').indeterminate = count > 0 && count < singles.length;
   el('select-shown').disabled = locked || !singles.length;
   el('bulk-actions').hidden = count === 0;
-  el('bulk-count').textContent = `${count} ${count === 1 ? 'photo' : 'photos'} selected`;
+  el('bulk-count').textContent = `${count} checked`;
   for (const button of el('bulk-actions').querySelectorAll('button')) button.disabled = locked;
   for (const input of el('groups').querySelectorAll('[data-select]')) input.checked = state.selected.has(input.dataset.select);
 }
@@ -545,7 +561,7 @@ async function changeFilter(patch) {
 // or a pending receipt always owns its current snapshot.
 let updateTimer, lastInteraction = 0, lastAutomatic = 0;
 function canUpdate() {
-  return !document.hidden && !state.busy && !state.loading && !client.saved.pending &&
+  return !document.hidden && !state.busy && !state.loading && !state.continuing && !client.saved.pending &&
     !state.selected.size && !document.querySelector('dialog[open], .page-tools[open], .card-menu[open]') &&
     !document.activeElement?.matches('input:not([type=checkbox]),select,textarea,[contenteditable=true]');
 }
@@ -602,6 +618,11 @@ document.addEventListener('visibilitychange', scheduleUpdates);
 for (const menu of document.querySelectorAll('details')) menu.addEventListener('toggle', scheduleUpdates);
 for (const dialog of document.querySelectorAll('dialog')) dialog.addEventListener('close', scheduleUpdates);
 
+el('toggle-filters').onclick = () => {
+  const expanded = el('toggle-filters').getAttribute('aria-expanded') !== 'true';
+  el('toggle-filters').setAttribute('aria-expanded', String(expanded));
+  document.querySelector('.toolbar').classList.toggle('filters-expanded', expanded);
+};
 el('refresh').onclick = () => run(refresh);
 el('more').onclick = () => run(more);
 el('sort').onchange = () =>
@@ -651,7 +672,34 @@ function repaintSelection() {
   selection();
 }
 el('compact').onchange = () => el('photos').classList.toggle('compact', el('compact').checked);
-el('apply').onclick = () => run(() => action(() => client.decide(state.comparison.id, { ...state.outcomes })));
+function saveComparison(next = false) {
+  if (el('apply').disabled || !state.comparison) return;
+  const anchor = state.groups.find(g => g.id === state.comparison.groupId)?.photos[0];
+  return action(() => client.decide(state.comparison.id, { ...state.outcomes }), {
+    ids: [...state.comparison.ids], latest: next, anchor,
+  });
+}
+async function continueReview(anchor) {
+  state.continuing = true;
+  try {
+    await refresh({ automatic: true });
+    let next = anchor && state.groups.find(group => comesAfter(group, anchor, state.sort));
+    while (!next && anchor && state.next !== null) {
+      await more();
+      next = state.groups.find(group => comesAfter(group, anchor, state.sort));
+    }
+    if (next) await compare(next);
+    else el('receipt-text').textContent += ' No more photos ahead in this view.';
+  } catch (cause) {
+    // This is a read failure after an accepted save, never a failed mutation.
+    throw Error(`Choices saved. Could not open the next comparison: ${cause.message}`);
+  } finally {
+    state.continuing = false;
+    recovery();
+  }
+}
+el('apply').onclick = () => run(() => saveComparison());
+el('apply-next').onclick = () => run(() => saveComparison(true));
 el('retry-action').onclick = () =>
   run(async () => {
     if (state.busy) return;
@@ -707,7 +755,7 @@ el('retry-sync').onclick = () =>
   });
 el('photo-prev').onclick = () => run(() => stepPhoto(-1));
 el('photo-next').onclick = () => run(() => stepPhoto(1));
-el('back-comparison').onclick = () => el('photo-view').close();
+el('back-comparison').onclick = backToComparison;
 el('back-pending-photo').onclick = () => showPhoto(state.comparison?.photos[0]);
 el('photo-undo').onclick = () => el('undo').click();
 el('photo-retry').onclick = () => el('retry-action').click();
@@ -732,30 +780,55 @@ el('comparison').addEventListener('close', () => {
   // A queued close event may arrive after a new comparison has opened.
   if (!el('comparison').open && state.viewerMode !== 'single') state.dialogGeneration++;
 });
+function backToComparison() {
+  el('photo-view').close();
+  el('photos').children[state.photoIndex]?.focus({ preventScroll: true });
+}
+function markAndAdvance(outcome) {
+  const photo = state.photoList[state.photoIndex];
+  if (!photo || !Object.hasOwn(state.outcomes, photo.id) || el('photo-keep').disabled) return;
+  setOutcome(photo.id, outcome);
+  const next = state.comparison.photos[state.photoIndex + 1];
+  if (next) showPhoto(next);
+  else backToComparison(); // Never save implicitly or advance into kept context.
+}
 document.addEventListener('keydown', (event) => {
-  if (!el('photo-view').open || event.target.closest('input,select,textarea,[contenteditable=true]')) return;
-  if (event.ctrlKey || event.metaKey || event.altKey || event.repeat) return;
+  if (event.target.closest('input,select,textarea,[contenteditable=true],.why-tooltip')) return;
+  if (event.ctrlKey || event.metaKey || event.altKey || event.repeat || state.busy || state.loading || client.saved.pending) return;
   const key = event.key.toLowerCase();
-  if (key === 'z' && state.undo && !el('photo-undo').disabled) { event.preventDefault(); el('photo-undo').click(); return; }
   const outcome = {y:'approve',a:'approve',f:'favorite',s:'reviewed',v:'reviewed',n:'reject',r:'reject'}[key];
-  if (outcome) {
-    event.preventDefault();
-    if (state.viewerMode === 'single') run(() => decideSingle(outcome));
-    else if (state.photoList[state.photoIndex]) setOutcome(state.photoList[state.photoIndex].id, outcome);
+  if (el('photo-view').open) {
+    if (key === 'z' && state.undo && !el('photo-undo').disabled) { event.preventDefault(); el('photo-undo').click(); return; }
+    if (outcome) {
+      event.preventDefault();
+      if (state.viewerMode === 'single') run(() => decideSingle(outcome));
+      else markAndAdvance(outcome);
+      return;
+    }
+    if (key === 'k' && !el('photo-keep').hidden && !el('photo-keep').disabled) {
+      event.preventDefault();
+      const id = state.photoList[state.photoIndex]?.id;
+      if (id) markAndAdvance(['approve', 'favorite'].includes(state.outcomes[id]) ? 'reviewed' : 'approve');
+    }
+    if (key === 'arrowright' && !el('photo-next').disabled) { event.preventDefault(); el('photo-next').click(); }
+    if (key === 'arrowleft' && !el('photo-prev').disabled) { event.preventDefault(); el('photo-prev').click(); }
     return;
   }
-  if (event.key.toLowerCase() === 'k' && !el('photo-keep').hidden && !el('photo-keep').disabled) {
-    event.preventDefault();
-    const id = state.photoList[state.photoIndex]?.id;
-    if (id) setOutcome(id, ['approve', 'favorite'].includes(state.outcomes[id]) ? 'reviewed' : 'approve');
+  if (!el('comparison').open || !state.comparison || state.comparison.oversized) return;
+  const photos = [...el('photos').children];
+  const focused = event.target.closest('#photos .photo-card');
+  const index = photos.indexOf(focused);
+  if (/^[1-9]$/.test(key) && photos[Number(key)-1]) {
+    event.preventDefault(); photos[Number(key)-1].focus(); return;
   }
-  if (event.key === 'ArrowRight' && !el('photo-next').disabled) {
-    event.preventDefault();
-    el('photo-next').click();
-  }
-  if (event.key === 'ArrowLeft' && !el('photo-prev').disabled) {
-    event.preventDefault();
-    el('photo-prev').click();
+  if (!focused) return;
+  if (outcome) { event.preventDefault(); setOutcome(focused.dataset.photoId, outcome); }
+  else if (['arrowleft','arrowright'].includes(key)) {
+    event.preventDefault(); photos[index + (key === 'arrowleft' ? -1 : 1)]?.focus();
+  } else if (key === 'enter' && event.target === focused) {
+    // Enter on an image/button retains its native behavior; only the explicitly
+    // focused photo card invokes the documented save-and-next shortcut.
+    event.preventDefault(); run(() => saveComparison(true));
   }
 });
 window.addEventListener('pagehide', () => client.channel?.close());

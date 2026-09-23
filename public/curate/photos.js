@@ -7,11 +7,17 @@ export function node(tag, text, className) {
 export const thumbnail = (id) => `/api/review/thumbnail/${encodeURIComponent(id)}`;
 
 export const choices = [
-  ['approve', 'Yes', 'Include in selected photos'],
-  ['reviewed', 'Skip', 'Mark reviewed without selecting'],
-  ['favorite', 'Fav', 'Select as a favorite'],
+  ['approve', 'Yes', 'Keep for display'],
+  ['reviewed', 'Skip', 'Mark reviewed without keeping'],
+  ['favorite', 'Fav', 'Keep as a favorite'],
   ['reject', 'No', 'Never show'],
 ];
+export function savedOutcome(photo) {
+  return photo?.state === 'approved' ? (photo.favorite || photo.tags?.includes('frame/favorite') ? 'favorite' : 'approve')
+    : { reviewed: 'reviewed', rejected: 'reject' }[photo?.state] ?? null;
+}
+export const outcomeLabel = (value) => choices.find(([key]) => key === value)?.[1] ?? 'Not decided';
+
 export function photoCard(
   photo,
   { readOnly = false, label = 'Photo', outcome = () => 'reviewed', change, open,
@@ -19,6 +25,8 @@ export function photoCard(
 ) {
   const card = node('article', undefined, 'photo-card');
   card.dataset.photoId = photo.id;
+  card.tabIndex = readOnly ? -1 : 0;
+  card.setAttribute('aria-label', label);
   const imageButton = node('button', undefined, 'photo-image');
   imageButton.type = 'button';
   const img = node('img');
@@ -30,11 +38,11 @@ export function photoCard(
   const info = node('div', undefined, 'photo-info');
   let checkbox;
   if (readOnly) {
-    imageButton.append(node('span', 'Already selected', 'photo-outcome'));
+    imageButton.append(node('span', 'Already kept', 'photo-outcome'));
   } else {
     const selection = node('label', undefined, 'photo-selection');
     checkbox = node('input'); checkbox.type = 'checkbox'; checkbox.dataset.compareSelect = photo.id;
-    checkbox.setAttribute('aria-label', `Select ${label}`);
+    checkbox.setAttribute('aria-label', `Check ${label}`);
     checkbox.onchange = () => select?.(checkbox.checked);
     selection.append(checkbox); card.append(selection);
     const actions = node('div', undefined, 'photo-choices');
@@ -46,7 +54,7 @@ export function photoCard(
       button.onclick = () => change(value);
       actions.append(button);
     }
-    info.append(actions);
+    info.append(node('small', label, 'photo-label'), actions, node('small', '', 'draft-outcome'));
   }
   const imageError = node('span', 'Preview unavailable. Try opening it in Immich.', 'p-muted');
   imageError.hidden = true;
@@ -55,6 +63,7 @@ export function photoCard(
   info.append(imageError);
   card.syncSelection = () => {
     if (readOnly) return;
+    info.querySelector('.draft-outcome').textContent = `Draft: ${outcomeLabel(outcome())}`;
     for (const button of info.querySelectorAll('[data-choice]'))
       button.setAttribute('aria-pressed', String(button.dataset.choice === outcome()));
     card.classList.toggle('selected', ['approve', 'favorite'].includes(outcome()));
@@ -109,26 +118,34 @@ export function groupCard(group, open, { decide, select, selected = false, decid
   cover.append(img, chip, marker);
   const caption = node('div', undefined, 'group-caption');
   if (photo.caption) caption.append(node('span', photo.caption, 'photo-caption'));
-  if (photo.capturedAt) caption.append(node('small', new Date(photo.capturedAt).toLocaleDateString()));
+  if (photo.capturedAt) caption.append(node('small', new Date(photo.capturedAt).toLocaleString([], { dateStyle: 'medium', timeStyle: 'short' })));
   const status = node('small', undefined, 'similarity-status');
   caption.append(status);
   const actions = node('div', undefined, 'card-actions');
   if (group.memberCount > 1) {
     card.classList.add('is-stack');
+    const strip = node('button', undefined, 'stack-strip');
+    strip.type = 'button'; strip.setAttribute('aria-label', `Compare ${group.memberCount} photos`);
+    for (const member of group.photos.slice(0, 3)) {
+      const preview = node('img'); preview.src = thumbnail(member.id); preview.alt = ''; preview.loading = 'lazy';
+      strip.append(preview);
+    }
+    if (group.memberCount > 3) strip.append(node('span', `+${group.memberCount - 3}`));
+    strip.onclick = event => { event.stopPropagation(); open(group); }; caption.prepend(strip);
   } else {
     for (const [value,text,title] of choices) {
-      const button = node('button', text, `p-btn${value === 'approve' ? ' primary' : value === 'favorite' ? ' gold' : value === 'reject' ? ' danger' : ''}`);
+      const button = node('button', text, `p-btn${value === 'favorite' ? ' gold' : value === 'reject' ? ' danger' : ''}`);
       button.dataset.quick = value; button.title = title; button.onclick = () => decide?.(group,value); actions.append(button);
     }
     const selection = node('label',undefined,'card-selection'), check = node('input');
     check.type = 'checkbox'; check.checked = selected; check.dataset.select = group.id;
-    check.setAttribute('aria-label',`Select ${photo.caption || label}`);
+    check.setAttribute('aria-label',`Check ${photo.caption || label}`);
     check.onchange = () => select?.(group,check.checked); selection.append(check); card.append(selection);
   }
   if (actions.childElementCount) caption.append(actions);
   card.updateSimilarity = (value) => {
     if (decided) {
-      chip.textContent = {approved:photo.tags?.includes('frame/favorite') ? 'Fav' : 'Yes',reviewed:'Skip',rejected:'No'}[photo.state] || 'Decided';
+      chip.textContent = outcomeLabel(savedOutcome(photo));
       status.hidden = true; return;
     }
     group.similarity = value;
@@ -136,7 +153,9 @@ export function groupCard(group, open, { decide, select, selected = false, decid
       : group.route === 'manual-budget' ? { state: 'limited' }
       : ['candidate-supported', 'single'].includes(group.route) ? { state: 'local' } : null;
     chip.textContent = group.memberCount > 1 ? `${group.memberCount} photos` : 'Single photo';
-    const label = similarityLabel(value), indicator = similarityIndicator(value);
+    const label = similarityLabel(value);
+    let indicator = similarityIndicator(value);
+    if (indicator?.dataset.phase === 'done') indicator = null;
     if (status.textContent !== label) status.textContent = label;
     status.hidden = !label || ['local','checked'].includes(value?.state) && !value?.uncertain;
     if (marker.firstChild?.title !== indicator?.title || marker.firstChild?.dataset.phase !== indicator?.dataset.phase)

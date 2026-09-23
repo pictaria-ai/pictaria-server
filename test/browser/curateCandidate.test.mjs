@@ -45,7 +45,7 @@ test('hash-supported stack updates automatically after closing, without changing
     await click('.group-card');
     await page.waitFor('document.querySelectorAll("#photos [data-keeper]").length===2 && !document.querySelector("#apply").disabled');
     await click('#comparison-similarity .why-trigger');
-    assert.match(await page.evaluate('document.querySelector("#stack-reasons").textContent'), /contrast outweighs/);
+    assert.match(await page.evaluate('document.querySelector("#stack-reasons").textContent'), /distinguish this group/);
     assert.equal(await page.evaluate('document.querySelector("#error").hidden'), true);
   });
 
@@ -79,7 +79,7 @@ test('candidate preview refines automatically, preserves selections, explains re
     await page.waitFor('document.querySelector(".group-card[data-similarity=checking]")');
     assert.equal(await page.evaluate('document.querySelector(".group-card .similarity-indicator").dataset.phase'), 'checking');
     assert.match(await page.evaluate('document.querySelector(".group-card .similarity-indicator").getAttribute("aria-label")'), /Checking/);
-    assert.match(await page.evaluate('document.querySelector("#refinement").textContent'), /Checks: \d+\/\d+/);
+    assert.match(await page.evaluate('document.querySelector("#refinement").textContent'), /Checking stacks/);
     await click('#refresh');
     await page.waitFor('!document.querySelector("#refresh").disabled');
     assert.equal(await page.evaluate('document.querySelectorAll(".group-card").length'), 1, 'partial checks do not regroup on Refresh');
@@ -99,14 +99,14 @@ test('candidate preview refines automatically, preserves selections, explains re
     await click('[data-close=comparison]');
     await page.waitFor('document.querySelector(".group-card[data-similarity=checked]") && !document.querySelector("#refresh").disabled');
     assert.equal(await page.evaluate('document.querySelectorAll(".group-card").length'), 1);
-    assert.equal(await page.evaluate('document.querySelector(".group-card .similarity-indicator").dataset.phase'), 'done');
+    assert.equal(await page.evaluate('document.querySelector(".group-card .similarity-indicator")'), null);
     await click('#refresh');
     await page.waitFor('!document.querySelector("#refresh").disabled');
     assert.equal(await page.evaluate('document.querySelectorAll(".group-card").length'), 1);
     await click('.group-card'); await page.waitFor('document.querySelectorAll("#photos [data-keeper]").length===5');
     await click('#comparison-similarity .why-trigger');
     assert.match(await page.evaluate('document.querySelector("#stack-reason").textContent'), /Candidate algorithm 3/);
-    assert.match(await page.evaluate('document.querySelector("#stack-reasons").textContent'), /established core/);
+    assert.match(await page.evaluate('document.querySelector("#stack-reasons").textContent'), /several photos support/);
     await click(`[data-keeper="${fixture.id(1)}"]`); await click(`[data-keeper="${fixture.id(3)}"]`);
     await click('#apply');
     await page.waitFor('!document.querySelector("#receipt").hidden && !document.querySelector("#undo").hidden && !document.querySelector("#undo").disabled && !document.querySelector("#refresh").disabled');
@@ -162,7 +162,7 @@ test('background status markers and inline progress remain stable on desktop and
       return Math.abs(count.top - status.top) < 2 && Math.abs((spinner.top+spinner.bottom)/2 - (refresh.top+refresh.bottom)/2) < 2;
     })()`), true);
 
-    assert.match(await page.evaluate('document.querySelector(".similarity-indicator[data-phase=done]").title'), /no similarity search needed/);
+    assert.equal(await page.evaluate('document.querySelector("#groups .similarity-indicator[data-phase=done]")'), null);
     if (process.env.PICTARIA_TEST_SCREENSHOTS) {
       const { data } = await page.send('Page.captureScreenshot', { format: 'png' });
       writeFileSync(join(process.env.PICTARIA_TEST_SCREENSHOTS, 'curate-checking-desktop.png'), Buffer.from(data, 'base64'));

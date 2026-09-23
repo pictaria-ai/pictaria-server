@@ -1,7 +1,7 @@
 main {
   max-width: 1500px;
   margin: auto;
-  padding: 26px 24px 70px;
+  padding: 26px 24px 140px;
 }
 h1 {
   margin: 0;
@@ -272,7 +272,7 @@ dialog::backdrop {
 }
 .photo-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 360px), 1fr));
   gap: 16px;
   align-items: start;
 }
@@ -291,12 +291,13 @@ dialog::backdrop {
   width: 100%;
   padding: 0;
   border: 0;
-  background: #101318;
+  background: transparent;
 }
 .photo-image img {
   display: block;
   width: 100%;
-  height: 320px;
+  height: auto;
+  max-height: 42dvh;
   object-fit: contain;
 }
 .photo-outcome {
@@ -335,11 +336,12 @@ dialog::backdrop {
   min-height: 44px;
 }
 .photo-grid.compact {
-  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 220px), 1fr));
   gap: 12px;
 }
 .photo-grid.compact .photo-image img {
-  height: 220px;
+  height: auto;
+  max-height: 34dvh;
 }
 #compact-label {
   display: flex;
@@ -497,7 +499,6 @@ dialog::backdrop {
 .page-tools summary, .card-menu summary { list-style: none; cursor: pointer; }
 .page-tools > div { position: absolute; z-index: 3; right: 0; display: grid; gap: 6px; width: 180px; padding: 10px; background: var(--p-panel); border: 1px solid var(--p-line); border-radius: 8px; box-shadow: var(--p-shadow); }
 #bulk-label { display: flex; gap: 8px; align-items: center; font-size: 13px; }
-#bulk-actions { position: sticky; top: 8px; z-index: 4; }
 .group-card { position: relative; overflow: visible; display: flex; flex-direction: column; }
 .group-card .cover { padding: 0; border: 0; width: 100%; overflow: hidden; border-radius: 11px 11px 0 0; display: block; }
 .group-card .cover:focus-visible { outline: 3px solid var(--p-accent); outline-offset: -3px; }
@@ -539,7 +540,7 @@ dialog::backdrop {
 #comparison-help { margin-bottom: 8px; font-size: 13px; }
 #photo-position, #photo-date { font-size: 12px; }
 @media (max-width: 760px) {
-  main { padding: 20px 12px 50px; }
+  main { padding: 20px 12px 170px; }
   .group-grid { grid-template-columns: repeat(auto-fill,minmax(200px,1fr)); gap: 14px; }
   .toolbar { gap: 8px; }
   .search-label { flex: 1 1 180px; }
@@ -601,4 +602,44 @@ dialog::backdrop {
 .why-content p { font-size: 11px; }
 @media (max-width: 600px) {
   .photo-grid.compact .photo-choices { grid-template-columns: repeat(2,minmax(0,1fr)); }
+}
+
+/* Review polish: keep controls compact and give the photos the space. */
+.secondary-filters { display: flex; align-items: center; flex-wrap: wrap; gap: 12px; }
+#toggle-filters { display: none; }
+#bulk-actions {
+  position: fixed; z-index: 5; bottom: max(12px, env(safe-area-inset-bottom));
+  left: 50%; transform: translateX(-50%); width: max-content;
+  max-width: calc(100vw - 24px); box-sizing: border-box; margin: 0;
+  justify-content: center; box-shadow: var(--p-shadow);
+}
+.stack-strip { display: flex; gap: 5px; align-items: stretch; width: 100%; padding: 0; border: 0; background: transparent; color: inherit; }
+.stack-strip img { width: 0; flex: 1; height: 50px; object-fit: cover; border-radius: 4px; }
+.stack-strip span { display: grid; place-items: center; font-size: 12px; min-width: 28px; }
+.photo-card:focus-visible, .photo-card:focus-within { outline: 3px solid var(--p-accent); outline-offset: 2px; }
+.photo-label, .draft-outcome { display: block; color: var(--p-muted); font-size: 11px; margin: 3px 0 6px; }
+.draft-outcome { margin: 7px 0 0; }
+.comparison-keys { font-size: 11px; margin: 0 0 12px; }
+.save-actions { display: flex; gap: 8px; flex-shrink: 0; }
+#photo-outcome { font-size: 14px; font-weight: 600; }
+[data-photo-action][aria-pressed=true] { border-color: var(--p-muted); box-shadow: inset 0 0 0 1px currentColor; }
+.why-details { font-size: 11px; color: var(--p-muted); margin-top: 10px; }
+.why-details summary { cursor: pointer; }
+@media (max-width: 760px) {
+  .heading p { font-size: 13px; }
+  .toolbar { margin: 12px 0 8px; }
+  .toolbar > .p-grow { display: none; }
+  #filters { width: 100%; }
+  #toggle-filters { display: inline-flex; align-items: center; justify-content: center; }
+  .refresh-tools { margin-left: auto; gap: 8px; }
+  .secondary-filters { display: none; order: 2; width: 100%; gap: 8px; }
+  .filters-expanded .secondary-filters { display: flex; }
+  .secondary-filters .search-label { flex: 1 1 100%; }
+  #updates { order: 3; }
+  #bulk-actions { gap: 7px; padding: 10px; }
+  #bulk-count { width: 100%; text-align: center; }
+  #bulk-actions .p-btn { padding: 7px 10px; }
+  .dialog-foot { flex-wrap: wrap; gap: 8px; padding: 12px; }
+  .dialog-foot .save-actions { margin-left: auto; }
+  .comparison-keys { display: none; }
 }

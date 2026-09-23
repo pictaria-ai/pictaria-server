@@ -42,6 +42,7 @@ test(
     await key('y');
     assert.equal(fixture.repo.db.prepare('SELECT COUNT(*) n FROM decision_operations').get().n, 0);
     assert.equal(await page.evaluate('document.querySelectorAll("#photos [data-keeper][aria-pressed=true]").length'), 1); // Y changes only the draft
+    await key('ArrowLeft'); // Y advanced; browse back before changing that draft.
     await key('s');
     assert.equal(await page.evaluate('document.querySelectorAll("#photos [data-keeper][aria-pressed=true]").length'), 0);
     await click('#back-comparison');
@@ -99,7 +100,7 @@ test(
     await click('#select-shown');
     assert.equal(
       await page.evaluate('document.querySelector("#bulk-count").textContent'),
-      '2 photos selected',
+      '2 checked',
     );
     await click('[data-bulk=reviewed]');
     await wait(
@@ -118,6 +119,9 @@ test(
     assert.equal(await page.evaluate('document.querySelectorAll(".group-card").length'), 2);
     await click(`.group-card[data-group-id="single:decided:${fixture.id(1001)}"] .cover`);
     await wait(`document.querySelector('#photo-view').open && ${photo(1001)}`);
+    assert.equal(await page.evaluate('document.querySelector("#photo-outcome").textContent'), 'Current: Fav');
+    assert.equal(await page.evaluate(`document.querySelector('.group-card[data-group-id="single:decided:${fixture.id(1001)}"] .p-chip').textContent`), 'Fav');
+    assert.equal(await page.evaluate('document.querySelector("[data-photo-action=approve]").classList.contains("primary")'), false);
     await key('n');
     await wait(
       `${photo(1001)} && !document.querySelector('[data-photo-action=approve]').disabled && document.querySelector('.group-card[data-group-id="single:decided:${fixture.id(1001)}"] .p-chip').textContent==='No'`,

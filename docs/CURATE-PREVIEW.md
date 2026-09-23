@@ -15,7 +15,9 @@ ranks. Repeated searches that strongly favor two separate subgroups can now
 override a misleading ThumbHash match. The linked document owns exact rules,
 bounds and version history. Open
 **Why?** beside the similarity status for a concise explanation. It appears on
-hover, keyboard focus or tap without moving the photos.
+hover, keyboard focus or tap without moving the photos. Its initial text uses
+plain language grounded in recorded reasons; technical details are secondary.
+The single-photo lightbox uses the same overlay.
 
 The current `/curate.html` remains the default during this staging step. The
 preview now includes **Pending** and **Decided**; **More → Production Curate**
@@ -31,25 +33,29 @@ in this preview, its proposed partitions are never saved.
 
 ## Review flow
 
+On narrow screens, **Filters** reveals search, date order and category controls.
+Desktop keeps these visible. The remembered sort is not changed by collapsing them.
+
 - **Pending** shows all pending photos by default. All, Stacks and Singles
   filter the same view. **All categories** can narrow it to the existing Enrich
   review categories (Candidates, Should Review and Unlikely, or customized labels).
   A mixed stack belongs to its highest-priority member category, as in production;
   filtering or matching one member in search always retains the **whole** stack.
-- **Decided** shows individual photos with earlier human choices, with search
-  and date order. Open a photo or use its card actions to change that choice.
+- **Decided** shows individual photos with earlier human choices (including Fav), with search
+  and date order. The lightbox labels the saved **Current** outcome separately from
+  stack **Draft** choices; Yes is never filled by default. Open a photo or use its card actions to change that choice.
   A newer concurrent decision invalidates the old action scope; it cannot be
   silently overwritten. Background checks continue for pending photos while you browse Decided.
-- Cards show a cover, available caption, date and stack size. Filenames are omitted.
-  **Yes / Skip / Fav / No** are direct actions for single photos: Yes selects a
-  photo, Skip marks it reviewed without selecting it, Fav selects it as a favorite,
+- Cards show a cover, up to three member thumbnails, available caption, capture date/time and stack size. Filenames are omitted.
+  **Yes / Skip / Fav / No** are direct actions for single photos: Yes keeps a
+  photo, Skip marks it reviewed without keeping it, Fav keeps it as a favorite,
   and No marks it Never show. None of these deletes the photo. Click the image for
   large inspection; a stack opens its comparison directly, without a separate
   Compare button. The shared Settings gear
   opens the Curate section, without a second settings button on the page.
-- **Select single photos** selects the singles currently loaded, excluding stacks.
-  In Singles and Decided it reads **Select shown photos**; Stacks hides it.
-  Loading more does not add photos to the selection. Selected singles expose the same
+- **Check single photos** checks the singles currently loaded, excluding stacks.
+  In Singles and Decided it reads **Check shown photos**; Stacks hides it.
+  Loading more does not check additional photos. The fixed bottom action bar does not move the grid. Checked singles expose the same
   **Yes / Skip / Fav / No** actions in one undoable operation
   (up to 1,000 photos). The server verifies these are still single photos at both
   operation creation and save; a regrouped photo requires a refresh.
@@ -62,14 +68,25 @@ in this preview, its proposed partitions are never saved.
   appear automatically when browsing pauses, preserving date order and your place.
   Open comparisons and bulk selections keep their current view.
 - Open a stack and use **Yes / Skip / Fav / No** beneath each photo. Click an
-  image to enlarge it. These choices remain a draft until **Save choices**; the
+  image to enlarge it. These choices remain a draft until **Save choices** or **Save & next**; the
   footer counts each outcome separately. Unmarked photos default to Skip, which
   is neither deletion nor Never show. Saves with no Yes or Fav choices are neutral.
-- Stack checkboxes select photos for batch actions independently of their outcome.
-  **Select all** checks all actionable photos; it does not mark them Yes. When any
-  photos are checked, the same four choices appear beside the selection count.
-  Applying one changes only those photos; **Clear selection** clears the checkboxes
-  without undoing any draft choices. Nearby reference photos cannot be selected.
+- Stack checkboxes check photos for batch actions independently of their outcome.
+  **Check all** checks all actionable photos; it does not mark them Yes. When any
+  photos are checked, the same four choices appear beside the checked count.
+  Applying one changes only those photos; **Clear checks** clears the checkboxes
+  without undoing any draft choices. Nearby reference photos cannot be checked.
+- **Save choices** returns to the grid. **Save & next** opens the next pending
+  comparison after this item's capture-time position, in the current filters and
+  date order. It opens a fresh view after the save, so the next comparison uses
+  the latest grouping, and loads more pages when needed. It does not wrap to
+  earlier items. An accepted save remains saved if opening the next item fails;
+  Refresh and Undo remain available. Undo after continuation refreshes the grid.
+- In a comparison, focus a photo using **Left/Right** or **1–9**, then use
+  **Y / S / F / N** to mark its draft outcome. **Enter** on the focused card
+  saves the comparison and continues; Enter on a button or image retains its
+  normal action. Modified/repeated keys, inputs, reference photos and uncertain
+  actions cannot invoke these shortcuts.
 - Comparisons with more than ten photos open in a compact grid; **Compact grid**
   can be turned off for larger images.
 - The lightbox follows the production layout: the photo fills the available
@@ -84,9 +101,10 @@ in this preview, its proposed partitions are never saved.
   closes the viewer. Decided edits stay on the same photo for inspection. Modified/repeated keystrokes and typing in fields do not
   trigger decisions. A lost response holds the current photo and offers exact retry.
 - In a **stack lightbox**, the same four buttons and **Y / S / F / N** keys change
-  the draft choice; arrows browse members. **K** also toggles Yes/Skip for existing
-  keyboard users. Escape or Back to comparison returns to that draft. No shortcut
-  saves an individual stack member; use **Save choices** for the whole comparison.
+  the draft choice. Keyboard marks advance to the next actionable photo; marking
+  the last returns to the comparison without saving. Mouse buttons stay on the
+  current photo. Arrows browse, and **K** toggles Yes/Skip and advances. Escape
+  or Back to comparison returns to the draft. Save the complete comparison explicitly.
 - Already-kept nearby photos are bounded reference context. They have no decision
   controls and are excluded from every outcome payload. Singles expose
   these references as sidebar thumbnails, with a return button to the pending photo.
@@ -109,12 +127,12 @@ in this preview, its proposed partitions are never saved.
 **Load more** only displays additional results; it is no longer needed to get
 those photos checked. The count distinguishes stacks and single photos. A small
 spinner beside **Refresh** indicates background activity across the pending queue;
-**Checks: N/M** appears beside the count without shifting the photo grid. Paused
-work has an attention indicator. The counts describe nearby time groups being
-checked, which can become several final stacks or singles.
+**Checking stacks…** appears beside the count without shifting the photo grid. Paused
+work has an attention indicator. Completed checks are quiet on cards; the
+comparison still exposes their status and explanation.
 
 Cards have a small status circle: a muted spinner while queued, a blue spinner
-while checking, a green check when ready, and an amber attention marker when
+while checking and an amber attention marker when
 paused, limited, unavailable or still uncertain. Text labels explain each state;
 reduced-motion preferences stop the animation. Comparisons resolved locally say
 that no similarity search is needed. The open comparison and stack lightbox put the status near the top. Pending,
@@ -237,3 +255,11 @@ selection; it never applies a bulk keeper choice to stacks.
 Full production mixed-load/incremental-memory gates, 30k repeated browser workflow
 acceptance, operational migration/cutover and owner visual review remain required
 before v1.3 release. Local fixture/browser tests do not establish those gates.
+
+### Keeper-advice follow-up (PIC-116)
+
+This iteration remains human-only. When keeper advice is integrated, show the
+recommendation distinctly and initialize only untouched drafts. Never overwrite
+a human choice. Applicability follows the recorded check/policy state, including
+the approved provider image-limit exception for clearly labeled unchecked-size
+suggestions; it must not become a blanket requirement for a green check.

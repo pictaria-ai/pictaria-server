@@ -189,11 +189,11 @@ provisional; failed searches are explicitly paused. Successful searches that
 leave membership uncertain say **Check complete · similarity uncertain**, retain
 the provisional grouping, and do not automatically retry or fragment it. An
 unconfigured or unavailable search service also leaves time groups provisional.
-Photo cards and the open comparison also show a small status indicator: muted
-spinner for queued work, blue spinner while checking, green check for completed
-supported work or ready updates, and amber for paused, limited or inconclusive
-checks. Locally resolved cards say no search is needed; unconfigured checks are
-not shown as completed. Text/accessible labels accompany color and animation;
+Photo cards show a muted spinner for queued work, a blue spinner while checking,
+and an amber indicator for paused, limited or inconclusive checks. Completed
+supported work is quiet on cards. The open comparison retains the complete
+status and explanation, including when no search was needed; unconfigured checks
+are not shown as completed. Text/accessible labels accompany color and animation;
 reduced-motion preferences disable spinning. Updated views with pending checks
 keep a pending indicator, rather than claiming completion.
 

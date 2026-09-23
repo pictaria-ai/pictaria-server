@@ -587,6 +587,20 @@ test('equal capture dates and unknown dates have deterministic order in both dir
     assert.deepEqual(ids(await service.openView({sort: 'newest'})), ['b', 'a', 'y', 'z']);
   }));
 
+test('grid previews are bounded and include favorite status without loading tags or evidence', async () =>
+  fixture(async ({ repo, service, add }) => {
+    for (let i=0;i<12;i++) add(`p${i}`,i);
+    const view=await service.openView();
+    assert.equal(view.groups[0].memberCount,12);
+    assert.equal(view.groups[0].photos.length,3);
+    assert.ok(view.groups[0].photos.every(photo => !('tags' in photo) && !('evidence' in photo)));
+    repo.setManualFrameTags({assetIds:['p0'],addTags:['frame/eligible','frame/favorite'],removeTags:[],action:'favorite'});
+    const decided=await service.openView({section:'decided'});
+    const photo=decided.groups[0].photos[0];
+    assert.equal(photo.state,'approved');
+    assert.equal(photo.favorite,true);
+  }));
+
 test('foundation HTTP routes return complete groups and reject malformed or stale actions', async () =>
   fixture(async ({ repo, service, add }) => {
     const { createServer } = await import('node:http');
@@ -617,7 +631,7 @@ test('foundation HTTP routes return complete groups and reject malformed or stal
       assert.equal((await (await post('groups', {sort: 'newest'})).json()).sort, 'newest');
       const v = await (await fetch(base + 'groups')).json();
       assert.equal(v.groups[0].memberCount, 2);
-      assert.equal(v.groups[0].photos.length, 1);
+      assert.equal(v.groups[0].photos.length, 2);
       assert.ok(v.groups[0].photos.every(p => !Object.hasOwn(p, 'evidence')));
       assert.equal((await post('comparisons', null)).status, 400);
       const c = await (await post('comparisons', { viewId: v.viewId, groupId: v.groups[0].id })).json();

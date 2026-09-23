@@ -7,6 +7,13 @@ All notable changes to Pictaria Server are documented here. This project follows
 
 ### Development
 
+- Curate Preview now distinguishes saved outcomes (including Fav) from drafts
+  and checked batches. Stack keyboard choices advance without saving; **Save &
+  next** continues with the latest grouping in the chosen date order. Stack cards
+  gain member previews and capture times, completed status is quieter, and Why
+  uses plain-language explanations. Mobile filters collapse, bulk actions stay
+  fixed below the grid, and comparisons retain the full uncropped images.
+
 - Curate checks now run in the background with Stacks enabled, including after
   server startup and new Enrich arrivals. Opening the page or Load more is no
   longer required. Complete checks survive restarts; active slots turn over to
@@ -61,7 +68,7 @@ All notable changes to Pictaria Server are documented here. This project follows
   Healthy searches now start two seconds apart (up to 30 automatic requests per
   minute), with extra delay on slow responses. Open comparisons and visible
   cards take priority; cached evidence avoids network waits. Small queued/checking
-  spinners, green ready checks and amber attention markers make progress visible
+  spinners and amber attention markers make progress visible
   without relying on color alone. Diagnostic counters expose request/latency and
   queue-completion measurements; grouping rules and search coverage are unchanged.
   Comparisons include **Why this stack?**, and unconfirmed time groups are labeled.

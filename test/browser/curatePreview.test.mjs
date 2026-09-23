@@ -296,7 +296,7 @@ test(
       await page.evaluate('document.querySelector("#photo-keep").focus()');
       await page.send('Input.dispatchKeyEvent', { type: 'keyDown', key: 'k', code: 'KeyK' });
       assert.equal(await page.evaluate('document.querySelector("#photo-keep").getAttribute("aria-pressed")'), 'false');
-      await click('#photo-next');
+      // K already advanced to the next actionable photo.
       await click('#photo-keep');
       assert.equal(
         await page.evaluate('document.querySelectorAll("#photos [data-keeper][aria-pressed=true]").length'),

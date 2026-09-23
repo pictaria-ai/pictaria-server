@@ -202,7 +202,7 @@ export class CurateService {
         Boolean(this.repo.db.prepare('SELECT 1 FROM curate_dirty LIMIT 1').get()),
       groups: groups.map((g) => ({ id: g.id, memberCount: g.ids.length, route: g.route,
           similarity: view.section === 'decided' ? null : this.refinement?.groupStatus(g) ?? null,
-          photos: this.store.covers(g.ids.slice(0, 1)) })),
+          photos: this.store.covers(g.ids.slice(0, 3)) })),
       nextOffset: offset + limit < view.total ? offset + limit : null,
     };
   }
