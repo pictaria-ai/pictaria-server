@@ -289,6 +289,21 @@ AI inference run is not required. On older Immich, metadata reads require
 `asset.statistics` as well as the existing asset/tag read permissions to
 check completeness. See [Immich compatibility](IMMICH-COMPATIBILITY.md).
 
+## Curate development preview (PIC-385)
+
+This development build advances the Enrich database to **schema 16** and the
+persistent-state contract to **19**. Startup creates the standard complete
+pre-migration recovery snapshot before adding the completed stack-check cache.
+Existing enrichment, human decisions and settings are preserved. Use that complete
+snapshot to return to a build with an older state contract; switching the image
+alone is not a supported downgrade across this boundary.
+
+With Stacks enabled and Immich configured, metadata reads and paced similarity
+checks now run without opening a browser, including for the existing pending
+backlog. Completed checks survive restarts. These reads do not invoke an AI
+provider or change human decisions, tags or albums. Disabling Stacks stops new
+background checks. [Scheduling and storage limits](CURATE-ALGORITHM.md#automatic-searches-and-stable-views).
+
 ## Upgrading to v1.2.0
 
 v1.2.0 upgrades persistent-state contract 8 from v1.1.0 to **contract 15**,

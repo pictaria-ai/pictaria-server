@@ -56,7 +56,7 @@ export class CurateService {
       },
     });
     const stacks = this.config.curateBurstGrouping !== false;
-    const ranks = this.refinement?.snapshot() ?? {};
+    this.refinement?.settingsChanged();
     const evidenceRevision = this.refinement?.revision ?? 0;
     if (this.current?.generation === this.store.generation() && this.current.stacks === stacks &&
         this.current.evidenceRevision === evidenceRevision) return this.current;
@@ -65,13 +65,13 @@ export class CurateService {
       // test-only SQLite cannot be shared with a read-only worker
       result = {
         generation: this.store.generation(),
-        ...(this.candidateEnabled ? candidateGroups(this.store.candidateRows(), { stacks, separations: this.store.separations(), ranks })
+        ...(this.candidateEnabled ? candidateGroups(this.store.candidateRows(), { stacks, separations: this.store.separations(), ranks: id => this.refinement?.saved.read(id) })
           : groupPhotos(this.store.pending(), { stacks, separations: this.store.separations() })),
       };
     } else
       result = await new Promise((resolve, reject) => {
         const worker = new Worker(new URL('./worker.mjs', import.meta.url), {
-          workerData: { path: this.repo.databasePath, stacks, candidate: this.candidateEnabled, ranks },
+          workerData: { path: this.repo.databasePath, stacks, candidate: this.candidateEnabled, rankConnection: this.refinement?.connection },
           // Server/test-runner flags (including --input-type) need not be valid worker flags.
           execArgv: [],
         });
@@ -183,11 +183,12 @@ export class CurateService {
     }
     if (view.section !== 'decided') this.refinement?.demand(viewId, groups);
     if (view.section !== 'decided') this.refinement?.attention(viewId, visible, comparison);
-    const refinement = view.section === 'decided' ? null : this.refinement?.status(viewId, groups) ?? null;
+    const refinement = this.refinement?.status(viewId, view.section === 'decided' ? [] : groups) ?? null;
     return {
       viewId,
       expiresAt: view.expiresAt,
       total: view.total,
+      counts: view.counts ?? null,
       sort: view.sort ?? 'oldest',
       section: view.section ?? 'pending', category: view.category ?? 'all', categories: this.categories(),
       immichUrl: this.config.immichPublicUrl || null,
@@ -328,21 +329,23 @@ export class CurateService {
     if (input.kind !== 'undo') await this.refresh();
     return this.repo.decisions.apply(input, (ids, reviewState, singlesOnly) => this.assertDecisionScope(ids, reviewState, singlesOnly));
   }
+  async backgroundTick() {
+    if (this.backgroundWork || this.closed) return;
+    this.backgroundWork = (async () => {
+      this.metadata.settingsChanged();
+      if (!this.refinement?.enabled() && !this.metadata.demanded()) return;
+      await this.refresh();
+      this.metadata.wake();
+      await this.refinement?.tick();
+    })();
+    try { await this.backgroundWork; this.backgroundError = null; }
+    catch { this.backgroundError = 'Curate checks paused. Background processing will retry.'; }
+    finally { this.backgroundWork = null; }
+  }
   start() {
     if (this.timer || this.closed) return;
-    this.timer = setInterval(() => {
-      this.metadata.settingsChanged();
-      void this.refinement?.tick().catch(() => {});
-      if (!this.metadata.demanded()) return;
-      void this.refresh()
-        .then(() => {
-          this.backgroundError = null;
-          this.metadata.wake();
-        })
-        .catch(() => {
-          this.backgroundError = 'Curate refresh failed; the previous view is still available.';
-        });
-    }, 1000);
+    this.timer = setInterval(() => { void this.backgroundTick(); }, 1000);
+    void this.backgroundTick();
     this.timer.unref();
   }
   settingsChanged() {
@@ -365,5 +368,6 @@ export class CurateService {
     await this.metadata.close();
     if (this.worker) await this.worker.terminate();
     await this.building?.catch(() => {});
+    await this.backgroundWork?.catch(() => {});
   }
 }

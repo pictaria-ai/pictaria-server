@@ -48,6 +48,36 @@ button {
   justify-content: space-between;
   margin-bottom: 14px;
 }
+/* Progress occupies the same row even when idle; activity cannot move the grid. */
+.view-summary {
+  display: flex;
+  align-items: center;
+  flex: 1;
+  min-width: 0;
+  gap: 16px;
+  min-height: 24px;
+}
+#count { flex-shrink: 0; }
+#refinement {
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  min-width: 0;
+}
+.refresh-tools { display: flex; align-items: center; gap: 12px; flex-shrink: 0; }
+#check-activity {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 24px;
+  height: 24px;
+}
+@media (max-width: 760px) {
+  .view-status { flex-direction: column; align-items: stretch; gap: 8px; }
+  .view-summary { flex-wrap: wrap; gap: 4px; }
+  #count, #refinement { width: 100%; min-height: 20px; line-height: 20px; }
+  #count { font-size: 12px; }
+}
 .search-label {
   flex: 0 1 260px;
 }

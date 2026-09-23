@@ -106,9 +106,10 @@ remain intact.
 
 ## Automatic searches and stable views
 
-Only opening/paging a **Curate Preview** view admits automatic searches, for
-unresolved time candidates represented on the pages requested. Opening the lab,
-released Curate, or starting the server does not admit this work. Small locally
+The server processes pending time candidates in the background whenever Stacks
+is enabled and Immich is configured. Startup resumes the backlog; arrivals from
+Enrich are picked up without a browser. Opening Curate, filtering and **Load more**
+only display work and adjust priority; they are not processing triggers. Small locally
 resolved comparisons and compatible exact renditions need no extra lookup.
 Larger ThumbHash-supported compositions also need verification: admit a photo
 with at least three nonconflicting neighbors when at least one of those pairs
@@ -124,8 +125,8 @@ recovery against a core. This deliberately favors preserving useful recovery
 evidence over the smallest possible request count. For example, a
 landscape/solo/couple candidate already resolved by people categories needs zero
 searches. A resolved two-photo couple in a larger candidate need not be queried when only
-the solo photos are uncertain. Filtering to just that resolved couple does not
-admit searches for the hidden solo group. Outside-rank counts still exclude the
+the solo photos are uncertain. Filtering to just that resolved couple does not display a check on its card; the
+hidden solo group still progresses in the background. Outside-rank counts still exclude the
 **entire original time candidate**, including members not queried.
 
 For each admitted candidate, the scheduler collects all **required** reference
@@ -137,40 +138,48 @@ still invalidate or resolve a candidate between requests.
   with a **30-new-request rolling-minute cap** on automatic work. Requests stay
   sequential. A successful search taking at least two seconds adds a pause equal
   to its duration (capped at 30 seconds) after completion. Failures retain the
-  longer cooldown and explicit retry requirement. No extra AI/provider calls.
+  longer cooldown and exponential retry delay. No extra AI/provider calls.
 - The opened comparison gets the next search turn, followed by currently visible
   cards, then other admitted groups. An in-flight request finishes normally.
   The browser reports at most 50 visible group IDs plus the open comparison;
   the server validates all against the saved view. Attention expires after 12
-  seconds without renewal, while broader view demand retains its 60-second limit.
-  Prioritization does not bypass admission/capacity, source or membership checks.
+  seconds without renewal; view attention records are retired after 60 seconds
+  idle. Neither expiry stops background processing. An inspected candidate can
+  take an untouched waiting slot; partial and in-flight passes are retained.
+  Prioritization does not bypass source or membership checks.
   Cached evidence can be consumed during network pacing without spending a
   request slot. The reference set and 50-result window are unchanged.
 - Each request asks for one reference's first 51 image results, removes the
   reference and keeps at most **50**. No pagination to find a desired match.
   Timeout **15 seconds**, response limit **2 MiB**, failure cooldown at least
   **30 seconds**. Permission/API/index failures leave manual Curate available.
-- At most **32 candidate cohorts** retained in the automatic scheduler, each at
-  most 40 photos. Active views retain their evidence, including completed matrices
-  across explicit Refresh. Entries expire after **10 minutes without active view
-  demand or progress**, rather than ten minutes from admission. No retained entry
-  is evicted merely to start more work. At capacity, other cohorts wait until
-  space expires; this is shown on their cards. Requests are sequential, and one
-  candidate can still wait behind active work or slow searches. Partial coverage is never published as a
-  completed grouping result.
-- The shared search cache holds at most **40 references for 10 minutes**. The
-  automatic cache retains only candidate-member positions and result-window
-  counts (returned, limit, outside), not unrelated photos
-  or response bodies. It is memory-only; restart begins a fresh bounded pass.
-- Preview polling renews demand. After **60 seconds** without visible-page
-  activity, demand stops. Expired/replaced views, stacking off, connection changes,
-  changed candidate membership/material/human constraints, and shutdown cancel
-  or discard in-flight work. Known source/connection revisions are checked before
-  and after I/O; unseen remote changes cannot be guaranteed absent.
-- Failures pause automatic work without repeated retry. An explicit new view
-  (Refresh, a filter change or post-action refresh) allows another attempt after
-  the shared cooldown. Automatic idle view replacement does not clear this pause.
-  A busy lab search merely delays the preview.
+- At most **32 incomplete candidate passes** in memory, each at most 40 photos.
+  Completing a pass frees its slot so the entire backlog can advance without
+  pagination. Partial coverage is never published as a completed result.
+- Completed candidate-member matrices persist in `curate_rank_evidence` in the
+  Enrich database. Scope hashes include exact membership, material evidence,
+  human constraints and algorithm version; the connection fingerprint must also
+  match. No credentials, unrelated result IDs or response bodies are stored.
+  The grouping worker reads one matrix at a time from its coherent SQLite snapshot.
+  Completed evidence has no inactivity TTL: an unchanged pending candidate stays
+  checked through restarts and Refresh, even when nobody opens the page.
+- Storage is bounded to **50,000 matrices**, **256 KiB per matrix**, and **64 MiB
+  of serialized evidence** (database/index overhead is additional). Obsolete
+  scopes are pruned in batches of at most 128. At capacity, preserve existing
+  evidence and pause new publication rather than evicting stable results and
+  continually rechecking them. A limited status explains this condition.
+- The separate shared search cache still holds **40 references for 10 minutes**
+  in memory. Unfinished passes restart after a server restart. Completed matrices
+  are invalidated by known photo/people evidence, membership or human constraint
+  changes, a changed algorithm, or a different Immich connection. Stacks off and
+  shutdown cancel in-flight work; browser inactivity does not. Unseen remote
+  changes (including changed search index rankings) cannot be detected by these
+  fingerprints; this is retained evidence, not a continuously refreshed index.
+- Failed passes retry automatically after **60 seconds**, doubling up to **15
+  minutes** on consecutive failures. Other candidates can progress while a pass
+  waits. Manual Refresh can release the pass retry delay, but cannot bypass the
+  shared transport cooldown or rate limit. Automatic idle view replacement does
+  not shorten retry delays. A busy lab search delays background searches.
 
 Cards show **Waiting for similarity check**, **Checking nearby photos · N of M**,
 or **Updated grouping ready**. Counts cover the required references for the
@@ -192,12 +201,13 @@ keep a pending indicator, rather than claiming completion.
 aggregate measurements since service start: search attempts/completions, cache
 hits, failures, last/average completed-search duration, completed automatic
 cohorts and average admission-to-completion time (including queueing, pauses and
-inactivity). Search measurements include the shared lab lane; direct lab-cache
+retry delays). Search measurements include the shared lab lane; direct lab-cache
 reads do not increment `cacheHits`. No photo IDs or responses are included.
 These are diagnostic counters, not persistent performance history or a new UI.
 
-The page summarizes checks for its own requested groups and highlights cards whose
-grouping changed. Checks that finish without changing grouping, or in an unrelated
+The page shows global background progress beside the stack/single-photo counts
+in a reserved status row, plus an activity spinner beside Refresh. Cards still
+show their own status and highlight changed grouping. Checks that finish without changing grouping, or in an unrelated
 view, do not by themselves request a replacement view. The single **Refresh**
 button highlights waiting updates, including changed photo information.
 
@@ -205,7 +215,7 @@ Background evidence changes only the next grouping snapshot. The grid adopts
 that snapshot automatically when browsing pauses, preserving loaded pages and a
 surviving scroll anchor. Open comparisons/lightboxes, selected batches and pending
 operations keep their current view fixed. A failed automatic update requires
-explicit Refresh and does not silently retry failed searches. Polling reads at
+explicit Refresh; this does not stop the independent background scheduler. Polling reads at
 most 50 cards near the visible cards or open comparison, every four seconds.
 A newly enlarged group can make an older smaller comparison unsafe to save; the
 existing membership checks require a refresh in that case. Human decisions,
@@ -252,6 +262,7 @@ and decision contract, not create a permanent second Curate pipeline.
 | `candidate-3` | 2026-09-21 | Owner scene/couple counterexample: repeated contrast between reciprocal subgroups can override hash support and provisional unknown joins. Preserve bounded result-window counts; verify larger hash-only groups so contrary evidence can arrive. Keep 50 results, pacing, complete-pass publication, and the landscape recovery rule. | PIC-382 / PIC-380 |
 | `candidate-3` scheduling / status follow-up | 2026-09-22 | Two-second healthy pacing, 30 automatic requests/minute, slow-response backoff, open/visible priority, immediate cached reuse and aggregate diagnostics. Visual queued/checking/done/attention markers; grouping rules, reference selection and result depth unchanged. | PIC-382 |
 | `candidate-3` review UX follow-up | 2026-09-22 | Automatically adopt complete snapshots at idle boundaries; freeze open comparisons and selections, preserve browsing position, and retain explicit Refresh for recovery. Remove manual stack-management controls; existing saved separations remain respected. No membership-rule or search-threshold change. | PIC-384 |
+| `candidate-3` background processing | 2026-09-23 | Process all pending candidates without browser demand; persist complete evidence, drain bounded active slots and retry failures with backoff. Compact global progress, Pending label and direct stack opening. Membership rules and search limits are unchanged. | PIC-385 |
 
 When membership rules, thresholds or interpretation of signals change, increment
 the implementation identifier and add a row describing the behavioral change and

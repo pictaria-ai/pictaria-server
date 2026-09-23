@@ -4,8 +4,10 @@ PIC-369's first human-only flow is available at **`/curate-preview.html`** on th
 implementation branch. It uses the normal password gate, library, persistent
 grouping and decision service. **Choices are real:** saving a decision updates
 local human tags and queues their synchronization to Immich. Use a test instance
-for initial review. Merely opening the page starts bounded read-only metadata
-refresh and selective, paced Immich similarity searches, not AI requests or human decisions.
+for initial review. The server runs bounded read-only metadata refresh and selective, paced Immich
+similarity searches in the background with Stacks enabled and Immich configured.
+No browser is required, including for new arrivals from Enrich. This processing
+makes no AI requests or human decisions.
 
 PIC-382 adds [candidate stacking algorithm 3](CURATE-ALGORITHM.md): wider time
 candidates, contextual people signals, positive ThumbHash and reciprocal search
@@ -16,7 +18,7 @@ bounds and version history. Open
 hover, keyboard focus or tap without moving the photos.
 
 The current `/curate.html` remains the default during this staging step. The
-preview now includes **To curate** and **Decided**; **More → Production Curate**
+preview now includes **Pending** and **Decided**; **More → Production Curate**
 keeps the released page accessible during testing. This temporary entry
 point allows human-flow review before production AI applicability, rollout and
 runtime acceptance are complete; it is not a second permanent Curate product.
@@ -29,7 +31,7 @@ in this preview, its proposed partitions are never saved.
 
 ## Review flow
 
-- **To curate** shows all pending photos by default. All, Stacks and Singles
+- **Pending** shows all pending photos by default. All, Stacks and Singles
   filter the same view. **All categories** can narrow it to the existing Enrich
   review categories (Candidates, Should Review and Unlikely, or customized labels).
   A mixed stack belongs to its highest-priority member category, as in production;
@@ -37,12 +39,13 @@ in this preview, its proposed partitions are never saved.
 - **Decided** shows individual photos with earlier human choices, with search
   and date order. Open a photo or use its card actions to change that choice.
   A newer concurrent decision invalidates the old action scope; it cannot be
-  silently overwritten. This view does not request stack similarity searches.
+  silently overwritten. Background checks continue for pending photos while you browse Decided.
 - Cards show a cover, available caption, date and stack size. Filenames are omitted.
   **Yes / Skip / Fav / No** are direct actions for single photos: Yes selects a
   photo, Skip marks it reviewed without selecting it, Fav selects it as a favorite,
   and No marks it Never show. None of these deletes the photo. Click the image for
-  large inspection; a stack opens its comparison first. The shared Settings gear
+  large inspection; a stack opens its comparison directly, without a separate
+  Compare button. The shared Settings gear
   opens the Curate section, without a second settings button on the page.
 - **Select single photos** selects the singles currently loaded, excluding stacks.
   In Singles and Decided it reads **Select shown photos**; Stacks hides it.
@@ -75,7 +78,7 @@ in this preview, its proposed partitions are never saved.
   the information panel scrolls below the photo.
 - For **single photos**, buttons and production keyboard shortcuts save immediately:
   **Y/A** Yes, **S/V** Skip, **F** Fav, **N/R** No.
-  In To curate, an accepted decision advances to the next loaded card (loading the next page
+  In Pending, an accepted decision advances to the next loaded card (loading the next page
   when necessary); reaching a stack opens its complete comparison. Arrow keys
   browse without deciding. **Z** undoes the last accepted action, and **Escape**
   closes the viewer. Decided edits stay on the same photo for inspection. Modified/repeated keystrokes and typing in fields do not
@@ -102,6 +105,13 @@ in this preview, its proposed partitions are never saved.
   from the preview’s **Decided** tab.
 - Save acceptance and Immich synchronization are separate. A failed sync can be
   retried without repeating the human decision or invoking AI.
+
+**Load more** only displays additional results; it is no longer needed to get
+those photos checked. The count distinguishes stacks and single photos. A small
+spinner beside **Refresh** indicates background activity across the pending queue;
+**Checks: N/M** appears beside the count without shifting the photo grid. Paused
+work has an attention indicator. The counts describe nearby time groups being
+checked, which can become several final stacks or singles.
 
 Cards have a small status circle: a muted spinner while queued, a blue spinner
 while checking, a green check when ready, and an amber attention marker when
@@ -130,10 +140,8 @@ pass, never one search at a time. Missing targets and successful empty results
 remain unknown unless repeated subgroup evidence resolves the relationship.
 **Check complete · similarity uncertain** keeps the compatible
 time grouping provisional. Failed or unavailable searches do not fragment it.
-Completed evidence stays available while the
-view is active, so repeated Refresh does not restart checks on a ten-minute timer.
-After inactivity or a server restart, this bounded memory cache can be empty and
-a fresh pass may be needed. Changes to photos, people evidence or human corrections
+Completed evidence is saved, so inactivity and server restarts do not repeat
+unchanged checks. Unfinished passes resume with a new bounded pass after restart. Changes to photos, people evidence or human corrections
 also require renewed checks for the affected candidate.
 
 Background updates appear automatically after a short browsing pause, at most
@@ -143,8 +151,9 @@ Closing a comparison allows updates to appear; its membership and keeper draft
 never change underneath the user. Automatic updates retain the number of loaded
 pages where possible and anchor the scroll position to a surviving card. A failed
 update stops automatic replacement and asks for **Refresh**, disabling decisions
-until the view is reconciled. Automatic view replacement does **not** retry failed
-similarity searches; explicit Refresh still permits retry after the shared cooldown.
+until the view is reconciled. Failed similarity checks retry independently after
+a delay of one minute, doubling up to 15 minutes; explicit Refresh can retry
+sooner after the shared cooldown.
 
 Accepted pending decisions remove only their cards from the displayed snapshot
 and Undo restores them there; this preserves navigation order while working

@@ -7,7 +7,19 @@ All notable changes to Pictaria Server are documented here. This project follows
 
 ### Development
 
-- Curate Preview combines **To curate / Decided**, category and date filters,
+- Curate checks now run in the background with Stacks enabled, including after
+  server startup and new Enrich arrivals. Opening the page or Load more is no
+  longer required. Complete checks survive restarts; active slots turn over to
+  process the whole backlog, and failed searches retry with bounded backoff.
+  Existing pacing and grouping rules are unchanged. A spinner beside Refresh
+  and short inline progress show activity without moving the grid. Counts
+  distinguish stacks and single photos, **Pending** replaces To curate, and
+  clicking a stack opens it without a separate Compare button.
+  Enrich schema **16** / persistent-state contract **19** adds the bounded
+  completed-evidence cache, with the normal complete recovery snapshot before
+  migration. See [Curate algorithm](docs/CURATE-ALGORITHM.md).
+
+- Curate Preview combines **Pending / Decided**, category and date filters,
   compact card actions, and explicit bulk selection of single photos. Clicking
   a photo opens a production-style full-screen lightbox with tags and details
   beside it. Singles regain keyboard decisions, automatic advance and Undo;
@@ -23,7 +35,7 @@ All notable changes to Pictaria Server are documented here. This project follows
   Stack corrections controls are removed; existing saved corrections remain intact.
   Background updates appear at idle boundaries while open comparisons and selected
   batches stay fixed. Loaded pages and scroll position are preserved. One Refresh
-  button handles manual updates/recovery without automatic retries of failed searches.
+  button handles manual updates/recovery independently of background processing.
   Open comparisons clearly show unfinished checks; the More menu is aligned.
   This iteration remains at `/curate-preview.html`; AI referee integration and
   the default-page cutover are still pending. [Review flow](docs/CURATE-PREVIEW.md).
@@ -34,7 +46,7 @@ All notable changes to Pictaria Server are documented here. This project follows
   results appear automatically when idle, preserving open comparisons and selections.
   Cards show waiting/checking progress and highlight ready updates. Search results
   are applied only after all required references have been checked; completed
-  evidence stays cached while its view is active, preventing timed cache expiry
+  evidence stays saved for unchanged pending candidates, preventing timed cache expiry
   from repeatedly splitting and rejoining an unchanged stack.
   Compatible uncertain photos stay together provisionally while
   searches are pending, unavailable or missing results. Enrich Group separates

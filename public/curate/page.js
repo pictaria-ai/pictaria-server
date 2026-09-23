@@ -153,26 +153,37 @@ async function refresh({ automatic = false } = {}) {
   }
 }
 function showViewStatus(view) {
-  el('count').textContent = `${state.groups.length} of ${Math.max(0, view.total - state.removed.size)} ${state.section === 'decided' ? 'photos' : 'cards'} shown`;
-  el('count').title = 'Each stack is one card. Its full photo count appears on the card.';
+  const loadedStacks = state.groups.filter(g => g.memberCount > 1).length;
+  const removedStacks = [...state.removed.values()].filter(g => g.memberCount > 1).length;
+  const stacks = Math.max(0, (view.counts?.stacks ?? loadedStacks) - removedStacks);
+  const singles = Math.max(0, (view.counts?.singles ?? view.total - stacks) - state.removed.size + removedStacks);
+  const parts = [];
+  if (stacks) parts.push(`${loadedStacks} of ${stacks} ${stacks === 1 ? 'stack' : 'stacks'}`);
+  if (singles) parts.push(`${state.groups.length - loadedStacks} of ${singles} ${singles === 1 ? 'single photo' : 'single photos'}`);
+  el('count').textContent = parts.length ? `${parts.join(' · ')} shown` : '0 photos shown';
   state.updateStatus = view;
   updateHint();
   const refinement = view.refinement;
   const metadata = view.metadata;
   if (state.view?.viewId === view.viewId) state.view.metadata = metadata;
   if (state.comparison) el('metadata-retry').hidden = !metadata?.problem;
-  el('metadata').textContent = metadata?.problem
-    ? `Photo information refresh paused: ${metadata.problem}`
-    : metadata?.state === 'refreshing'
-      ? 'Refreshing photo information from Immich. Your open view stays in place.'
-      : '';
-  el('metadata').hidden = !el('metadata').textContent;
-  el('refinement').textContent = refinement?.problem ||
-    (refinement?.pending || refinement?.limited
-      ? `Similarity checks: ${refinement.checkedGroups} of ${refinement.totalGroups} nearby groups finished. ` +
-        (refinement.limited ? 'Some are waiting for a check slot. ' : '') +
-        'Marked cards may regroup. You can review other photos while you wait.' : '');
-  el('refinement').hidden = !el('refinement').textContent;
+  const paused = refinement?.state === 'paused' || refinement?.state === 'limited';
+  const checking = Boolean(refinement?.remainingGroups);
+  const status = paused ? 'Checks paused' : checking
+    ? `Checks: ${refinement.checkedGroups}/${refinement.totalGroups}`
+    : metadata?.problem ? 'Photo information paused'
+    : metadata?.state === 'refreshing' ? 'Refreshing photo information' : '';
+  el('refinement').textContent = status;
+  el('refinement').title = refinement?.problem || metadata?.problem ||
+    (checking ? 'Background similarity checks across pending photos. Marked stacks may regroup.' : '');
+  const activity = paused ? { state: 'paused' } : refinement?.state === 'searching' || metadata?.state === 'refreshing'
+    ? { state: 'checking' } : checking ? { state: 'waiting' } : null;
+  const indicator = similarityIndicator(activity);
+  if (indicator) {
+    indicator.title = indicator.ariaLabel = paused ? 'Stack checks paused; retrying automatically when possible' : 'Checking pending stacks in the background';
+  }
+  const slot = el('check-activity');
+  if (slot.firstChild?.dataset.phase !== indicator?.dataset.phase) slot.replaceChildren(...(indicator ? [indicator] : []));
   for (const group of view.groups) {
     cards.get(group.id)?.updateSimilarity(group.similarity);
     if (state.comparison?.groupId === group.id) showComparisonSimilarity(group.similarity);

@@ -31,7 +31,7 @@
         </div>
       </div>
       <nav id="sections" class="p-tabs section-tabs" aria-label="Review status">
-        <button class="p-tab active" data-section="pending">To curate</button>
+        <button class="p-tab active" data-section="pending">Pending</button>
         <button class="p-tab" data-section="decided">Decided</button>
       </nav>
       <div class="toolbar">
@@ -59,14 +59,17 @@
         </label>
         <div class="p-grow"></div>
         <span id="updates" class="p-muted" hidden role="status"><span id="updates-copy"></span></span>
-        <button id="refresh" class="p-btn">Refresh</button>
-        <details class="page-tools">
-          <summary class="p-btn">More</summary>
-          <div>
-            <a class="p-btn" href="/curate-stacking-lab.html">Stacking lab</a>
-            <a class="p-btn" href="/curate.html">Production Curate</a>
-          </div>
-        </details>
+        <div class="refresh-tools">
+          <span id="check-activity" aria-live="polite"></span>
+          <button id="refresh" class="p-btn">Refresh</button>
+          <details class="page-tools">
+            <summary class="p-btn">More</summary>
+            <div>
+              <a class="p-btn" href="/curate-stacking-lab.html">Stacking lab</a>
+              <a class="p-btn" href="/curate.html">Production Curate</a>
+            </div>
+          </details>
+        </div>
       </div>
       <div class="view-status">
         <label id="bulk-label"
@@ -74,10 +77,11 @@
             >Select single photos</span
           ></label
         >
-        <span id="count" class="p-muted" aria-live="polite">Loading photos…</span>
+        <div class="view-summary">
+          <span id="count" class="p-muted" aria-live="polite">Loading photos…</span>
+          <span id="refinement" class="p-muted" role="status"></span>
+        </div>
       </div>
-      <p id="metadata" class="p-muted"></p>
-      <p id="refinement" class="p-muted" role="status"></p>
       <div id="error" role="alert" hidden></div>
       <div id="recovery" class="notice" hidden role="status">
         <span>The last action’s response is uncertain. Retry it safely before continuing.</span

@@ -70,7 +70,7 @@ export function candidateGroups(rows, { stacks = true, separations = [], ranks =
     const ids = cohort.map(p => p.id);
     const scopeId = fingerprint({ method: CANDIDATE_METHOD,
       rows: cohort.map(p => [p.id, p.materialKey, [...(labels.get(p.id) ?? [])]]) });
-    const evidence = ranks[scopeId] ?? {}, supplied = evidence.rows ?? {};
+    const evidence = (typeof ranks === 'function' ? ranks(scopeId) : ranks[scopeId]) ?? {}, supplied = evidence.rows ?? {};
     const members = cohort.map(p => ({ ...p, hash: hash(p.thumbhash), identities: recognizedIds(p.recognition) }));
     const matrix = new Map();
     const at = (a, b) => matrix.get(a.id)?.get(b.id);

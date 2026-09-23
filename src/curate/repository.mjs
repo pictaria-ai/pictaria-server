@@ -447,9 +447,10 @@ export class CurateRepository {
     // and persistence yield, and all retained snapshot bytes count toward 5 MiB.
     const method = current.method ?? GROUPING_METHOD;
     const hash = createHash('sha256').update(method);
-    let bytes = 0,
+    let bytes = 0, stacks = 0,
       started = performance.now();
     for (const group of groups) {
+      if (group.ids.length > 1) stacks++;
       const encoded = JSON.stringify(this.encodedGroup(group, method));
       bytes += Buffer.byteLength(encoded) + 4;
       hash.update(encoded).update('\n');
@@ -498,6 +499,7 @@ export class CurateRepository {
         evidenceRevision: current.evidenceRevision ?? 0,
         stacks: current.stacks,
         total: groups.length,
+        counts: { stacks, singles: groups.length - stacks },
         sort, section, category,
         snapshotId,
         ...(rootId ? { replacementRootId: rootId } : {}),

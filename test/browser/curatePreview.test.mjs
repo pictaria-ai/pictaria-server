@@ -6,7 +6,17 @@ import { curatePreviewFixture } from './curatePreviewFixture.mjs';
 
 test('Curate preview date order is global and remembered across automatic updates', { timeout: 60000 }, async (t) => {
   if (!findChrome()) return t.skip('Chrome required');
-  const fixture = await curatePreviewFixture({ stackSize: 3, singles: 52 });
+  const fixture = await curatePreviewFixture({ stackSize: 3, singles: 52, metadataReady: true,
+    prepare({ repo, assets, id }) {
+      // Sorting must not race an unrelated unconfirmed -> supported route change.
+      // A locally resolved small stack needs no similarity searches.
+      for (let i = 1; i <= 3; i++) {
+        const thumbhash = Buffer.alloc(21, 0).toString('base64');
+        repo.updateAssetVisuals(id(i), { thumbhash });
+        assets.find(a => a.id === id(i)).thumbhash = thumbhash;
+      }
+    },
+  });
   const browser = await launchChrome(),
     page = await browser.newPage();
   t.after(async () => {

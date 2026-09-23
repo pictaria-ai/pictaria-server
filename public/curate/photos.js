@@ -69,8 +69,8 @@ export function similarityLabel(status) {
   switch (status?.state) {
     case 'waiting': return 'Waiting for similarity check';
     case 'checking': return `Checking nearby photos · ${status.done} of ${status.total}`;
-    case 'paused': return 'Similarity check paused · Refresh to retry';
-    case 'limited': return status.total ? 'Waiting for a check slot' : 'Similarity not checked · automatic limit';
+    case 'paused': return 'Similarity check paused · retrying automatically';
+    case 'limited': return status.total ? 'Similarity check paused · storage limit' : 'Similarity not checked · automatic limit';
     case 'updated': return status.paused ? 'Grouping updated · similarity check paused'
       : status.checking ? 'Grouping updated · checking nearby photos'
       : status.pending ? 'Grouping updated · checks still pending' : 'Updated grouping available';
@@ -115,7 +115,6 @@ export function groupCard(group, open, { decide, select, selected = false, decid
   const actions = node('div', undefined, 'card-actions');
   if (group.memberCount > 1) {
     card.classList.add('is-stack');
-    const compare = node('button', 'Compare', 'p-btn'); compare.onclick = () => open(group); actions.append(compare);
   } else {
     for (const [value,text,title] of choices) {
       const button = node('button', text, `p-btn${value === 'approve' ? ' primary' : value === 'favorite' ? ' gold' : value === 'reject' ? ' danger' : ''}`);
@@ -126,7 +125,7 @@ export function groupCard(group, open, { decide, select, selected = false, decid
     check.setAttribute('aria-label',`Select ${photo.caption || label}`);
     check.onchange = () => select?.(group,check.checked); selection.append(check); card.append(selection);
   }
-  caption.append(actions);
+  if (actions.childElementCount) caption.append(actions);
   card.updateSimilarity = (value) => {
     if (decided) {
       chip.textContent = {approved:photo.tags?.includes('frame/favorite') ? 'Fav' : 'Yes',reviewed:'Skip',rejected:'No'}[photo.state] || 'Decided';
@@ -149,6 +148,8 @@ export function groupCard(group, open, { decide, select, selected = false, decid
   card.append(cover, caption);
   // The article itself remains a convenient programmatic entry point; child
   // actions never bubble into opening a second interaction.
-  card.onclick = event => { if (event.target === card) open(group); };
+  card.onclick = event => {
+    if (event.target === card || group.memberCount > 1 && caption.contains(event.target)) open(group);
+  };
   return card;
 }
