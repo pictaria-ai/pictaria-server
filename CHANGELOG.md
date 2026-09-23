@@ -14,6 +14,8 @@ All notable changes to Pictaria Server are documented here. This project follows
   Stack cards gain member previews and capture times, completed status is quieter, and Why
   uses plain-language explanations. Mobile filters collapse, bulk actions stay
   fixed below the grid, and comparisons retain the full uncropped images.
+  Decided cards subtly shade the current decision button instead of putting a
+  duplicate label over the photo; the lightbox uses the same shading.
 
 - Curate checks now run in the background with Stacks enabled, including after
   server startup and new Enrich arrivals. Opening the page or Load more is no

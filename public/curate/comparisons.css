@@ -624,7 +624,13 @@ dialog::backdrop {
 .comparison-keys { font-size: 11px; margin: 0 0 12px; }
 .save-actions { display: flex; gap: 8px; flex-shrink: 0; }
 #photo-outcome { font-size: 14px; font-weight: 600; }
-[data-photo-action][aria-pressed=true] { border-color: var(--p-muted); box-shadow: inset 0 0 0 1px currentColor; }
+:is([data-quick], [data-photo-action])[aria-pressed=true] {
+  background: color-mix(in srgb, var(--decision-tint, var(--p-muted)) 16%, var(--p-panel));
+  border-color: color-mix(in srgb, var(--decision-tint, var(--p-muted)) 55%, var(--p-line));
+}
+:is([data-quick=approve], [data-photo-action=approve]) { --decision-tint: var(--p-accent); }
+:is([data-quick=favorite], [data-photo-action=favorite]) { --decision-tint: var(--p-gold); }
+:is([data-quick=reject], [data-photo-action=reject]) { --decision-tint: var(--p-danger); }
 .why-details { font-size: 11px; color: var(--p-muted); margin-top: 10px; }
 .why-details summary { cursor: pointer; }
 @media (max-width: 760px) {

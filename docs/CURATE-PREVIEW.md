@@ -43,7 +43,9 @@ Desktop keeps these visible. The remembered sort is not changed by collapsing th
   filtering or matching one member in search always retains the **whole** stack.
 - **Decided** shows individual photos with earlier human choices (including Fav), with search
   and date order. The lightbox labels the saved **Current** outcome separately from
-  stack **Draft** choices; Yes is never filled by default. Open a photo or use its card actions to change that choice.
+  stack **Draft** choices; Yes is never filled by default. The saved decision button
+  has a subtle tint on the card and in the lightbox; Decided photos have no duplicate
+  outcome label over the image. Open a photo or use its card actions to change that choice.
   A newer concurrent decision invalidates the old action scope; it cannot be
   silently overwritten. Background checks continue for pending photos while you browse Decided.
 - Cards show a cover, up to three member thumbnails, available caption, capture date/time and stack size. Filenames are omitted.

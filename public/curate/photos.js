@@ -135,7 +135,10 @@ export function groupCard(group, open, { decide, select, selected = false, decid
   } else {
     for (const [value,text,title] of choices) {
       const button = node('button', text, `p-btn${value === 'favorite' ? ' gold' : value === 'reject' ? ' danger' : ''}`);
-      button.dataset.quick = value; button.title = title; button.onclick = () => decide?.(group,value); actions.append(button);
+      const current = decided && savedOutcome(photo) === value;
+      button.dataset.quick = value; button.title = current ? `Current decision: ${text}` : title;
+      button.setAttribute('aria-pressed', String(current));
+      button.onclick = () => decide?.(group,value); actions.append(button);
     }
     const selection = node('label',undefined,'card-selection'), check = node('input');
     check.type = 'checkbox'; check.checked = selected; check.dataset.select = group.id;
@@ -145,7 +148,7 @@ export function groupCard(group, open, { decide, select, selected = false, decid
   if (actions.childElementCount) caption.append(actions);
   card.updateSimilarity = (value) => {
     if (decided) {
-      chip.textContent = outcomeLabel(savedOutcome(photo));
+      chip.hidden = true;
       status.hidden = true; return;
     }
     group.similarity = value;
