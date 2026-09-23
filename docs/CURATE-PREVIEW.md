@@ -73,6 +73,8 @@ Desktop keeps these visible. The remembered sort is not changed by collapsing th
   image to enlarge it. These choices remain a draft until **Save** or **Save & next**; the
   footer counts each outcome separately. Unmarked photos default to Skip, which
   is neither deletion nor Never show. Saves with no Yes or Fav choices are neutral.
+  Selected choices use the same subtle fills as Decided: teal for Yes, gray for
+  Skip, gold for Fav and red for No, in both the comparison and its lightbox.
 - Stack checkboxes check photos for batch actions independently of their outcome.
   **Check all** checks all actionable photos; it does not mark them Yes. When any
   photos are checked, the same four choices appear beside the checked count.

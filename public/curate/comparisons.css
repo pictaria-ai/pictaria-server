@@ -516,7 +516,6 @@ dialog::backdrop {
 .card-selection input { margin: 0; width: 16px; height: 16px; accent-color: var(--p-accent); }
 .photo-image { cursor: zoom-in; }
 .photo-info [data-keeper] { min-width: 75px; }
-.photo-info [aria-pressed=true] { background: var(--p-accent); color: var(--p-accent-ink); }
 #photo-view { width: 100vw; max-width: 100vw; height: 100dvh; max-height: 100dvh; margin: 0; border: 0; border-radius: 0; background: rgb(8 10 13 / .97); }
 .lightbox-layout { display: grid; grid-template-columns: minmax(0,1fr) 320px; height: 100%; }
 .lightbox-stage { position: relative; min-width: 0; min-height: 0; padding: 18px; display: flex; align-items: center; justify-content: center; }
@@ -586,10 +585,6 @@ dialog::backdrop {
 .photo-info { display: block; padding: 8px; }
 .photo-choices { display: grid; grid-template-columns: repeat(4,minmax(0,1fr)); gap: 5px; }
 .photo-choices .p-btn, .photo-grid.compact .photo-info .p-btn { width: 100%; min-width: 0; padding: 6px 3px; font-size: 13px; }
-.photo-info [aria-pressed=true], [data-stack-choice][aria-pressed=true] { background: var(--p-panel-2); color: var(--p-text); border-color: var(--p-muted); box-shadow: inset 0 0 0 1px currentColor; }
-.photo-info [data-choice=approve][aria-pressed=true], [data-stack-choice=approve][aria-pressed=true] { background: var(--p-accent); color: var(--p-accent-ink); border-color: var(--p-accent); }
-.photo-info [data-choice=favorite][aria-pressed=true], [data-stack-choice=favorite][aria-pressed=true] { color: var(--p-gold); }
-.photo-info [data-choice=reject][aria-pressed=true], [data-stack-choice=reject][aria-pressed=true] { color: var(--p-danger); }
 .choice-batch { display: flex; align-items: center; flex-wrap: wrap; gap: 6px; }
 .choice-batch strong { font-size: 12px; font-weight: 500; color: var(--p-muted); }
 .card-actions { display: grid; grid-template-columns: repeat(4,minmax(0,1fr)); gap: 5px; }
@@ -627,13 +622,13 @@ dialog::backdrop {
 .comparison-keys { font-size: 11px; margin: 0 0 12px; }
 .save-actions { display: flex; gap: 8px; flex-shrink: 0; margin-left: auto; }
 #photo-outcome { font-size: 14px; font-weight: 600; }
-:is([data-quick], [data-photo-action])[aria-pressed=true] {
+:is([data-quick], [data-photo-action], [data-choice], [data-stack-choice])[aria-pressed=true] {
   background: color-mix(in srgb, var(--decision-tint, var(--p-muted)) 16%, var(--p-panel));
   border-color: color-mix(in srgb, var(--decision-tint, var(--p-muted)) 55%, var(--p-line));
 }
-:is([data-quick=approve], [data-photo-action=approve]) { --decision-tint: var(--p-accent); }
-:is([data-quick=favorite], [data-photo-action=favorite]) { --decision-tint: var(--p-gold); }
-:is([data-quick=reject], [data-photo-action=reject]) { --decision-tint: var(--p-danger); }
+:is([data-quick=approve], [data-photo-action=approve], [data-choice=approve], [data-stack-choice=approve]) { --decision-tint: var(--p-accent); }
+:is([data-quick=favorite], [data-photo-action=favorite], [data-choice=favorite], [data-stack-choice=favorite]) { --decision-tint: var(--p-gold); }
+:is([data-quick=reject], [data-photo-action=reject], [data-choice=reject], [data-stack-choice=reject]) { --decision-tint: var(--p-danger); }
 .why-details { font-size: 11px; color: var(--p-muted); margin-top: 10px; }
 .why-details summary { cursor: pointer; }
 @media (max-width: 760px) {
