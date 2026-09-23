@@ -37,7 +37,7 @@ test(
       'document.querySelectorAll("#photos [data-keeper]").length===3 && !document.querySelector("#apply").disabled',
     );
     await click('#photos .photo-image');
-    await wait('document.querySelector("#photo-view").open');
+    await wait('document.querySelector("#photo-view").open && document.querySelector("#photo-loading").hidden');
     assert.equal(await page.evaluate('document.querySelectorAll("#photos [data-keeper][aria-pressed=true]").length'), 0);
     await key('y');
     assert.equal(fixture.repo.db.prepare('SELECT COUNT(*) n FROM decision_operations').get().n, 0);

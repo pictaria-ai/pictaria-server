@@ -70,7 +70,7 @@ Desktop keeps these visible. The remembered sort is not changed by collapsing th
   appear automatically when browsing pauses, preserving date order and your place.
   Open comparisons and bulk selections keep their current view.
 - Open a stack and use **Yes / Skip / Fav / No** beneath each photo. Click an
-  image to enlarge it. These choices remain a draft until **Save choices** or **Save & next**; the
+  image to enlarge it. These choices remain a draft until **Save** or **Save & next**; the
   footer counts each outcome separately. Unmarked photos default to Skip, which
   is neither deletion nor Never show. Saves with no Yes or Fav choices are neutral.
 - Stack checkboxes check photos for batch actions independently of their outcome.
@@ -78,7 +78,7 @@ Desktop keeps these visible. The remembered sort is not changed by collapsing th
   photos are checked, the same four choices appear beside the checked count.
   Applying one changes only those photos; **Clear checks** clears the checkboxes
   without undoing any draft choices. Nearby reference photos cannot be checked.
-- **Save choices** returns to the grid. **Save & next** opens the next pending
+- **Save** returns to the grid. **Save & next** opens the next pending
   comparison after this item's capture-time position, in the current filters and
   date order. It opens a fresh view after the save, so the next comparison uses
   the latest grouping, and loads more pages when needed. It does not wrap to
@@ -98,6 +98,12 @@ Desktop keeps these visible. The remembered sort is not changed by collapsing th
   space beside a narrow panel with caption, tags, capture date, enrichment score,
   producing model/profile when available, and an Immich link. On narrow screens
   the information panel scrolls below the photo.
+- The lightbox stays open while moving between single photos, including after a
+  decision or Undo. It keeps the previous image visible until the next image is
+  ready, briefly disabling decisions during the handoff. Adjacent images are
+  preloaded with a bounded five-image cache; a loading label appears when needed.
+  Closing the viewer cancels the pending transition. Failed previews show an
+  explicit unavailable message rather than leaving the previous photo under new details.
 - For **single photos**, buttons and production keyboard shortcuts save immediately:
   **Y/A** Yes, **S/V** Skip, **F** Fav, **N/R** No.
   In Pending, an accepted decision advances to the next loaded card (loading the next page

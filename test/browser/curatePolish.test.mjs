@@ -48,7 +48,7 @@ test(
     await key('y');
     assert.equal(await page.evaluate('document.activeElement.dataset.photoId'), fixture.id(2));
     await click('#photos .photo-image');
-    await page.waitFor('document.querySelector("#photo-view").open');
+    await page.waitFor('document.querySelector("#photo-view").open && document.querySelector("#photo-loading").hidden');
     await click('[data-stack-choice=favorite]'); // Mouse choice stays put.
     assert.equal(
       await page.evaluate('document.querySelector("#photo-large").src.includes("' + fixture.id(1) + '")'),

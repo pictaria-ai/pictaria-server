@@ -1,10 +1,12 @@
 import { CurateClient, request, decisionSummary } from './client.js';
 import { comesAfter } from './order.js';
 import { explanation } from './explanation.js';
+import { PreviewImages } from './preview-images.js';
 import { node, thumbnail, photoCard, groupCard, savedOutcome, outcomeLabel, similarityLabel, similarityIndicator } from './photos.js';
 
 const el = (id) => document.getElementById(id);
 const client = new CurateClient();
+const previews = new PreviewImages();
 const SORT_PREFERENCE = 'pictaria.curate.sort';
 const state = {
   section: 'pending', category: 'all', selected: new Set(), removed: new Map(),
@@ -26,6 +28,7 @@ const state = {
   photoList: [],
   dialogGeneration: 0,
   openFailed: false,
+  opening: null,
   syncKind: null,
 };
 let failedPreviews = new Set();
@@ -78,7 +81,7 @@ function recovery() {
   el('comparison-recovery').hidden = !client.saved.pending;
   el('comparison-retry').disabled = state.busy;
   el('retry-action').disabled = state.busy;
-  const locked = state.busy || state.continuing || Boolean(client.saved.pending);
+  const locked = state.busy || state.opening || state.continuing || Boolean(client.saved.pending);
   el('refresh').disabled = locked || state.loading;
   el('search').disabled = locked || state.loading;
   el('sort').disabled = el('category').disabled = locked || state.loading;
@@ -99,7 +102,7 @@ function selection() {
   el('comparison-bulk').hidden = !state.batchPhotos.size;
   el('comparison-bulk-count').textContent = `${state.batchPhotos.size} checked`;
   el('apply').textContent = state.comparison
-    ? 'Save choices'
+    ? 'Save'
     : state.openFailed
       ? 'Refresh to continue'
       : 'Loading comparison…';
@@ -108,6 +111,7 @@ function selection() {
   el('apply').disabled =
     !state.comparison ||
     state.busy ||
+    state.opening || state.continuing ||
     Boolean(client.saved.pending) ||
     state.comparison.oversized ||
     failedPreviews.size > 0;
@@ -116,16 +120,19 @@ function selection() {
 }
 function closeComparison() {
   state.dialogGeneration++;
+  state.opening = null;
+  el('photo-loading').hidden = true;
   el('photo-view').close();
   el('comparison').close();
   state.comparison = null;
 }
-async function refresh({ automatic = false } = {}) {
+async function refresh({ automatic = false, keepLightbox = false } = {}) {
   if (state.busy || state.loading || client.saved.pending) return;
   const count = automatic ? state.groups.length : 0;
   const scroll = automatic ? scrollContext() : null;
   state.loading = true;
-  closeComparison();
+  if (!keepLightbox) closeComparison();
+  previews.clear();
   clearErrors();
   recovery();
   try {
@@ -246,12 +253,15 @@ async function more() {
   }
 }
 async function compare(group) {
-  if (state.busy || state.loading || state.autoUpdateFailed || client.saved.pending) return;
+  if (state.busy || state.loading || state.opening || state.autoUpdateFailed || client.saved.pending) return;
   clearErrors();
   const generation = ++state.dialogGeneration;
+  const single = group.memberCount === 1;
+  const keepPhoto = single && el('photo-view').open;
+  state.opening = single ? 'single' : 'stack';
   state.viewerMode = group.memberCount === 1 ? 'single' : 'stack';
   state.batchPhotos.clear();
-  state.comparison = null;
+  if (!keepPhoto) state.comparison = null;
   state.outcomes = {};
   state.draftTouched = false;
   state.openFailed = false;
@@ -273,62 +283,106 @@ async function compare(group) {
   el('metadata-retry').hidden = true;
   el('photos').replaceChildren();
   el('context').hidden = true;
-  el('comparison').showModal();
+  if (single) openLightboxShell();
+  else {
+    el('photo-view').close();
+    el('comparison').showModal();
+  }
   recovery();
-  const comparison = await client.comparison(state.view.viewId, group.id);
-  if (generation !== state.dialogGeneration || !el('comparison').open) return;
-  state.comparison = comparison;
-  showComparisonSimilarity(comparison.similarity);
-  state.outcomes = comparison.oversized ? {} : Object.fromEntries(comparison.photos.map(photo =>
-    [photo.id, savedOutcome(photo) || 'reviewed']));
-  state.photoList = [...comparison.photos, ...comparison.context];
-  el('comparison-state').textContent = comparison.oversized
-    ? 'This group exceeds the 1,000-photo decision limit. Only the first 50 previews are shown; decisions are disabled. Turn off stacks in Settings to review these photos individually.'
-    : comparison.photos.some((p) => !p.metadata.checkedAt || p.metadata.outcome !== 'refreshed')
-      ? 'Some photo information is awaiting refresh. You can still make a manual choice; changed inputs will require a refresh before saving.'
-      : '';
-  el('metadata-retry').hidden = !state.view.metadata?.problem;
-  el('photos').replaceChildren(
-    ...comparison.photos.map((photo, index) =>
-      photoCard(photo, {
-        label: `Photo ${index + 1}`,
-        selected: () => state.batchPhotos.has(photo.id),
-        select: (selected) => {
-          selected ? state.batchPhotos.add(photo.id) : state.batchPhotos.delete(photo.id);
-          repaintSelection();
-        },
-        outcome: () => state.outcomes[photo.id] || 'reviewed',
-        change: (value) => setOutcome(photo.id, value),
-        imageState: (ok) => {
-          if (state.comparison !== comparison) return;
-          ok ? failedPreviews.delete(photo.id) : failedPreviews.add(photo.id);
-          el('preview-errors').hidden = !failedPreviews.size;
-          selection();
-        },
-        open: showPhoto,
-      }),
-    ),
-  );
-  el('context').hidden = !comparison.context.length;
-  el('context-omitted').hidden = !comparison.contextOmitted;
-  el('context-photos').replaceChildren(
-    ...comparison.context.map((photo) => photoCard(photo, { readOnly: true, open: showPhoto })),
-  );
-  recovery();
-  if (state.viewerMode === 'single') { el('comparison').close(); showPhoto(comparison.photos[0]); }
-  else el('photos').firstElementChild?.focus({ preventScroll: true });
+  try {
+    const comparison = await client.comparison(state.view.viewId, group.id);
+    if (generation !== state.dialogGeneration) return;
+    const preview = single ? await previews.get(comparison.photos[0].id).promise : null;
+    if (generation !== state.dialogGeneration || !(single ? el('photo-view') : el('comparison')).open) return;
+    state.comparison = comparison;
+    showComparisonSimilarity(comparison.similarity);
+    state.outcomes = comparison.oversized ? {} : Object.fromEntries(comparison.photos.map(photo =>
+      [photo.id, savedOutcome(photo) || 'reviewed']));
+    state.photoList = [...comparison.photos, ...comparison.context];
+    el('comparison-state').textContent = comparison.oversized
+      ? 'This group exceeds the 1,000-photo decision limit. Only the first 50 previews are shown; decisions are disabled. Turn off stacks in Settings to review these photos individually.'
+      : comparison.photos.some((p) => !p.metadata.checkedAt || p.metadata.outcome !== 'refreshed')
+        ? 'Some photo information is awaiting refresh. You can still make a manual choice; changed inputs will require a refresh before saving.'
+        : '';
+    el('metadata-retry').hidden = !state.view.metadata?.problem;
+    el('photos').replaceChildren(
+      ...comparison.photos.map((photo, index) =>
+        photoCard(photo, {
+          label: `Photo ${index + 1}`,
+          selected: () => state.batchPhotos.has(photo.id),
+          select: (selected) => {
+            selected ? state.batchPhotos.add(photo.id) : state.batchPhotos.delete(photo.id);
+            repaintSelection();
+          },
+          outcome: () => state.outcomes[photo.id] || 'reviewed',
+          change: (value) => setOutcome(photo.id, value),
+          imageState: (ok) => {
+            if (state.comparison !== comparison) return;
+            ok ? failedPreviews.delete(photo.id) : failedPreviews.add(photo.id);
+            el('preview-errors').hidden = !failedPreviews.size;
+            selection();
+          },
+          open: showPhoto,
+        }),
+      ),
+    );
+    el('context').hidden = !comparison.context.length;
+    el('context-omitted').hidden = !comparison.contextOmitted;
+    el('context-photos').replaceChildren(
+      ...comparison.context.map((photo) => photoCard(photo, { readOnly: true, open: showPhoto })),
+    );
+    recovery();
+    if (single) { el('comparison').close(); renderPhoto(comparison.photos[0], preview); }
+    else el('photos').firstElementChild?.focus({ preventScroll: true });
+  } catch (cause) {
+    if (generation === state.dialogGeneration) throw cause;
+  } finally {
+    if (generation === state.dialogGeneration) {
+      state.opening = null;
+      el('photo-loading').hidden = true;
+      recovery();
+    }
+  }
 }
-function showPhoto(photo) {
-  if (!photo) return;
+function openLightboxShell() {
+  if (!el('photo-view').open) {
+    el('photo-view').classList.add('loading-initial');
+    el('photo-view').showModal();
+  }
+  el('photo-loading').hidden = false;
+}
+async function showPhoto(photo) {
+  if (!photo || state.opening || state.busy || client.saved.pending) return;
+  const generation = ++state.dialogGeneration;
+  state.opening = 'photo';
+  openLightboxShell();
+  recovery();
+  try {
+    const entry = previews.get(photo.id);
+    const preview = entry.ready ? entry : await entry.promise;
+    if (generation !== state.dialogGeneration || !el('photo-view').open) return;
+    renderPhoto(photo, preview);
+  } finally {
+    if (generation === state.dialogGeneration) {
+      state.opening = null;
+      el('photo-loading').hidden = true;
+      recovery();
+    }
+  }
+}
+function renderPhoto(photo, preview) {
   state.photoIndex = state.photoList.findIndex((p) => p.id === photo.id);
   el('photo-title').textContent = 'Photo';
-  el('photo-large').src = thumbnail(photo.id);
-  el('photo-large').alt = photo.caption || `Photo ${state.photoIndex + 1}`;
+  preview.image.id = 'photo-large';
+  preview.image.alt = photo.caption || `Photo ${state.photoIndex + 1}`;
+  preview.image.hidden = !preview.ok;
+  if (el('photo-large') !== preview.image) el('photo-large').replaceWith(preview.image);
+  el('photo-view').classList.remove('loading-initial');
   el('photo-caption').textContent = photo.caption || '';
   el('photo-date').textContent = photo.capturedAt ? new Date(photo.capturedAt).toLocaleString() : '';
   el('photo-score').textContent = Number.isFinite(photo.frameScore) ? `Enrichment score: ${photo.frameScore.toFixed(2)}` : '';
   el('photo-model').hidden = true;
-  el('photo-image-error').hidden = true;
+  el('photo-image-error').hidden = preview.ok;
   el('photo-tags').replaceChildren(...(photo.tags || []).map((tag) => node('span', tag)));
   const references = state.viewerMode === 'single' ? state.comparison.context : [];
   el('photo-context').hidden = !references.length;
@@ -347,6 +401,12 @@ function showPhoto(photo) {
   syncViewer();
   showComparisonSimilarity(state.comparison?.similarity);
   fullCaption(photo);
+  const list = state.viewerMode === 'single' ? state.groups : state.photoList;
+  const index = state.viewerMode === 'single'
+    ? state.groups.findIndex(g => g.id === state.comparison.groupId) : state.photoIndex;
+  const neighbors = list.slice(Math.max(0, index - 1), index + 2)
+    .map(item => state.viewerMode === 'single' ? item.memberCount === 1 && item.photos[0] : item).filter(Boolean);
+  for (const neighbor of neighbors) if (neighbor.id !== photo.id) previews.get(neighbor.id);
 }
 async function fullCaption(photo) {
   try {
@@ -361,7 +421,7 @@ async function fullCaption(photo) {
 }
 function setOutcome(id, value) { setOutcomes([id], value); }
 function setOutcomes(ids, value) {
-  if (state.busy || client.saved.pending || !state.comparison || state.comparison.oversized) return;
+  if (state.busy || state.opening || client.saved.pending || !state.comparison || state.comparison.oversized) return;
   for (const id of ids) if (Object.hasOwn(state.outcomes, id)) {
     state.outcomes[id] = value;
     state.draftTouched = true; // An explicit Skip also counts; checking a box does not.
@@ -393,7 +453,7 @@ function syncViewer() {
   el('photo-outcome').textContent = single || !actionable
     ? `Current: ${outcomeLabel(savedOutcome(photo))}`
     : `Draft: ${outcomeLabel(state.outcomes[photo.id])} · not saved`;
-  const locked = state.busy || state.loading || Boolean(client.saved.pending) || state.comparison?.oversized;
+  const locked = state.busy || state.loading || state.opening || state.continuing || Boolean(client.saved.pending) || state.comparison?.oversized;
   for (const control of document.querySelectorAll('[data-stack-choice], [data-photo-action]'))
     control.disabled = locked || !actionable;
   el('photo-prev').disabled = locked || (single ? !actionable || at <= 0 : state.photoIndex <= 0);
@@ -414,7 +474,7 @@ function syncViewer() {
 }
 function syncReceipts() {
   const available = Boolean(state.undo && state.undo.until > Date.now());
-  const locked = state.busy || state.loading || state.continuing || Boolean(client.saved.pending);
+  const locked = state.busy || state.loading || state.opening || state.continuing || Boolean(client.saved.pending);
   el('undo').hidden = !available;
   el('undo').disabled = locked || !available;
   for (const prefix of ['photo', 'comparison']) {
@@ -424,7 +484,7 @@ function syncReceipts() {
   }
 }
 async function action(work, context = null) {
-  if (state.busy || client.saved.pending) return;
+  if (state.busy || state.opening || state.continuing || client.saved.pending) return;
   state.busy = true;
   state.actionContext = context || (state.comparison ? { ids: [...state.comparison.ids] } : null);
   clearErrors();
@@ -441,78 +501,94 @@ async function accepted({ kind, result }) {
   const undoContext = kind === 'undo' ? state.undo?.ui : null;
   const previousGroup = state.comparison?.groupId;
   const index = state.groups.findIndex(g => g.id === previousGroup);
-  closeComparison();
-  state.undo = null;
-  let correctionMessage = 'Stack correction saved. Keeper decisions are unchanged.';
-  state.syncId = result.operationId || null;
-  state.syncKind = kind;
-  if (result.undo)
-    state.undo = {
-      kind: 'undo',
-      body: { operationId: result.undo.operationId, kind: 'undo', targetOperationId: result.undo.targetOperationId },
-      until: result.undo.expiresAt,
-      ui: context,
-    };
-  if (kind === 'separation') {
-    // A replayed receipt describes creation, not the correction's current state.
-    const { correction } = await request(`separations?id=${encodeURIComponent(result.id)}`).catch(() => ({
-      correction: null,
-    }));
-    if (!correction) correctionMessage = 'Stack correction recorded. Keeper decisions are unchanged.';
-    else if (!correction.active)
-      correctionMessage = 'This stack correction has since been reset. Keeper decisions are unchanged.';
-    if (correction?.active && correction.revision === result.revision)
+  const keepPhoto = el('photo-view').open &&
+    (kind === 'decision' && context?.advance || kind === 'undo' && state.section === 'pending' &&
+      undoContext?.advance && undoContext.viewId === state.view?.viewId);
+  if (keepPhoto) state.continuing = true;
+  else closeComparison();
+  try {
+    state.undo = null;
+    let correctionMessage = 'Stack correction saved. Keeper decisions are unchanged.';
+    state.syncId = result.operationId || null;
+    state.syncKind = kind;
+    if (result.undo)
       state.undo = {
-        kind: 'reset',
-        body: { id: correction.id, revision: correction.revision, undo: true },
-        until: result.undoUntil,
+        kind: 'undo',
+        body: { operationId: result.undo.operationId, kind: 'undo', targetOperationId: result.undo.targetOperationId },
+        until: result.undo.expiresAt,
+        ui: context,
       };
+    if (kind === 'separation') {
+      // A replayed receipt describes creation, not the correction's current state.
+      const { correction } = await request(`separations?id=${encodeURIComponent(result.id)}`).catch(() => ({
+        correction: null,
+      }));
+      if (!correction) correctionMessage = 'Stack correction recorded. Keeper decisions are unchanged.';
+      else if (!correction.active)
+        correctionMessage = 'This stack correction has since been reset. Keeper decisions are unchanged.';
+      if (correction?.active && correction.revision === result.revision)
+        state.undo = {
+          kind: 'reset',
+          body: { id: correction.id, revision: correction.revision, undo: true },
+          until: result.undoUntil,
+        };
+    }
+    el('receipt-text').textContent = result.savedLocally
+      ? `${kind === 'undo' ? 'Undid' : 'Saved'} choices for ${result.assetCount} ${result.assetCount === 1 ? 'photo' : 'photos'}.`
+      : kind === 'separation'
+        ? correctionMessage
+        : 'Stack correction reset. Keeper decisions are unchanged.';
+    el('receipt').hidden = false;
+    el('sync').textContent = result.savedLocally
+      ? kind === 'undo'
+        ? 'Syncing Undo to Immich…'
+        : 'Syncing to Immich…'
+      : '';
+    el('retry-sync').hidden = true;
+    el('undo').hidden = !state.undo || state.undo.until <= Date.now();
+    // The accepted result is shown before refreshing, so a failed read cannot
+    // turn a saved action into an apparent failure or a second operation.
+    state.busy = false;
+    state.actionContext = null;
+    if (state.view && kind === 'decision' && context?.ids && state.section === 'pending') {
+      const ids = new Set(context.ids);
+      const removed = state.groups.map((group,index) => ({group,index})).filter(({group}) => ids.has(group.photos[0].id));
+      if (state.undo) state.undo.ui = { ...context, removed, viewId: state.view.viewId };
+      for (const {group} of removed) { state.removed.set(group.id, group); state.selected.delete(group.id); }
+      state.groups = state.groups.filter(g => !state.removed.has(g.id));
+      renderGroups(); showViewStatus(state.view);
+      if (context.latest) {
+        await continueReview(context.anchor);
+      } else if (context.advance) {
+        if (index >= state.groups.length && state.next !== null) await more();
+        if (state.groups[index] && (!keepPhoto || el('photo-view').open)) await compare(state.groups[index]);
+        else closeComparison();
+      }
+    } else if (state.view && kind === 'undo' && undoContext?.removed && undoContext.viewId === state.view.viewId && state.section === 'pending') {
+      for (const {group,index} of undoContext.removed) {
+        if (state.removed.delete(group.id)) state.groups.splice(index,0,group);
+      }
+      renderGroups(); showViewStatus(state.view);
+      if (undoContext.advance && undoContext.removed[0]) await compare(undoContext.removed[0].group);
+    } else {
+      await refresh({ keepLightbox: keepPhoto });
+      if (context?.advance && state.section === 'decided') {
+        const group = state.groups.find(g => context.ids.includes(g.photos[0].id));
+        if (group && (!keepPhoto || el('photo-view').open)) await compare(group);
+        else closeComparison();
+      }
+    }
+    state.actionContext = null;
+  } catch (cause) {
+    if (!keepPhoto) throw cause;
+    closeComparison();
+    throw Error(`${kind === 'undo' ? 'Choices restored' : 'Choices saved'}. Could not open the next photo: ${cause.message}`);
+  } finally {
+    if (keepPhoto) {
+      state.continuing = false;
+      recovery();
+    }
   }
-  el('receipt-text').textContent = result.savedLocally
-    ? `${kind === 'undo' ? 'Undid' : 'Saved'} choices for ${result.assetCount} ${result.assetCount === 1 ? 'photo' : 'photos'}.`
-    : kind === 'separation'
-      ? correctionMessage
-      : 'Stack correction reset. Keeper decisions are unchanged.';
-  el('receipt').hidden = false;
-  el('sync').textContent = result.savedLocally
-    ? kind === 'undo'
-      ? 'Syncing Undo to Immich…'
-      : 'Syncing to Immich…'
-    : '';
-  el('retry-sync').hidden = true;
-  el('undo').hidden = !state.undo || state.undo.until <= Date.now();
-  // The accepted result is shown before refreshing, so a failed read cannot
-  // turn a saved action into an apparent failure or a second operation.
-  state.busy = false;
-  state.actionContext = null;
-  if (state.view && kind === 'decision' && context?.ids && state.section === 'pending') {
-    const ids = new Set(context.ids);
-    const removed = state.groups.map((group,index) => ({group,index})).filter(({group}) => ids.has(group.photos[0].id));
-    if (state.undo) state.undo.ui = { ...context, removed, viewId: state.view.viewId };
-    for (const {group} of removed) { state.removed.set(group.id, group); state.selected.delete(group.id); }
-    state.groups = state.groups.filter(g => !state.removed.has(g.id));
-    renderGroups(); showViewStatus(state.view);
-    if (context.latest) {
-      await continueReview(context.anchor);
-    } else if (context.advance) {
-      if (index >= state.groups.length && state.next !== null) await more();
-      if (state.groups[index]) await compare(state.groups[index]);
-    }
-  } else if (state.view && kind === 'undo' && undoContext?.removed && undoContext.viewId === state.view.viewId && state.section === 'pending') {
-    for (const {group,index} of undoContext.removed) {
-      if (state.removed.delete(group.id)) state.groups.splice(index,0,group);
-    }
-    renderGroups(); showViewStatus(state.view);
-    if (undoContext.advance && undoContext.removed[0]) await compare(undoContext.removed[0].group);
-  } else {
-    await refresh().catch(error);
-    if (context?.advance && state.section === 'decided') {
-      const group = state.groups.find(g => context.ids.includes(g.photos[0].id));
-      if (group) await compare(group);
-    }
-  }
-  state.actionContext = null;
-
 }
 function renderGroups() {
   visibility.disconnect(); visibleCards.clear(); cards.clear();
@@ -558,12 +634,12 @@ function quickDecision(groups, outcome) {
   }, { ids: groups.map(g => g.photos[0].id) });
 }
 async function stepPhoto(delta) {
-  if (state.busy || state.loading || client.saved.pending) return;
+  if (state.busy || state.loading || state.opening || state.continuing || client.saved.pending) return;
   if (state.viewerMode !== 'single') return showPhoto(state.photoList[state.photoIndex + delta]);
   const index = state.groups.findIndex(g => g.id === state.comparison?.groupId) + delta;
   if (index >= state.groups.length && state.next !== null) await more();
   const group = state.groups[index];
-  if (group) { el('photo-view').close(); await compare(group); }
+  if (group && el('photo-view').open) await compare(group);
 }
 function decideSingle(outcome) {
   if (state.viewerMode !== 'single' || !state.comparison || state.comparison.ids.length !== 1 ||
@@ -781,7 +857,6 @@ el('back-pending-photo').onclick = () => showPhoto(state.comparison?.photos[0]);
 el('photo-undo').onclick = el('comparison-undo').onclick = () => el('undo').click();
 el('photo-retry').onclick = () => el('retry-action').click();
 el('photo-refresh').onclick = () => run(refresh);
-el('photo-large').onerror = () => { el('photo-image-error').hidden = false; };
 for (const button of document.querySelectorAll('[data-photo-action]')) button.onclick = () => run(() => decideSingle(button.dataset.photoAction));
 for (const button of document.querySelectorAll('[data-stack-choice]')) button.onclick = () => {
   const photo = state.photoList[state.photoIndex];
@@ -799,7 +874,18 @@ for (const dialog of document.querySelectorAll('dialog'))
   });
 el('comparison').addEventListener('close', () => {
   // A queued close event may arrive after a new comparison has opened.
-  if (!el('comparison').open && state.viewerMode !== 'single') state.dialogGeneration++;
+  if (!el('comparison').open && state.viewerMode !== 'single') {
+    state.dialogGeneration++;
+    if (state.opening === 'stack') { state.opening = null; recovery(); }
+  }
+});
+el('photo-view').addEventListener('close', () => {
+  if (!el('photo-view').open && ['single', 'photo'].includes(state.opening)) {
+    state.dialogGeneration++;
+    state.opening = null;
+    el('photo-loading').hidden = true;
+    recovery();
+  }
 });
 function backToComparison() {
   el('photo-view').close();
@@ -815,7 +901,7 @@ function markAndAdvance(outcome) {
 }
 document.addEventListener('keydown', (event) => {
   if (event.target.closest('input,select,textarea,[contenteditable=true],.why-tooltip')) return;
-  if (event.ctrlKey || event.metaKey || event.altKey || event.repeat || state.busy || state.loading || client.saved.pending) return;
+  if (event.ctrlKey || event.metaKey || event.altKey || event.repeat || state.busy || state.loading || state.opening || state.continuing || client.saved.pending) return;
   const key = event.key.toLowerCase();
   const outcome = {y:'approve',a:'approve',f:'favorite',s:'reviewed',v:'reviewed',n:'reject',r:'reject'}[key];
   const undo = el('photo-view').open ? el('photo-undo') : el('comparison').open ? el('comparison-undo') : null;

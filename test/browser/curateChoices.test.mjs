@@ -110,7 +110,7 @@ test(
     );
     assert.equal(operations(), 0, 'stack choices remain a draft until Save');
     await click(`${card(1)} .photo-image`);
-    await page.waitFor('document.querySelector("#photo-view").open');
+    await page.waitFor('document.querySelector("#photo-view").open && document.querySelector("#photo-loading").hidden');
     assert.deepEqual(
       await page.evaluate('[...document.querySelectorAll("[data-stack-choice]")].map(b=>b.textContent)'),
       ['Yes (Y)', 'Skip (S)', 'Fav (F)', 'No (N)'],
