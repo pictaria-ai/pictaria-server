@@ -144,7 +144,7 @@
             <div class="p-grow"></div>
             <label id="compact-label" hidden><input id="compact" type="checkbox" /> Compact grid</label>
           </div>
-          <p class="comparison-keys p-muted">Focus a photo: ← → or 1–9. Mark: Y Yes · S Skip · F Fav · N No. Enter: save &amp; next.</p>
+          <p class="comparison-keys p-muted">Focus a photo: ← → or 1–9. Mark: Y Yes · S Skip · F Fav · N No. Enter: save &amp; next after marking. Z: undo last save.</p>
           <section id="photos" class="photo-grid" aria-label="Comparison photos"></section>
           <section id="context" hidden>
             <h3>Already kept nearby</h3>
@@ -156,6 +156,10 @@
           </section>
         </div>
         <footer class="dialog-foot">
+          <div id="comparison-receipt" class="comparison-receipt" role="status" hidden>
+            <span id="comparison-receipt-text"></span>
+            <button id="comparison-undo" class="p-btn">Undo last save (Z)</button>
+          </div>
           <span id="selection-count" aria-live="polite"></span
           ><div class="save-actions"><button id="apply" class="p-btn" disabled>Save choices</button>
           <button id="apply-next" class="p-btn primary" disabled>Save &amp; next</button></div>

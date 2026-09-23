@@ -120,6 +120,7 @@ test(
     await click(`.group-card[data-group-id="single:decided:${fixture.id(1001)}"] .cover`);
     await wait(`document.querySelector('#photo-view').open && ${photo(1001)}`);
     assert.equal(await page.evaluate('document.querySelector("#photo-outcome").textContent'), 'Current: Fav');
+    assert.match(await page.evaluate('document.querySelector("#photo-position").textContent'), /^\d+ of \d+ photos$/);
     assert.equal(await page.evaluate(`document.querySelector('.group-card[data-group-id="single:decided:${fixture.id(1001)}"] .p-chip').textContent`), 'Fav');
     assert.equal(await page.evaluate('document.querySelector("[data-photo-action=approve]").classList.contains("primary")'), false);
     await key('n');

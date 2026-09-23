@@ -17,7 +17,7 @@ const state = {
   next: null,
   loading: false,
   comparison: null,
-  outcomes: {}, batchPhotos: new Set(),
+  outcomes: {}, batchPhotos: new Set(), draftTouched: false,
   busy: false,
   undo: null,
   syncId: null,
@@ -247,6 +247,7 @@ async function compare(group) {
   state.batchPhotos.clear();
   state.comparison = null;
   state.outcomes = {};
+  state.draftTouched = false;
   state.openFailed = false;
   failedPreviews = new Set();
   el('preview-errors').hidden = true;
@@ -355,7 +356,10 @@ async function fullCaption(photo) {
 function setOutcome(id, value) { setOutcomes([id], value); }
 function setOutcomes(ids, value) {
   if (state.busy || client.saved.pending || !state.comparison || state.comparison.oversized) return;
-  for (const id of ids) if (Object.hasOwn(state.outcomes, id)) state.outcomes[id] = value;
+  for (const id of ids) if (Object.hasOwn(state.outcomes, id)) {
+    state.outcomes[id] = value;
+    state.draftTouched = true; // An explicit Skip also counts; checking a box does not.
+  }
   repaintSelection(); syncViewer();
 }
 function syncViewer() {
@@ -365,7 +369,9 @@ function syncViewer() {
   );
   const single = state.viewerMode === 'single';
   const at = state.groups.findIndex(g => g.id === state.comparison?.groupId);
-  el('photo-position').textContent = single ? `Photo · ${at + 1} of ${state.groups.length} ${state.next !== null ? 'loaded ' : ''}comparisons`
+  const onlyPhotos = state.section === 'decided' || state.kind === 'singles' || state.view?.counts?.stacks === 0;
+  const unit = onlyPhotos ? 'photos' : 'items';
+  el('photo-position').textContent = single ? `${at + 1} of ${state.groups.length} ${state.next !== null ? 'loaded ' : ''}${unit}`
     : `${state.photoIndex + 1} of ${state.photoList.length} photos`;
   el('single-actions').hidden = !single || !actionable;
   el('stack-actions').hidden = single || !actionable;
@@ -392,15 +398,24 @@ function syncViewer() {
   el('photo-keys').textContent = single
     ? 'Y Yes · S Skip · F Fav · N No · Z Undo · ← → browse · Esc close. Choices save immediately.'
     : 'Y Yes · S Skip · F Fav · N No: mark & next. ← → browse. Esc returns to comparison. Choices are not saved until you save the stack.';
-  el('photo-receipt').hidden = !state.undo;
-  el('photo-receipt-text').textContent = el('receipt-text').textContent;
-  el('photo-undo').disabled = locked || !state.undo;
+  syncReceipts();
   for (const button of document.querySelectorAll('[data-photo-action]'))
     button.setAttribute('aria-pressed', String(button.dataset.photoAction === savedOutcome(photo)));
   if (!actionable) return;
   const value = state.outcomes[photo.id];
   for (const button of document.querySelectorAll('[data-stack-choice]'))
     button.setAttribute('aria-pressed', String(button.dataset.stackChoice === value));
+}
+function syncReceipts() {
+  const available = Boolean(state.undo && state.undo.until > Date.now());
+  const locked = state.busy || state.loading || state.continuing || Boolean(client.saved.pending);
+  el('undo').hidden = !available;
+  el('undo').disabled = locked || !available;
+  for (const prefix of ['photo', 'comparison']) {
+    el(`${prefix}-receipt`).hidden = !available;
+    el(`${prefix}-receipt-text`).textContent = el('receipt-text').textContent;
+    el(`${prefix}-undo`).disabled = locked || !available;
+  }
 }
 async function action(work, context = null) {
   if (state.busy || client.saved.pending) return;
@@ -757,7 +772,7 @@ el('photo-prev').onclick = () => run(() => stepPhoto(-1));
 el('photo-next').onclick = () => run(() => stepPhoto(1));
 el('back-comparison').onclick = backToComparison;
 el('back-pending-photo').onclick = () => showPhoto(state.comparison?.photos[0]);
-el('photo-undo').onclick = () => el('undo').click();
+el('photo-undo').onclick = el('comparison-undo').onclick = () => el('undo').click();
 el('photo-retry').onclick = () => el('retry-action').click();
 el('photo-refresh').onclick = () => run(refresh);
 el('photo-large').onerror = () => { el('photo-image-error').hidden = false; };
@@ -797,8 +812,11 @@ document.addEventListener('keydown', (event) => {
   if (event.ctrlKey || event.metaKey || event.altKey || event.repeat || state.busy || state.loading || client.saved.pending) return;
   const key = event.key.toLowerCase();
   const outcome = {y:'approve',a:'approve',f:'favorite',s:'reviewed',v:'reviewed',n:'reject',r:'reject'}[key];
+  const undo = el('photo-view').open ? el('photo-undo') : el('comparison').open ? el('comparison-undo') : null;
+  if (key === 'z' && undo && state.undo?.until > Date.now() && !undo.disabled) {
+    event.preventDefault(); undo.click(); return;
+  }
   if (el('photo-view').open) {
-    if (key === 'z' && state.undo && !el('photo-undo').disabled) { event.preventDefault(); el('photo-undo').click(); return; }
     if (outcome) {
       event.preventDefault();
       if (state.viewerMode === 'single') run(() => decideSingle(outcome));
@@ -827,8 +845,10 @@ document.addEventListener('keydown', (event) => {
     event.preventDefault(); photos[index + (key === 'arrowleft' ? -1 : 1)]?.focus();
   } else if (key === 'enter' && event.target === focused) {
     // Enter on an image/button retains its native behavior; only the explicitly
-    // focused photo card invokes the documented save-and-next shortcut.
-    event.preventDefault(); run(() => saveComparison(true));
+    // focused card with an explicitly marked draft can invoke save-and-next.
+    // Automatic initial focus must never turn a stray Enter into a Skip-all save.
+    event.preventDefault();
+    if (state.draftTouched) run(() => saveComparison(true));
   }
 });
 window.addEventListener('pagehide', () => client.channel?.close());

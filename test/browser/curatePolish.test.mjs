@@ -150,6 +150,16 @@ test(
       await page.evaluate('document.querySelector(".group-caption small").textContent'),
       /\d+:\d+/,
     );
+    assert.equal(
+      await page.evaluate(`(() => {
+      const fields=['search','sort','category'].map(id=>document.getElementById(id).getBoundingClientRect());
+      return fields.every(r=>Math.abs((r.top+r.bottom)/2-(fields[0].top+fields[0].bottom)/2)<2)
+        && document.body.scrollWidth<=innerWidth;
+    })()`),
+      true,
+      'desktop filters fit one row',
+    );
+    await screenshot(page, 'curate-toolbar-desktop.png');
     await page.send('Emulation.setDeviceMetricsOverride', {
       width: 375,
       height: 812,
@@ -190,7 +200,11 @@ test(
       window.fetch=(...args)=>{if(String(args[0]).endsWith('/comparisons'))window.comparisonRequests++;return nativeFetch(...args);}`);
     await click('.is-stack .stack-strip');
     await page.waitFor('!document.querySelector("#apply").disabled');
-    assert.equal(await page.evaluate('window.comparisonRequests'), 1, 'thumbnail click must not bubble into a second open');
+    assert.equal(
+      await page.evaluate('window.comparisonRequests'),
+      1,
+      'thumbnail click must not bubble into a second open',
+    );
     // Use local, generated aspect fixtures to measure portrait/landscape fit.
     await page.evaluate(`Promise.all([...document.querySelectorAll('#photos .photo-image img')].map((img,i)=>new Promise(resolve=>{
     img.onload=resolve;const w=i%2?600:1000,h=i%2?900:600;
@@ -239,5 +253,98 @@ test(
       `document.querySelector('#photo-view').open && document.querySelector('#photo-large').src.includes('${fixture.id(1049)}') && !document.querySelector('#refresh').disabled`,
     );
     assert.equal(await page.evaluate('document.querySelector("#sort").value'), 'newest');
+  },
+);
+
+test(
+  'stack-to-stack Undo stays accessible; initial focus and checked boxes never enable Enter save',
+  { timeout: 60000 },
+  async (t) => {
+    if (!findChrome()) return t.skip('Chrome required');
+    const { fixture, page, click, key, ready, operations } = await setup(t);
+    const newcomer = fixture.add(2001, 601, 'second-stack-neighbor');
+    fixture.repo.curate.mergeMetadataAsset({ ...fixture.assets.find((a) => a.id === newcomer), tags: [] });
+    await click('#refresh');
+    await ready();
+    await click('.is-stack .cover');
+    await page.waitFor(
+      'document.querySelectorAll("#photos .photo-card").length===4 && !document.querySelector("#apply-next").disabled',
+    );
+    await page.evaluate(`window.issuedDecisions=0;const nativeFetch=window.fetch;
+    window.fetch=(...args)=>{if(String(args[0]).endsWith('/operations'))window.issuedDecisions++;return nativeFetch(...args);}`);
+    await key('Enter');
+    await click('#select-all');
+    await page.evaluate('document.querySelector("#photos .photo-card").focus()');
+    await key('Enter');
+    assert.equal(
+      await page.evaluate('window.issuedDecisions'),
+      0,
+      'auto-focus and checked boxes alone are not save intent',
+    );
+    assert.equal(operations(), 0);
+    await key('s'); // Explicit Skip counts even though it matches the default.
+    await key('Enter');
+    await page.waitFor(
+      `document.querySelector('#photos [data-photo-id="${fixture.id(1001)}"]') && !document.querySelector('#apply-next').disabled && !document.querySelector('#comparison-undo').disabled`,
+    );
+    await key('Enter');
+    assert.equal(await page.evaluate('window.issuedDecisions'), 1, 'continuation resets draft intent');
+    assert.equal(operations(), 1);
+    assert.equal(await page.evaluate('document.querySelector("#comparison-receipt").hidden'), false);
+    assert.match(
+      await page.evaluate('document.querySelector("#comparison-receipt-text").textContent'),
+      /Saved choices for 4 photos/,
+    );
+    assert.equal(
+      await page.evaluate(`(()=>{const r=document.querySelector('#comparison-undo').getBoundingClientRect();
+    return r.width>0 && r.top>=0 && r.bottom<=innerHeight})()`),
+      true,
+    );
+    await screenshot(page, 'curate-stack-undo-desktop.png');
+    await page.send('Input.dispatchKeyEvent', { type: 'keyDown', key: 'z', modifiers: 2 });
+    assert.equal(operations(), 1, 'Ctrl-Z is not a saved decision Undo');
+    // Lose the acknowledgment after Undo is accepted. Z must use the same
+    // recovery protocol as the button, and never undo the next pending stack.
+    await page.evaluate(`const beforeUndo=window.fetch;window.fetch=async(...args)=>{
+    const result=await beforeUndo(...args);if(String(args[0]).endsWith('/operations/apply')){
+      window.fetch=beforeUndo;throw new TypeError('Synthetic lost Undo acknowledgment');}return result;}`);
+    await key('z');
+    await page.waitFor(
+      '!document.querySelector("#comparison-recovery").hidden && !document.querySelector("#comparison-retry").disabled',
+    );
+    assert.equal(await page.evaluate('document.querySelector("#comparison-undo").disabled'), true);
+    const count = operations();
+    await key('z');
+    await click('#comparison-retry');
+    await page.waitFor(
+      '!document.querySelector("#comparison").open && !document.querySelector("#refresh").disabled',
+    );
+    assert.equal(operations(), count, 'Undo retry reuses the original operation');
+    for (const id of [1, 2, 3, 4, 1001, 2001])
+      assert.equal(fixture.repo.curate.photo(fixture.id(id)).state, 'undecided');
+    // Mouse Save & next is still an explicit way to skip an entire stack.
+    await click('.is-stack .cover');
+    await page.waitFor('!document.querySelector("#apply-next").disabled');
+    await click('#apply-next');
+    await page.waitFor(
+      `document.querySelector('#photos [data-photo-id="${fixture.id(1001)}"]') && !document.querySelector('#comparison-undo').disabled`,
+    );
+    await page.send('Emulation.setDeviceMetricsOverride', {
+      width: 375,
+      height: 812,
+      deviceScaleFactor: 1,
+      mobile: true,
+    });
+    assert.equal(
+      await page.evaluate(`(()=>{const r=document.querySelector('#comparison-undo').getBoundingClientRect();
+    return r.left>=0 && r.right<=innerWidth && r.top>=0 && r.bottom<=innerHeight})()`),
+      true,
+    );
+    await screenshot(page, 'curate-stack-undo-mobile.png');
+    await click('#comparison-undo');
+    await page.waitFor(
+      '!document.querySelector("#comparison").open && !document.querySelector("#refresh").disabled',
+    );
+    assert.equal(fixture.repo.curate.photo(fixture.id(1)).state, 'undecided');
   },
 );

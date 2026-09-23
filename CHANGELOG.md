@@ -9,8 +9,9 @@ All notable changes to Pictaria Server are documented here. This project follows
 
 - Curate Preview now distinguishes saved outcomes (including Fav) from drafts
   and checked batches. Stack keyboard choices advance without saving; **Save &
-  next** continues with the latest grouping in the chosen date order. Stack cards
-  gain member previews and capture times, completed status is quieter, and Why
+  next** continues with the latest grouping in the chosen date order. Undo is
+  available inside the next stack; Enter cannot save an untouched comparison.
+  Stack cards gain member previews and capture times, completed status is quieter, and Why
   uses plain-language explanations. Mobile filters collapse, bulk actions stay
   fixed below the grid, and comparisons retain the full uncropped images.
 

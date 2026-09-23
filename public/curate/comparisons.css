@@ -255,6 +255,7 @@ dialog::backdrop {
   overflow-wrap: anywhere;
 }
 .dialog-foot {
+  flex-wrap: wrap;
   border-top: 1px solid var(--p-line);
 }
 .dialog-foot .p-btn {
@@ -605,7 +606,8 @@ dialog::backdrop {
 }
 
 /* Review polish: keep controls compact and give the photos the space. */
-.secondary-filters { display: flex; align-items: center; flex-wrap: wrap; gap: 12px; }
+.secondary-filters { display: flex; align-items: center; flex: 1 0 auto; gap: 12px; }
+.secondary-filters .sort-label { flex-shrink: 0; white-space: nowrap; }
 #toggle-filters { display: none; }
 #bulk-actions {
   position: fixed; z-index: 5; bottom: max(12px, env(safe-area-inset-bottom));
@@ -632,7 +634,7 @@ dialog::backdrop {
   #filters { width: 100%; }
   #toggle-filters { display: inline-flex; align-items: center; justify-content: center; }
   .refresh-tools { margin-left: auto; gap: 8px; }
-  .secondary-filters { display: none; order: 2; width: 100%; gap: 8px; }
+  .secondary-filters { display: none; flex-wrap: wrap; order: 2; width: 100%; gap: 8px; }
   .filters-expanded .secondary-filters { display: flex; }
   .secondary-filters .search-label { flex: 1 1 100%; }
   #updates { order: 3; }
@@ -643,3 +645,6 @@ dialog::backdrop {
   .dialog-foot .save-actions { margin-left: auto; }
   .comparison-keys { display: none; }
 }
+
+.comparison-receipt { display: flex; align-items: center; flex-wrap: wrap; gap: 8px 12px; width: 100%; font-size: 12px; color: var(--p-muted); }
+.comparison-receipt[hidden] { display: none; }

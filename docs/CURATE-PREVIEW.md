@@ -84,8 +84,10 @@ Desktop keeps these visible. The remembered sort is not changed by collapsing th
   Refresh and Undo remain available. Undo after continuation refreshes the grid.
 - In a comparison, focus a photo using **Left/Right** or **1–9**, then use
   **Y / S / F / N** to mark its draft outcome. **Enter** on the focused card
-  saves the comparison and continues; Enter on a button or image retains its
-  normal action. Modified/repeated keys, inputs, reference photos and uncertain
+  saves the comparison and continues **after at least one explicit draft choice**
+  (including Skip). Initial focus or checking boxes alone does not enable this
+  shortcut. The Save buttons still allow an intentional Skip-all. Enter on a
+  button or image retains its normal action. Modified/repeated keys, inputs, reference photos and uncertain
   actions cannot invoke these shortcuts.
 - Comparisons with more than ten photos open in a compact grid; **Compact grid**
   can be turned off for larger images.
@@ -115,6 +117,10 @@ Desktop keeps these visible. The remembered sort is not changed by collapsing th
   before closing the comparison.
   Saved separations from earlier preview builds remain respected; removing these
   controls does not erase their data or change existing human decisions.
+- The last-save receipt and **Undo last save (Z)** are available inside the
+  comparison, including after Save & next opens another stack. This undoes the
+  previous saved decision, not an unsaved draft; Undo returns to the grid after
+  stack continuation.
 - Immediate Undo is conditional on no newer human decision on any affected photo.
   The last action remains undoable until its server deadline (30 minutes).
   The visible Undo affordance does not survive a page reload; saved decisions and
