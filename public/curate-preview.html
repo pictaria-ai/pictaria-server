@@ -117,8 +117,10 @@
           <button class="p-btn" data-close="comparison">Close</button>
         </header>
         <div class="dialog-body">
-          <div id="comparison-similarity" class="check-notice" role="status" hidden></div>
-          <p id="comparison-help">Mark each photo Yes, Skip, Fav or No, then save. Unmarked photos default to Skip.</p>
+          <div class="comparison-intro">
+            <p id="comparison-help">Mark each photo Yes, Skip, Fav or No, then save. Unmarked photos default to Skip.</p>
+            <div id="comparison-similarity" role="status" hidden></div>
+          </div>
           <p id="comparison-state" class="p-muted" aria-live="polite"></p>
           <button id="metadata-retry" class="p-btn quiet" hidden>Retry photo information refresh</button>
           <div id="comparison-error" role="alert" hidden></div>
@@ -156,12 +158,12 @@
           </section>
         </div>
         <footer class="dialog-foot">
+          <span id="selection-count" aria-live="polite"></span>
           <div id="comparison-receipt" class="comparison-receipt" role="status" hidden>
             <span id="comparison-receipt-text"></span>
             <button id="comparison-undo" class="p-btn">Undo last save (Z)</button>
           </div>
-          <span id="selection-count" aria-live="polite"></span
-          ><div class="save-actions"><button id="apply" class="p-btn" disabled>Save choices</button>
+          <div class="save-actions"><button id="apply" class="p-btn" disabled>Save choices</button>
           <button id="apply-next" class="p-btn primary" disabled>Save &amp; next</button></div>
         </footer>
       </div>

@@ -211,10 +211,16 @@ function showComparisonSimilarity(status) {
     const signature = JSON.stringify([state.comparison?.id, status]);
     if (target.dataset.status === signature) continue;
     target.dataset.status = signature;
+    if (id === 'comparison-similarity') {
+      target.replaceChildren(explanation(state.comparison, 'stack-reason', {
+        title, detail, indicator: similarityIndicator(status),
+      }));
+      continue;
+    }
     const copy = node('div'), heading = node('div', undefined, 'check-heading');
     heading.append(node('strong', title || 'Stack comparison'));
     if (state.comparison?.ids.length > 1)
-      heading.append(explanation(state.comparison, id === 'comparison-similarity' ? 'stack-reason' : 'photo-stack-reason'));
+      heading.append(explanation(state.comparison, 'photo-stack-reason'));
     copy.append(heading);
     if (detail) copy.append(node('p', detail));
     const indicator = similarityIndicator(status);

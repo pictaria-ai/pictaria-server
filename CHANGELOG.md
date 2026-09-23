@@ -16,6 +16,9 @@ All notable changes to Pictaria Server are documented here. This project follows
   fixed below the grid, and comparisons retain the full uncropped images.
   Decided cards subtly shade the current decision button instead of putting a
   duplicate label over the photo; the lightbox uses the same shading.
+  Stack comparisons place the check status in a small explanation icon beside
+  the instructions, align decision buttons beneath equal-height uncropped photo
+  areas, and keep counts, Undo and Save actions in a slimmer footer.
 
 - Curate checks now run in the background with Stacks enabled, including after
   server startup and new Enrich arrivals. Opening the page or Load more is no

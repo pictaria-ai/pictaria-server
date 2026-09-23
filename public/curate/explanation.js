@@ -2,7 +2,7 @@ import { node } from './photos.js';
 import { plainReasons } from './explanation-copy.js';
 
 // An overlay inside the active dialog: hover, focus or tap never reflows photos.
-export function explanation(comparison, prefix) {
+export function explanation(comparison, prefix, status = null) {
   const title = comparison.ids?.length === 1 ? 'Why this photo?' : 'Why this stack?';
   const wrap = node('span', undefined, 'why-tooltip');
   const trigger = node('button', 'Why?', 'why-trigger');
@@ -13,6 +13,18 @@ export function explanation(comparison, prefix) {
   panel.id = prefix;
   panel.setAttribute('role', 'tooltip');
   panel.hidden = true;
+  if (status) {
+    const indicator = status.indicator || node('span', 'i', 'similarity-indicator');
+    indicator.removeAttribute('role');
+    indicator.removeAttribute('aria-label');
+    indicator.removeAttribute('title');
+    indicator.setAttribute('aria-hidden', 'true');
+    trigger.replaceChildren(indicator);
+    trigger.classList.add('status-trigger');
+    trigger.setAttribute('aria-label', `${status.title || 'Stack comparison'}. ${title}`);
+    panel.append(node('strong', status.title || 'Stack comparison', 'why-status'));
+    if (status.detail) panel.append(node('p', status.detail));
+  }
   panel.append(node('strong', title));
   const reasons = node('ul');
   reasons.id = `${prefix}s`;

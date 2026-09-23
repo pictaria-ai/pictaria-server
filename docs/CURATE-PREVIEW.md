@@ -13,11 +13,11 @@ PIC-382 adds [candidate stacking algorithm 3](CURATE-ALGORITHM.md): wider time
 candidates, contextual people signals, positive ThumbHash and reciprocal search
 ranks. Repeated searches that strongly favor two separate subgroups can now
 override a misleading ThumbHash match. The linked document owns exact rules,
-bounds and version history. Open
-**Why?** beside the similarity status for a concise explanation. It appears on
+bounds and version history. Open the small similarity-status icon beside the
+comparison instructions for a concise explanation. It appears on
 hover, keyboard focus or tap without moving the photos. Its initial text uses
 plain language grounded in recorded reasons; technical details are secondary.
-The single-photo lightbox uses the same overlay.
+The stack lightbox exposes the same explanation through **Why?**.
 
 The current `/curate.html` remains the default during this staging step. The
 preview now includes **Pending** and **Decided**; **More → Production Curate**
@@ -92,7 +92,8 @@ Desktop keeps these visible. The remembered sort is not changed by collapsing th
   button or image retains its normal action. Modified/repeated keys, inputs, reference photos and uncertain
   actions cannot invoke these shortcuts.
 - Comparisons with more than ten photos open in a compact grid; **Compact grid**
-  can be turned off for larger images.
+  can be turned off for larger images. Equal-height image areas keep decision
+  buttons aligned across different aspect ratios; photos are resized without cropping.
 - The lightbox follows the production layout: the photo fills the available
   space beside a narrow panel with caption, tags, capture date, enrichment score,
   producing model/profile when available, and an Immich link. On narrow screens
@@ -114,15 +115,17 @@ Desktop keeps these visible. The remembered sort is not changed by collapsing th
   these references as sidebar thumbnails, with a return button to the pending photo.
 - Stacks are a comparison aid. Choose any number of keepers without editing the
   stack first. There are no Remove from stack, Split into singles or Stack
-  corrections controls. The grey **Why?** beside the similarity status is a
-  read-only overlay, available on hover, focus or tap. Escape dismisses the overlay
+  corrections controls. The status icon opens a read-only explanation overlay,
+  available on hover, focus or tap. Escape dismisses the overlay
   before closing the comparison.
   Saved separations from earlier preview builds remain respected; removing these
   controls does not erase their data or change existing human decisions.
 - The last-save receipt and **Undo last save (Z)** are available inside the
   comparison, including after Save & next opens another stack. This undoes the
   previous saved decision, not an unsaved draft; Undo returns to the grid after
-  stack continuation.
+  stack continuation. The compact footer keeps the outcome count, Undo and Save
+  actions together on wide screens; on narrow screens the Save buttons share a
+  second row, and the receipt text is available to assistive technology.
 - Immediate Undo is conditional on no newer human decision on any affected photo.
   The last action remains undoable until its server deadline (30 minutes).
   The visible Undo affordance does not survive a page reload; saved decisions and
@@ -143,8 +146,10 @@ Cards have a small status circle: a muted spinner while queued, a blue spinner
 while checking and an amber attention marker when
 paused, limited, unavailable or still uncertain. Text labels explain each state;
 reduced-motion preferences stop the animation. Comparisons resolved locally say
-that no similarity search is needed. The open comparison and stack lightbox put the status near the top. Pending,
-inconclusive or incomplete checks explain that manual choices are still possible.
+that no similarity search is needed. The open comparison uses a small icon at
+the right of the instructions, with status and reasons on hover, focus or tap.
+The stack lightbox keeps the status text near the top. Pending, inconclusive or
+incomplete checks explain that manual choices are still possible.
 If an updated grouping becomes available, the notice explains that the current
 comparison stays fixed and closing it lets the grid update.
 
