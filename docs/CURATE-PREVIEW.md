@@ -159,14 +159,14 @@ spinner beside **Refresh** indicates background activity across the pending queu
 **Checking stacks · N remaining** appears beside the count without shifting the photo grid.
 This is the overall pending-check queue, including photos outside the current
 page or filters and while browsing Decided. It includes queued and in-progress
-checks; paused checks retain their remaining count. Each check covers a nearby
+checks; finished incomplete checks leave the remaining count. Each check covers a nearby
 group that may form several stacks, so it is not a count of final stack cards.
 Paused work has an attention indicator. Completed checks are quiet on cards; the
 comparison still exposes their status and explanation.
 
 Cards have a small status circle: a muted spinner while queued, a blue spinner
-while checking and an amber attention marker when
-paused, limited, unavailable or still uncertain. Text labels explain each state;
+while checking, an amber **!** for incomplete/unavailable checks, and a muted
+**i** for successfully checked but inconclusive groupings. Text labels explain each state;
 reduced-motion preferences stop the animation. Comparisons resolved locally say
 that no similarity search is needed. The open comparison uses a small icon at
 the right of the checkbox controls, with status and reasons on hover, focus or tap.
@@ -194,7 +194,7 @@ remain unknown unless repeated subgroup evidence resolves the relationship.
 **Check complete · similarity uncertain** keeps the compatible
 time grouping provisional. Failed or unavailable searches do not fragment it.
 Completed evidence is saved, so inactivity and server restarts do not repeat
-unchanged checks. Failed passes retain successful rows and retry deadlines across restarts; other unfinished work can repeat. Changes to photos, people evidence or human corrections
+unchanged checks. Finished incomplete checks retain only their safe reason; interrupted in-flight work can repeat. Changes to photos, people evidence or human corrections
 also require renewed checks for the affected candidate.
 
 Background updates appear automatically after a short browsing pause, at most
@@ -204,21 +204,21 @@ Closing a comparison allows updates to appear; its membership and keeper draft
 never change underneath the user. Automatic updates retain the number of loaded
 pages where possible and anchor the scroll position to a surviving card. A failed
 update stops automatic replacement and asks for **Refresh**, disabling decisions
-until the view is reconciled. Failed similarity checks retry independently after
-a delay of one minute, doubling up to 15 minutes. When Immich specifically reports
-that a photo has no search embedding, that photo gets three automatic retries,
-waiting 15, 30 and 60 minutes between attempts. It then stops until explicitly
-retried, and stays stopped across restarts. Other photos and groups can proceed. **N need attention**, the amber
-status indicator and the comparison’s Why explanation expose the cause and next
-retry, or explain that automatic retries stopped. **Checks stopped** replaces
-**Checks waiting** when all remaining work has exhausted its retries. Check Smart
-Search processing in Immich for missing embeddings. Manual
-**Refresh** retries sooner after shared pacing; changing views does not. Deleted
-or inaccessible reference photos do not slow searches for other groups. Other
-than missing embeddings, a failed search pauses its group for one minute to let
-other groups proceed; that pause survives restart. Authentication, rate limits
-and service failures still slow the shared search connection. Incomplete
-passes never count as checked or supply partial evidence for regrouping.
+until the view is reconciled. A failed similarity search gets one retry within the current pass. If it fails
+again, that candidate finishes as **not fully checked** and leaves the pending
+count. Its existing grouping remains usable, and human decisions work normally.
+There is no long-term repair queue or Retry now control. **Refresh** reloads the
+view; it does not restart finished checks.
+
+An amber **!** means **Similarity not fully checked**; its explanation gives a
+short reason. A muted **i** means **Check complete · similarity uncertain**:
+searches succeeded but the evidence was inconclusive. Neither asks the user to
+repair a stack. Completed supported work stays quiet on cards. The header shows
+only ongoing checks as remaining, and separately notes finished incomplete
+checks as ready to curate. These outcomes survive restart without keeping
+partial search rows or retry deadlines. Source/connection changes may invalidate
+the outcome normally. Incomplete passes never supply partial ranking evidence
+for regrouping.
 
 Accepted pending decisions remove only their cards from the displayed snapshot
 and Undo restores them there; this preserves navigation order while working
@@ -265,9 +265,11 @@ block Save until the previews can be retried.
   The action is saved atomically with the separation; exact retries must preserve
   both the partition and its action. Existing records remain readable without
   fabricated history. An additive index supports the active-correction list.
-- The current background/recovery preview uses enrichment schema **17** /
-  persistent-state contract **20**. Schema 16 added completed search evidence;
-  schema 17 adds bounded failed-pass checkpoints and retry deadlines.
+- The current preview uses enrichment schema **17** / persistent-state contract
+  **21**. Schema 16 added completed search evidence. The current result format
+  also records terminal incomplete outcomes in that same bounded store. Draft
+  retry checkpoints from the earlier unreleased preview are discarded; there is
+  no separate retry table or persisted partial-pass state.
 - Startup creates the normal pre-migration recovery checkpoint. Downgrading to a
   binary using an older contract requires restoring the **complete** matching
   pre-upgrade checkpoint (including state metadata and databases); changing only
@@ -284,7 +286,8 @@ legacy separation persistence/reset at the API layer, duplicated tabs, keyboard 
 390-pixel viewport. Viewer keyboard selection, compact grids, single-photo
 controls and failed-open recovery are also covered. Automatic-update tests cover
 open comparisons, bulk selections, pagination/scroll preservation, a failed
-replacement without retry loops, and explicit retry of paused similarity work.
+replacement without retry loops, and bounded similarity retries that settle
+incomplete groupings without blocking human choices.
 Date-order coverage includes pagination, duplicate stacks spanning distant dates,
 missing/equal dates, filters/search, browser preference, failed replacement,
 background arrivals, decisions/Undo and persisted view order after restart.

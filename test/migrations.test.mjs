@@ -262,18 +262,21 @@ test('a legacy insights database gains the day/lat/lon columns', () => {
   });
 });
 
-test('schema 16 gains empty retry storage without changing existing photos or completed checks', () => {
+test('schema 16 upgrade preserves photos and retires draft retry storage', () => {
   withDir(dir => {
     const path = join(dir, 'enrichment.sqlite');
     const repo = new Repository(path); repo.initSchema(); repo.upsertAsset({ id: 'preserved' });
-    repo.db.exec('DROP TABLE curate_rank_retries; PRAGMA user_version=16');
+    repo.db.exec('CREATE TABLE curate_rank_retries (json TEXT); INSERT INTO curate_rank_retries VALUES (\'draft\'); PRAGMA user_version=16');
     const before = repo.db.prepare('SELECT * FROM assets').all();
     assert.deepEqual(repo.initSchema().applied, [17]);
     assert.deepEqual(repo.db.prepare('SELECT * FROM assets').all(), before);
-    assert.equal(repo.db.prepare('SELECT COUNT(*) n FROM curate_rank_retries').get().n, 0);
+    assert.equal(repo.db.prepare("SELECT name FROM sqlite_master WHERE name='curate_rank_retries'").get(), undefined);
+    // Earlier unmerged schema-17 preview checkpoints are also disposable.
+    repo.db.exec('CREATE TABLE curate_rank_retries (json TEXT); INSERT INTO curate_rank_retries VALUES (\'draft\')');
     repo.close();
     const reopened = new Repository(path);
     assert.deepEqual(reopened.initSchema().applied, []);
+    assert.equal(reopened.db.prepare("SELECT name FROM sqlite_master WHERE name='curate_rank_retries'").get(), undefined);
     assert.equal(getUserVersion(reopened.db), 17); reopened.close();
   });
 });

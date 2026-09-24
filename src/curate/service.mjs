@@ -102,8 +102,8 @@ export class CurateService {
     this.metrics.rebuildMs = performance.now() - start;
     return this.current;
   }
-  async openView({ kind = 'all', search = '', sort = 'oldest', section = 'pending', category = 'all', retryChecks = false, replacesViewId = null } = {}) {
-    if (typeof retryChecks !== 'boolean' || !['pending', 'decided'].includes(section) || typeof category !== 'string' ||
+  async openView({ kind = 'all', search = '', sort = 'oldest', section = 'pending', category = 'all', replacesViewId = null } = {}) {
+    if (!['pending', 'decided'].includes(section) || typeof category !== 'string' ||
         !['all', ...this.categories().map(b => b.id)].includes(category) ||
         !['all', 'stacks', 'singles'].includes(kind) || !['oldest', 'newest'].includes(sort) ||
         typeof search !== 'string' || search.length > 200)
@@ -153,7 +153,6 @@ export class CurateService {
     // Capacity failure is explicit; no page silently drops part of a stack.
     const lease = await this.store.createView(section === 'decided' ? { ...current, method: 'decided' } : current, groups, { replacesViewId, sort, section, category });
     this.metadata.wake();
-    if (retryChecks) this.refinement?.retry();
     return this.page(lease.id);
   }
   categories() {

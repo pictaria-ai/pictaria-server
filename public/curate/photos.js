@@ -78,11 +78,8 @@ export function similarityLabel(status) {
   switch (status?.state) {
     case 'waiting': return 'Waiting for similarity check';
     case 'checking': return `Checking nearby photos · ${status.done} of ${status.total}`;
-    case 'paused': return status.problemCode === 'similarity_embedding_missing_exhausted'
-      ? 'Similarity check incomplete · automatic retries stopped'
-      : status.problemCode === 'similarity_embedding_missing'
-      ? 'Similarity check incomplete · waiting for Immich Smart Search'
-      : 'Similarity check paused · retrying automatically';
+    case 'incomplete': return 'Similarity not fully checked';
+    case 'paused': return 'Similarity check paused';
     case 'limited': return status.total ? 'Similarity check paused · storage limit' : 'Similarity not checked · automatic limit';
     case 'updated': return status.paused ? 'Grouping updated · similarity check paused'
       : status.checking ? 'Grouping updated · checking nearby photos'
@@ -100,8 +97,10 @@ export function similarityIndicator(status) {
   const state = status.state;
   const phase = status.paused ? 'attention' : state === 'checking' || status.checking ? 'checking'
     : state === 'waiting' || (state === 'updated' && status.pending) ? 'waiting'
-    : ['paused', 'limited', 'unavailable'].includes(state) || status.uncertain ? 'attention' : 'done';
-  const indicator = node('span', phase === 'done' ? '✓' : phase === 'attention' ? '!' : '', 'similarity-indicator');
+    : ['incomplete', 'paused', 'limited', 'unavailable'].includes(state) ? 'attention'
+    : status.uncertain ? 'inconclusive' : 'done';
+  const indicator = node('span', phase === 'done' ? '✓' : phase === 'attention' ? '!'
+    : phase === 'inconclusive' ? 'i' : '', 'similarity-indicator');
   indicator.dataset.phase = phase;
   indicator.setAttribute('role', 'img');
   indicator.setAttribute('aria-label', label);

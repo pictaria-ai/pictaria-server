@@ -12,9 +12,8 @@ CREATE TABLE IF NOT EXISTS curate_rank_evidence (
 );
 `;
 
-// Only completed candidate-member matrices survive restarts. No unrelated search
-// results or credentials are retained. Scope hashes include material inputs and
-// the algorithm version; opening a page is never a retention condition.
+// Finished outcomes survive restarts: a complete matrix or one safe problem
+// code for an incomplete check. No partial pass or future retry work is stored.
 export class CurateRankStore {
   constructor(db, connection, limits = RANK_STORE_LIMITS) {
     this.limits = limits;
@@ -24,17 +23,15 @@ export class CurateRankStore {
       connection,
       CANDIDATE_METHOD,
     );
-    this.records = new Map(
-      db
-        .prepare('SELECT scope_id,bytes FROM curate_rank_evidence')
-        .all()
-        .map((r) => [r.scope_id, r.bytes]),
-    );
+    const records = db.prepare("SELECT scope_id,bytes,json_extract(json,'$.problemCode') problem FROM curate_rank_evidence").all();
+    this.records = new Map(records.map(r => [r.scope_id, r.bytes]));
+    this.problems = new Map(records.filter(r => r.problem).map(r => [r.scope_id, r.problem]));
     this.bytes = [...this.records.values()].reduce((n, bytes) => n + bytes, 0);
   }
   has(id) {
     return this.records.has(id);
   }
+  problem(id) { return this.problems.get(id); }
   read(id) {
     const row = this.db
       .prepare('SELECT json FROM curate_rank_evidence WHERE scope_id=? AND connection_key=? AND method=?')
@@ -42,7 +39,8 @@ export class CurateRankStore {
     return row ? JSON.parse(row.json) : null;
   }
   save(entry, now) {
-    const json = JSON.stringify({ rows: entry.rows, coverage: entry.coverage }),
+    const json = JSON.stringify(entry.problemCode ? { problemCode: entry.problemCode }
+      : { rows: entry.rows, coverage: entry.coverage }),
       bytes = Buffer.byteLength(json);
     if (
       bytes > this.limits.recordBytes ||
@@ -59,6 +57,8 @@ export class CurateRankStore {
       .run(entry.id, this.connection, CANDIDATE_METHOD, json, bytes, now);
     this.bytes += bytes - (this.records.get(entry.id) ?? 0);
     this.records.set(entry.id, bytes);
+    if (entry.problemCode) this.problems.set(entry.id, entry.problemCode);
+    else this.problems.delete(entry.id);
     return true;
   }
   prune(valid) {
@@ -69,6 +69,7 @@ export class CurateRankStore {
       if (!valid.has(id)) {
         this.db.prepare('DELETE FROM curate_rank_evidence WHERE scope_id=?').run(id);
         this.records.delete(id);
+        this.problems.delete(id);
         this.bytes -= bytes;
         if (++removed === 128) break;
       }
@@ -77,6 +78,7 @@ export class CurateRankStore {
   reset(connection) {
     this.db.prepare('DELETE FROM curate_rank_evidence').run();
     this.records.clear();
+    this.problems.clear();
     this.bytes = 0;
     this.connection = connection;
   }
@@ -88,6 +90,7 @@ export function rankReader(db, connection) {
   );
   return (id) => {
     const row = read.get(id, connection, CANDIDATE_METHOD);
-    return row ? JSON.parse(row.json) : null;
+    const result = row ? JSON.parse(row.json) : null;
+    return result?.problemCode ? null : result;
   };
 }

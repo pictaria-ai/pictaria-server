@@ -33,3 +33,15 @@ test('obsolete rank cleanup is bounded per pass', (t) => {
   assert.equal(store.prune(new Set()), 72);
   assert.equal(store.bytes, 0);
 });
+
+test('incomplete outcomes retain only a problem code and never supply grouping evidence', t => {
+  const db = new DatabaseSync(':memory:'); db.exec(RANK_SCHEMA); t.after(() => db.close());
+  const store = new CurateRankStore(db, 'connection');
+  assert.equal(store.save({ id: 'failed', problemCode: 'similarity_embedding_missing',
+    rows: { private: { partial: 1 } }, coverage: { private: {} } }, 1), true);
+  assert.deepEqual(store.read('failed'), { problemCode: 'similarity_embedding_missing' });
+  assert.equal(rankReader(db, 'connection')('failed'), null);
+  const restarted = new CurateRankStore(db, 'connection');
+  assert.equal(restarted.problem('failed'), 'similarity_embedding_missing');
+  restarted.prune(new Set()); assert.equal(restarted.problems.size, 0);
+});

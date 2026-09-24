@@ -168,7 +168,7 @@ test('real HTTP adapter enforces response byte limit and whole-exchange deadline
 });
 
 test('upstream errors give actionable messages without forwarding private diagnostics', async t => {
-  for (const [status, expected] of [[400, /Smart Search/], [401, /asset.read/], [429, /Immich is busy/], [500, /Could not load/]]) await t.test(String(status), async t => {
+  for (const [status, expected] of [[400, /Smart Search/], [401, /asset.read/], [429, /Immich was busy/], [500, /Could not load/]]) await t.test(String(status), async t => {
     const { search, calls } = setup(t, () => { throw new ImmichApiError('private-photo-and-secret', status); });
     await assert.rejects(search.search('a'), error => { assert.match(error.message, expected); assert.doesNotMatch(error.message, /private-photo|secret/); return true; });
     assert.equal(calls.length, 1);

@@ -123,7 +123,7 @@ function closeComparison() {
   el('comparison').close();
   state.comparison = null;
 }
-async function refresh({ automatic = false, keepLightbox = false, retryChecks = false } = {}) {
+async function refresh({ automatic = false, keepLightbox = false } = {}) {
   if (state.busy || state.loading || client.saved.pending) return;
   const count = automatic ? state.groups.length : 0;
   const scroll = automatic ? scrollContext() : null;
@@ -133,7 +133,7 @@ async function refresh({ automatic = false, keepLightbox = false, retryChecks = 
   clearErrors();
   recovery();
   try {
-    const view = await client.open({ kind: state.kind, search: state.search, sort: state.sort, section: state.section, category: state.category }, { retryChecks });
+    const view = await client.open({ kind: state.kind, search: state.search, sort: state.sort, section: state.section, category: state.category });
     while (view.nextOffset !== null && view.groups.length < count) {
       const page = await client.page(view.viewId, view.nextOffset);
       view.groups.push(...page.groups); view.nextOffset = page.nextOffset;
@@ -177,24 +177,24 @@ function showViewStatus(view) {
   if (state.comparison) el('metadata-retry').hidden = !metadata?.problem;
   const paused = refinement?.state === 'paused' || refinement?.state === 'limited';
   const remaining = refinement?.remainingGroups ?? 0;
-  const failed = refinement?.failedGroups ?? 0;
+  const incomplete = refinement?.incompleteGroups ?? 0;
   const checking = remaining > 0;
   const progress = checking ? ` · ${remaining.toLocaleString()} remaining` : '';
-  const failureLabel = !paused ? 'Checking stacks' : refinement.stoppedGroups && !refinement.retryAt ? 'Checks stopped' : 'Checks waiting';
-  const status = failed ? `${failureLabel}${progress} · ${failed.toLocaleString()} need attention`
-    : paused ? `Checks paused${progress}` : checking ? `Checking stacks${progress}`
+  const incompleteLabel = incomplete ? `${incomplete.toLocaleString()} not fully checked` : '';
+  const status = paused ? `Checks paused${progress}` : checking ? `Checking stacks${progress}${incomplete ? ` · ${incompleteLabel}` : ''}`
+    : incompleteLabel ? `${incompleteLabel} · Ready to curate`
     : metadata?.problem ? 'Photo information paused'
     : metadata?.state === 'refreshing' ? 'Refreshing photo information' : '';
   el('refinement').textContent = status;
   el('refinement').title = [refinement?.problem || metadata?.problem,
-    failed && refinement.retryAt ? `Next scheduled retry: ${new Date(refinement.retryAt).toLocaleString()}. Refresh retries sooner.` : '',
+    incomplete ? 'These checks have finished with limited information. You can curate the photos normally.' : '',
     checking ? 'Remaining checks across all pending photos, including outside this view. Includes queued and in-progress checks. Each check covers nearby photos that may form more than one stack.' : '',
   ].filter(Boolean).join(' ');
-  const activity = paused || failed ? { state: 'paused' } : refinement?.state === 'searching' || metadata?.state === 'refreshing'
-    ? { state: 'checking' } : checking ? { state: 'waiting' } : null;
+  const activity = paused ? { state: 'paused' } : refinement?.state === 'searching' || metadata?.state === 'refreshing'
+    ? { state: 'checking' } : checking ? { state: 'waiting' } : incomplete ? { state: 'incomplete' } : null;
   const indicator = similarityIndicator(activity);
   if (indicator) {
-    indicator.title = indicator.ariaLabel = failed ? el('refinement').title : paused ? 'Stack checks paused; retrying automatically when possible' : 'Checking pending stacks in the background';
+    indicator.title = indicator.ariaLabel = el('refinement').title || (paused ? 'Stack checks paused' : 'Checking pending stacks in the background');
   }
   const slot = el('check-activity');
   if (slot.firstChild?.dataset.phase !== indicator?.dataset.phase) slot.replaceChildren(...(indicator ? [indicator] : []));
@@ -210,12 +210,12 @@ function showComparisonSimilarity(status) {
   const title = status?.state === 'updated' ? 'Updated grouping available'
     : status?.state === 'checked' && status.uncertain ? 'Similarity check inconclusive'
     : status?.state === 'checked' ? 'Similarity checked' : similarityLabel(status);
-  const detail = (status?.problem ? `${status.problem}${status.retryAt ? ` Next retry: ${new Date(status.retryAt).toLocaleString()}.` : ''} ` : '') + (status?.state === 'updated'
+  const detail = (status?.problem ? `${status.problem} ` : '') + (status?.state === 'updated'
     ? 'Your open comparison stays unchanged. Close it to see the updated grouping.'
     : ['waiting', 'checking'].includes(status?.state)
       ? 'This stack may change after checking. You can still choose which photos to keep.'
       : status?.uncertain ? 'The evidence is inconclusive. You can still choose which photos to keep.'
-        : ['paused', 'limited', 'unavailable'].includes(status?.state)
+        : ['incomplete', 'paused', 'limited', 'unavailable'].includes(status?.state)
           ? 'This stack has not been fully checked. You can still choose which photos to keep.' : '');
   for (const id of ['comparison-similarity','photo-similarity']) {
     const target = el(id);
@@ -720,7 +720,7 @@ el('toggle-filters').onclick = () => {
   el('toggle-filters').setAttribute('aria-expanded', String(expanded));
   document.querySelector('.toolbar').classList.toggle('filters-expanded', expanded);
 };
-el('refresh').onclick = () => run(() => refresh({ retryChecks: true }));
+el('refresh').onclick = () => run(() => refresh());
 el('more').onclick = () => run(more);
 el('sort').onchange = () =>
   run(async () => {

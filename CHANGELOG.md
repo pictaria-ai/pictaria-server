@@ -7,17 +7,14 @@ All notable changes to Pictaria Server are documented here. This project follows
 
 ### Development
 
-- Curate Preview exposes failed similarity checks and their next retry instead
-  of leaving them indefinitely labeled as checking. Missing Immich search
-  embeddings get three automatic retries after 15, 30 and 60 minutes, then stop
-  until explicitly retried; other photos and groups keep
-  progressing. Failed passes retain successful rows and retry deadlines across
-  restarts, within bounded storage. Only an explicit Refresh resets the wait.
-  Deleted or inaccessible references keep normal search pacing for other
-  photos, and failing groups yield their slots so healthy stacks can progress.
-  Grouping still uses complete passes, and manual curation remains available.
-  Enrich schema 17 / persistent-state contract 20 adds retry checkpoints with
-  the normal pre-migration recovery snapshot.
+- Curate Preview settles failed similarity checks after one retry instead of
+  keeping a long-term repair queue. Incomplete groupings remain ready for human
+  curation, and healthy stacks continue processing. Finished outcomes survive
+  restart; partial-pass checkpoints and retry deadlines are removed. Refresh
+  reloads the view without restarting checks. Amber **!** now means not fully
+  checked; a muted **i** means checked but inconclusive. Enrich schema 17 /
+  persistent-state contract 21 retains the normal pre-migration snapshot and
+  discards retry checkpoints from the earlier unreleased preview.
 
 - Curate Preview now distinguishes saved outcomes (including Fav) from drafts
   and checked batches. Stack keyboard choices advance without saving; **Save &

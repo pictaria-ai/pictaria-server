@@ -140,7 +140,7 @@ test('contract 10 upgrade snapshots queue pins before clearing them and retains 
     writeFileSync(config.persistentState.inventoryPath, JSON.stringify(inventory));
 
     const upgraded = await openInstallation(config, 'verify');
-    assert.equal(upgraded.inventory.upgrade.stateVersion, 20);
+    assert.equal(upgraded.inventory.upgrade.stateVersion, 21);
     assert.deepEqual(semanticSnapshot(upgraded), before);
     assert.equal(upgraded.profiles.activeProfile().id, travel.id);
     assert.equal(upgraded.enrichment.db.prepare('SELECT COUNT(*) AS n FROM enrich_queue WHERE profile_revision_id IS NOT NULL').get().n, 0);
@@ -215,7 +215,7 @@ test('contract 14 upgrade snapshots schema 11 before tag sync and does not backf
       assert.equal(getUserVersion(snapshot), 11);
       assert.equal(snapshot.prepare("SELECT name FROM sqlite_master WHERE name='ai_tag_sync'").get(), undefined);
     } finally { snapshot.close(); }
-    assert.equal(upgraded.inventory.upgrade.stateVersion, 20);
+    assert.equal(upgraded.inventory.upgrade.stateVersion, 21);
     closeInstallation(upgraded);
   } finally { rmSync(workspace, { recursive: true, force: true }); }
 });
@@ -234,7 +234,7 @@ test('contract 13 upgrade snapshots version 6 settings and history before adopti
     const inventory = JSON.parse(readFileSync(config.persistentState.inventoryPath, 'utf8'));
     inventory.upgrade.stateVersion = 13; writeFileSync(config.persistentState.inventoryPath, JSON.stringify(inventory));
     const upgraded = await openInstallation(config, 'verify');
-    assert.equal(upgraded.inventory.upgrade.stateVersion, 20);
+    assert.equal(upgraded.inventory.upgrade.stateVersion, 21);
     assert.equal(JSON.parse(readFileSync(config.settingsPath, 'utf8')).version, 7);
     assert.equal(config.enrichHistoryRuns, 100); assert.equal(config.enrichHistoryLogs, 100);
     const snapshotDir = join(config.backup.dir, upgraded.inventory.upgrade.recoveryPoint.snapshotName);
@@ -480,27 +480,29 @@ function restoreSnapshot(snapshotDir, restoredConfig) {
   }
 }
 
-test('contract 19 upgrade snapshots schema 16 before adding failed-check checkpoints', async () => {
+for (const priorContract of [19, 20]) test(`contract ${priorContract} upgrade snapshots before retaining terminal check outcomes`, async () => {
   const workspace = mkdtempSync(join(tmpdir(), 'pictaria-curate-retry-recovery-'));
   try {
     const root = join(workspace, 'source'); materializeLegacyInstallation(root);
     const config = fixtureConfig(root); const installed = await openInstallation(config, 'initialize');
     const before = semanticSnapshot(installed);
-    installed.enrichment.db.exec('DROP TABLE curate_rank_retries; PRAGMA user_version = 16;');
+    const priorSchema = priorContract === 19 ? 16 : 17;
+    installed.enrichment.db.exec(`PRAGMA user_version = ${priorSchema};`);
+    if (priorContract === 20) installed.enrichment.db.exec('CREATE TABLE curate_rank_retries (scope_id TEXT);');
     closeInstallation(installed);
     const inventory = JSON.parse(readFileSync(config.persistentState.inventoryPath, 'utf8'));
-    inventory.upgrade.stateVersion = 19; writeFileSync(config.persistentState.inventoryPath, JSON.stringify(inventory));
+    inventory.upgrade.stateVersion = priorContract; writeFileSync(config.persistentState.inventoryPath, JSON.stringify(inventory));
     const upgraded = await openInstallation(config, 'verify');
-    assert.deepEqual(upgraded.enrichmentMigration.applied, [17]);
+    assert.deepEqual(upgraded.enrichmentMigration.applied, priorSchema === 16 ? [17] : []);
     assert.deepEqual(semanticSnapshot(upgraded), before);
-    assert.equal(upgraded.enrichment.db.prepare('SELECT count(*) n FROM curate_rank_retries').get().n, 0);
+    assert.equal(upgraded.enrichment.db.prepare("SELECT name FROM sqlite_master WHERE name='curate_rank_retries'").get(), undefined);
     const snapshotDir = join(config.backup.dir, upgraded.inventory.upgrade.recoveryPoint.snapshotName);
     const snapshot = new DatabaseSync(join(snapshotDir, 'enrichment.sqlite'), { readOnly: true });
     try {
-      assert.equal(getUserVersion(snapshot), 16);
-      assert.equal(snapshot.prepare("SELECT name FROM sqlite_master WHERE name='curate_rank_retries'").get(), undefined);
+      assert.equal(getUserVersion(snapshot), priorSchema);
+      assert.equal(Boolean(snapshot.prepare("SELECT name FROM sqlite_master WHERE name='curate_rank_retries'").get()), priorContract === 20);
     } finally { snapshot.close(); }
-    assert.equal(upgraded.inventory.upgrade.stateVersion, 20);
+    assert.equal(upgraded.inventory.upgrade.stateVersion, 21);
     closeInstallation(upgraded);
   } finally { rmSync(workspace, { recursive: true, force: true }); }
 });

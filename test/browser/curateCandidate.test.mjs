@@ -182,15 +182,15 @@ test('background status markers and inline progress remain stable on desktop and
       writeFileSync(join(process.env.PICTARIA_TEST_SCREENSHOTS, 'curate-checking-desktop.png'), Buffer.from(data, 'base64'));
     }
     release();
-    await page.waitFor('document.querySelector(".group-card[data-similarity=paused]")');
-    assert.equal(await progress(), 'Checks waiting · 1 remaining · 1 need attention');
+    await page.waitFor('document.querySelector(".group-card[data-similarity=checked]")', { timeoutMs: 42000 });
+    assert.equal(await progress(), '');
     assert.equal(await page.evaluate('document.querySelector("#groups").getBoundingClientRect().top'), gridTop,
-      'changing progress to a paused message cannot move the grid');
+      'finishing a check cannot move the grid');
 
-    assert.equal(await page.evaluate('document.querySelector(".group-card[data-similarity=paused] .similarity-indicator").dataset.phase'), 'attention');
-    await click('.group-card[data-similarity=paused]');
-    await page.waitFor('document.querySelector("#comparison-similarity .similarity-indicator[data-phase=attention]")');
-    assert.match(await page.evaluate('document.querySelector("#comparison-similarity").textContent'), /paused/);
+    assert.equal(await page.evaluate('document.querySelector(".group-card[data-similarity=checked] .similarity-indicator").dataset.phase'), 'inconclusive');
+    await click('.group-card[data-similarity=checked]');
+    await page.waitFor('document.querySelector("#comparison-similarity .similarity-indicator[data-phase=inconclusive]")');
+    assert.match(await page.evaluate('document.querySelector("#comparison-similarity").textContent'), /inconclusive/);
     await click('[data-close=comparison]');
     await page.send('Emulation.setDeviceMetricsOverride', { width: 390, height: 844, deviceScaleFactor: 1, mobile: true });
     await page.send('Emulation.setEmulatedMedia', { features: [{ name: 'prefers-reduced-motion', value: 'reduce' }] });
@@ -198,19 +198,19 @@ test('background status markers and inline progress remain stable on desktop and
     assert.equal(await page.evaluate('getComputedStyle(document.querySelector(".similarity-indicator")).animationName'), 'none');
     if (process.env.PICTARIA_TEST_SCREENSHOTS) {
       const { data } = await page.send('Page.captureScreenshot', { format: 'png' });
-      writeFileSync(join(process.env.PICTARIA_TEST_SCREENSHOTS, 'curate-paused-mobile.png'), Buffer.from(data, 'base64'));
+      writeFileSync(join(process.env.PICTARIA_TEST_SCREENSHOTS, 'curate-inconclusive-mobile.png'), Buffer.from(data, 'base64'));
     }
-    // Explicit refresh resumes after the shared failure cooldown, without a
-    // retry loop. Successful empty results stay amber, never confident green.
+    // A recovered transient failure produces an inconclusive result. Refresh
+    // only reloads the view; it cannot reset or repeat completed search work.
     await click('#refresh');
     await page.waitFor('document.querySelector(".group-card[data-similarity=checked]")', { timeoutMs: 42000 });
     assert.equal(fixture.similarityReads.length, 4);
-    assert.equal(await page.evaluate('document.querySelector(".group-card[data-similarity=checked] .similarity-indicator").dataset.phase'), 'attention');
+    assert.equal(await page.evaluate('document.querySelector(".group-card[data-similarity=checked] .similarity-indicator").dataset.phase'), 'inconclusive');
     assert.match(await page.evaluate('document.querySelector(".group-card[data-similarity=checked] .similarity-status").textContent'), /uncertain/);
     assert.equal(await progress(), '', 'completed checks no longer contribute to remaining work');
   });
 
-test('missing embeddings show actionable attention without view changes resetting backoff',
+test('incomplete similarity checks stay usable and differ from completed inconclusive checks',
   { timeout: 40000 }, async t => {
     if (!findChrome()) return t.skip('Chrome required');
     let missing = true;
@@ -227,26 +227,37 @@ test('missing embeddings show actionable attention without view changes resettin
     await page.navigate(`${fixture.base}/curate-preview.html`);
     await page.waitFor('document.querySelector(".gate-backdrop input")');
     await page.evaluate('document.querySelector(".gate-backdrop input").value="smoke-secret";document.querySelector(".gate-backdrop button").click()');
-    await page.waitFor('document.querySelector("#refinement")?.textContent==="Checks waiting · 1 remaining · 1 need attention"', { timeoutMs: 15000 });
-    assert.equal(fixture.similarityReads.length, 3, 'other references were checked after one failed');
+    await page.waitFor('document.querySelector("#refinement")?.textContent==="1 not fully checked · Ready to curate"', { timeoutMs: 15000 });
+    assert.equal(fixture.similarityReads.length, 4, 'one retry, then finished incomplete');
     const diagnostic = await page.evaluate('document.querySelector("#check-activity .similarity-indicator").title');
-    assert.match(diagnostic, /Immich has no search embedding/); assert.match(diagnostic, /Next scheduled retry/);
+    assert.match(diagnostic, /Immich has no search embedding/); assert.match(diagnostic, /curate the photos normally/);
+    assert.doesNotMatch(diagnostic, /retry|need attention/i);
     assert.doesNotMatch(diagnostic, /private-upstream-detail|00000000/);
     assert.equal(await page.evaluate('document.querySelector("#check-activity .similarity-indicator").dataset.phase'), 'attention');
+    if (process.env.PICTARIA_TEST_SCREENSHOTS) {
+      const { data } = await page.send('Page.captureScreenshot', { format: 'png' });
+      writeFileSync(join(process.env.PICTARIA_TEST_SCREENSHOTS, 'curate-incomplete-desktop.png'), Buffer.from(data, 'base64'));
+    }
     await click('[data-section=decided]'); await page.waitFor('!document.querySelector("#refresh").disabled');
     await click('[data-section=pending]'); await page.waitFor('!document.querySelector("#refresh").disabled && document.querySelector(".is-stack")');
-    assert.equal(fixture.similarityReads.length, 3);
+    assert.equal(fixture.similarityReads.length, 4);
     await click('.is-stack');
     await page.waitFor('document.querySelector("#comparison-similarity .why-trigger")');
     await click('#comparison-similarity .why-trigger');
     const explanation = await page.evaluate('document.querySelector("#comparison-similarity").textContent');
-    assert.match(explanation, /waiting for Immich Smart Search/);
-    assert.match(explanation, /Next retry:/); assert.match(explanation, /still choose/);
+    assert.match(explanation, /not fully checked/);
+    assert.doesNotMatch(explanation, /Next retry:/); assert.match(explanation, /still choose/);
     assert.equal(await page.evaluate('document.querySelector("#photos [data-keeper]").disabled'), false);
     await click('[data-close=comparison]');
     missing = false;
     await click('#refresh');
-    await page.waitFor('!document.querySelector("#refinement").textContent && !document.querySelector("#refresh").disabled', { timeoutMs: 12000 });
+    await page.waitFor('!document.querySelector("#refresh").disabled && document.querySelector(".is-stack")');
+    assert.equal(await page.evaluate('document.querySelector(".is-stack .similarity-indicator").textContent'), '!');
     assert.deepEqual(fixture.similarityReads.map(r => r.queryAssetId), [fixture.id(1), fixture.id(2), fixture.id(3), fixture.id(1)]);
-    assert.equal(fixture.repo.db.prepare('SELECT count(*) n FROM decision_operations').get().n, 0);
+    await click('.is-stack');
+    await page.waitFor('document.querySelector("#comparison").open && document.querySelector("#photos [data-choice=approve]") && !document.querySelector("#apply").disabled');
+    await click('#photos [data-choice=approve]');
+    await click('#apply');
+    await page.waitFor('!document.querySelector("#comparison").open && !document.querySelector("#refresh").disabled');
+    assert.equal(fixture.repo.db.prepare('SELECT count(*) n FROM decision_operations').get().n, 1, 'incomplete checks never block human decisions');
   });

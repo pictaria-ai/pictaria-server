@@ -199,6 +199,7 @@ button {
 .similarity-indicator[data-phase='checking'] { color: #60a5fa; animation-duration: .8s; }
 .similarity-indicator[data-phase='done'] { color: #4ade80; }
 .similarity-indicator[data-phase='attention'] { color: #fbbf24; }
+.similarity-indicator[data-phase='inconclusive'] { color: var(--p-muted); }
 :root[data-theme='light'] .similarity-indicator[data-phase='checking'] { color: #2563eb; }
 :root[data-theme='light'] .similarity-indicator[data-phase='done'] { color: #178052; }
 :root[data-theme='light'] .similarity-indicator[data-phase='attention'] { color: #aa6400; }
