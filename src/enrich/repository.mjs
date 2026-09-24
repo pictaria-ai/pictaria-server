@@ -1,4 +1,5 @@
 import { RANK_SCHEMA } from '../curate/rank-store.mjs';
+import { RETRY_SCHEMA } from '../curate/retry-store.mjs';
 import { CURATE_SCHEMA, CORRECTION_ACTION_SCHEMA, installCurateTriggers } from '../curate/schema.mjs';
 import { CurateRepository } from '../curate/repository.mjs';
 import { copyFileSync, mkdirSync, readFileSync } from 'node:fs';
@@ -522,6 +523,7 @@ const ENRICH_MIGRATIONS = [
   { version: 14, up(db) { db.exec(DECISION_SCHEMA); } },
   { version: 15, up(db) { db.exec(CORRECTION_ACTION_SCHEMA); } },
   { version: 16, up(db) { db.exec(RANK_SCHEMA); } },
+  { version: 17, up(db) { db.exec(RETRY_SCHEMA); } },
 ];
 
 // The review projection of a normalized output: exactly the fields the

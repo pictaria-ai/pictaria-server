@@ -194,7 +194,7 @@ remain unknown unless repeated subgroup evidence resolves the relationship.
 **Check complete · similarity uncertain** keeps the compatible
 time grouping provisional. Failed or unavailable searches do not fragment it.
 Completed evidence is saved, so inactivity and server restarts do not repeat
-unchanged checks. Unfinished passes resume with a new bounded pass after restart. Changes to photos, people evidence or human corrections
+unchanged checks. Failed passes retain successful rows and retry deadlines across restarts; other unfinished work can repeat. Changes to photos, people evidence or human corrections
 also require renewed checks for the affected candidate.
 
 Background updates appear automatically after a short browsing pause, at most
@@ -205,8 +205,13 @@ never change underneath the user. Automatic updates retain the number of loaded
 pages where possible and anchor the scroll position to a surviving card. A failed
 update stops automatic replacement and asks for **Refresh**, disabling decisions
 until the view is reconciled. Failed similarity checks retry independently after
-a delay of one minute, doubling up to 15 minutes; explicit Refresh can retry
-sooner after the shared cooldown.
+a delay of one minute, doubling up to 15 minutes. When Immich specifically reports
+that a photo has no search embedding, that photo waits 15 minutes, doubling up to
+one hour. Other photos and groups can proceed. **N need attention**, the amber
+status indicator and the comparison’s Why explanation expose the cause and next
+retry. Check Smart Search processing in Immich for missing embeddings. Manual
+**Refresh** retries sooner after shared pacing; changing views does not. Incomplete
+passes never count as checked or supply partial evidence for regrouping.
 
 Accepted pending decisions remove only their cards from the displayed snapshot
 and Undo restores them there; this preserves navigation order while working
@@ -253,8 +258,11 @@ block Save until the previews can be retried.
   The action is saved atomically with the separation; exact retries must preserve
   both the partition and its action. Existing records remain readable without
   fabricated history. An additive index supports the active-correction list.
+- The current background/recovery preview uses enrichment schema **17** /
+  persistent-state contract **20**. Schema 16 added completed search evidence;
+  schema 17 adds bounded failed-pass checkpoints and retry deadlines.
 - Startup creates the normal pre-migration recovery checkpoint. Downgrading to a
-  binary using contract 17 or earlier requires restoring the **complete** matching
+  binary using an older contract requires restoring the **complete** matching
   pre-upgrade checkpoint (including state metadata and databases); changing only
   the application image is blocked by the downgrade guard. See
   [upgrade and recovery](UPGRADING.md). The date-sort and combined-UI follow-ups add no further

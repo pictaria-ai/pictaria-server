@@ -152,7 +152,7 @@ still invalidate or resolve a candidate between requests.
 - Each request asks for one reference's first 51 image results, removes the
   reference and keeps at most **50**. No pagination to find a desired match.
   Timeout **15 seconds**, response limit **2 MiB**, failure cooldown at least
-  **30 seconds**. Permission/API/index failures leave manual Curate available.
+  **30 seconds**, except a confirmed missing embedding uses only the normal two-second pacing for other references. Permission/API/index failures leave manual Curate available.
 - At most **32 incomplete candidate passes** in memory, each at most 40 photos.
   Completing a pass frees its slot so the entire backlog can advance without
   pagination. Partial coverage is never published as a completed result.
@@ -169,17 +169,33 @@ still invalidate or resolve a candidate between requests.
   evidence and pause new publication rather than evicting stable results and
   continually rechecking them. A limited status explains this condition.
 - The separate shared search cache still holds **40 references for 10 minutes**
-  in memory. Unfinished passes restart after a server restart. Completed matrices
+  in memory. Failed passes also checkpoint successful rows and per-reference retry
+  deadlines, surviving restart; untouched in-progress passes may repeat after restart. Completed matrices
   are invalidated by known photo/people evidence, membership or human constraint
   changes, a changed algorithm, or a different Immich connection. Stacks off and
   shutdown cancel in-flight work; browser inactivity does not. Unseen remote
   changes (including changed search index rankings) cannot be detected by these
   fingerprints; this is retained evidence, not a continuously refreshed index.
-- Failed passes retry automatically after **60 seconds**, doubling up to **15
-  minutes** on consecutive failures. Other candidates can progress while a pass
-  waits. Manual Refresh can release the pass retry delay, but cannot bypass the
-  shared transport cooldown or rate limit. Automatic idle view replacement does
-  not shorten retry delays. A busy lab search delays background searches.
+- A failed reference does not block the other required references or hold an active
+  slot while deferred. Parked partial passes stay outside the **32 active scopes**
+  and never enter the grouping algorithm until every required search succeeds.
+  Retry checkpoints are bounded to **50,000 records**, **256 KiB per record**,
+  **16 MiB serialized total**, with obsolete scopes pruned in batches of 128.
+  Only compact progress summaries stay in memory. At capacity, preserve active
+  evidence and expose a storage-limited status instead of silently discarding it.
+- Confirmed Immich HTTP 400 “has no embedding” responses retry the affected photo
+  after **15 minutes**, doubling to **60 minutes**. This error does not impose a
+  connection-wide failure cooldown. Other failures retry after **60 seconds**,
+  doubling to **15 minutes**, and retain the shared transport cooldown. Missing
+  embeddings are never interpreted as empty successful results or dissimilarity.
+- Manual **Refresh** releases retry deadlines, while respecting shared pacing and
+  rate limits. Opening the page, changing filters, loading more and automatic
+  view replacement do not reset them. A busy lab search delays background work.
+- Responses expose safe predefined problem codes/messages, failed group/reference
+  counts and the next retry time, including while healthy work is still waiting
+  or running. Upstream error bodies, private identifiers and credentials are not
+  forwarded. Unknown HTTP 400s remain generic reference failures; only the known
+  diagnostic is classified as a missing embedding.
 
 Cards show **Waiting for similarity check**, **Checking nearby photos · N of M**,
 or **Updated grouping ready**. Counts cover the required references for the
@@ -206,7 +222,10 @@ reads do not increment `cacheHits`. No photo IDs or responses are included.
 These are diagnostic counters, not persistent performance history or a new UI.
 
 The page shows global background progress beside the stack/single-photo counts
-in a reserved status row, plus an activity spinner beside Refresh. Cards still
+in a reserved status row, plus an activity spinner beside Refresh. When checks
+fail, this shows **N need attention** and an amber indicator; its tooltip explains
+the cause and next retry. When only deferred work remains it says **Checks waiting**.
+The comparison’s Why explanation also gives the cause and retry time. Cards still
 show their own status and highlight changed grouping. Checks that finish without changing grouping, or in an unrelated
 view, do not by themselves request a replacement view. The single **Refresh**
 button highlights waiting updates, including changed photo information.
@@ -263,6 +282,8 @@ and decision contract, not create a permanent second Curate pipeline.
 | `candidate-3` scheduling / status follow-up | 2026-09-22 | Two-second healthy pacing, 30 automatic requests/minute, slow-response backoff, open/visible priority, immediate cached reuse and aggregate diagnostics. Visual queued/checking/done/attention markers; grouping rules, reference selection and result depth unchanged. | PIC-382 |
 | `candidate-3` review UX follow-up | 2026-09-22 | Automatically adopt complete snapshots at idle boundaries; freeze open comparisons and selections, preserve browsing position, and retain explicit Refresh for recovery. Remove manual stack-management controls; existing saved separations remain respected. No membership-rule or search-threshold change. | PIC-384 |
 | `candidate-3` background processing | 2026-09-23 | Process all pending candidates without browser demand; persist complete evidence, drain bounded active slots and retry failures with backoff. Compact global progress, Pending label and direct stack opening. Membership rules and search limits are unchanged. | PIC-385 |
+
+| `candidate-3` failure recovery | 2026-09-23 | Surface safe search failures, park missing-embedding references with persistent backoff, and allow other work to drain. No grouping or search-limit change. | PIC-387 |
 
 When membership rules, thresholds or interpretation of signals change, increment
 the implementation identifier and add a row describing the behavioral change and

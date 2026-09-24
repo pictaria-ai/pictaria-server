@@ -6,6 +6,7 @@ import { tmpdir } from 'node:os';
 import { Repository } from '../../src/enrich/repository.mjs';
 import { CurateService } from '../../src/curate/service.mjs';
 import { CurateSimilaritySearch } from '../../src/curate/similarity.mjs';
+import { ImmichApiError } from '../../src/immich.mjs';
 import { REFINEMENT_LIMITS } from '../../src/curate/refinement.mjs';
 import { observedRanks, searchItems } from './fixtures/rankContrast.mjs';
 
@@ -269,16 +270,22 @@ test('thirty new searches per minute and 40 per cohort; known local similarity s
   assert.equal(large.groups[0].memberCount, 41); assert.equal(oversized.calls.length, 0);
 });
 
-test('failure pauses without automatic retries; explicit Refresh retries after lane cooldown', async t => {
-  const { curate, refine, calls, advance } = await setup(t, { respond: () => { throw Error('private upstream detail'); } });
+test('failures remain visible while other references progress; only explicit Refresh resets backoff', async t => {
+  const { curate, refine, calls, advance } = await setup(t, { n: 2, respond: () => { throw Error('private upstream detail'); } });
   const view = await curate.openView(); await refine.tick();
-  assert.equal(refine.status().state, 'paused'); assert.doesNotMatch(JSON.stringify(curate.page(view.viewId)), /private upstream/);
-  advance(35000); await refine.tick(); assert.equal(calls.length, 1);
-  const automatic = await curate.openView({ replacesViewId: view.viewId, retryChecks: false });
-  await refine.tick(); assert.equal(calls.length, 1);
-  assert.equal(refine.status().state, 'paused', 'automatic replacement must not restart failed searches');
+  assert.equal(refine.status().state, 'waiting');
+  assert.equal(refine.status().failedGroups, 1);
+  assert.match(refine.status().problem, /Could not load/);
+  assert.doesNotMatch(JSON.stringify(curate.page(view.viewId)), /private upstream/);
+  advance(35000); await refine.tick();
+  assert.deepEqual(calls.map(c => c.body.queryAssetId), ['p0', 'p1']);
+  assert.equal(refine.status().state, 'paused');
+  await curate.openView({ replacesViewId: view.viewId });
+  await refine.tick(); assert.equal(calls.length, 2, 'opening or filtering does not reset retries');
   await assert.rejects(curate.openView({ retryChecks: 'false' }), /Invalid/);
-  await curate.openView({ replacesViewId: automatic.viewId }); await refine.tick(); assert.equal(calls.length, 2);
+  await curate.openView({ retryChecks: true });
+  await refine.tick(); assert.equal(calls.length, 2, 'explicit retry still respects lane cooldown');
+  advance(30000); await refine.tick(); assert.equal(calls.length, 3);
 });
 
 test('changed cohort after I/O discards result; no unrelated IDs in retained matrix', async t => {
@@ -380,8 +387,9 @@ test('failed partial pass stays unpublished and resumes on explicit retry', asyn
   assert.equal(s.curate.current.groups[0].route, 'candidate-unconfirmed');
   assert.deepEqual(s.refine.snapshot(), {});
   assert.equal(s.refine.revision, 0);
-  s.advance(35_000); await s.refine.tick(); assert.equal(s.calls.length, 2);
-  view = await s.curate.openView({ replacesViewId: view.viewId });
+  s.advance(35_000); await s.refine.tick(); assert.equal(s.calls.length, 3);
+  assert.deepEqual(s.refine.snapshot(), {}, 'healthy reference is retained but not published');
+  view = await s.curate.openView({ replacesViewId: view.viewId, retryChecks: true });
   await s.refine.tick(); s.advance(5000); await s.refine.tick();
   assert.equal(s.refine.revision, 1);
   assert.equal(s.curate.page(view.viewId).refinement.ready, 1);
@@ -552,11 +560,12 @@ test('failed searches retry automatically with backoff, leaving other candidates
   await s.curate.backgroundTick();
   s.advance(35_000); await s.curate.backgroundTick();
   s.advance(2000); await s.curate.backgroundTick();
-  assert.deepEqual(s.calls.map(c => c.body.queryAssetId), ['p0', 'other-a', 'other-b']);
-  s.advance(23_000); await s.curate.backgroundTick();
-  assert.equal(s.calls.length, 4);
+  s.advance(2000); await s.curate.backgroundTick();
+  assert.deepEqual(s.calls.map(c => c.body.queryAssetId), ['p0', 'p1', 'other-a', 'other-b']);
+  s.advance(21_000); await s.curate.backgroundTick();
+  assert.equal(s.calls.length, 5);
   assert.equal(s.refine.status().state, 'paused');
-  s.advance(119_999); await s.curate.backgroundTick(); assert.equal(s.calls.length, 4);
+  s.advance(119_999); await s.curate.backgroundTick(); assert.equal(s.calls.length, 5);
   failing = false;
   s.advance(1); await s.curate.backgroundTick();
   s.advance(2000); await s.curate.backgroundTick();
@@ -593,4 +602,111 @@ test('turning Stacks off cancels an in-flight background request and does not pu
   assert.equal(s.refine.saved.records.size, 0);
   assert.equal(s.refine.entries.size, 0);
   await s.curate.backgroundTick(); assert.equal(s.calls.length, 1);
+});
+
+test('missing embeddings park partial evidence across restart, then publish once after recovery', async t => {
+  let failing = true;
+  const s = await setup(t, { respond: args => {
+    if (args.body.queryAssetId === 'p0' && failing) throw new ImmichApiError('Asset private-photo has no embedding secret', 400);
+    return { assets: { items: ['p0','p1','p2'].map(id => ({ id, type: 'IMAGE' })) } };
+  } });
+  const view = await s.curate.openView();
+  for (let i = 0; i < 3; i++) { await s.curate.backgroundTick(); s.advance(2000); }
+  const status = s.refine.status();
+  assert.equal(status.state, 'paused'); assert.equal(status.pending, 1);
+  assert.equal(status.failedGroups, 1); assert.equal(status.failedReferences, 1);
+  assert.deepEqual(status.problemCodes, ['similarity_embedding_missing']);
+  assert.match(status.problem, /Immich has no search embedding/);
+  assert.equal(s.curate.page(view.viewId).groups[0].similarity.problemCode, 'similarity_embedding_missing');
+  assert.deepEqual(s.refine.snapshot(), {}); assert.equal(s.refine.revision, 0);
+  assert.equal(s.refine.entries.size, 0, 'deferred scope releases its active slot');
+  assert.equal(s.refine.retries.records.size, 1);
+  assert.doesNotMatch(JSON.stringify(s.repo.db.prepare('SELECT * FROM curate_rank_retries').all()), /private-photo|secret/);
+  const now = s.refine.now;
+  await s.curate.close();
+  const repo = new Repository(s.repo.databasePath); repo.initSchema();
+  const next = new CurateService({ repo, config: s.config, immich: s.immich,
+    metadataOptions: { automatic: false }, candidateOptions: { enabled: true, now } });
+  next.start = () => {};
+  next.similarity = new CurateSimilaritySearch({ curate: next, now });
+  t.after(async () => { await next.close(); repo.close(); });
+  await next.backgroundTick();
+  assert.equal(s.calls.length, 3, 'restart preserves successful rows and missing-reference backoff');
+  assert.equal(next.refinement.status().failedReferences, 1);
+  assert.equal(next.refinement.status().retryAt, status.retryAt);
+  await next.openView({ retryChecks: false }); await next.backgroundTick(); assert.equal(s.calls.length, 3);
+  s.advance(status.retryAt - now() - 1); await next.backgroundTick(); assert.equal(s.calls.length, 3);
+  failing = false; s.advance(1); await next.backgroundTick();
+  assert.deepEqual(s.calls.map(c => c.body.queryAssetId), ['p0','p1','p2','p0']);
+  assert.equal(next.refinement.revision, 1); assert.equal(next.refinement.status().checkedGroups, 1);
+  assert.equal(next.refinement.status().failedGroups, 0); assert.equal(next.refinement.status().problem, null);
+  assert.equal(next.refinement.retries.records.size, 0);
+  assert.equal(repo.db.prepare('SELECT count(*) n FROM decision_operations').get().n, 0);
+});
+
+test('more than 32 missing-embedding scopes cannot starve later healthy scopes', async t => {
+  const s = await setup(t, { n: 0, respond: args => {
+    const [, group, member] = args.body.queryAssetId.split('-');
+    if (+group < 40 && member === '0') throw new ImmichApiError('Asset private has no embedding', 400);
+    return { assets: { items: [] } };
+  } });
+  for (let n = 0; n < 60; n++) for (let i = 0; i < 2; i++) {
+    const id = `backlog-${n}-${i}`;
+    s.repo.upsertAsset({ id, fileCreatedAt: new Date(1767225600000 + n * 600_000 + i * 1000).toISOString() });
+    s.repo.reviewListAdd([id], 'test');
+  }
+  for (let i = 0; i < 120; i++) {
+    await s.curate.backgroundTick(); s.advance(2000);
+    assert.ok(s.refine.entries.size <= 32);
+  }
+  const status = s.refine.status();
+  assert.equal(s.calls.length, 120); assert.equal(status.checkedGroups, 20);
+  assert.equal(status.failedGroups, 40); assert.equal(status.failedReferences, 40);
+  assert.equal(status.remainingGroups, 40); assert.equal(status.pending, 40);
+  assert.equal(s.refine.entries.size, 0); assert.equal(s.refine.retries.records.size, 40);
+  assert.equal(s.refine.views.size, 0); assert.equal(status.state, 'paused');
+});
+
+test('parked failures invalidate on exact source or connection changes', async t => {
+  for (const mode of ['source', 'connection']) await t.test(mode, async t => {
+    const s = await setup(t, { n: 2, respond: () => { throw new ImmichApiError('Asset private has no embedding', 400); } });
+    for (let i = 0; i < 2; i++) { await s.curate.backgroundTick(); s.advance(2000); }
+    const old = [...s.refine.retries.records.keys()][0];
+    if (mode === 'source') s.repo.updateAssetVisuals('p0', { thumbhash: Buffer.alloc(21, 12).toString('base64') });
+    else { s.immich.apiKey = 'replacement'; s.curate.settingsChanged(); }
+    await s.curate.backgroundTick();
+    assert.equal(s.calls.length, 3);
+    assert.equal(mode === 'source' ? s.refine.retries.records.has(old) : s.refine.status().failedReferences === 2, false);
+    assert.deepEqual(s.refine.snapshot(), {});
+  });
+});
+
+test('retry storage limits are visible, preserve active evidence and recover when space is available', async t => {
+  const s = await setup(t, { n: 2, respond: () => { throw new ImmichApiError('Asset private has no embedding', 400); } });
+  const limits = s.refine.retries.limits;
+  s.refine.retries.limits = { ...limits, bytes: 1 };
+  for (let i = 0; i < 2; i++) { await s.curate.backgroundTick(); s.advance(2000); }
+  assert.equal(s.refine.status().state, 'limited'); assert.equal(s.refine.entries.size, 1);
+  assert.equal(s.refine.retries.records.size, 0); assert.equal(s.refine.status().failedReferences, 2);
+  s.refine.retries.limits = limits;
+  await s.curate.backgroundTick();
+  assert.equal(s.refine.status().state, 'paused'); assert.equal(s.refine.entries.size, 0);
+  assert.equal(s.refine.retries.records.size, 1); assert.equal(s.calls.length, 2);
+});
+
+test('missing-embedding retries grow from 15 to 60 minutes and explicit retry preserves attempt history', async t => {
+  const s = await setup(t, { n: 2, respond: args => {
+    if (args.body.queryAssetId === 'p0') throw new ImmichApiError('Asset private has no embedding', 400);
+    return { assets: { items: [] } };
+  } });
+  await s.curate.backgroundTick();
+  assert.equal(s.refine.status().retryAt - s.refine.now(), 15 * 60_000);
+  s.advance(2000); await s.curate.backgroundTick();
+  for (const delay of [30, 60, 60]) {
+    s.advance(s.refine.status().retryAt - s.refine.now()); await s.curate.backgroundTick();
+    assert.equal(s.refine.status().retryAt - s.refine.now(), delay * 60_000);
+  }
+  await s.curate.openView({ retryChecks: true }); s.advance(2000); await s.curate.backgroundTick();
+  assert.equal(s.refine.status().retryAt - s.refine.now(), 60 * 60_000);
+  assert.deepEqual(s.calls.map(c => c.body.queryAssetId), ['p0','p1','p0','p0','p0','p0']);
 });

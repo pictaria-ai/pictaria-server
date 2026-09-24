@@ -183,7 +183,7 @@ test('background status markers and inline progress remain stable on desktop and
     }
     release();
     await page.waitFor('document.querySelector(".group-card[data-similarity=paused]")');
-    assert.equal(await progress(), 'Checks paused · 1 remaining');
+    assert.equal(await progress(), 'Checking stacks · 1 remaining · 1 need attention');
     assert.equal(await page.evaluate('document.querySelector("#groups").getBoundingClientRect().top'), gridTop,
       'changing progress to a paused message cannot move the grid');
 
@@ -208,4 +208,45 @@ test('background status markers and inline progress remain stable on desktop and
     assert.equal(await page.evaluate('document.querySelector(".group-card[data-similarity=checked] .similarity-indicator").dataset.phase'), 'attention');
     assert.match(await page.evaluate('document.querySelector(".group-card[data-similarity=checked] .similarity-status").textContent'), /uncertain/);
     assert.equal(await progress(), '', 'completed checks no longer contribute to remaining work');
+  });
+
+test('missing embeddings show actionable attention without view changes resetting backoff',
+  { timeout: 40000 }, async t => {
+    if (!findChrome()) return t.skip('Chrome required');
+    let missing = true;
+    const fixture = await curatePreviewFixture({ stackSize: 3, singles: 0, metadataReady: true,
+      prepare(f) {
+        for (let n = 1; n <= 3; n++) f.similarityResponses.set(f.id(n), async () => missing && n === 1
+          ? { status: 400, body: { message: `Asset ${f.id(1)} has no embedding private-upstream-detail` } }
+          : { status: 200, body: { assets: { items: [1,2,3].map(i => ({ id: f.id(i), type: 'IMAGE' })) } } });
+      },
+    });
+    const browser = await launchChrome(), page = await browser.newPage();
+    t.after(async () => { await browser.stop(); await fixture.stop(); });
+    const click = selector => page.evaluate(`document.querySelector(${JSON.stringify(selector)}).click()`);
+    await page.navigate(`${fixture.base}/curate-preview.html`);
+    await page.waitFor('document.querySelector(".gate-backdrop input")');
+    await page.evaluate('document.querySelector(".gate-backdrop input").value="smoke-secret";document.querySelector(".gate-backdrop button").click()');
+    await page.waitFor('document.querySelector("#refinement").textContent==="Checks waiting · 1 remaining · 1 need attention"', { timeoutMs: 15000 });
+    assert.equal(fixture.similarityReads.length, 3, 'other references were checked after one failed');
+    const diagnostic = await page.evaluate('document.querySelector("#check-activity .similarity-indicator").title');
+    assert.match(diagnostic, /Immich has no search embedding/); assert.match(diagnostic, /Next scheduled retry/);
+    assert.doesNotMatch(diagnostic, /private-upstream-detail|00000000/);
+    assert.equal(await page.evaluate('document.querySelector("#check-activity .similarity-indicator").dataset.phase'), 'attention');
+    await click('[data-section=decided]'); await page.waitFor('!document.querySelector("#refresh").disabled');
+    await click('[data-section=pending]'); await page.waitFor('!document.querySelector("#refresh").disabled && document.querySelector(".is-stack")');
+    assert.equal(fixture.similarityReads.length, 3);
+    await click('.is-stack');
+    await page.waitFor('document.querySelector("#comparison-similarity .why-trigger")');
+    await click('#comparison-similarity .why-trigger');
+    const explanation = await page.evaluate('document.querySelector("#comparison-similarity").textContent');
+    assert.match(explanation, /waiting for Immich Smart Search/);
+    assert.match(explanation, /Next retry:/); assert.match(explanation, /still choose/);
+    assert.equal(await page.evaluate('document.querySelector("#photos [data-keeper]").disabled'), false);
+    await click('[data-close=comparison]');
+    missing = false;
+    await click('#refresh');
+    await page.waitFor('!document.querySelector("#refinement").textContent && !document.querySelector("#refresh").disabled', { timeoutMs: 12000 });
+    assert.deepEqual(fixture.similarityReads.map(r => r.queryAssetId), [fixture.id(1), fixture.id(2), fixture.id(3), fixture.id(1)]);
+    assert.equal(fixture.repo.db.prepare('SELECT count(*) n FROM decision_operations').get().n, 0);
   });

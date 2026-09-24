@@ -76,7 +76,7 @@ test('one lane across references; abort stops work and does not cache a late res
   controller.abort();
   assert.equal(calls[0].signal.aborted, true);
   release({ assets: { items: [item('b')] } });
-  await assert.rejects(running, /interrupted or timed out/);
+  await assert.rejects(running, { code: 'similarity_timeout' });
   assert.equal(calls.length, 1); assert.equal(search.cache.size, 0);
 });
 
@@ -264,4 +264,35 @@ test('oversized rank groups are rejected without sampling; expired views and shu
   assert.equal(calls.length, 1); assert.equal(search.owner, null);
   curate.lab.views.clear();
   assert.throws(() => curate.lab.ranks.plan(body), { code: 'lab_expired' });
+});
+
+test('confirmed missing embeddings use safe diagnostics without delaying unrelated searches', async t => {
+  const s = setup(t, (_args, n) => {
+    if (n === 1) throw new ImmichApiError('HTTP 400: Asset private-id has no embedding; token=private-secret', 400);
+    return { assets: { items: [item('a')] } };
+  });
+  await assert.rejects(s.search.search('a'), e => {
+    assert.equal(e.code, 'similarity_embedding_missing');
+    assert.doesNotMatch(e.message, /private-id|private-secret/); return true;
+  });
+  assert.equal(s.search.cache.size, 0);
+  s.advance(limits.minIntervalMs);
+  assert.deepEqual((await s.search.search('b')).ids, ['a']);
+  assert.equal(s.calls.length, 2);
+});
+
+test('only the known missing-embedding response receives the per-photo classification', async t => {
+  for (const [status, message, code] of [
+    [400, 'Smart search is not enabled', 'similarity_search_disabled'],
+    [400, 'Other validation failure', 'similarity_reference_unavailable'],
+    [404, 'Asset private has no embedding', 'similarity_reference_unavailable'],
+    [403, 'private diagnostic', 'similarity_access_denied'],
+    [429, 'private diagnostic', 'similarity_rate_limited'],
+  ]) await t.test(code + status, async t => {
+    const s = setup(t, () => { throw new ImmichApiError(message, status); });
+    await assert.rejects(s.search.search('a'), { code });
+    s.advance(limits.minIntervalMs);
+    await assert.rejects(s.search.search('b'), { code: 'similarity_cooldown' });
+    assert.equal(s.calls.length, 1); assert.equal(s.search.cache.size, 0);
+  });
 });

@@ -102,7 +102,7 @@ export class CurateService {
     this.metrics.rebuildMs = performance.now() - start;
     return this.current;
   }
-  async openView({ kind = 'all', search = '', sort = 'oldest', section = 'pending', category = 'all', retryChecks = true, replacesViewId = null } = {}) {
+  async openView({ kind = 'all', search = '', sort = 'oldest', section = 'pending', category = 'all', retryChecks = false, replacesViewId = null } = {}) {
     if (typeof retryChecks !== 'boolean' || !['pending', 'decided'].includes(section) || typeof category !== 'string' ||
         !['all', ...this.categories().map(b => b.id)].includes(category) ||
         !['all', 'stacks', 'singles'].includes(kind) || !['oldest', 'newest'].includes(sort) ||

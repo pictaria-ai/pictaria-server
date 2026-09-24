@@ -78,7 +78,9 @@ export function similarityLabel(status) {
   switch (status?.state) {
     case 'waiting': return 'Waiting for similarity check';
     case 'checking': return `Checking nearby photos · ${status.done} of ${status.total}`;
-    case 'paused': return 'Similarity check paused · retrying automatically';
+    case 'paused': return status.problemCode === 'similarity_embedding_missing'
+      ? 'Similarity check incomplete · waiting for Immich Smart Search'
+      : 'Similarity check paused · retrying automatically';
     case 'limited': return status.total ? 'Similarity check paused · storage limit' : 'Similarity not checked · automatic limit';
     case 'updated': return status.paused ? 'Grouping updated · similarity check paused'
       : status.checking ? 'Grouping updated · checking nearby photos'
@@ -101,7 +103,7 @@ export function similarityIndicator(status) {
   indicator.dataset.phase = phase;
   indicator.setAttribute('role', 'img');
   indicator.setAttribute('aria-label', label);
-  indicator.title = label;
+  indicator.title = [label, status.problem].filter(Boolean).join('. ');
   return indicator;
 }
 

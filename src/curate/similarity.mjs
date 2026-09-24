@@ -1,4 +1,5 @@
 import { CurateError, fingerprint } from './contracts.mjs';
+import { classifySearchError, problemMessage } from './search-problems.mjs';
 
 export const SIMILARITY_LIMITS = Object.freeze({
   results: 50, timeoutMs: 15_000, responseBytes: 2 * 1024 * 1024,
@@ -111,15 +112,14 @@ export class CurateSimilaritySearch {
         elapsedMs: Math.round(this.elapsedNow() - started) };
     } catch (error) {
       this.metrics.failures++;
-      this.nextAt = Math.max(this.nextAt, this.now() + SIMILARITY_LIMITS.failureIntervalMs);
+      const code = error instanceof CurateError ? error.code : classifySearchError(error, signal.aborted);
+      // A missing embedding is specific to this reference. Keep normal pacing
+      // for healthy photos; its caller owns the much longer reference backoff.
+      if (code !== 'similarity_embedding_missing')
+        this.nextAt = Math.max(this.nextAt, this.now() + SIMILARITY_LIMITS.failureIntervalMs);
       if (error instanceof CurateError) throw error;
-      const message = signal.aborted ? 'Similarity search was interrupted or timed out. Try again when ready.'
-        : [401, 403].includes(error.status) ? 'Immich denied this search. Check the API key’s asset.read permission.'
-        : [400, 404, 422].includes(error.status) ? 'Immich could not search from this photo. Check that Smart Search is enabled and has processed the reference photo.'
-        : error.status === 429 ? 'Immich is busy. Wait before trying again.'
-        : 'Could not load similarity ranks from Immich. Try again later.';
       // Never return upstream bodies, credentials, URLs, or unrelated photos.
-      throw new CurateError(message, 'similarity_unavailable', 503);
+      throw new CurateError(problemMessage(code), code, 503);
     } finally {
       const elapsed = Math.max(0, this.elapsedNow() - started);
       this.metrics.completedSearches++;
