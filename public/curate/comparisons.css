@@ -66,7 +66,7 @@ button {
   min-height: 40px;
   margin: 14px 0;
 }
-#filters { grid-column: 2; grid-row: 1; }
+#filters { grid-column: 1; grid-row: 1; justify-self: start; }
 .view-status {
   display: grid;
   grid-template-columns: 180px minmax(0,1fr);
@@ -77,11 +77,10 @@ button {
 .selection-slot { min-height: 24px; display: flex; align-items: center; }
 /* Progress occupies the same row even when idle; activity cannot move the grid. */
 .view-summary {
-  display: grid;
-  grid-template-columns: minmax(0,1fr) minmax(0,300px);
+  display: flex;
+  justify-content: flex-end;
   align-items: center;
   min-width: 0;
-  gap: 16px;
   min-height: 24px;
 }
 #count, #refinement {
@@ -92,7 +91,10 @@ button {
   min-height: 20px;
   line-height: 20px;
 }
-#refinement { text-align: right; }
+#count { flex: 1; text-align: right; }
+#refinement { flex: 0 1 auto; text-align: right; }
+#refinement:not(:empty) { margin-left: 12px; }
+#refinement:not(:empty)::before { content: "·"; margin-right: 12px; }
 .refresh-tools { display: flex; align-items: center; gap: 12px; flex-shrink: 0; }
 #check-activity {
   display: inline-flex;
@@ -616,10 +618,10 @@ dialog::backdrop {
 }
 
 /* Review polish: keep controls compact and give the photos the space. */
-.secondary-filters { display: grid; grid-template-columns: clamp(160px,20vw,260px) max-content minmax(0,1fr) 190px; align-items: center; min-width: 0; gap: 12px; }
-.secondary-filters .search-label { grid-column: 1; }
-.secondary-filters .sort-label { grid-column: 2; }
-.secondary-filters #category-label { grid-column: 4; min-width: 0; }
+.secondary-filters { display: grid; grid-column: 2; grid-row: 1; grid-template-columns: max-content 190px clamp(160px,20vw,260px); align-items: center; min-width: 0; gap: 12px; }
+.secondary-filters .search-label { grid-column: 3; grid-row: 1; }
+.secondary-filters .sort-label { grid-column: 1; grid-row: 1; }
+.secondary-filters #category-label { grid-column: 2; min-width: 0; }
 #category { width: 100%; min-width: 0; text-overflow: ellipsis; }
 .secondary-filters .sort-label { flex-shrink: 0; white-space: nowrap; }
 #toggle-filters { display: none; }
@@ -665,14 +667,16 @@ dialog::backdrop {
   #toggle-filters { display: inline-flex; align-items: center; justify-content: center; grid-column: 2; grid-row: 1; }
   .secondary-filters { display: none; grid-template-columns: repeat(2,minmax(0,1fr)); grid-column: 1 / -1; grid-row: 2; gap: 8px; }
   .filters-expanded .secondary-filters { display: grid; }
-  .secondary-filters .search-label { grid-column: 1 / -1; grid-row: 1; }
-  .secondary-filters .sort-label { grid-column: 1; grid-row: 2; }
-  .secondary-filters #category-label { grid-column: 2; grid-row: 2; }
+  .secondary-filters .search-label { grid-column: 1 / -1; grid-row: 2; }
+  .secondary-filters .sort-label { grid-column: 1; grid-row: 1; }
+  .secondary-filters #category-label { grid-column: 2; grid-row: 1; }
   .secondary-filters .sort-label > span { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
   .secondary-filters .sort-label select { width: 100%; min-width: 0; }
   .view-status { grid-template-columns: minmax(0,1fr); gap: 4px; }
   .selection-slot { min-height: 20px; }
-  .view-summary { grid-template-columns: minmax(0,1fr); gap: 4px; }
+  .view-summary { display: grid; grid-template-columns: minmax(0,1fr); gap: 4px; }
+  #refinement:not(:empty) { margin-left: 0; }
+  #refinement:not(:empty)::before { content: none; }
   #count, #refinement { min-height: 20px; line-height: 20px; text-align: left; }
   #count { font-size: 12px; }
 }

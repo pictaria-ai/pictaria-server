@@ -177,21 +177,17 @@ function showViewStatus(view) {
   if (state.comparison) el('metadata-retry').hidden = !metadata?.problem;
   const paused = refinement?.state === 'paused' || refinement?.state === 'limited';
   const remaining = refinement?.remainingGroups ?? 0;
-  const incomplete = refinement?.incompleteGroups ?? 0;
   const checking = remaining > 0;
   const progress = checking ? ` · ${remaining.toLocaleString()} remaining` : '';
-  const incompleteLabel = incomplete ? `${incomplete.toLocaleString()} not fully checked` : '';
-  const status = paused ? `Checks paused${progress}` : checking ? `Checking stacks${progress}${incomplete ? ` · ${incompleteLabel}` : ''}`
-    : incompleteLabel ? `${incompleteLabel} · Ready to curate`
+  const status = paused ? `Checks paused${progress}` : checking ? `Checking stacks${progress}`
     : metadata?.problem ? 'Photo information paused'
     : metadata?.state === 'refreshing' ? 'Refreshing photo information' : '';
   el('refinement').textContent = status;
-  el('refinement').title = [refinement?.problem || metadata?.problem,
-    incomplete ? 'These checks have finished with limited information. You can curate the photos normally.' : '',
+  el('refinement').title = [paused ? refinement?.problem : metadata?.problem,
     checking ? 'Remaining checks across all pending photos, including outside this view. Includes queued and in-progress checks. Each check covers nearby photos that may form more than one stack.' : '',
   ].filter(Boolean).join(' ');
   const activity = paused ? { state: 'paused' } : refinement?.state === 'searching' || metadata?.state === 'refreshing'
-    ? { state: 'checking' } : checking ? { state: 'waiting' } : incomplete ? { state: 'incomplete' } : null;
+    ? { state: 'checking' } : checking ? { state: 'waiting' } : null;
   const indicator = similarityIndicator(activity);
   if (indicator) {
     indicator.title = indicator.ariaLabel = el('refinement').title || (paused ? 'Stack checks paused' : 'Checking pending stacks in the background');
@@ -615,8 +611,7 @@ function setControls(view) {
 function bulkSelection() {
   const singles = state.groups.filter(g => g.memberCount === 1);
   const locked = state.loading || state.busy || state.continuing || state.autoUpdateFailed || Boolean(client.saved.pending);
-  el('bulk-label').hidden = state.section === 'pending' && state.kind === 'stacks';
-  el('bulk-label-text').textContent = state.section === 'decided' || state.kind === 'singles' ? 'Check shown photos' : 'Check single photos';
+  el('bulk-label').hidden = state.section === 'pending' && state.kind !== 'singles';
   const count = singles.filter(g => state.selected.has(g.id)).length;
   el('select-shown').checked = count > 0 && count === singles.length;
   el('select-shown').indeterminate = count > 0 && count < singles.length;

@@ -7,6 +7,12 @@ All notable changes to Pictaria Server are documented here. This project follows
 
 ### Development
 
+- Curate Preview places All/Stacks/Singles on the left and date, category and
+  Search filters on the right, with Search last. Shown counts and active progress
+  share the right side of the status row; the header checkbox appears in Singles
+  and Decided. Finished incomplete checks keep their per-stack explanations
+  without leaving an aggregate warning in the header.
+
 - Curate Preview settles failed similarity checks after one retry instead of
   keeping a long-term repair queue. Incomplete groupings remain ready for human
   curation, and healthy stacks continue processing. Finished outcomes survive

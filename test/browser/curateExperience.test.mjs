@@ -96,8 +96,10 @@ test(
     );
     await page.send('Emulation.clearDeviceMetricsOverride');
     await click('[data-close=photo-view]');
-    // Selecting shown singles never includes the stack; saved batch is atomic/undoable.
-    await click('#select-shown');
+    // All keeps individual single-photo checks, without a select-all control.
+    // Selecting those singles never includes the stack; the batch is atomic/undoable.
+    assert.equal(await page.evaluate('document.querySelector("#bulk-label").hidden'), true);
+    await page.evaluate('document.querySelectorAll(".group-card:not(.is-stack) [data-select]").forEach(input=>input.click())');
     assert.equal(
       await page.evaluate('document.querySelector("#bulk-count").textContent'),
       '2 checked',
@@ -218,7 +220,7 @@ test(
       'document.querySelectorAll(".group-card").length===50 && !document.querySelector("#refresh").disabled',
     );
     await page.evaluate(
-      'document.querySelector("#select-shown").click();document.querySelector("#more").click()',
+      'document.querySelectorAll(".group-card [data-select]").forEach(input=>input.click());document.querySelector("#more").click()',
     );
     await page.waitFor(
       'document.querySelectorAll(".group-card").length===51 && !document.querySelector("#refresh").disabled',

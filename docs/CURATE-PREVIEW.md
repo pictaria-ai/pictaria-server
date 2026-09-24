@@ -34,12 +34,14 @@ in this preview, its proposed partitions are never saved.
 ## Review flow
 
 The header has three stable rows: Pending/Decided with activity, Refresh and More;
-search/date order with category and All/Stacks/Singles; then selection, counts
-and background progress. Hiding Pending-only filters or the selection checkbox
-does not move shared controls or the photo grid. On narrow screens, **Filters**
-reveals search, date order and category controls. Counts and progress each keep
-their own line, and the selection slot remains reserved in Stacks. Desktop keeps
-filters visible. The remembered sort is not changed by collapsing them.
+All/Stacks/Singles on the left with date order, category and Search on the right;
+then selection on the left with shown counts and active background progress
+aligned together on the right. The header checkbox appears in Singles and Decided;
+All still allows checking individual single-photo cards. Hiding Pending-only
+filters or the selection checkbox does not move shared controls or the photo grid.
+On narrow screens, **Filters** reveals date order, category and Search controls.
+Counts and progress each keep their own line, and the selection slot remains
+reserved in All and Stacks. Desktop keeps filters visible. The remembered sort is not changed by collapsing them.
 
 - **Pending** shows all pending photos by default. All, Stacks and Singles
   filter the same view. **All categories** can narrow it to the existing Enrich
@@ -62,8 +64,8 @@ filters visible. The remembered sort is not changed by collapsing them.
   large inspection; a stack opens its comparison directly, without a separate
   Compare button. The shared Settings gear
   opens the Curate section, without a second settings button on the page.
-- **Check single photos** checks the singles currently loaded, excluding stacks.
-  In Singles and Decided it reads **Check shown photos**; Stacks hides it.
+- **Check shown photos** checks the currently loaded photos in Singles or Decided.
+  All and Stacks hide this header control; All retains each single-photo checkbox.
   Loading more does not check additional photos. The fixed bottom action bar does not move the grid. Checked singles expose the same
   **Yes / Skip / Fav / No** actions in one undoable operation
   (up to 1,000 photos). The server verifies these are still single photos at both
@@ -218,10 +220,10 @@ An amber **!** means **Similarity not fully checked**; its explanation gives a
 short reason. A muted **i** means **Check complete · similarity uncertain**:
 searches succeeded but the evidence was inconclusive. Neither asks the user to
 repair a stack. Completed supported work stays quiet on cards. The header shows
-only ongoing checks as remaining, and separately notes finished incomplete
-checks as ready to curate. These outcomes survive restart without keeping
-partial search rows or retry deadlines. Source/connection changes may invalidate
-the outcome normally. Incomplete passes never supply partial ranking evidence
+active progress or paused work; once checks finish, it omits aggregate incomplete
+counts and the idle warning icon. Per-stack explanations remain available.
+These outcomes survive restart without keeping partial search rows or retry
+deadlines. Source/connection changes may invalidate the outcome normally. Incomplete passes never supply partial ranking evidence
 for regrouping.
 
 Accepted pending decisions remove only their cards from the displayed snapshot

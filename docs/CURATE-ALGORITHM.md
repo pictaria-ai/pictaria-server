@@ -245,13 +245,13 @@ reads do not increment `cacheHits`. No photo IDs or responses are included.
 These are diagnostic counters, not persistent performance history or a new UI.
 
 The page shows global background progress beside the stack/single-photo counts
-in a reserved status row, plus an activity spinner beside Refresh. When checks
-finish incomplete, this separately shows **N not fully checked**. When no work
-remains, it adds **Ready to curate** with a static amber indicator, not a spinner.
-The tooltip and comparison’s Why explanation give the reason and make clear that
-human choices are available. There is no repair action or next-retry time. Cards still
-show their own status and highlight changed grouping. Checks that finish without changing grouping, or in an unrelated
-view, do not by themselves request a replacement view. The single **Refresh**
+in a reserved status row, plus an activity spinner beside Refresh. After work
+finishes, the header stays quiet even when some checks finished incomplete.
+An affected card and its comparison’s Why explanation retain the status and
+reason, and make clear that human choices are available. There is no repair action
+or next-retry time. Cards still show their own status and highlight changed grouping.
+Checks that finish without changing grouping, or in an unrelated view, do not by
+themselves request a replacement view. The single **Refresh**
 button highlights waiting updates, including changed photo information.
 
 Background evidence changes only the next grouping snapshot. The grid adopts

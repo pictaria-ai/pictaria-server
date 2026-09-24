@@ -228,13 +228,14 @@ test('incomplete similarity checks stay usable and differ from completed inconcl
     await page.navigate(`${fixture.base}/curate-preview.html`);
     await page.waitFor('document.querySelector(".gate-backdrop input")');
     await page.evaluate('document.querySelector(".gate-backdrop input").value="smoke-secret";document.querySelector(".gate-backdrop button").click()');
-    await page.waitFor('document.querySelector("#refinement")?.textContent==="1 not fully checked · Ready to curate"', { timeoutMs: 15000 });
+    await page.waitFor('document.querySelector(".is-stack .similarity-indicator[data-phase=attention]") && !document.querySelector("#refinement").textContent', { timeoutMs: 15000 });
     assert.equal(fixture.similarityReads.length, 4, 'one retry, then finished incomplete');
-    const diagnostic = await page.evaluate('document.querySelector("#check-activity .similarity-indicator").title');
-    assert.match(diagnostic, /Immich has no search embedding/); assert.match(diagnostic, /curate the photos normally/);
+    const diagnostic = await page.evaluate('document.querySelector(".is-stack .similarity-indicator").title');
+    assert.match(diagnostic, /Immich has no search embedding/);
     assert.doesNotMatch(diagnostic, /retry|need attention/i);
     assert.doesNotMatch(diagnostic, /private-upstream-detail|00000000/);
-    assert.equal(await page.evaluate('document.querySelector("#check-activity .similarity-indicator").dataset.phase'), 'attention');
+    assert.equal(await page.evaluate('document.querySelector("#check-activity").childElementCount'), 0,
+      'settled incomplete checks stay on cards without an idle header warning');
     if (process.env.PICTARIA_TEST_SCREENSHOTS) {
       const { data } = await page.send('Page.captureScreenshot', { format: 'png' });
       writeFileSync(join(process.env.PICTARIA_TEST_SCREENSHOTS, 'curate-incomplete-desktop.png'), Buffer.from(data, 'base64'));
