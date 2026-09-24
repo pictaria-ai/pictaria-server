@@ -30,17 +30,25 @@
           <p class="p-muted">Choose good photos without keeping every repeat.</p>
         </div>
       </div>
-      <nav id="sections" class="p-tabs section-tabs" aria-label="Review status">
-        <button class="p-tab active" data-section="pending">Pending</button>
-        <button class="p-tab" data-section="decided">Decided</button>
-      </nav>
-      <div class="toolbar">
-        <nav id="filters" class="p-tabs" aria-label="Photo groups">
-          <button class="p-tab active" data-kind="all">All</button
-          ><button class="p-tab" data-kind="stacks">Stacks</button
-          ><button class="p-tab" data-kind="singles">Singles</button>
+      <div class="view-controls">
+        <nav id="sections" class="p-tabs section-tabs" aria-label="Review status">
+          <button class="p-tab active" data-section="pending">Pending</button>
+          <button class="p-tab" data-section="decided">Decided</button>
         </nav>
-        <button id="toggle-filters" class="p-btn" aria-expanded="false" aria-controls="secondary-filters">Filters</button>
+        <span id="updates" class="p-muted" hidden role="status"><span id="updates-copy"></span></span>
+        <div class="refresh-tools">
+          <span id="check-activity" aria-live="polite"></span>
+          <button id="refresh" class="p-btn">Refresh</button>
+          <details class="page-tools">
+            <summary class="p-btn">More</summary>
+            <div>
+              <a class="p-btn" href="/curate-stacking-lab.html">Stacking lab</a>
+              <a class="p-btn" href="/curate.html">Production Curate</a>
+            </div>
+          </details>
+        </div>
+      </div>
+      <div class="toolbar">
         <div id="secondary-filters" class="secondary-filters">
         <label class="search-label"
           ><span class="sr-only">Search photos</span
@@ -60,26 +68,21 @@
           </select>
         </label>
         </div>
-        <div class="p-grow"></div>
-        <span id="updates" class="p-muted" hidden role="status"><span id="updates-copy"></span></span>
-        <div class="refresh-tools">
-          <span id="check-activity" aria-live="polite"></span>
-          <button id="refresh" class="p-btn">Refresh</button>
-          <details class="page-tools">
-            <summary class="p-btn">More</summary>
-            <div>
-              <a class="p-btn" href="/curate-stacking-lab.html">Stacking lab</a>
-              <a class="p-btn" href="/curate.html">Production Curate</a>
-            </div>
-          </details>
-        </div>
+        <nav id="filters" class="p-tabs" aria-label="Photo groups">
+          <button class="p-tab active" data-kind="all">All</button
+          ><button class="p-tab" data-kind="stacks">Stacks</button
+          ><button class="p-tab" data-kind="singles">Singles</button>
+        </nav>
+        <button id="toggle-filters" class="p-btn" aria-expanded="false" aria-controls="secondary-filters">Filters</button>
       </div>
       <div class="view-status">
+        <div class="selection-slot">
         <label id="bulk-label"
           ><input id="select-shown" type="checkbox" /><span id="bulk-label-text"
             >Check single photos</span
           ></label
         >
+        </div>
         <div class="view-summary">
           <span id="count" class="p-muted" aria-live="polite">Loading photos…</span>
           <span id="refinement" class="p-muted" role="status"></span>

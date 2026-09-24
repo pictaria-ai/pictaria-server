@@ -30,6 +30,9 @@ All notable changes to Pictaria Server are documented here. This project follows
   Card captions stay on one line with an ellipsis, keeping decision buttons
   aligned; single-photo checkboxes have even padding. Background progress shows
   how many checks remain across all pending photos, including outside the view.
+  The page header uses stable view, filter and results rows: Refresh and More
+  sit beside Pending/Decided, shared controls stay anchored when optional
+  filters disappear, and the selection slot remains reserved in Stacks.
 
 - Curate checks now run in the background with Stacks enabled, including after
   server startup and new Enrich arrivals. Opening the page or Load more is no

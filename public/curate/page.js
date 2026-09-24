@@ -168,6 +168,7 @@ function showViewStatus(view) {
   if (stacks) parts.push(`${loadedStacks} of ${stacks} ${stacks === 1 ? 'stack' : 'stacks'}`);
   if (singles) parts.push(`${state.groups.length - loadedStacks} of ${singles} ${singles === 1 ? 'single photo' : 'single photos'}`);
   el('count').textContent = parts.length ? `${parts.join(' · ')} shown` : '0 photos shown';
+  el('count').title = el('count').textContent;
   state.updateStatus = view;
   updateHint();
   const refinement = view.refinement;

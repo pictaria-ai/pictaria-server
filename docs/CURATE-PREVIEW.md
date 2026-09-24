@@ -33,8 +33,13 @@ in this preview, its proposed partitions are never saved.
 
 ## Review flow
 
-On narrow screens, **Filters** reveals search, date order and category controls.
-Desktop keeps these visible. The remembered sort is not changed by collapsing them.
+The header has three stable rows: Pending/Decided with activity, Refresh and More;
+search/date order with category and All/Stacks/Singles; then selection, counts
+and background progress. Hiding Pending-only filters or the selection checkbox
+does not move shared controls or the photo grid. On narrow screens, **Filters**
+reveals search, date order and category controls. Counts and progress each keep
+their own line, and the selection slot remains reserved in Stacks. Desktop keeps
+filters visible. The remembered sort is not changed by collapsing them.
 
 - **Pending** shows all pending photos by default. All, Stacks and Singles
   filter the same view. **All categories** can narrow it to the existing Enrich

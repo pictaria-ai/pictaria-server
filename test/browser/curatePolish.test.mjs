@@ -160,6 +160,17 @@ test(
       'desktop filters fit one row',
     );
     await screenshot(page, 'curate-toolbar-desktop.png');
+    const headerPositions = () => page.evaluate(`['#sections','#refresh','.page-tools','#check-activity','#search','#sort','#count','#refinement','#groups'].map(selector=>{
+      const {x,y}=document.querySelector(selector).getBoundingClientRect();return {selector,x,y};
+    })`);
+    const stableViews = async () => {
+      const initial = await headerPositions();
+      for (const selector of ['[data-kind=stacks]','[data-kind=singles]','[data-section=decided]','[data-section=pending]','[data-kind=all]']) {
+        await click(selector); await ready();
+        assert.deepEqual(await headerPositions(), initial, `header controls stay anchored after ${selector}`);
+      }
+    };
+    await stableViews();
     await page.send('Emulation.setDeviceMetricsOverride', {
       width: 375,
       height: 812,
@@ -170,6 +181,7 @@ test(
       await page.evaluate('getComputedStyle(document.querySelector("#secondary-filters")).display'),
       'none',
     );
+    await stableViews();
     const top = await page.evaluate('document.querySelector("#groups").getBoundingClientRect().top');
     assert.ok(top < 520, `mobile photos should be visible on the first screen (${top})`);
     await click('#select-shown');
@@ -189,8 +201,9 @@ test(
     await click('#toggle-filters');
     assert.equal(
       await page.evaluate('getComputedStyle(document.querySelector("#secondary-filters")).display'),
-      'flex',
+      'grid',
     );
+    await stableViews();
     await page.evaluate(
       'document.querySelector("#sort").value="newest";document.querySelector("#sort").dispatchEvent(new Event("change"))',
     );
