@@ -281,13 +281,34 @@ test('confirmed missing embeddings use safe diagnostics without delaying unrelat
   assert.equal(s.calls.length, 2);
 });
 
-test('only the known missing-embedding response receives the per-photo classification', async t => {
+test('unavailable reference responses keep normal pacing for other photos', async t => {
+  for (const [status, message] of [
+    [400, 'Not found or no asset.read access'],
+    [400, 'Other validation failure'],
+    [404, 'Asset private has no embedding'],
+    [422, 'private diagnostic'],
+  ]) await t.test(`${status} ${message}`, async t => {
+    const s = setup(t, (_args, n) => {
+      if (n === 1) throw new ImmichApiError(message, status);
+      return { assets: { items: [item('a')] } };
+    });
+    await assert.rejects(s.search.search('a'), { code: 'similarity_reference_unavailable' });
+    assert.equal(s.search.cache.size, 0);
+    s.advance(limits.minIntervalMs - 1);
+    await assert.rejects(s.search.search('b'), { code: 'similarity_cooldown' });
+    s.advance(1);
+    assert.deepEqual((await s.search.search('b')).ids, ['a']);
+    assert.equal(s.calls.length, 2);
+  });
+});
+
+test('global failures retain their classification and shared cooldown', async t => {
   for (const [status, message, code] of [
     [400, 'Smart search is not enabled', 'similarity_search_disabled'],
-    [400, 'Other validation failure', 'similarity_reference_unavailable'],
-    [404, 'Asset private has no embedding', 'similarity_reference_unavailable'],
+    [401, 'private diagnostic', 'similarity_access_denied'],
     [403, 'private diagnostic', 'similarity_access_denied'],
     [429, 'private diagnostic', 'similarity_rate_limited'],
+    [500, 'private diagnostic', 'similarity_unavailable'],
   ]) await t.test(code + status, async t => {
     const s = setup(t, () => { throw new ImmichApiError(message, status); });
     await assert.rejects(s.search.search('a'), { code });

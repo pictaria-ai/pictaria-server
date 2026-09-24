@@ -60,8 +60,9 @@ export class CurateRefinement {
   }
   nextReference(entry) {
     if (entry.retryAt > this.now()) return;
-    return entry.referenceIds.find(id => !Object.hasOwn(entry.rows, id) &&
+    const ready = entry.referenceIds.filter(id => !Object.hasOwn(entry.rows, id) &&
       !embeddingStopped(entry.errors[id]) && !(entry.errors[id]?.retryAt > this.now()));
+    return ready.find(id => !entry.errors[id]) ?? ready[0];
   }
   summary(entry) {
     const errors = Object.values(entry.errors);
@@ -260,7 +261,9 @@ export class CurateRefinement {
     if (lane.owner || lane.work) return;
     this.requests = this.requests.filter(time => time + 60_000 > this.now());
     const priorities = this.priorities();
-    const entry = [...active].map(id => this.entries.get(id)).filter(e => e && this.needed(e) && this.nextReference(e))
+    // Re-admitted deferred groups join behind existing work at equal priority;
+    // source order must not give the same failed group every available turn.
+    const entry = [...this.entries.values()].filter(e => active.has(e.id) && this.needed(e) && this.nextReference(e))
       .sort((a, b) => (priorities.get(a.id) ?? 2) - (priorities.get(b.id) ?? 2))[0];
     if (!entry) return;
     const id = this.nextReference(entry);
@@ -314,6 +317,11 @@ export class CurateRefinement {
       const stopped = missing && attempts >= REFINEMENT_LIMITS.embeddingMaxAttempts;
       entry.errors[id] = { code: stopped ? 'similarity_embedding_missing_exhausted' : code,
         attempts, retryAt: stopped ? null : this.now() + delay };
+      // Other reference/global failures yield the whole slot briefly, including
+      // untried members. Persisting this pause prevents restart from undoing it.
+      // Missing embeddings already have a long per-photo delay and no shared
+      // failure cooldown; their remaining members can continue at normal pace.
+      if (!missing) entry.retryAt = this.now() + REFINEMENT_LIMITS.retryMs;
     } else {
       entry.failureCode = 'similarity_save_failed';
       entry.retryAt = this.now() + Math.min(REFINEMENT_LIMITS.retryMaxMs,

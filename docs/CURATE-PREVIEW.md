@@ -213,7 +213,11 @@ status indicator and the comparison’s Why explanation expose the cause and nex
 retry, or explain that automatic retries stopped. **Checks stopped** replaces
 **Checks waiting** when all remaining work has exhausted its retries. Check Smart
 Search processing in Immich for missing embeddings. Manual
-**Refresh** retries sooner after shared pacing; changing views does not. Incomplete
+**Refresh** retries sooner after shared pacing; changing views does not. Deleted
+or inaccessible reference photos do not slow searches for other groups. Other
+than missing embeddings, a failed search pauses its group for one minute to let
+other groups proceed; that pause survives restart. Authentication, rate limits
+and service failures still slow the shared search connection. Incomplete
 passes never count as checked or supply partial evidence for regrouping.
 
 Accepted pending decisions remove only their cards from the displayed snapshot

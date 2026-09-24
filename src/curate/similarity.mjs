@@ -113,9 +113,11 @@ export class CurateSimilaritySearch {
     } catch (error) {
       this.metrics.failures++;
       const code = error instanceof CurateError ? error.code : classifySearchError(error, signal.aborted);
-      // A missing embedding is specific to this reference. Keep normal pacing
-      // for healthy photos; its caller owns the much longer reference backoff.
-      if (code !== 'similarity_embedding_missing')
+      // Missing/deleted/inaccessible reference photos do not imply that the
+      // whole service needs a cooldown. Their caller owns per-photo backoff.
+      // Authentication, rate limits, disabled search and other failures still
+      // slow the shared lane, including when the lab is using it.
+      if (!['similarity_embedding_missing', 'similarity_reference_unavailable'].includes(code))
         this.nextAt = Math.max(this.nextAt, this.now() + SIMILARITY_LIMITS.failureIntervalMs);
       if (error instanceof CurateError) throw error;
       // Never return upstream bodies, credentials, URLs, or unrelated photos.

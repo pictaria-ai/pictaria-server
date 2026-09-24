@@ -13,6 +13,8 @@ All notable changes to Pictaria Server are documented here. This project follows
   until explicitly retried; other photos and groups keep
   progressing. Failed passes retain successful rows and retry deadlines across
   restarts, within bounded storage. Only an explicit Refresh resets the wait.
+  Deleted or inaccessible references keep normal search pacing for other
+  photos, and failing groups yield their slots so healthy stacks can progress.
   Grouping still uses complete passes, and manual curation remains available.
   Enrich schema 17 / persistent-state contract 20 adds retry checkpoints with
   the normal pre-migration recovery snapshot.

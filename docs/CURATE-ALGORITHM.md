@@ -137,8 +137,9 @@ still invalidate or resolve a candidate between requests.
 - One shared lane with the lab, at least **2 seconds** between new requests,
   with a **30-new-request rolling-minute cap** on automatic work. Requests stay
   sequential. A successful search taking at least two seconds adds a pause equal
-  to its duration (capped at 30 seconds) after completion. Failures retain the
-  longer cooldown and exponential retry delay. No extra AI/provider calls.
+  to its duration (capped at 30 seconds) after completion. Service-wide failures
+  retain the longer cooldown; failed references use exponential retry delays.
+  No extra AI/provider calls.
 - The opened comparison gets the next search turn, followed by currently visible
   cards, then other admitted groups. An in-flight request finishes normally.
   The browser reports at most 50 visible group IDs plus the open comparison;
@@ -152,7 +153,10 @@ still invalidate or resolve a candidate between requests.
 - Each request asks for one reference's first 51 image results, removes the
   reference and keeps at most **50**. No pagination to find a desired match.
   Timeout **15 seconds**, response limit **2 MiB**, failure cooldown at least
-  **30 seconds**, except a confirmed missing embedding uses only the normal two-second pacing for other references. Permission/API/index failures leave manual Curate available.
+  **30 seconds** for authentication, rate limits, disabled search, timeouts and
+  other service failures. A missing embedding or unavailable reference (HTTP
+  400/404/422, except disabled search) keeps normal two-second pacing for other
+  photos. Permission/API/index failures leave manual Curate available.
 - At most **32 incomplete candidate passes** in memory, each at most 40 photos.
   Completing a pass frees its slot so the entire backlog can advance without
   pagination. Partial coverage is never published as a completed result.
@@ -176,8 +180,12 @@ still invalidate or resolve a candidate between requests.
   shutdown cancel in-flight work; browser inactivity does not. Unseen remote
   changes (including changed search index rankings) cannot be detected by these
   fingerprints; this is retained evidence, not a continuously refreshed index.
-- A failed reference does not block the other required references or hold an active
-  slot while deferred. Parked partial passes stay outside the **32 active scopes**
+- A failed reference does not hold an active slot while deferred. Except for
+  missing embeddings, a reference failure also pauses its whole candidate for
+  **60 seconds**, releasing the slot for other groups. When admitted again, it
+  joins behind existing work at equal browsing priority. Unqueried members get
+  a turn before due retries, so one repeatedly failing photo cannot monopolize
+  its own group either. Parked partial passes stay outside the **32 active scopes**
   and never enter the grouping algorithm until every required search succeeds.
   Retry checkpoints are bounded to **50,000 records**, **256 KiB per record**,
   **16 MiB serialized total**, with obsolete scopes pruned in batches of 128.
@@ -189,8 +197,9 @@ still invalidate or resolve a candidate between requests.
   slot and remains incomplete. Other references can still finish. Explicit
   **Refresh** starts a new bounded cycle for stopped references. This error does not impose a
   connection-wide failure cooldown. Other failures retry after **60 seconds**,
-  doubling to **15 minutes**, and retain the shared transport cooldown. Missing
-  embeddings are never interpreted as empty successful results or dissimilarity.
+  doubling to **15 minutes**; service-wide failures also retain the shared
+  transport cooldown. The three-retry cap applies only to missing embeddings,
+  which are never interpreted as empty successful results or dissimilarity.
 - Manual **Refresh** releases retry deadlines, while respecting shared pacing and
   rate limits. Opening the page, changing filters, loading more and automatic
   view replacement do not reset them. A busy lab search delays background work.

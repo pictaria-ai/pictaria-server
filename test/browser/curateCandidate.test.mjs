@@ -183,7 +183,7 @@ test('background status markers and inline progress remain stable on desktop and
     }
     release();
     await page.waitFor('document.querySelector(".group-card[data-similarity=paused]")');
-    assert.equal(await progress(), 'Checking stacks · 1 remaining · 1 need attention');
+    assert.equal(await progress(), 'Checks waiting · 1 remaining · 1 need attention');
     assert.equal(await page.evaluate('document.querySelector("#groups").getBoundingClientRect().top'), gridTop,
       'changing progress to a paused message cannot move the grid');
 

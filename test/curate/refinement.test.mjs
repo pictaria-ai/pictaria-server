@@ -273,11 +273,12 @@ test('thirty new searches per minute and 40 per cohort; known local similarity s
 test('failures remain visible while other references progress; only explicit Refresh resets backoff', async t => {
   const { curate, refine, calls, advance } = await setup(t, { n: 2, respond: () => { throw Error('private upstream detail'); } });
   const view = await curate.openView(); await refine.tick();
-  assert.equal(refine.status().state, 'waiting');
+  assert.equal(refine.status().state, 'paused');
   assert.equal(refine.status().failedGroups, 1);
   assert.match(refine.status().problem, /Could not load/);
   assert.doesNotMatch(JSON.stringify(curate.page(view.viewId)), /private upstream/);
-  advance(35000); await refine.tick();
+  advance(35000); await refine.tick(); assert.equal(calls.length, 1, 'failed group yields its slot for a minute');
+  advance(25000); await refine.tick();
   assert.deepEqual(calls.map(c => c.body.queryAssetId), ['p0', 'p1']);
   assert.equal(refine.status().state, 'paused');
   await curate.openView({ replacesViewId: view.viewId });
@@ -387,7 +388,7 @@ test('failed partial pass stays unpublished and resumes on explicit retry', asyn
   assert.equal(s.curate.current.groups[0].route, 'candidate-unconfirmed');
   assert.deepEqual(s.refine.snapshot(), {});
   assert.equal(s.refine.revision, 0);
-  s.advance(35_000); await s.refine.tick(); assert.equal(s.calls.length, 3);
+  s.advance(60_000); await s.refine.tick(); assert.equal(s.calls.length, 3);
   assert.deepEqual(s.refine.snapshot(), {}, 'healthy reference is retained but not published');
   view = await s.curate.openView({ replacesViewId: view.viewId, retryChecks: true });
   await s.refine.tick(); s.advance(5000); await s.refine.tick();
@@ -561,8 +562,10 @@ test('failed searches retry automatically with backoff, leaving other candidates
   s.advance(35_000); await s.curate.backgroundTick();
   s.advance(2000); await s.curate.backgroundTick();
   s.advance(2000); await s.curate.backgroundTick();
-  assert.deepEqual(s.calls.map(c => c.body.queryAssetId), ['p0', 'p1', 'other-a', 'other-b']);
+  assert.deepEqual(s.calls.map(c => c.body.queryAssetId), ['p0', 'other-a', 'other-b']);
   s.advance(21_000); await s.curate.backgroundTick();
+  assert.equal(s.calls.at(-1).body.queryAssetId, 'p1');
+  s.advance(2000); await s.curate.backgroundTick();
   assert.equal(s.calls.length, 5);
   assert.equal(s.refine.status().state, 'paused');
   s.advance(119_999); await s.curate.backgroundTick(); assert.equal(s.calls.length, 5);
@@ -665,6 +668,95 @@ test('more than 32 missing-embedding scopes cannot starve later healthy scopes',
   assert.equal(status.remainingGroups, 40); assert.equal(status.pending, 40);
   assert.equal(s.refine.entries.size, 0); assert.equal(s.refine.retries.records.size, 40);
   assert.equal(s.refine.views.size, 0); assert.equal(status.state, 'paused');
+});
+
+test('unavailable references yield to healthy groups and try unqueried members before retries', async t => {
+  const s = await setup(t, { n: 4, respond: args => {
+    if (args.body.queryAssetId.startsWith('p'))
+      throw new ImmichApiError('Not found or no asset.read access', 400);
+    return { assets: { items: [] } };
+  } });
+  for (let i = 0; i < 4; i++) {
+    const id = `healthy-${i}`;
+    s.repo.upsertAsset({ id, fileCreatedAt: new Date(1767226200000 + i * 1000).toISOString() });
+    s.repo.reviewListAdd([id], 'test');
+  }
+  await s.curate.backgroundTick();
+  s.advance(2000); await s.curate.backgroundTick();
+  assert.equal(s.calls[1]?.body.queryAssetId, 'healthy-0', 'the next turn belongs to a healthy group');
+  for (let i = 0; i < 3; i++) { s.advance(2000); await s.curate.backgroundTick(); }
+  assert.equal(s.refine.status().checkedGroups, 1);
+  assert.equal(s.refine.status().failedGroups, 1);
+  assert.equal(s.refine.saved.records.size, 1, 'failed group never publishes partial evidence');
+  s.advance(52_000); await s.curate.backgroundTick();
+  assert.equal(s.calls.at(-1).body.queryAssetId, 'p1', 'unqueried members precede due retries');
+  s.advance(60_000); await s.curate.backgroundTick();
+  assert.equal(s.calls.at(-1).body.queryAssetId, 'p2');
+  s.advance(60_000); await s.curate.backgroundTick();
+  assert.equal(s.calls.at(-1).body.queryAssetId, 'p3');
+});
+
+test('more than 32 wholly unavailable scopes release slots for healthy work', async t => {
+  const s = await setup(t, { n: 0, respond: args => {
+    if (+args.body.queryAssetId.split('-')[1] < 36)
+      throw new ImmichApiError('Not found or no asset.read access', 400);
+    return { assets: { items: [] } };
+  } });
+  for (let n = 0; n < 40; n++) for (let i = 0; i < 4; i++) {
+    const id = `queue-${n}-${i}`;
+    s.repo.upsertAsset({ id, fileCreatedAt: new Date(1767225600000 + n * 600_000 + i * 1000).toISOString() });
+    s.repo.reviewListAdd([id], 'test');
+  }
+  for (let i = 0; i < 100; i++) {
+    await s.curate.backgroundTick(); s.advance(2000);
+    assert.ok(s.refine.entries.size <= 32);
+  }
+  assert.equal(s.refine.status().checkedGroups, 4);
+  assert.equal(s.refine.status().failedGroups, 36);
+  assert.equal(s.refine.saved.records.size, 4);
+});
+
+test('unavailable group pause survives restart without retrying its first reference ahead of unqueried photos', async t => {
+  const s = await setup(t, { n: 4, respond: () => {
+    throw new ImmichApiError('Not found or no asset.read access', 400);
+  } });
+  await s.curate.backgroundTick();
+  const now = s.refine.now;
+  await s.curate.close();
+  const repo = new Repository(s.repo.databasePath); repo.initSchema();
+  const next = new CurateService({ repo, config: s.config, immich: s.immich,
+    metadataOptions: { automatic: false }, candidateOptions: { enabled: true, now } });
+  next.start = () => {};
+  next.similarity = new CurateSimilaritySearch({ curate: next, now });
+  t.after(async () => { await next.close(); repo.close(); });
+  await next.backgroundTick();
+  assert.equal(next.refinement.entries.size, 0);
+  s.advance(59_999); await next.backgroundTick(); assert.equal(s.calls.length, 1);
+  s.advance(1); await next.backgroundTick();
+  assert.deepEqual(s.calls.map(c => c.body.queryAssetId), ['p0', 'p1']);
+  assert.deepEqual(next.refinement.snapshot(), {});
+});
+
+test('global search failures retain cooldown but yield the next turn to another group', async t => {
+  for (const status of [401, 403, 429, 500]) await t.test(String(status), async t => {
+    const s = await setup(t, { n: 4, respond: args => {
+      if (args.body.queryAssetId.startsWith('p')) throw new ImmichApiError('private upstream detail', status);
+      return { assets: { items: [] } };
+    } });
+    for (let i = 0; i < 2; i++) {
+      const id = `healthy-${i}`;
+      s.repo.upsertAsset({ id, fileCreatedAt: new Date(1767226200000 + i * 1000).toISOString() });
+      s.repo.reviewListAdd([id], 'test');
+    }
+    await s.curate.backgroundTick();
+    s.advance(29_999); await s.curate.backgroundTick(); assert.equal(s.calls.length, 1);
+    s.advance(1); await s.curate.backgroundTick();
+    assert.equal(s.calls[1]?.body.queryAssetId, 'healthy-0');
+    s.advance(2000); await s.curate.backgroundTick();
+    assert.equal(s.refine.status().checkedGroups, 1);
+    assert.equal(s.refine.status().failedGroups, 1);
+    assert.doesNotMatch(JSON.stringify(s.refine.status()), /private upstream detail/);
+  });
 });
 
 test('parked failures invalidate on exact source or connection changes', async t => {
