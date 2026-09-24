@@ -153,6 +153,20 @@ test('background status markers and inline progress remain stable on desktop and
     assert.match(await page.evaluate('document.querySelector("#count").textContent'), /1 of 1 stack · 1 of 1 single photo shown/);
     assert.equal(await page.evaluate('document.querySelector("[data-section=pending]").textContent'), 'Pending');
     assert.equal(await page.evaluate('document.querySelector(".is-stack .card-actions")'), null);
+    const progress = () => page.evaluate('document.querySelector("#refinement").textContent');
+    assert.equal(await progress(), 'Checking stacks · 1 remaining');
+    // Global work stays visible even when every displayed card is outside it.
+    await click('[data-kind=singles]');
+    await page.waitFor('!document.querySelector("#refresh").disabled && document.querySelectorAll(".group-card").length===1');
+    assert.equal(await page.evaluate('document.querySelector(".is-stack")'), null);
+    assert.equal(await progress(), 'Checking stacks · 1 remaining');
+    await click('[data-section=decided]');
+    await page.waitFor('!document.querySelector("#refresh").disabled && document.querySelector("[data-section=decided].active")');
+    assert.equal(await progress(), 'Checking stacks · 1 remaining');
+    await click('[data-section=pending]');
+    await page.waitFor('!document.querySelector("#refresh").disabled');
+    await click('[data-kind=all]');
+    await page.waitFor('!document.querySelector("#refresh").disabled && document.querySelectorAll(".group-card").length===2');
     const gridTop = await page.evaluate('document.querySelector("#groups").getBoundingClientRect().top');
     assert.equal(await page.evaluate(`(() => {
       const count = document.querySelector('#count').getBoundingClientRect();
@@ -169,6 +183,7 @@ test('background status markers and inline progress remain stable on desktop and
     }
     release();
     await page.waitFor('document.querySelector(".group-card[data-similarity=paused]")');
+    assert.equal(await progress(), 'Checks paused · 1 remaining');
     assert.equal(await page.evaluate('document.querySelector("#groups").getBoundingClientRect().top'), gridTop,
       'changing progress to a paused message cannot move the grid');
 
@@ -192,4 +207,5 @@ test('background status markers and inline progress remain stable on desktop and
     assert.equal(fixture.similarityReads.length, 4);
     assert.equal(await page.evaluate('document.querySelector(".group-card[data-similarity=checked] .similarity-indicator").dataset.phase'), 'attention');
     assert.match(await page.evaluate('document.querySelector(".group-card[data-similarity=checked] .similarity-status").textContent'), /uncertain/);
+    assert.equal(await progress(), '', 'completed checks no longer contribute to remaining work');
   });

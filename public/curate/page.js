@@ -175,14 +175,17 @@ function showViewStatus(view) {
   if (state.view?.viewId === view.viewId) state.view.metadata = metadata;
   if (state.comparison) el('metadata-retry').hidden = !metadata?.problem;
   const paused = refinement?.state === 'paused' || refinement?.state === 'limited';
-  const checking = Boolean(refinement?.remainingGroups);
-  const status = paused ? 'Checks paused' : checking
-    ? 'Checking stacks…'
+  const remaining = refinement?.remainingGroups ?? 0;
+  const checking = remaining > 0;
+  const progress = checking ? ` · ${remaining.toLocaleString()} remaining` : '';
+  const status = paused ? `Checks paused${progress}` : checking
+    ? `Checking stacks${progress}`
     : metadata?.problem ? 'Photo information paused'
     : metadata?.state === 'refreshing' ? 'Refreshing photo information' : '';
   el('refinement').textContent = status;
-  el('refinement').title = refinement?.problem || metadata?.problem ||
-    (checking ? 'Background similarity checks across pending photos. Marked stacks may regroup.' : '');
+  el('refinement').title = [refinement?.problem || metadata?.problem,
+    checking ? 'Remaining checks across all pending photos, including outside this view. Includes queued and in-progress checks. Each check covers nearby photos that may form more than one stack.' : '',
+  ].filter(Boolean).join(' ');
   const activity = paused ? { state: 'paused' } : refinement?.state === 'searching' || metadata?.state === 'refreshing'
     ? { state: 'checking' } : checking ? { state: 'waiting' } : null;
   const indicator = similarityIndicator(activity);

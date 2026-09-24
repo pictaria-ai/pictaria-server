@@ -27,6 +27,9 @@ All notable changes to Pictaria Server are documented here. This project follows
   comparison-window flash. Open in Immich is compact and vertically centered;
   the stack action now reads **Save** alongside **Save & next**.
   **Save & next** stays the primary action regardless of the chosen outcomes.
+  Card captions stay on one line with an ellipsis, keeping decision buttons
+  aligned; single-photo checkboxes have even padding. Background progress shows
+  how many checks remain across all pending photos, including outside the view.
 
 - Curate checks now run in the background with Stacks enabled, including after
   server startup and new Enrich arrivals. Opening the page or Load more is no

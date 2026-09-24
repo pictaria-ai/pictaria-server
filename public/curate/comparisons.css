@@ -504,7 +504,7 @@ dialog::backdrop {
 .group-card .cover { padding: 0; border: 0; width: 100%; overflow: hidden; border-radius: 11px 11px 0 0; display: block; }
 .group-card .cover:focus-visible { outline: 3px solid var(--p-accent); outline-offset: -3px; }
 .group-card.is-stack { box-shadow: 0 -4px 0 -1px var(--p-panel), 0 -5px 0 -1px var(--p-line); }
-.group-caption { flex: 1; padding: 10px 12px; gap: 5px; }
+.group-caption { flex: 1; min-width: 0; grid-template-columns: minmax(0,1fr); padding: 10px 12px; gap: 5px; }
 .group-caption .filename { font-size: 14px; }
 .card-actions { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 4px; }
 .card-actions .p-btn { font-size: 12px; min-height: 34px; padding: 5px 9px; }
@@ -512,7 +512,7 @@ dialog::backdrop {
 .card-menu[open] { z-index: 3; }
 .card-menu > button { display: block; width: 130px; position: absolute; right: 0; background: var(--p-panel); }
 .card-menu > button:last-child { margin-top: 36px; }
-.card-selection { position: absolute; z-index: 2; left: 10px; top: 10px; padding: 4px; background: var(--p-panel); border-radius: 5px; }
+.card-selection { position: absolute; z-index: 2; left: 10px; top: 10px; display: grid; place-items: center; padding: 4px; background: var(--p-panel); border-radius: 5px; }
 .card-selection input { margin: 0; width: 16px; height: 16px; accent-color: var(--p-accent); }
 .photo-image { cursor: zoom-in; }
 .photo-info [data-keeper] { min-width: 75px; }
@@ -589,7 +589,7 @@ dialog::backdrop {
 .card-actions { display: grid; grid-template-columns: repeat(4,minmax(0,1fr)); gap: 5px; }
 .card-actions .p-btn { padding: 5px 4px; }
 .is-stack .card-actions { display: flex; }
-.group-caption .photo-caption { font-size: 14px; }
+.group-caption .photo-caption { font-size: 14px; min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
 .check-heading { display: flex; align-items: center; flex-wrap: wrap; gap: 9px; }
 .why-tooltip { display: inline-flex; }
 .why-trigger { padding: 0; background: transparent; border: 0; color: var(--p-muted); font: inherit; font-size: 12px; cursor: help; text-decoration: underline dotted; text-underline-offset: 3px; }

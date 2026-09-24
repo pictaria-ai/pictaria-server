@@ -49,6 +49,8 @@ Desktop keeps these visible. The remembered sort is not changed by collapsing th
   A newer concurrent decision invalidates the old action scope; it cannot be
   silently overwritten. Background checks continue for pending photos while you browse Decided.
 - Cards show a cover, up to three member thumbnails, available caption, capture date/time and stack size. Filenames are omitted.
+  Captions are limited to one line with an ellipsis so decision buttons stay
+  aligned. Hover for the full caption, or open the lightbox to read it.
   **Yes / Skip / Fav / No** are direct actions for single photos: Yes keeps a
   photo, Skip marks it reviewed without keeping it, Fav keeps it as a favorite,
   and No marks it Never show. None of these deletes the photo. Click the image for
@@ -149,8 +151,12 @@ Desktop keeps these visible. The remembered sort is not changed by collapsing th
 **Load more** only displays additional results; it is no longer needed to get
 those photos checked. The count distinguishes stacks and single photos. A small
 spinner beside **Refresh** indicates background activity across the pending queue;
-**Checking stacks…** appears beside the count without shifting the photo grid. Paused
-work has an attention indicator. Completed checks are quiet on cards; the
+**Checking stacks · N remaining** appears beside the count without shifting the photo grid.
+This is the overall pending-check queue, including photos outside the current
+page or filters and while browsing Decided. It includes queued and in-progress
+checks; paused checks retain their remaining count. Each check covers a nearby
+group that may form several stacks, so it is not a count of final stack cards.
+Paused work has an attention indicator. Completed checks are quiet on cards; the
 comparison still exposes their status and explanation.
 
 Cards have a small status circle: a muted spinner while queued, a blue spinner

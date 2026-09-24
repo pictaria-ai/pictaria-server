@@ -117,7 +117,11 @@ export function groupCard(group, open, { decide, select, selected = false, decid
   const marker = node('span', undefined, 'similarity-marker');
   cover.append(img, chip, marker);
   const caption = node('div', undefined, 'group-caption');
-  if (photo.caption) caption.append(node('span', photo.caption, 'photo-caption'));
+  if (photo.caption) {
+    const description = node('span', photo.caption, 'photo-caption');
+    description.title = photo.caption;
+    caption.append(description);
+  }
   if (photo.capturedAt) caption.append(node('small', new Date(photo.capturedAt).toLocaleString([], { dateStyle: 'medium', timeStyle: 'short' })));
   const status = node('small', undefined, 'similarity-status');
   caption.append(status);
