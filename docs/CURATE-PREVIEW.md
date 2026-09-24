@@ -206,10 +206,13 @@ pages where possible and anchor the scroll position to a surviving card. A faile
 update stops automatic replacement and asks for **Refresh**, disabling decisions
 until the view is reconciled. Failed similarity checks retry independently after
 a delay of one minute, doubling up to 15 minutes. When Immich specifically reports
-that a photo has no search embedding, that photo waits 15 minutes, doubling up to
-one hour. Other photos and groups can proceed. **N need attention**, the amber
+that a photo has no search embedding, that photo gets three automatic retries,
+waiting 15, 30 and 60 minutes between attempts. It then stops until explicitly
+retried, and stays stopped across restarts. Other photos and groups can proceed. **N need attention**, the amber
 status indicator and the comparison’s Why explanation expose the cause and next
-retry. Check Smart Search processing in Immich for missing embeddings. Manual
+retry, or explain that automatic retries stopped. **Checks stopped** replaces
+**Checks waiting** when all remaining work has exhausted its retries. Check Smart
+Search processing in Immich for missing embeddings. Manual
 **Refresh** retries sooner after shared pacing; changing views does not. Incomplete
 passes never count as checked or supply partial evidence for regrouping.
 

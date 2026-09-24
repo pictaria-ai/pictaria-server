@@ -6,7 +6,12 @@ import { CurateRetryStore } from './retry-store.mjs';
 import { problemCode, problemMessage } from './search-problems.mjs';
 export const REFINEMENT_LIMITS = Object.freeze({ cohorts: 32, views: 200,
   activeMs: 60_000, attentionMs: 12_000, requestsPerMinute: 30, retryMs: 60_000, retryMaxMs: 15 * 60_000,
-  embeddingRetryMs: 15 * 60_000, embeddingRetryMaxMs: 60 * 60_000 });
+  embeddingRetryMs: 15 * 60_000, embeddingRetryMaxMs: 60 * 60_000, embeddingMaxAttempts: 4 });
+
+// Also honor counts retained by the earlier uncapped preview.
+const embeddingStopped = error => error?.code === 'similarity_embedding_missing_exhausted' ||
+  (error?.code === 'similarity_embedding_missing' && error.attempts >= REFINEMENT_LIMITS.embeddingMaxAttempts);
+const failureCode = error => embeddingStopped(error) ? 'similarity_embedding_missing_exhausted' : error.code;
 
 export class CurateRefinement {
   constructor(curate, { now = Date.now } = {}) {
@@ -44,21 +49,32 @@ export class CurateRefinement {
       if (!scopes.has(id)) continue;
       const e = this.entries.get(id) ?? { ...scopes.get(id), ...this.retries.read(id) };
       e.retryAt = 0;
-      for (const failure of Object.values(e.errors ?? {})) failure.retryAt = 0;
+      for (const failure of Object.values(e.errors ?? {})) {
+        failure.retryAt = 0;
+        if (embeddingStopped(failure)) {
+          failure.code = 'similarity_embedding_missing'; failure.attempts = 0;
+        }
+      }
       if (this.retries.records.has(id)) this.checkpoint(e);
     }
   }
   nextReference(entry) {
     if (entry.retryAt > this.now()) return;
-    return entry.referenceIds.find(id => !Object.hasOwn(entry.rows, id) && !(entry.errors[id]?.retryAt > this.now()));
+    return entry.referenceIds.find(id => !Object.hasOwn(entry.rows, id) &&
+      !embeddingStopped(entry.errors[id]) && !(entry.errors[id]?.retryAt > this.now()));
   }
   summary(entry) {
     const errors = Object.values(entry.errors);
-    const codes = [...new Set([...errors.map(e => e.code), ...(entry.failureCode ? [entry.failureCode] : [])])].sort();
-    const due = entry.referenceIds.filter(id => !Object.hasOwn(entry.rows, id)).map(id => entry.errors[id]?.retryAt ?? 0);
+    const codes = [...new Set([...errors.map(failureCode), ...(entry.failureCode ? [entry.failureCode] : [])])].sort();
+    const remaining = entry.referenceIds.filter(id => !Object.hasOwn(entry.rows, id));
+    const due = remaining.filter(id => !embeddingStopped(entry.errors[id]))
+      .map(id => entry.errors[id]?.retryAt ?? 0);
+    const retries = errors.filter(e => !embeddingStopped(e) && e.retryAt > this.now()).map(e => e.retryAt);
+    // null means no automatic work remains, not "ready now". Preserve that
+    // distinction in the compact durable summary as well as the active pass.
     return { done: Object.keys(entry.rows).length, failedReferences: errors.length, problemCodes: codes,
-      eligibleAt: Math.max(entry.retryAt, due.length ? Math.min(...due) : 0),
-      retryAt: errors.length ? Math.min(...errors.map(e => e.retryAt)) : entry.retryAt || null };
+      eligibleAt: remaining.length && !due.length ? null : Math.max(entry.retryAt, due.length ? Math.min(...due) : 0),
+      retryAt: retries.length ? Math.min(...retries) : entry.retryAt > this.now() ? entry.retryAt : null };
   }
   checkpoint(entry) {
     const saved = this.retries.save(entry, this.summary(entry));
@@ -79,7 +95,8 @@ export class CurateRefinement {
   }
   admit(scope) {
     if (!scope?.needsRanks || this.saved.has(scope.id) || this.entries.has(scope.id) || this.entries.size >= REFINEMENT_LIMITS.cohorts) return;
-    if (this.retries.records.get(scope.id)?.eligibleAt > this.now()) return;
+    const progress = this.retries.records.get(scope.id);
+    if (progress && (progress.eligibleAt === null || progress.eligibleAt > this.now())) return;
     this.entries.set(scope.id, { ...scope, rows: Object.create(null), coverage: Object.create(null), errors: Object.create(null),
       admittedAt: this.now(), failures: 0, retryAt: 0, ...this.retries.read(scope.id) });
   }
@@ -95,12 +112,14 @@ export class CurateRefinement {
     // A deferred pass must not monopolize an active slot. Successful rows and
     // individual retry deadlines survive parking and restart, but never enter
     // the grouping engine before the whole pass succeeds.
-    for (const [id, e] of this.entries) if (id !== this.running?.id && this.summary(e).eligibleAt > this.now() &&
-        this.checkpoint(e)) this.entries.delete(id);
+    for (const [id, e] of this.entries) {
+      const at = this.summary(e).eligibleAt;
+      if (id !== this.running?.id && (at === null || at > this.now()) && this.checkpoint(e)) this.entries.delete(id);
+    }
     const priorities = this.priorities();
     const pending = scopes.filter(s => s.needsRanks && !this.saved.has(s.id))
       .sort((a,b) => (priorities.get(a.id) ?? 2) - (priorities.get(b.id) ?? 2) ||
-        this.scopeProgress(a).eligibleAt - this.scopeProgress(b).eligibleAt);
+        (this.scopeProgress(a).eligibleAt ?? Infinity) - (this.scopeProgress(b).eligibleAt ?? Infinity));
     // Make room for an inspected comparison without dropping an in-flight or
     // partially completed pass. The evicted untouched candidate remains queued.
     for (const scope of pending) {
@@ -199,12 +218,13 @@ export class CurateRefinement {
     const failedGroups = progress.filter(p => p.problemCodes.length).length;
     const codes = [...new Set(progress.flatMap(p => p.problemCodes))].sort();
     const retryAt = progress.reduce((earliest, p) => p.retryAt > this.now() ? Math.min(earliest, p.retryAt) : earliest, Infinity);
-    const readyToRun = progress.some(p => p.eligibleAt <= this.now());
+    const readyToRun = progress.some(p => p.eligibleAt !== null && p.eligibleAt <= this.now());
+    const stoppedGroups = progress.filter(p => p.problemCodes.includes('similarity_embedding_missing_exhausted')).length;
     const state = this.curate.backgroundError ? 'paused' : !pendingScopes.length ? 'idle' : this.storageFull || this.retryStorageBlocked?.size ? 'limited' : this.work ? 'searching' : readyToRun ? 'waiting' : 'paused';
     const view = this.views.get(viewId);
     return { state, pending, limited: state === 'limited',
       problem: this.curate.backgroundError || (state === 'limited' ? 'Saved check storage is full. Existing results are preserved.' : codes.length ? codes.map(problemMessage).join(' ') : state === 'paused' ? 'Stack checks paused; retrying automatically.' : null),
-      problemCodes: codes, failedGroups, failedReferences: progress.reduce((n,p) => n + p.failedReferences, 0),
+      problemCodes: codes, failedGroups, stoppedGroups, failedReferences: progress.reduce((n,p) => n + p.failedReferences, 0),
       retryAt: Number.isFinite(retryAt) ? retryAt : null,
       totalGroups: scopes.length, checkedGroups: scopes.length - pendingScopes.length,
       remainingGroups: pendingScopes.length,
@@ -291,7 +311,9 @@ export class CurateRefinement {
       const missing = code === 'similarity_embedding_missing';
       const delay = Math.min(missing ? REFINEMENT_LIMITS.embeddingRetryMaxMs : REFINEMENT_LIMITS.retryMaxMs,
         (missing ? REFINEMENT_LIMITS.embeddingRetryMs : REFINEMENT_LIMITS.retryMs) * 2 ** (attempts - 1));
-      entry.errors[id] = { code, attempts, retryAt: this.now() + delay };
+      const stopped = missing && attempts >= REFINEMENT_LIMITS.embeddingMaxAttempts;
+      entry.errors[id] = { code: stopped ? 'similarity_embedding_missing_exhausted' : code,
+        attempts, retryAt: stopped ? null : this.now() + delay };
     } else {
       entry.failureCode = 'similarity_save_failed';
       entry.retryAt = this.now() + Math.min(REFINEMENT_LIMITS.retryMaxMs,

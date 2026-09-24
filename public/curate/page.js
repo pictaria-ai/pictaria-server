@@ -180,7 +180,8 @@ function showViewStatus(view) {
   const failed = refinement?.failedGroups ?? 0;
   const checking = remaining > 0;
   const progress = checking ? ` · ${remaining.toLocaleString()} remaining` : '';
-  const status = failed ? `${paused ? 'Checks waiting' : 'Checking stacks'}${progress} · ${failed.toLocaleString()} need attention`
+  const failureLabel = !paused ? 'Checking stacks' : refinement.stoppedGroups && !refinement.retryAt ? 'Checks stopped' : 'Checks waiting';
+  const status = failed ? `${failureLabel}${progress} · ${failed.toLocaleString()} need attention`
     : paused ? `Checks paused${progress}` : checking ? `Checking stacks${progress}`
     : metadata?.problem ? 'Photo information paused'
     : metadata?.state === 'refreshing' ? 'Refreshing photo information' : '';

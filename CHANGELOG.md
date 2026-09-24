@@ -9,7 +9,8 @@ All notable changes to Pictaria Server are documented here. This project follows
 
 - Curate Preview exposes failed similarity checks and their next retry instead
   of leaving them indefinitely labeled as checking. Missing Immich search
-  embeddings wait 15–60 minutes between attempts; other photos and groups keep
+  embeddings get three automatic retries after 15, 30 and 60 minutes, then stop
+  until explicitly retried; other photos and groups keep
   progressing. Failed passes retain successful rows and retry deadlines across
   restarts, within bounded storage. Only an explicit Refresh resets the wait.
   Grouping still uses complete passes, and manual curation remains available.

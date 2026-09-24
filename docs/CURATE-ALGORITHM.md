@@ -184,7 +184,10 @@ still invalidate or resolve a candidate between requests.
   Only compact progress summaries stay in memory. At capacity, preserve active
   evidence and expose a storage-limited status instead of silently discarding it.
 - Confirmed Immich HTTP 400 “has no embedding” responses retry the affected photo
-  after **15 minutes**, doubling to **60 minutes**. This error does not impose a
+  after **15, 30 and 60 minutes**: three automatic retries after the initial
+  attempt, then **stop**. The stopped state survives restart, releases its active
+  slot and remains incomplete. Other references can still finish. Explicit
+  **Refresh** starts a new bounded cycle for stopped references. This error does not impose a
   connection-wide failure cooldown. Other failures retry after **60 seconds**,
   doubling to **15 minutes**, and retain the shared transport cooldown. Missing
   embeddings are never interpreted as empty successful results or dissimilarity.
@@ -196,6 +199,13 @@ still invalidate or resolve a candidate between requests.
   or running. Upstream error bodies, private identifiers and credentials are not
   forwarded. Unknown HTTP 400s remain generic reference failures; only the known
   diagnostic is classified as a missing embedding.
+
+The retry window accommodates a photo whose Immich Smart Search job is still
+queued. It is not a repair guarantee: Immich's [reference search handler](https://github.com/immich-app/immich/blob/v3.2.0/server/src/services/search.service.ts)
+rejects a missing embedding without scheduling generation. Generation belongs to
+its [Smart Search job](https://github.com/immich-app/immich/blob/v3.2.0/server/src/services/smart-info.service.ts).
+A persistent failure may need attention in Immich; Pictaria does not keep polling
+it indefinitely or invoke Immich processing jobs.
 
 Cards show **Waiting for similarity check**, **Checking nearby photos · N of M**,
 or **Updated grouping ready**. Counts cover the required references for the
@@ -225,7 +235,9 @@ The page shows global background progress beside the stack/single-photo counts
 in a reserved status row, plus an activity spinner beside Refresh. When checks
 fail, this shows **N need attention** and an amber indicator; its tooltip explains
 the cause and next retry. When only deferred work remains it says **Checks waiting**.
-The comparison’s Why explanation also gives the cause and retry time. Cards still
+When only exhausted work remains, it says **Checks stopped**. The comparison’s
+Why explanation also gives the cause and retry time, or says automatic retries
+stopped and asks the user to check Immich before explicitly retrying. Cards still
 show their own status and highlight changed grouping. Checks that finish without changing grouping, or in an unrelated
 view, do not by themselves request a replacement view. The single **Refresh**
 button highlights waiting updates, including changed photo information.
@@ -282,8 +294,7 @@ and decision contract, not create a permanent second Curate pipeline.
 | `candidate-3` scheduling / status follow-up | 2026-09-22 | Two-second healthy pacing, 30 automatic requests/minute, slow-response backoff, open/visible priority, immediate cached reuse and aggregate diagnostics. Visual queued/checking/done/attention markers; grouping rules, reference selection and result depth unchanged. | PIC-382 |
 | `candidate-3` review UX follow-up | 2026-09-22 | Automatically adopt complete snapshots at idle boundaries; freeze open comparisons and selections, preserve browsing position, and retain explicit Refresh for recovery. Remove manual stack-management controls; existing saved separations remain respected. No membership-rule or search-threshold change. | PIC-384 |
 | `candidate-3` background processing | 2026-09-23 | Process all pending candidates without browser demand; persist complete evidence, drain bounded active slots and retry failures with backoff. Compact global progress, Pending label and direct stack opening. Membership rules and search limits are unchanged. | PIC-385 |
-
-| `candidate-3` failure recovery | 2026-09-23 | Surface safe search failures, park missing-embedding references with persistent backoff, and allow other work to drain. No grouping or search-limit change. | PIC-387 |
+| `candidate-3` failure recovery | 2026-09-23 | Surface safe search failures, park missing-embedding references with persistent backoff and a three-retry cap, and allow other work to drain. No grouping or search-limit change. | PIC-387 |
 
 When membership rules, thresholds or interpretation of signals change, increment
 the implementation identifier and add a row describing the behavioral change and

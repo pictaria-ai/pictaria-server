@@ -78,7 +78,9 @@ export function similarityLabel(status) {
   switch (status?.state) {
     case 'waiting': return 'Waiting for similarity check';
     case 'checking': return `Checking nearby photos · ${status.done} of ${status.total}`;
-    case 'paused': return status.problemCode === 'similarity_embedding_missing'
+    case 'paused': return status.problemCode === 'similarity_embedding_missing_exhausted'
+      ? 'Similarity check incomplete · automatic retries stopped'
+      : status.problemCode === 'similarity_embedding_missing'
       ? 'Similarity check incomplete · waiting for Immich Smart Search'
       : 'Similarity check paused · retrying automatically';
     case 'limited': return status.total ? 'Similarity check paused · storage limit' : 'Similarity not checked · automatic limit';
