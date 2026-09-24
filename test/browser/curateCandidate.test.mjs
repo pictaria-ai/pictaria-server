@@ -227,7 +227,7 @@ test('missing embeddings show actionable attention without view changes resettin
     await page.navigate(`${fixture.base}/curate-preview.html`);
     await page.waitFor('document.querySelector(".gate-backdrop input")');
     await page.evaluate('document.querySelector(".gate-backdrop input").value="smoke-secret";document.querySelector(".gate-backdrop button").click()');
-    await page.waitFor('document.querySelector("#refinement").textContent==="Checks waiting · 1 remaining · 1 need attention"', { timeoutMs: 15000 });
+    await page.waitFor('document.querySelector("#refinement")?.textContent==="Checks waiting · 1 remaining · 1 need attention"', { timeoutMs: 15000 });
     assert.equal(fixture.similarityReads.length, 3, 'other references were checked after one failed');
     const diagnostic = await page.evaluate('document.querySelector("#check-activity .similarity-indicator").title');
     assert.match(diagnostic, /Immich has no search embedding/); assert.match(diagnostic, /Next scheduled retry/);
