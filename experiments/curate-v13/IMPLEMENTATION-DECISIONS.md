@@ -7,6 +7,24 @@ The [functional spec](https://linear.app/aedr/document/curate-v13-functional-spe
 is updated with these behavioral limits. This record supersedes earlier proposed
 choices where they differ. Historical visual and runtime reports remain evidence.
 
+## September 24 amendment — settled checks (PIC-387)
+
+The owner-approved D3 contract now allows enabled keeper advice after a per-group
+check finishes incomplete following bounded effort. Similarity work settles first,
+then any enabled AI Stack Referee; pending work still waits. Retain an honest
+not-fully-checked label and all provider/configuration, capacity, budget,
+validation, applicability and human-authority guards. No long-term stack repair
+queue or routine Retry control is required. The verified too-large exception
+remains distinct. Failed or mixed keeper batches still withhold full-stack advice
+application.
+
+This supersedes the September 15 table/text below where **failed** checks block
+keeper work indefinitely. Those rows and the prototype planner record the earlier
+evaluated contract; PIC-370/PIC-116 must implement the amended admission rule.
+Current deterministic composition/lifecycle rules live in
+[the candidate algorithm guide](../../docs/CURATE-ALGORITHM.md); the prototype's
+initial grouping thresholds below are historical.
+
 ## 1. Grouping and keeper baseline
 
 Keep the released keeper-quality criteria that the owner accepted, with validated

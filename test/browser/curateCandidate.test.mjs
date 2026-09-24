@@ -94,7 +94,8 @@ test('candidate preview refines automatically, preserves selections, explains re
     assert.equal(await page.evaluate('document.querySelectorAll("#photos .selected").length'), 1);
     assert.equal(await page.evaluate('document.querySelectorAll("#photos [data-keeper]").length'), 5);
     assert.equal(await page.evaluate('document.querySelectorAll(".group-card[data-similarity=updated]").length'), 1);
-    assert.match(await page.evaluate('document.querySelector("#comparison-similarity").textContent'), /Updated grouping available/);
+    assert.doesNotMatch(await page.evaluate('document.querySelector("#comparison-similarity").textContent'), /Updated grouping available|Close this/);
+    assert.equal(await page.evaluate('document.querySelector("#comparison-similarity .similarity-indicator")'), null);
     assert.equal(await page.evaluate('document.querySelector("#show-updates")'), null);
     await click('[data-close=comparison]');
     await page.waitFor('document.querySelector(".group-card[data-similarity=checked]") && !document.querySelector("#refresh").disabled');

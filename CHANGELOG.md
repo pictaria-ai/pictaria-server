@@ -12,8 +12,11 @@ All notable changes to Pictaria Server are documented here. This project follows
   curation, and healthy stacks continue processing. Finished outcomes survive
   restart; partial-pass checkpoints and retry deadlines are removed. Refresh
   reloads the view without restarting checks. Amber **!** now means not fully
-  checked; a muted **i** means checked but inconclusive. Enrich schema 17 /
-  persistent-state contract 21 retains the normal pre-migration snapshot and
+  checked; a muted **i** means checked but inconclusive. Saving one stack now
+  preserves its checked/incomplete neighbours across restart. Upcoming comparisons
+  and visible cards get priority; open comparisons no longer prompt users to
+  close them for routine grouping updates. Enrich schema 18 /
+  persistent-state contract 22 retains the normal pre-migration snapshot and
   discards retry checkpoints from the earlier unreleased preview.
 
 - Curate Preview now distinguishes saved outcomes (including Fav) from drafts

@@ -207,12 +207,12 @@ function showViewStatus(view) {
 }
 function showComparisonSimilarity(status) {
   if (state.comparison) state.comparison.similarity = status;
-  const title = status?.state === 'updated' ? 'Updated grouping available'
-    : status?.state === 'checked' && status.uncertain ? 'Similarity check inconclusive'
+  // A machine update is for the next view, not an instruction to abandon an
+  // inspected comparison. Real scope/input conflicts still use the Save guards.
+  if (status?.state === 'updated') status = null;
+  const title = status?.state === 'checked' && status.uncertain ? 'Similarity check inconclusive'
     : status?.state === 'checked' ? 'Similarity checked' : similarityLabel(status);
-  const detail = (status?.problem ? `${status.problem} ` : '') + (status?.state === 'updated'
-    ? 'Your open comparison stays unchanged. Close it to see the updated grouping.'
-    : ['waiting', 'checking'].includes(status?.state)
+  const detail = (status?.problem ? `${status.problem} ` : '') + (['waiting', 'checking'].includes(status?.state)
       ? 'This stack may change after checking. You can still choose which photos to keep.'
       : status?.uncertain ? 'The evidence is inconclusive. You can still choose which photos to keep.'
         : ['incomplete', 'paused', 'limited', 'unavailable'].includes(status?.state)
@@ -224,9 +224,9 @@ function showComparisonSimilarity(status) {
     if (target.dataset.status === signature) continue;
     target.dataset.status = signature;
     if (id === 'comparison-similarity') {
-      target.replaceChildren(explanation(state.comparison, 'stack-reason', {
+      target.replaceChildren(explanation(state.comparison, 'stack-reason', status ? {
         title, detail, indicator: similarityIndicator(status),
-      }));
+      } : null));
       continue;
     }
     const copy = node('div'), heading = node('div', undefined, 'check-heading');

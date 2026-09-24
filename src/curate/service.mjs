@@ -1,7 +1,7 @@
 import { reviewConfig } from '../enrich/reviewBuckets.mjs';
 import { Worker } from 'node:worker_threads';
 import { groupPhotos } from './grouping.mjs';
-import { candidateGroups } from './candidate.mjs';
+import { settledCandidateGroups, rememberSettledGroups } from './settled-groups.mjs';
 import { CurateRefinement } from './refinement.mjs';
 import { CurateError } from './contracts.mjs';
 import { CurateMetadataRefresher } from './metadata.mjs';
@@ -65,7 +65,7 @@ export class CurateService {
       // test-only SQLite cannot be shared with a read-only worker
       result = {
         generation: this.store.generation(),
-        ...(this.candidateEnabled ? candidateGroups(this.store.candidateRows(), { stacks, separations: this.store.separations(), ranks: id => this.refinement?.saved.read(id) })
+        ...(this.candidateEnabled ? settledCandidateGroups(this.store, { stacks, connection: this.refinement?.connection })
           : groupPhotos(this.store.pending(), { stacks, separations: this.store.separations() })),
       };
     } else
@@ -87,6 +87,8 @@ export class CurateService {
           else resolve(received);
         });
       });
+    this.abort.signal.throwIfAborted();
+    if (this.refinement) result.retentionLimited = await rememberSettledGroups(this.store, this.refinement.saved, result, this.refinement.now());
     this.abort.signal.throwIfAborted();
     // No await between complete replacement and publication. A concurrent
     // source change remains queued in curate_dirty for the next rebuild.

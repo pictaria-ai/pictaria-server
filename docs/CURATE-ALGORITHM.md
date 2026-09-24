@@ -140,12 +140,14 @@ still invalidate or resolve a candidate between requests.
   to its duration (capped at 30 seconds) after completion. Service-wide failures
   retain the longer cooldown; a failed reference gets one retry within its pass.
   No extra AI/provider calls.
-- The opened comparison gets the next search turn, followed by currently visible
-  cards, then other admitted groups. An in-flight request finishes normally.
+- The next five comparisons in the current saved view order get priority,
+  followed by visible cards, then other admitted groups. The open comparison
+  gets no special priority; a shared candidate can still serve upcoming cards.
+  An in-flight request finishes normally.
   The browser reports at most 50 visible group IDs plus the open comparison;
   the server validates all against the saved view. Attention expires after 12
   seconds without renewal; view attention records are retired after 60 seconds
-  idle. Neither expiry stops background processing. An inspected candidate can
+  idle. Neither expiry stops background processing. A prioritized candidate can
   take an untouched waiting slot; partial and in-flight passes are retained.
   Groups without a failed reference take precedence over groups retrying a failure.
   Prioritization does not bypass source or membership checks.
@@ -169,15 +171,25 @@ still invalidate or resolve a candidate between requests.
   The grouping worker reads one matrix at a time from its coherent SQLite snapshot.
   Finished outcomes have no inactivity TTL: completed checks stay checked and
   incomplete checks stay settled through restarts and Refresh.
+- Finished results also retain their established groups and original source-input
+  fingerprints. Human decisions **subtract photos**, preserving untouched neighbours
+  and their checked/incomplete state, including across restart. Never reinterpret
+  original outside-rank counts against a reduced pending cohort. Undo can restore
+  members while the result remains cached; fully decided candidates may be pruned.
+  Existing completed records acquire this metadata lazily without new searches.
+  New arrivals, changed source evidence/availability or human constraints invalidate
+  affected connected candidates. A small member index lives beside the bounded
+  outcome store; it is not a repair queue or permanent history.
 - Storage is bounded to **50,000 outcomes**, **256 KiB per outcome**, and **64 MiB
   of serialized evidence** (database/index overhead is additional). Obsolete
   scopes are pruned in batches of at most 128. At capacity, preserve existing
   evidence and pause new publication rather than evicting stable results and
-  continually rechecking them. A limited status explains this condition.
+  continually rechecking them. If retained group metadata also reaches capacity,
+  show a limited status warning that decisions may require recalculation.
 - The separate shared search cache still holds **40 references for 10 minutes**
   in memory. Partial passes exist only in the **32 active scopes** and are not
   checkpointed. An interrupted in-flight check can start over after restart.
-  Finished outcomes are invalidated by known photo/people evidence, membership or
+  Finished outcomes are invalidated by known photo/people evidence, new arrivals or
   human constraint changes, a changed algorithm, or a different Immich connection.
   Stacks off and shutdown cancel in-flight work; browser inactivity does not.
   Unseen changes to Immich's search index are not detected by these fingerprints.
@@ -301,3 +313,13 @@ the implementation identifier and add a row describing the behavioral change and
 its evidence. Preserve earlier entries. Documentation clarifications or layout-only
 changes do not require an algorithm-version change. Before making this the default
 Curate page, update the main user guide and remove superseded staging descriptions.
+
+## Referee handoff (planned)
+
+Similarity checks settle first, followed by the optional AI Stack Referee. Work
+still pending waits; a finished-incomplete check does not permanently block the
+enabled Keeper Referee. It may recommend keepers from the retained group with a
+clear not-fully-checked label. Provider/configuration safeguards, request budgets,
+response validation and human authority still apply. Failed check output never
+becomes a valid partition. This is the September 24 contract for PIC-370/PIC-116;
+this candidate implementation does not yet make either AI call.

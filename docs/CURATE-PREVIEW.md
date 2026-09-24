@@ -194,13 +194,17 @@ remain unknown unless repeated subgroup evidence resolves the relationship.
 **Check complete · similarity uncertain** keeps the compatible
 time grouping provisional. Failed or unavailable searches do not fragment it.
 Completed evidence is saved, so inactivity and server restarts do not repeat
-unchanged checks. Finished incomplete checks retain only their safe reason; interrupted in-flight work can repeat. Changes to photos, people evidence or human corrections
-also require renewed checks for the affected candidate.
+unchanged checks. Finished incomplete checks retain their safe reason and
+established grouping; interrupted in-flight work can repeat. Changes to photos,
+people evidence or human corrections also require renewed checks for the affected
+candidate.
 
 Background updates appear automatically after a short browsing pause, at most
 once every five seconds. Open comparisons/lightboxes, selected batches, open
 menus, edited fields and pending action receipts prevent automatic replacement.
-Closing a comparison allows updates to appear; its membership and keeper draft
+Closing a comparison allows updates to appear. The open comparison does not
+show a routine close-to-refresh notice; its Why explanation remains available,
+and real save-conflict guards remain. Its membership and keeper draft
 never change underneath the user. Automatic updates retain the number of loaded
 pages where possible and anchor the scroll position to a surviving card. A failed
 update stops automatic replacement and asks for **Refresh**, disabling decisions
@@ -222,7 +226,12 @@ for regrouping.
 
 Accepted pending decisions remove only their cards from the displayed snapshot
 and Undo restores them there; this preserves navigation order while working
-through singles. Other cards do not regroup during an open comparison or viewer.
+through singles. Finished checks also preserve untouched neighbouring groups
+when decisions remove photos from their larger time cohort, across restart and
+Refresh. New arrivals and material evidence/constraint changes can invalidate
+that cached work. The next five comparisons in saved view order, then visible
+cards, get search priority without cancelling an in-flight request or recording
+permanent viewed state. Other cards do not regroup during an open comparison or viewer.
 Decided edits and Undo after changing views reload a fresh view. Photo-information
 refresh status is separate from AI status, and failed metadata refresh can be
 requested again from the open comparison. Unknown metadata is not claimed complete.
@@ -265,11 +274,13 @@ block Save until the previews can be retried.
   The action is saved atomically with the separation; exact retries must preserve
   both the partition and its action. Existing records remain readable without
   fabricated history. An additive index supports the active-correction list.
-- The current preview uses enrichment schema **17** / persistent-state contract
-  **21**. Schema 16 added completed search evidence. The current result format
+- The current preview uses enrichment schema **18** / persistent-state contract
+  **22**. Schema 16 added completed search evidence. The current result format
   also records terminal incomplete outcomes in that same bounded store. Draft
   retry checkpoints from the earlier unreleased preview are discarded; there is
-  no separate retry table or persisted partial-pass state.
+  no separate retry table or persisted partial-pass state. Schema 18 adds the
+  bounded-result member index used to preserve settled groupings after decisions;
+  prior completed records are captured lazily without repeating searches.
 - Startup creates the normal pre-migration recovery checkpoint. Downgrading to a
   binary using an older contract requires restoring the **complete** matching
   pre-upgrade checkpoint (including state metadata and databases); changing only

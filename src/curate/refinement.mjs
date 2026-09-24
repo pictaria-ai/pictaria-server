@@ -95,6 +95,7 @@ export class CurateRefinement {
     if (!view) return;
     if (groups) view.visible = groups.map(g => g.ids[0]);
     view.focus = comparison?.ids[0] ?? null;
+    view.next = comparison ? this.curate.store.nextViewGroups(viewId, comparison.id, 5).map(g => g.ids[0]) : [];
     view.attentionAt = this.now();
   }
   priorities() {
@@ -104,11 +105,14 @@ export class CurateRefinement {
       if (view.attentionAt + REFINEMENT_LIMITS.attentionMs <= this.now()) continue;
       const scope = id => this.curate.current?.scopeByMember?.get(id)?.id;
       for (const id of view.visible ?? []) {
+        if (id === view.focus) continue;
         const key = scope(id);
         if (key && !priorities.has(key)) priorities.set(key, 1);
       }
-      const focus = scope(view.focus);
-      if (focus) priorities.set(focus, 0);
+      for (const [index, id] of (view.next ?? []).entries()) {
+        const key = scope(id), priority = index / 5;
+        if (key) priorities.set(key, Math.min(priorities.get(key) ?? 2, priority));
+      }
     }
     return priorities;
   }
@@ -149,11 +153,11 @@ export class CurateRefinement {
     const incomplete = scopes.filter(s => this.saved.problem(s.id));
     const pending = pendingScopes.reduce((n,s) => n + s.referenceIds.length - Object.keys(this.entries.get(s.id)?.rows ?? {}).length, 0);
     const codes = [...new Set(incomplete.map(s => this.saved.problem(s.id)))].sort();
-    const state = this.curate.backgroundError ? 'paused' : this.storageFull ? 'limited' :
+    const state = this.curate.backgroundError ? 'paused' : this.storageFull || this.curate.current?.retentionLimited ? 'limited' :
       !pendingScopes.length ? 'idle' : this.work ? 'searching' : 'waiting';
     const view = this.views.get(viewId);
     return { state, pending, limited: state === 'limited',
-      problem: this.curate.backgroundError || (state === 'limited' ? 'Saved check storage is full. Existing results are preserved.' :
+      problem: this.curate.backgroundError || (state === 'limited' ? 'Saved check storage is full. Some groupings may be recalculated after decisions.' :
         codes.length ? codes.map(problemMessage).join(' ') : null),
       problemCodes: codes, incompleteGroups: incomplete.length,
       totalGroups: scopes.length, checkedGroups: scopes.length - pendingScopes.length - incomplete.length,

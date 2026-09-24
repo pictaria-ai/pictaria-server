@@ -28,14 +28,7 @@ export function candidateGroups(rows, { stacks = true, separations = [], ranks =
   });
   const separated = (a, b) => [...(labels.get(a.id) ?? [])].some(([id, part]) =>
     labels.get(b.id)?.has(id) && labels.get(b.id).get(id) !== part);
-  const cohorts = [];
-  for (const row of [...rows].sort(order)) {
-    const last = cohorts.at(-1);
-    if (stacks && row.availability !== 'unavailable' && row.time !== null && last &&
-        last[0].availability !== 'unavailable' && last[0].time !== null &&
-        row.time - last[0].time <= limits.spanMs && row.time - last.at(-1).time <= limits.gapMs) last.push(row);
-    else cohorts.push([row]);
-  }
+  const cohorts = timeCandidates(rows, stacks);
   const groups = [], scopes = [], metrics = { photos: rows.length, pairComparisons: 0, limitedGroups: 0 };
   function emit(members, route, reasons) {
     const sorted = [...members].sort(order), ids = sorted.map(p => p.id);
@@ -205,4 +198,18 @@ export function candidateGroups(rows, { stacks = true, separations = [], ranks =
   }
   groups.sort((a, b) => (a.capturedMs ?? Infinity) - (b.capturedMs ?? Infinity) || a.ids[0].localeCompare(b.ids[0]));
   return { method: CANDIDATE_METHOD, groups, scopes, metrics };
+}
+
+// Shared discovery boundaries for new work and validation of retained outcomes.
+export function timeCandidates(rows, stacks = true) {
+  const limits = CANDIDATE_LIMITS;
+  const cohorts = [];
+  for (const row of [...rows].sort(order)) {
+    const last = cohorts.at(-1);
+    if (stacks && row.availability !== 'unavailable' && row.time !== null && last &&
+        last[0].availability !== 'unavailable' && last[0].time !== null &&
+        row.time - last[0].time <= limits.spanMs && row.time - last.at(-1).time <= limits.gapMs) last.push(row);
+    else cohorts.push([row]);
+  }
+  return cohorts;
 }

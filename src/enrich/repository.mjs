@@ -1,4 +1,4 @@
-import { RANK_SCHEMA } from '../curate/rank-store.mjs';
+import { RANK_SCHEMA, RANK_MEMBER_SCHEMA } from '../curate/rank-store.mjs';
 import { CURATE_SCHEMA, CORRECTION_ACTION_SCHEMA, installCurateTriggers } from '../curate/schema.mjs';
 import { CurateRepository } from '../curate/repository.mjs';
 import { copyFileSync, mkdirSync, readFileSync } from 'node:fs';
@@ -524,6 +524,7 @@ const ENRICH_MIGRATIONS = [
   { version: 16, up(db) { db.exec(RANK_SCHEMA); } },
   // Finished incomplete outcomes share the rank store. Retire draft retry state.
   { version: 17, up(db) { db.exec('DROP TABLE IF EXISTS curate_rank_retries'); } },
+  { version: 18, up(db) { db.exec(RANK_MEMBER_SCHEMA); } },
 ];
 
 // The review projection of a normalized output: exactly the fields the

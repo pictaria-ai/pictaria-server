@@ -45,3 +45,22 @@ test('incomplete outcomes retain only a problem code and never supply grouping e
   assert.equal(restarted.problem('failed'), 'similarity_embedding_missing');
   restarted.prune(new Set()); assert.equal(restarted.problems.size, 0);
 });
+
+test('settled membership is atomic and follows replacement, pruning and connection cleanup', t => {
+  const db = new DatabaseSync(':memory:'); db.exec(RANK_SCHEMA); t.after(() => db.close());
+  const store = new CurateRankStore(db, 'connection');
+  const entry = { id: 'scope', rows: {}, coverage: {}, settled: { members: [['a'], ['b']] } };
+  assert.equal(store.save(entry, 1), true);
+  const before = store.read('scope'), bytes = store.bytes;
+  db.exec("CREATE TRIGGER reject_member BEFORE INSERT ON curate_rank_members WHEN NEW.asset_id='bad' BEGIN SELECT RAISE(ABORT,'synthetic disk failure'); END;");
+  assert.throws(() => store.save({ ...entry, settled: { members: [['c'], ['bad']] } }, 2), /synthetic/);
+  assert.deepEqual(store.read('scope'), before); assert.equal(store.bytes, bytes);
+  assert.deepEqual(db.prepare('SELECT asset_id FROM curate_rank_members ORDER BY asset_id').all().map(r => r.asset_id), ['a','b']);
+  assert.equal(store.save({ id: 'scope', problemCode: 'similarity_embedding_missing' }, 3), true);
+  assert.equal(store.settled.size, 0);
+  assert.equal(db.prepare('SELECT count(*) n FROM curate_rank_members').get().n, 0);
+  store.save(entry, 4); store.prune(new Set());
+  assert.equal(db.prepare('SELECT count(*) n FROM curate_rank_members').get().n, 0);
+  store.save(entry, 5); new CurateRankStore(db, 'new-connection');
+  assert.equal(db.prepare('SELECT count(*) n FROM curate_rank_members').get().n, 0);
+});
