@@ -88,7 +88,7 @@ function recovery() {
   el('more').disabled = locked || state.loading;
   for (const button of document.querySelectorAll('#filters button, #sections button, .group-card button, .group-card input'))
     button.disabled = locked || state.loading || state.autoUpdateFailed;
-  for (const input of document.querySelectorAll('#photos [data-choice], #photos [data-compare-select], .compare-tools button'))
+  for (const input of document.querySelectorAll('#photos [data-choice], #photos [data-compare-select], .compare-tools button:not(.why-trigger)'))
     input.disabled = locked || !state.comparison || state.comparison.oversized;
   el('undo').disabled = locked;
   selection();
@@ -96,8 +96,6 @@ function recovery() {
   bulkSelection();
 }
 function selection() {
-  const values = Object.values(state.outcomes),
-    keep = values.filter((v) => ['approve', 'favorite'].includes(v)).length;
   el('selection-count').textContent = state.comparison ? decisionSummary(state.outcomes) : '';
   el('comparison-bulk').hidden = !state.batchPhotos.size;
   el('comparison-bulk-count').textContent = `${state.batchPhotos.size} checked`;
@@ -106,7 +104,6 @@ function selection() {
     : state.openFailed
       ? 'Refresh to continue'
       : 'Loading comparison…';
-  el('apply-next').classList.toggle('primary', keep > 0);
   if (state.comparison?.oversized) el('apply').textContent = 'Comparison too large';
   el('apply').disabled =
     !state.comparison ||
@@ -267,13 +264,8 @@ async function compare(group) {
   state.openFailed = false;
   failedPreviews = new Set();
   el('preview-errors').hidden = true;
-  el('comparison-title').textContent = group.memberCount > 1 ? 'Compare stack' : 'Review photo';
-  el('comparison-subtitle').textContent =
-    `${group.memberCount} ${group.memberCount === 1 ? 'photo' : 'photos'} in this comparison`;
-  el('comparison-help').textContent =
-    group.memberCount > 1
-      ? 'Mark photos Yes, Skip, Fav or No, then save. Check boxes to mark several at once. Unmarked photos default to Skip.'
-      : 'Yes keeps the photo; Skip marks it reviewed; Fav keeps it as a favorite; No means Never show. Photos are not deleted.';
+  el('comparison-title').textContent = group.memberCount > 1
+    ? `Compare stack · ${group.memberCount} photos` : 'Review photo';
   el('select-all').hidden = el('select-none').hidden = group.memberCount < 2;
   el('compact-label').hidden = group.memberCount <= 10;
   el('compact').checked = group.memberCount > 10;

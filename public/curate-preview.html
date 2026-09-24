@@ -110,17 +110,10 @@
     <dialog id="comparison" aria-labelledby="comparison-title">
       <div class="dialog-frame">
         <header class="dialog-head">
-          <div>
-            <h2 id="comparison-title">Compare photos</h2>
-            <p id="comparison-subtitle" class="p-muted"></p>
-          </div>
+          <h2 id="comparison-title">Compare photos</h2>
           <button class="p-btn" data-close="comparison">Close</button>
         </header>
         <div class="dialog-body">
-          <div class="comparison-intro">
-            <p id="comparison-help">Mark each photo Yes, Skip, Fav or No, then save. Unmarked photos default to Skip.</p>
-            <div id="comparison-similarity" role="status" hidden></div>
-          </div>
           <p id="comparison-state" class="p-muted" aria-live="polite"></p>
           <button id="metadata-retry" class="p-btn quiet" hidden>Retry photo information refresh</button>
           <div id="comparison-error" role="alert" hidden></div>
@@ -145,6 +138,7 @@
             </div>
             <div class="p-grow"></div>
             <label id="compact-label" hidden><input id="compact" type="checkbox" /> Compact grid</label>
+            <div id="comparison-similarity" role="status" hidden></div>
           </div>
           <p class="comparison-keys p-muted">Focus a photo: ← → or 1–9. Mark: Y Yes · S Skip · F Fav · N No. Enter: save &amp; next after marking. Z: undo last save.</p>
           <section id="photos" class="photo-grid" aria-label="Comparison photos"></section>

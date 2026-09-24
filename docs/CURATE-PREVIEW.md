@@ -14,7 +14,7 @@ candidates, contextual people signals, positive ThumbHash and reciprocal search
 ranks. Repeated searches that strongly favor two separate subgroups can now
 override a misleading ThumbHash match. The linked document owns exact rules,
 bounds and version history. Open the small similarity-status icon beside the
-comparison instructions for a concise explanation. It appears on
+comparison checkbox controls for a concise explanation. It appears on
 hover, keyboard focus or tap without moving the photos. Its initial text uses
 plain language grounded in recorded reasons; technical details are secondary.
 The stack lightbox exposes the same explanation through **Why?**.
@@ -72,7 +72,7 @@ Desktop keeps these visible. The remembered sort is not changed by collapsing th
 - Open a stack and use **Yes / Skip / Fav / No** beneath each photo. Click an
   image to enlarge it. These choices remain a draft until **Save** or **Save & next**; the
   footer counts each outcome separately. Unmarked photos default to Skip, which
-  is neither deletion nor Never show. Saves with no Yes or Fav choices are neutral.
+  is neither deletion nor Never show.
   Selected choices use the same subtle fills as Decided: teal for Yes, gray for
   Skip, gold for Fav and red for No, in both the comparison and its lightbox.
 - Stack checkboxes check photos for batch actions independently of their outcome.
@@ -86,6 +86,9 @@ Desktop keeps these visible. The remembered sort is not changed by collapsing th
   the latest grouping, and loads more pages when needed. It does not wrap to
   earlier items. An accepted save remains saved if opening the next item fails;
   Refresh and Undo remain available. Undo after continuation refreshes the grid.
+  **Save & next** remains the primary button for every combination of outcomes,
+  including Skip-all. The compact header reads **Compare stack · N photos**;
+  the check-status icon sits beside the checkbox controls.
 - In a comparison, focus a photo using **Left/Right** or **1–9**, then use
   **Y / S / F / N** to mark its draft outcome. **Enter** on the focused card
   saves the comparison and continues **after at least one explicit draft choice**
@@ -155,7 +158,7 @@ while checking and an amber attention marker when
 paused, limited, unavailable or still uncertain. Text labels explain each state;
 reduced-motion preferences stop the animation. Comparisons resolved locally say
 that no similarity search is needed. The open comparison uses a small icon at
-the right of the instructions, with status and reasons on hover, focus or tap.
+the right of the checkbox controls, with status and reasons on hover, focus or tap.
 The stack lightbox keeps the status text near the top. Pending, inconclusive or
 incomplete checks explain that manual choices are still possible.
 If an updated grouping becomes available, the notice explains that the current

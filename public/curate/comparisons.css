@@ -272,7 +272,7 @@ dialog::backdrop {
   min-height: 0;
 }
 .compare-tools {
-  margin: 10px 0;
+  margin: 0 0 8px;
 }
 .photo-grid {
   display: grid;
@@ -540,7 +540,6 @@ dialog::backdrop {
 .lightbox-side #stack-actions > .p-btn { width: 100%; }
 .lightbox-side .viewer-secondary { margin: 10px 0; justify-content: flex-start; }
 .lightbox-side #photo-receipt { margin: 0; padding: 10px; font-size: 12px; }
-#comparison-help { margin-bottom: 8px; font-size: 13px; }
 #photo-position, #photo-date { font-size: 12px; }
 @media (max-width: 760px) {
   main { padding: 20px 12px 170px; }
@@ -654,8 +653,6 @@ dialog::backdrop {
 
 .comparison-receipt { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; margin-left: auto; font-size: 12px; color: var(--p-muted); }
 .comparison-receipt[hidden] { display: none; }
-.comparison-intro { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
-#comparison-help { flex: 1; margin: 0; }
 #comparison-state:empty { display: none; }
 #comparison-similarity { flex: 0 0 auto; }
 .status-trigger { display: grid; place-items: center; width: 36px; height: 36px; text-decoration: none; }

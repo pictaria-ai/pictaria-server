@@ -18,13 +18,15 @@ All notable changes to Pictaria Server are documented here. This project follows
   duplicate label over the photo; the lightbox uses the same shading.
   Selected stack draft buttons use those same subtle fills for all four choices,
   both beneath comparison photos and in the lightbox.
-  Stack comparisons place the check status in a small explanation icon beside
-  the instructions, align decision buttons beneath equal-height uncropped photo
+  Stack comparisons combine the title and photo count, omit the instruction
+  paragraph, and place the check-status icon beside the checkbox controls.
+  They align decision buttons beneath equal-height uncropped photo
   areas, and keep counts, Undo and Save actions in a slimmer footer.
   Single-photo navigation and decisions retain the lightbox through loading,
   preload adjacent images, and swap photos only when ready, avoiding the white
   comparison-window flash. Open in Immich is compact and vertically centered;
   the stack action now reads **Save** alongside **Save & next**.
+  **Save & next** stays the primary action regardless of the chosen outcomes.
 
 - Curate checks now run in the background with Stacks enabled, including after
   server startup and new Enrich arrivals. Opening the page or Load more is no
