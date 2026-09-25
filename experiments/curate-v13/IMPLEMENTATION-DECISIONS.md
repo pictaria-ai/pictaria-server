@@ -135,7 +135,7 @@ bounds are 30 seconds and 1 MiB; connection failures back off from 30 seconds to
 15 minutes and recover with one probe. Stacks off and shutdown cancel requests;
 Enrich being off does not. Freshness, claims and retry timing survive restart.
 Responses revalidate source evidence/membership/connection before applying. This
-lane has no paid-call accounting: cohort admission remains PIC-346. Synthetic
+lane has no paid-call accounting: paid-call admission remains PIC-346. Synthetic
 real-HTTP, restart, failure and concurrency tests cover the adapter; integrated
 resource and live-version acceptance remain separate.
 
@@ -197,37 +197,39 @@ photo sets/modes/Undo targets, full-payload replay, SQLite restart and pruning.
 They do not implement production cleanup or lease issuance;
 PIC-368 must wire it atomically into the actual operation/outbox transaction.
 
-## 4. Shared AI budgets as groups change
+## 4. Bounded AI effort (September 25 owner decision)
 
-Keep one active Curate provider call globally and the existing fair Enrich/Curate
-turn policy. Provider pause/cooldown, role gates, two attempts per exact relevant
-input, and 30-second settling remain in force. These are separate protections.
+The per-photo policy below supersedes the prototype's cohort reservation,
+merge/split rebinding, absent-sibling and quiet-period compaction design. Stacks
+are an intermediate aid; incomplete advice is acceptable and remains usable.
 
-For automatic work, reserve all planned calls before starting: at most three
-reservations per cohort and role in 30 minutes. Three keeper batches consume
-three slots. Reservations are conservative admission accounting, not billed
-calls. Actual transport attempts remain separately measured.
+- Keep one active Curate call and fair Enrich/Curate turns, independent role
+  gates, at most two dispatched attempts per exact role/input and 30-second
+  settling. Coalesce overlapping changes to the latest queued replacement.
+- Each participating photo has an allowance of three automatic comparisons per
+  role in a rolling 30 minutes, including retries and read-only context. Charge
+  only the photos actually included in each call. Disjoint Photo Referee batches
+  have separate participants; shared context consumes an allowance in each call.
+  Changes in membership, model or backend do not reset the photo allowance.
+- A limit settles that input without further automatic advice. Expiry, refresh,
+  restart and toggles never resurrect it. Newly changed eligible inputs may be
+  considered normally; there is no repair queue or per-stack reset control.
+- On the first shared provider failure, protect the rest of its queue. Bad
+  credentials/configuration pause until corrected. A transient failure waits at
+  least 30 seconds (longer when Retry-After requires it), then admits one recovery
+  request. Another shared failure pauses until explicit connection recovery.
+  Dispatched requests, including timeouts, remain charged. A bad answer is an
+  input failure, not evidence of a service-wide outage.
+- Keep one shared executor. Only the exclusive server owner may recover
+  interrupted work. Retire obsolete inactive records after current/queued
+  work, comparison/Undo/advice references and the budget window no longer need
+  them; do not prune unchanged inputs just because time passed.
 
-Assign each member a durable budget cohort. Splits share it. A merge transaction
-chooses a canonical existing cohort, rebinds **all** originating members (including
-currently absent split siblings) and recent reservations, and coalesces obsolete
-queued work. Preserve reservation IDs so a shared event is counted once rather
-than once per descendant. Re-resolve the cohort from exact members at admission;
-an old queued cohort ID cannot recover a fresh allowance. Toggles/restarts do not
-reset this mapping. Truly independent new photos can receive a new cohort.
-
-Avoid tying unrelated descendants together forever: after a full 30-minute quiet
-period, with no active work and no recent reservations in either role, a complete
-current partition of that cohort can receive separate budget identities. Missing
-siblings prevent this compaction. Exact-input attempt/completed-advice records
-remain; compaction cannot retry a failed or completed unchanged input as new work.
-Keep origin information needed for current explanations separately from the budget
-identity, without an unbounded chain of historical copies.
-
-`lifecycle.mjs` tests split/merge/restart, deduplicated reservations, absent siblings,
-role isolation, expiry and safe quiet-period compaction. It is a pure policy
-model. PIC-367/346 implement indexed transactional rebinding and queue integration;
-do not transplant its whole-state scans into request handlers.
+`lifecycle.mjs` remains historical prototype evidence, not the production budget
+implementation. `src/curate/ai-limits.mjs` implements durable provider protection
+and per-photo admission with synthetic restart/upgrade tests. Production worker
+composition, settling/coalescing, protected-reference selection for cleanup and
+shared Enrich integration remain PIC-346/PIC-118 activation prerequisites.
 
 ## 5. Sizing evidence and acceptance ownership
 

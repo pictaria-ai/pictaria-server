@@ -32,14 +32,15 @@ function failureReason(error, phase) {
 }
 
 // Shared, deliberately unwired execution seam for the two future workers.
-// It does not select jobs, provide retries, or implement provider/cohort budgets.
-// The mandatory, read-only admit callback checks those remaining controls and
-// the scheduler's existing reservation/turn; it must not reserve on each check.
+// It does not select jobs or provide retries. Optional limits are connected by
+// the shared runtime owner; the mandatory read-only admit callback checks the
+// scheduler's turn. Repeated preparation checkpoints never charge a call.
 // Omit it and no work can start, even when a role is declared available.
 export class CurateAiExecution {
   #busy = false;
-  constructor({ attempts, getConfig, availability, stopped = () => false, admit = () => false }) {
+  constructor({ attempts, limits, getConfig, availability, stopped = () => false, admit = () => false }) {
     this.attempts = attempts;
+    this.limits = limits;
     this.getConfig = getConfig;
     this.availability = availability;
     this.stopped = stopped;
@@ -52,19 +53,24 @@ export class CurateAiExecution {
     // All admission/applicability callbacks are synchronous. A Promise cannot
     // accidentally authorize work using a stale answer.
     if (job.isCurrent() !== true) return 'stale';
+    const limit = this.limits?.eligibility(job);
+    if (limit && limit !== 'eligible') return limit;
     if (this.admit(job) !== true) return 'waiting';
     return null;
   }
 
   async run(job) {
-    job = Object.freeze({ ...job });
+    job = Object.freeze({ ...job, ...(job.photoIds ? { photoIds: Object.freeze([...job.photoIds]) } : {}) });
     for (const name of ['prepare', 'submit', 'validate', 'accept', 'isCurrent'])
       if (typeof job?.[name] !== 'function') throw new TypeError(`Missing Curate AI ${name} callback.`);
     if (this.#busy) return { state: 'busy' };
     const eligible = this.attempts.eligibility(job.role, job.inputKey);
     if (eligible !== 'eligible') return { state: eligible };
     const reason = this.#reason(job);
-    if (reason) return { state: reason };
+    if (reason) {
+      if (reason === 'photo-limit') this.limits.settleLimited(job);
+      return { state: reason };
+    }
     this.#busy = true;
     let ticket, phase = 'prepare';
     const checkpoint = () => {
@@ -76,9 +82,10 @@ export class CurateAiExecution {
       const prepared = await job.prepare(checkpoint);
       checkpoint();
       phase = 'submit';
-      ticket = this.attempts.start(job.role, job.inputKey);
+      ticket = this.limits ? this.limits.start(job, this.attempts) : this.attempts.start(job.role, job.inputKey);
       if (ticket.state !== 'started') return { state: ticket.state };
       const response = await job.submit(prepared);
+      this.limits?.finish(ticket);
       // Turning a role off after dispatch does not discard useful paid work.
       // Changed photos/human decisions still invalidate it. No dependent job
       // is created here; it must pass fresh admission through run() separately.
@@ -98,6 +105,8 @@ export class CurateAiExecution {
       });
       return { state: 'succeeded', attempts: ticket.attempts };
     } catch (error) {
+      if (error instanceof AdmissionStopped && error.reason === 'photo-limit') this.limits.settleLimited(job);
+      if (ticket?.state === 'started' && phase === 'submit') this.limits?.finish(ticket, error);
       if (ticket?.state === 'started') this.attempts.finish(ticket, error instanceof AdmissionStopped && error.reason === 'stale' ? 'stale' : 'failed');
       // No raw errors, request objects, keys, photo metadata or responses escape
       // into status. The future provider guard receives failures at transport.

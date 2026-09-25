@@ -1,3 +1,4 @@
+import { CurateAiLimits } from './ai-limits.mjs';
 import { createHash, randomUUID } from 'node:crypto';
 import { setImmediate } from 'node:timers/promises';
 import { deriveState } from '../enrich/reviewBuckets.mjs';
@@ -23,6 +24,7 @@ export class CurateRepository {
     this.viewBuilds = new Map();
     this.metadata = new CurateMetadataStore(this);
     this.aiAttempts = new CurateAiAttempts(repo);
+    this.aiLimits = new CurateAiLimits(repo);
   }
   prepare(sql) {
     let statement = this.statements.get(sql);

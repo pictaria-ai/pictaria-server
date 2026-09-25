@@ -129,7 +129,7 @@ test('a fresh enrichment database is stamped and fully shaped', () => {
     const repo = new Repository(join(dir, 'enrichment.sqlite'));
     const result = repo.initSchema();
     assert.equal(result.fresh, true);
-    assert.equal(getUserVersion(repo.db), 19);
+    assert.equal(getUserVersion(repo.db), 20);
     for (const column of ['subject_group']) {
       const names = repo.db.prepare("SELECT name FROM pragma_table_info('referee_picks')").all().map((row) => row.name);
       assert.ok(names.includes(column));
@@ -178,8 +178,8 @@ test('a legacy enrichment database lands in the current shape via migration 1', 
     const repo = new Repository(path);
     const result = repo.initSchema();
     assert.equal(result.fresh, false);
-    assert.deepEqual(result.applied, [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19]);
-    assert.equal(getUserVersion(repo.db), 19);
+    assert.deepEqual(result.applied, [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20]);
+    assert.equal(getUserVersion(repo.db), 20);
 
     // manual_overrides rebuilt append-only with data preserved.
     const overrideColumns = repo.db.prepare("SELECT name FROM pragma_table_info('manual_overrides')").all().map((row) => row.name);
@@ -227,7 +227,7 @@ test('provider-payload migration removes raw envelopes and superseded normalized
       .run(JSON.stringify({ caption: 'old', short_caption: 'old' }), rows[0].id);
     repo.db.exec('PRAGMA user_version = 5');
 
-    assert.deepEqual(repo.initSchema().applied, [6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19]);
+    assert.deepEqual(repo.initSchema().applied, [6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20]);
     const migrated = repo.db.prepare(`
       SELECT raw_output_json, normalized_output_json
       FROM processing_runs ORDER BY id
@@ -268,7 +268,7 @@ test('schema 16 upgrade preserves photos and retires draft retry storage', () =>
     const repo = new Repository(path); repo.initSchema(); repo.upsertAsset({ id: 'preserved' });
     repo.db.exec('CREATE TABLE curate_rank_retries (json TEXT); INSERT INTO curate_rank_retries VALUES (\'draft\'); PRAGMA user_version=16');
     const before = repo.db.prepare('SELECT * FROM assets').all();
-    assert.deepEqual(repo.initSchema().applied, [17, 18, 19]);
+    assert.deepEqual(repo.initSchema().applied, [17, 18, 19, 20]);
     assert.deepEqual(repo.db.prepare('SELECT * FROM assets').all(), before);
     assert.equal(repo.db.prepare("SELECT name FROM sqlite_master WHERE name='curate_rank_retries'").get(), undefined);
     // Earlier unmerged schema-17 preview checkpoints are also disposable.
@@ -277,6 +277,6 @@ test('schema 16 upgrade preserves photos and retires draft retry storage', () =>
     const reopened = new Repository(path);
     assert.deepEqual(reopened.initSchema().applied, []);
     assert.equal(reopened.db.prepare("SELECT name FROM sqlite_master WHERE name='curate_rank_retries'").get(), undefined);
-    assert.equal(getUserVersion(reopened.db), 19); reopened.close();
+    assert.equal(getUserVersion(reopened.db), 20); reopened.close();
   });
 });

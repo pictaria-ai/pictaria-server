@@ -1,3 +1,4 @@
+import { AI_LIMIT_SCHEMA } from '../curate/ai-limits.mjs';
 import { AI_ATTEMPT_SCHEMA } from '../curate/ai-attempts.mjs';
 import { RANK_SCHEMA, RANK_MEMBER_SCHEMA } from '../curate/rank-store.mjs';
 import { CURATE_SCHEMA, CORRECTION_ACTION_SCHEMA, installCurateTriggers } from '../curate/schema.mjs';
@@ -527,6 +528,7 @@ const ENRICH_MIGRATIONS = [
   { version: 17, up(db) { db.exec('DROP TABLE IF EXISTS curate_rank_retries'); } },
   { version: 18, up(db) { db.exec(RANK_MEMBER_SCHEMA); } },
   { version: 19, up(db) { db.exec(AI_ATTEMPT_SCHEMA); } },
+  { version: 20, up(db) { db.exec(AI_LIMIT_SCHEMA); } },
 ];
 
 // The review projection of a normalized output: exactly the fields the
