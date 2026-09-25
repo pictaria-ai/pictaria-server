@@ -11,7 +11,9 @@ All notable changes to Pictaria Server are documented here. This project follows
   Search filters on the right, with Search last. Shown counts and active progress
   share the right side of the status row; the header checkbox appears in Singles
   and Decided. Finished incomplete checks keep their per-stack explanations
-  without leaving an aggregate warning in the header.
+  without leaving an aggregate warning in the header. Search stays focused and
+  editable while results load; typing during a slow request applies the latest
+  text next, and failed requests preserve the search draft.
 
 - Curate Preview settles failed similarity checks after one retry instead of
   keeping a long-term repair queue. Incomplete groupings remain ready for human

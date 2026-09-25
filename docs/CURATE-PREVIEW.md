@@ -43,6 +43,12 @@ On narrow screens, **Filters** reveals date order, category and Search controls.
 Counts and progress each keep their own line, and the selection slot remains
 reserved in All and Stacks. Desktop keeps filters visible. The remembered sort is not changed by collapsing them.
 
+Search updates after a short typing pause and keeps focus and cursor position
+while loading results. Text entered during an active request becomes the next
+search, with only the latest draft submitted. A failed request leaves that draft
+editable; **Refresh** searches it again. Background regrouping waits while a
+search draft has not been applied.
+
 - **Pending** shows all pending photos by default. All, Stacks and Singles
   filter the same view. **All categories** can narrow it to the existing Enrich
   review categories (Candidates, Should Review and Unlikely, or customized labels).

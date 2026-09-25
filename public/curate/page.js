@@ -83,7 +83,7 @@ function recovery() {
   el('retry-action').disabled = state.busy;
   const locked = state.busy || state.opening || state.continuing || Boolean(client.saved.pending);
   el('refresh').disabled = locked || state.loading;
-  el('search').disabled = locked || state.loading;
+  el('search').disabled = locked;
   el('sort').disabled = el('category').disabled = locked || state.loading;
   el('more').disabled = locked || state.loading;
   for (const button of document.querySelectorAll('#filters button, #sections button, .group-card button, .group-card input'))
@@ -94,6 +94,7 @@ function recovery() {
   selection();
   syncViewer();
   bulkSelection();
+  resumeSearch();
 }
 function selection() {
   el('selection-count').textContent = state.comparison ? decisionSummary(state.outcomes) : '';
@@ -645,15 +646,16 @@ function decideSingle(outcome) {
 async function changeFilter(patch) {
   if (state.busy || state.loading || client.saved.pending) return;
   const previous = { kind: state.kind, section: state.section, category: state.category, search: state.search };
-  Object.assign(state,patch);
+  Object.assign(state, { search: el('search').value.trim() }, patch);
   try { await refresh(); }
-  catch (e) { Object.assign(state,previous); if (state.view) setControls(state.view); el('search').value=state.search; throw e; }
+  catch (e) { Object.assign(state,previous); if (state.view) setControls(state.view); throw e; }
 }
 // Delay changes until browsing pauses. An open comparison, a selected batch,
 // or a pending receipt always owns its current snapshot.
 let updateTimer, lastInteraction = 0, lastAutomatic = 0;
 function canUpdate() {
   return !document.hidden && !state.busy && !state.loading && !state.continuing && !client.saved.pending &&
+    el('search').value.trim() === state.search &&
     !state.selected.size && !document.querySelector('dialog[open], .page-tools[open], .card-menu[open]') &&
     !document.activeElement?.matches('input:not([type=checkbox]),select,textarea,[contenteditable=true]');
 }
@@ -708,14 +710,14 @@ window.addEventListener('scroll', () => { lastInteraction = Date.now(); schedule
 document.addEventListener('focusout', () => setTimeout(scheduleUpdates, 0));
 document.addEventListener('visibilitychange', scheduleUpdates);
 for (const menu of document.querySelectorAll('details')) menu.addEventListener('toggle', scheduleUpdates);
-for (const dialog of document.querySelectorAll('dialog')) dialog.addEventListener('close', scheduleUpdates);
+for (const dialog of document.querySelectorAll('dialog')) dialog.addEventListener('close', () => { scheduleUpdates(); resumeSearch(); });
 
 el('toggle-filters').onclick = () => {
   const expanded = el('toggle-filters').getAttribute('aria-expanded') !== 'true';
   el('toggle-filters').setAttribute('aria-expanded', String(expanded));
   document.querySelector('.toolbar').classList.toggle('filters-expanded', expanded);
 };
-el('refresh').onclick = () => run(() => refresh());
+el('refresh').onclick = () => run(() => changeFilter({ search: el('search').value.trim() }));
 el('more').onclick = () => run(more);
 el('sort').onchange = () =>
   run(async () => {
@@ -723,7 +725,7 @@ el('sort').onchange = () =>
     const previous = state.sort;
     state.sort = el('sort').value;
     try {
-      await refresh();
+      await changeFilter({});
     } catch (e) {
       // Failed replacement leaves the displayed cards in their previous order.
       state.sort = previous;
@@ -739,10 +741,26 @@ el('sort').onchange = () =>
 for (const button of document.querySelectorAll('#filters button')) button.onclick = () => run(() => changeFilter({ kind: button.dataset.kind }));
 for (const button of document.querySelectorAll('#sections button')) button.onclick = () => run(() => changeFilter({ section: button.dataset.section }));
 el('category').onchange = () => run(() => changeFilter({ category: el('category').value }));
-let searchTimer;
-el('search').oninput = () => {
+let searchTimer, searchQueued = false;
+function scheduleSearch(delay) {
   clearTimeout(searchTimer);
-  searchTimer = setTimeout(() => run(() => changeFilter({ search: el('search').value.trim() })),300);
+  searchTimer = setTimeout(() => {
+    searchTimer = null;
+    // Keep the latest text through a slow view replacement or an open comparison.
+    // Do not overlap replacements: each request must replace the last accepted view.
+    if (state.loading || el('search').disabled || document.querySelector('dialog[open]')) return;
+    searchQueued = false;
+    const search = el('search').value.trim();
+    if (search !== state.search) run(() => changeFilter({ search }));
+  }, delay);
+}
+function resumeSearch() {
+  // Run after filter rollback/error handling settles, without resetting an active debounce.
+  if (searchQueued && !searchTimer) scheduleSearch(0);
+}
+el('search').oninput = () => {
+  searchQueued = true;
+  scheduleSearch(300);
 };
 el('select-shown').onchange = () => {
   for (const group of state.groups) if (group.memberCount === 1)
