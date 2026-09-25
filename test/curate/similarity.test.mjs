@@ -76,8 +76,25 @@ test('one lane across references; abort stops work and does not cache a late res
   controller.abort();
   assert.equal(calls[0].signal.aborted, true);
   release({ assets: { items: [item('b')] } });
-  await assert.rejects(running, /interrupted or timed out/);
+  await assert.rejects(running, { code: 'similarity_timeout' });
   assert.equal(calls.length, 1); assert.equal(search.cache.size, 0);
+});
+
+test('slow successful searches back off, then healthy responses restore two-second pacing', async t => {
+  let elapsed = 0;
+  const s = setup(t, (args, count) => {
+    if (count === 1) { elapsed += 6000; s.advance(6000); }
+    return { assets: { items: [item('b')] } };
+  }, { elapsedNow: () => elapsed });
+  await s.search.search('a');
+  assert.equal(s.search.nextAt - s.search.now(), 6000);
+  await assert.rejects(s.search.search('b'), { code: 'similarity_cooldown' });
+  assert.equal((await s.search.search('a')).cached, true);
+  s.advance(6000); await s.search.search('b');
+  assert.equal(s.search.nextAt - s.search.now(), 2000);
+  assert.equal(s.search.metrics.requests, 2);
+  assert.equal(s.search.metrics.cacheHits, 1);
+  assert.equal(s.search.metrics.searchMs, 6000);
 });
 
 test('cache has bounded size and lifetime; cached arrays cannot be mutated by callers', async t => {
@@ -151,9 +168,152 @@ test('real HTTP adapter enforces response byte limit and whole-exchange deadline
 });
 
 test('upstream errors give actionable messages without forwarding private diagnostics', async t => {
-  for (const [status, expected] of [[400, /Smart Search/], [401, /asset.read/], [429, /Immich is busy/], [500, /Could not load/]]) await t.test(String(status), async t => {
+  for (const [status, expected] of [[400, /Smart Search/], [401, /asset.read/], [429, /Immich was busy/], [500, /Could not load/]]) await t.test(String(status), async t => {
     const { search, calls } = setup(t, () => { throw new ImmichApiError('private-photo-and-secret', status); });
     await assert.rejects(search.search('a'), error => { assert.match(error.message, expected); assert.doesNotMatch(error.message, /private-photo|secret/); return true; });
     assert.equal(calls.length, 1);
+  });
+});
+
+function rankView(curate, ids) {
+  curate.lab.views.set('rank-view', { expiresAt: Date.now() + 60000,
+    groups: [ids.map((id, time) => ({ id, time }))] });
+  return { viewId: 'rank-view', groupId: 0 };
+}
+async function rankPass(curate, body, signal = new AbortController().signal) {
+  const plan = curate.lab.ranks.plan(body), events = [];
+  await curate.lab.ranks.run({ ...body, admission: plan.admission }, { signal, emit: async value => events.push(value) });
+  return { plan, events };
+}
+
+test('group rank passes admit eight new requests, keep directions distinct, and expose only selected ranks', async t => {
+  const { curate, repo, calls, advance } = setup(t, args => ({ assets: { items: args.body.queryAssetId === 'a'
+    ? [item('outside-private'), item('b')] : [item('a')] } }));
+  const ids = ['a', 'b', 'c', ...Array.from({ length: 7 }, (_, i) => `more-${i}`)];
+  for (const id of ids.slice(3)) { repo.upsertAsset({ id }); repo.reviewListAdd([id], 'test'); }
+  const body = rankView(curate, ids);
+  const waits = []; curate.lab.ranks.wait = async ms => { waits.push(ms); advance(ms); };
+  const first = await rankPass(curate, body);
+  assert.equal(first.plan.newSearches, 8); assert.equal(first.plan.remaining, 2);
+  assert.equal(calls.length, 8); assert.deepEqual(waits, Array(7).fill(limits.minIntervalMs));
+  const rows = first.events.filter(e => e.type === 'row').map(e => e.row);
+  assert.equal(rows[0].photos.find(p => p.id === 'b').rank, 2);
+  assert.equal(rows[1].photos.find(p => p.id === 'a').rank, 1);
+  assert.equal(rows[0].photos.find(p => p.id === 'c').rank, null);
+  assert.doesNotMatch(JSON.stringify(first), /outside-private|synthetic-secret|privateMetadata/);
+  const second = await rankPass(curate, { ...body, completed: rows.map(r => r.referenceId), scope: first.plan.scope });
+  assert.equal(second.plan.newSearches, 2); assert.equal(calls.length, 10);
+  const cached = await rankPass(curate, body);
+  assert.equal(cached.plan.newSearches, 0); assert.equal(cached.plan.cached, 10); assert.equal(calls.length, 10);
+  assert.equal(repo.db.prepare('SELECT count(*) n FROM decision_operations').get().n, 0);
+});
+
+test('rank admission rejects expired cache estimates, changed sources and forged completed scope before work', async t => {
+  const { curate, repo, calls, advance, search } = setup(t, () => ({ assets: { items: [item('a'), item('b')] } }));
+  const body = rankView(curate, ['a', 'b']);
+  await search.search('a');
+  const plan = curate.lab.ranks.plan(body);
+  advance(limits.cacheMs);
+  await assert.rejects(curate.lab.ranks.run({ ...body, admission: plan.admission }, {
+    signal: new AbortController().signal, emit: async () => assert.fail('no stream before admission'),
+  }), { code: 'lab_rank_estimate_changed' });
+  assert.equal(calls.length, 1);
+  assert.throws(() => curate.lab.ranks.plan({ ...body, completed: ['a'] }), { code: 'lab_rank_changed' });
+  repo.updateAssetVisuals('a', { thumbhash: 'AQID' });
+  assert.throws(() => curate.lab.ranks.plan({ ...body, scope: plan.scope }), { code: 'lab_rank_changed' });
+});
+
+test('cancel between rank requests stops the pass; one lane is reserved even while pacing', async t => {
+  const { curate, calls, search } = setup(t, () => ({ assets: { items: [item('a'), item('b')] } }));
+  const body = rankView(curate, ['a', 'b', 'c']), controller = new AbortController();
+  curate.lab.ranks.wait = async (_ms, signal) => {
+    await assert.rejects(search.search('c'), { code: 'similarity_busy' });
+    await assert.rejects(rankPass(curate, body), { code: 'similarity_busy' });
+    controller.abort(); signal.throwIfAborted();
+  };
+  await assert.rejects(rankPass(curate, body, controller.signal), { name: 'AbortError' });
+  assert.equal(calls.length, 1); assert.equal(search.owner, null);
+});
+
+test('rank failure stops without retry and changed connection cannot leak mixed-library evidence', async t => {
+  const { curate, calls, advance, client, search } = setup(t, (_args, n) => {
+    if (n === 2) throw Error('private backend error');
+    return { assets: { items: [item('a')] } };
+  });
+  const body = rankView(curate, ['a', 'b', 'c']);
+  curate.lab.ranks.wait = async ms => advance(ms);
+  const { events } = await rankPass(curate, body);
+  assert.equal(calls.length, 2); assert.equal(events.at(-1).stopped, true);
+  assert.equal(events.filter(e => e.type === 'row').at(-1).row.state, 'failed');
+  assert.doesNotMatch(JSON.stringify(events), /private backend error/);
+  assert.equal(search.owner, null);
+  const plan = curate.lab.ranks.plan(body);
+  await assert.rejects(curate.lab.ranks.run({ ...body, admission: plan.admission }, {
+    signal: new AbortController().signal, emit: async event => { if (event.type === 'start') client.apiKey = 'replacement-secret'; },
+  }), { code: 'lab_rank_changed' });
+  assert.equal(calls.length, 2); assert.equal(search.owner, null);
+});
+
+test('oversized rank groups are rejected without sampling; expired views and shutdown stop passes', async t => {
+  const { curate, calls, search } = setup(t, () => ({ assets: { items: [] } }));
+  const body = rankView(curate, Array.from({ length: 41 }, (_, i) => `p${i}`));
+  assert.throws(() => curate.lab.ranks.plan(body), { code: 'lab_rank_size' });
+  rankView(curate, ['a', 'b']);
+  curate.lab.ranks.wait = async () => { await search.close(); };
+  await assert.rejects(rankPass(curate, body), { name: 'AbortError' });
+  assert.equal(calls.length, 1); assert.equal(search.owner, null);
+  curate.lab.views.clear();
+  assert.throws(() => curate.lab.ranks.plan(body), { code: 'lab_expired' });
+});
+
+test('confirmed missing embeddings use safe diagnostics without delaying unrelated searches', async t => {
+  const s = setup(t, (_args, n) => {
+    if (n === 1) throw new ImmichApiError('HTTP 400: Asset private-id has no embedding; token=private-secret', 400);
+    return { assets: { items: [item('a')] } };
+  });
+  await assert.rejects(s.search.search('a'), e => {
+    assert.equal(e.code, 'similarity_embedding_missing');
+    assert.doesNotMatch(e.message, /private-id|private-secret/); return true;
+  });
+  assert.equal(s.search.cache.size, 0);
+  s.advance(limits.minIntervalMs);
+  assert.deepEqual((await s.search.search('b')).ids, ['a']);
+  assert.equal(s.calls.length, 2);
+});
+
+test('unavailable reference responses keep normal pacing for other photos', async t => {
+  for (const [status, message] of [
+    [400, 'Not found or no asset.read access'],
+    [400, 'Other validation failure'],
+    [404, 'Asset private has no embedding'],
+    [422, 'private diagnostic'],
+  ]) await t.test(`${status} ${message}`, async t => {
+    const s = setup(t, (_args, n) => {
+      if (n === 1) throw new ImmichApiError(message, status);
+      return { assets: { items: [item('a')] } };
+    });
+    await assert.rejects(s.search.search('a'), { code: 'similarity_reference_unavailable' });
+    assert.equal(s.search.cache.size, 0);
+    s.advance(limits.minIntervalMs - 1);
+    await assert.rejects(s.search.search('b'), { code: 'similarity_cooldown' });
+    s.advance(1);
+    assert.deepEqual((await s.search.search('b')).ids, ['a']);
+    assert.equal(s.calls.length, 2);
+  });
+});
+
+test('global failures retain their classification and shared cooldown', async t => {
+  for (const [status, message, code] of [
+    [400, 'Smart search is not enabled', 'similarity_search_disabled'],
+    [401, 'private diagnostic', 'similarity_access_denied'],
+    [403, 'private diagnostic', 'similarity_access_denied'],
+    [429, 'private diagnostic', 'similarity_rate_limited'],
+    [500, 'private diagnostic', 'similarity_unavailable'],
+  ]) await t.test(code + status, async t => {
+    const s = setup(t, () => { throw new ImmichApiError(message, status); });
+    await assert.rejects(s.search.search('a'), { code });
+    s.advance(limits.minIntervalMs);
+    await assert.rejects(s.search.search('b'), { code: 'similarity_cooldown' });
+    assert.equal(s.calls.length, 1); assert.equal(s.search.cache.size, 0);
   });
 });

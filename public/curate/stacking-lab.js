@@ -1,3 +1,5 @@
+import { RankComparison } from './rank-comparison.js';
+import { combinedPartition, COMBINED_DEFAULTS } from './combined-evidence.js';
 import { request } from './client.js';
 import { node, thumbnail } from './photos.js';
 import { partition, decodeHash, hashDistance, peopleCategory, peopleLabel } from './stacking-model.js';
@@ -5,7 +7,7 @@ import { partition, decodeHash, hashDistance, peopleCategory, peopleLabel } from
 const el = (id) => document.getElementById(id);
 let view, loaded = 0, current, result, focused = null, viewerIndex = 0, requestId = 0;
 let currentGroup, refreshing = false, refreshController;
-let ranking = null, rankingController, rankingId = 0;
+let ranking = null, rankingController, rankingId = 0, rankPanel;
 const personLabels = new Map();
 const cards = new Map();
 const colors = ['#648cea', '#bc8b47', '#4baca0', '#b884c9', '#d17c74', '#8da84e'];
@@ -48,6 +50,7 @@ function append(value) {
 
 async function open(group) {
   const token = ++requestId;
+  rankPanel?.dispose(); rankPanel = null;
   refreshController?.abort();
   rankingController?.abort(); rankingId++; ranking = null;
   el('check-ranking').textContent = 'Check similarity ranking';
@@ -75,7 +78,7 @@ async function open(group) {
       button.setAttribute('aria-label', `Highlight group containing ${photo.filename}`);
       button.onclick = () => { focused = focused === photo.id ? null : photo.id; renderResult(); };
       const info = node('div', undefined, 'lab-info');
-      const file = node('strong', photo.filename, 'filename'); file.title = photo.filename;
+      const file = node('strong', `Photo ${current.photos.indexOf(photo) + 1} · ${photo.filename}`, 'filename'); file.title = photo.filename;
       const facts = node('p', date(photo.time), 'p-muted');
       const people = node('p', `Enrich people: ${peopleLabel(photo)}`, 'lab-people');
       const recognition = node('p', 'Loading recognition data…', 'lab-recognition p-muted');
@@ -89,6 +92,10 @@ async function open(group) {
       info.append(file, facts, people, recognition, checked, rank, reason, distance, larger, failed); card.append(button, info);
       el('lab-photos').append(card); cards.set(photo.id, { card, button, badge, reason, distance, recognition, checked, rank });
     }
+    rankPanel = new RankComparison({ root: el('rank-comparison'), tableRoot: el('rank-table'), viewId: view.viewId, groupId: currentGroup,
+      photos: current.photos, onChange: recalculate,
+      onBusy: busy => { el('check-ranking').disabled = busy || !!ranking || current.photos.length < 2; },
+      onFocus: id => { focused = id; renderResult(); } });
     reset();
     void refreshRecognition();
   } catch (e) { if (token === requestId) { error('experiment-error', e.message); el('experiment-subtitle').textContent = 'Could not open this time group.'; } }
@@ -104,6 +111,7 @@ async function checkRanking() {
     const value = await request('lab/ranking', { viewId: view.viewId, groupId: currentGroup }, { signal: rankingController.signal });
     if (token !== rankingId || !el('experiment').open) return;
     ranking = value;
+    void rankPanel?.prepare();
     const ranks = new Map(value.photos.map(p => [p.id, p.rank]));
     for (const photo of current.photos) {
       const rank = ranks.get(photo.id), item = cards.get(photo.id);
@@ -176,25 +184,38 @@ function settings() {
   return { gapMs: Number(el('gap').value) * 1000,
     spanMs: el('use-span').checked ? Number(el('span').value) * 1000 : null,
     thumbhash: el('use-hash').checked, threshold: Number(el('threshold').value), people: el('use-people').checked,
-    identities: el('use-identities').checked };
+    identities: el('use-identities').checked, ranks: el('use-ranks').checked,
+    nearHash: el('use-hash').checked ? Number(el('near-hash').value) : COMBINED_DEFAULTS.nearHash, farHash: el('use-hash').checked ? Number(el('far-hash').value) : COMBINED_DEFAULTS.farHash,
+    outsideLimit: el('use-ranks').checked ? Number(el('rank-cutoff').value) : COMBINED_DEFAULTS.outsideLimit, rankContrast: el('use-ranks').checked ? Number(el('rank-contrast').value) : COMBINED_DEFAULTS.rankContrast, combined: el('combined-mode').checked };
 }
 function reset() {
   el('gap').value = current.gapSeconds; el('gap').max = current.gapSeconds;
   el('span').value = 180; el('threshold').value = 0.1;
-  for (const id of ['use-span', 'use-hash', 'use-people', 'use-identities']) el(id).checked = false;
+  for (const id of ['use-span', 'use-hash', 'use-people', 'use-identities', 'use-ranks', 'combined-mode']) el(id).checked = false;
+  el('near-hash').value = COMBINED_DEFAULTS.nearHash; el('far-hash').value = COMBINED_DEFAULTS.farHash;
+  el('rank-cutoff').value = COMBINED_DEFAULTS.outsideLimit; el('rank-contrast').value = COMBINED_DEFAULTS.rankContrast;
   focused = null; recalculate();
 }
 function recalculate() {
   if (!current || refreshing) return;
+  const combined = el('combined-mode').checked;
+  el('use-ranks').disabled = !combined;
+  el('rank-cutoff').disabled = el('rank-contrast').disabled = !combined || !el('use-ranks').checked;
+  el('near-hash').disabled = el('far-hash').disabled = !combined || !el('use-hash').checked;
+  for (const hint of document.querySelectorAll('.combined-hint')) hint.hidden = !combined;
+  el('mode-hint').textContent = combined
+    ? el('use-identities').checked ? 'Signals combine; recognized people must still match.' : 'Signals combine; uncertain matches stay provisional.'
+    : 'Each enabled rule must pass. Combine evidence to use ranks.';
+  for (const hint of document.querySelectorAll('.strict-hint')) hint.hidden = combined;
   el('span').disabled = !el('use-span').checked;
-  el('threshold').disabled = !el('use-hash').checked;
+  el('threshold').disabled = combined || !el('use-hash').checked;
   el('threshold-value').textContent = Number(el('threshold').value).toFixed(3);
-  if (!el('gap').value || !el('gap').checkValidity() || (el('use-span').checked && (!el('span').value || !el('span').checkValidity()))) {
-    error('experiment-error', 'Enter a valid gap and span. Results below still use the previous settings.');
+  if (!el('gap').value || !el('gap').checkValidity() || (el('use-span').checked && (!el('span').value || !el('span').checkValidity())) || (combined && ((el('use-hash').checked && (['near-hash', 'far-hash'].some(id => !el(id).value || !el(id).checkValidity()) || Number(el('near-hash').value) >= Number(el('far-hash').value))) || (el('use-ranks').checked && ['rank-cutoff', 'rank-contrast'].some(id => !el(id).value || !el(id).checkValidity()))))) {
+    error('experiment-error', 'Enter valid time limits, ordered ThumbHash bands, and rank limits. Results below still use the previous settings.');
     el('copy').disabled = true; return;
   }
   error('experiment-error'); el('copy').disabled = false;
-  result = partition(current.photos, settings()); renderResult();
+  result = combined ? combinedPartition(current.photos, settings(), rankPanel?.evidence) : partition(current.photos, settings()); renderResult();
 }
 function renderResult() {
   if (!result) return;
@@ -202,7 +223,17 @@ function renderResult() {
   const anchor = current.photos.find((p) => p.id === focused);
   const sizes = result.groups.map((g) => g.length);
   el('result').textContent = `${current.photos.length} photos → ${sizes.length} group${sizes.length === 1 ? '' : 's'} (${sizes.join(' + ')})`;
-  el('focus-help').textContent = group ? `Group ${group} highlighted. Click another photo to compare; dimmed photos are still included.` : 'Click a photo to highlight its proposed group. Dimmed photos stay in the experiment.';
+  el('combined-summary').textContent = result.summaries ? result.summaries.map((text, i) => `Group ${i + 1}: ${text}`).join(' · ') : '';
+  const evidence = el('pair-evidence'); evidence.replaceChildren();
+  if (result.pair && anchor) {
+    evidence.append(node('p', 'Pair evidence for the highlighted photo (arrows follow the photo-number order):', 'p-muted'));
+    for (const other of current.photos) if (other.id !== anchor.id) {
+      const i = current.photos.indexOf(anchor), j = current.photos.indexOf(other);
+      const pair = result.pair(anchor.id, other.id);
+      evidence.append(node('p', `Photos ${Math.min(i, j) + 1} ↔ ${Math.max(i, j) + 1}: ${pair.state === 'separate' ? 'separation proposed' : pair.state}. ${pair.reason}. ${pair.notes.join(' · ')}`));
+    }
+  }
+  el('focus-help').textContent = group ? `Group ${group} highlighted. Dimmed photos stay included.` : 'Click a photo to highlight its group.';
   el('clear-focus').disabled = !focused;
   const unknownHash = current.photos.filter((p) => !decodeHash(p.thumbhash)).length;
   const unknownPeople = current.photos.filter((p) => peopleCategory(p) === null).length;
@@ -216,7 +247,7 @@ function renderResult() {
     item.card.classList.toggle('anchor', focused === photo.id);
     item.button.setAttribute('aria-pressed', String(focused === photo.id));
     item.badge.textContent = `Group ${number} · ${result.groups[number - 1].length} photo${result.groups[number - 1].length === 1 ? '' : 's'}`;
-    item.reason.textContent = result.reasons.get(photo.id);
+    item.reason.textContent = [result.reasons.get(photo.id), result.summaries?.[number - 1]].filter(Boolean).join('. ');
     const distance = anchor ? hashDistance(decodeHash(anchor.thumbhash), decodeHash(photo.thumbhash)) : null;
     item.distance.textContent = anchor ? photo.id === anchor.id ? 'Highlighted reference photo' :
       `ThumbHash distance to reference: ${distance === null ? 'unknown' : distance.toFixed(3)}` : '';
@@ -255,7 +286,8 @@ el('clear-focus').onclick = () => { focused = null; renderResult(); };
 el('copy').onclick = async () => {
   const s = settings();
   const rankSummary = ranking ? `\nImmich similarity ranking (earliest reference; timeline images; first 50 excluding reference)\n${el('ranking-status').textContent}\n${current.photos.map((p, i) => `Photo ${i + 1}: ${cards.get(p.id).rank.textContent}`).join('\n')}` : '';
-  const text = `Stacking lab (experimental)\nStarting gap: ${current.gapSeconds} s\nGap: ${s.gapMs / 1000} s; span: ${s.spanMs === null ? 'unlimited' : s.spanMs / 1000 + ' s'}\nThumbHash: ${s.thumbhash ? s.threshold.toFixed(3) + ' (every pair)' : 'off'}; Enrich people categories (none/one/couple/group): ${s.people ? 'on' : 'off'}\nDifferent recognized people (nonempty lists with no identities in common): ${s.identities ? 'on' : 'off'}\n${el('recognition-status').textContent}\n${el('result').textContent}\n${el('evidence-note').textContent.split('. Photo links')[0]}${rankSummary}`;
+  const hashSummary = !s.thumbhash ? 'off' : s.combined ? `very close ≤ ${s.nearHash.toFixed(3)}, clearly different ≥ ${s.farHash.toFixed(3)}` : `${s.threshold.toFixed(3)} (every pair)`;
+  const text = `Stacking lab (experimental)\nStarting gap: ${current.gapSeconds} s\nGap: ${s.gapMs / 1000} s; span: ${s.spanMs === null ? 'unlimited' : s.spanMs / 1000 + ' s'}\nThumbHash: ${hashSummary}; Enrich people categories (none/one/couple/group): ${s.people ? 'on' : 'off'}\nDifferent recognized people (nonempty lists with no identities in common): ${s.identities ? 'on' : 'off'}\n${el('recognition-status').textContent}\n${el('result').textContent}\n${el('evidence-note').textContent.split('. Photo links')[0]}${rankSummary}\nMode: ${s.combined ? 'Combined evidence (experimental)' : 'Individual filters'}; outside photos ahead / minimum contrast: ${s.ranks && s.combined ? `${s.outsideLimit} / ${s.rankContrast}` : 'off'}\n${el('combined-summary').textContent}\n${rankPanel?.summary() ?? ''}\n${[...el('pair-evidence').children].map(p => p.textContent).join('\n')}`;
   try {
     if (navigator.clipboard?.writeText) await navigator.clipboard.writeText(text);
     else {
@@ -263,7 +295,7 @@ el('copy').onclick = async () => {
       const copied = document.execCommand('copy'); area.remove();
       if (!copied) throw Error('Clipboard unavailable.');
     }
-    el('copy').textContent = 'Copied'; setTimeout(() => { el('copy').textContent = 'Copy experiment summary'; }, 2000);
+    el('copy').textContent = 'Copied'; setTimeout(() => { el('copy').textContent = 'Copy'; }, 2000);
   } catch { error('experiment-error', 'Could not copy the summary in this browser.'); }
 };
 for (const button of document.querySelectorAll('[data-close]')) button.onclick = () => el(button.dataset.close).close();
@@ -277,7 +309,7 @@ el('experiment').addEventListener('close', () => {
   // request already; the old close must not cancel that request.
   if (!el('experiment').open) {
     requestId++; refreshController?.abort(); refreshing = false;
-    rankingId++; rankingController?.abort();
+    rankingId++; rankingController?.abort(); rankPanel?.dispose();
   }
 });
 el('previous').onclick = () => showPhoto(viewerIndex - 1);

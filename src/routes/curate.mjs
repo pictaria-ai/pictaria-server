@@ -3,7 +3,7 @@ import { CurateError } from '../curate/contracts.mjs';
 
 // Production foundation for PIC-368/369. The existing /api/review/assets UI
 // contract is intentionally unchanged until complete keeper-set actions land.
-export function createCurateRoutes({ curate, review = null }) {
+export function createCurateRoutes({ curate, review = null, enrichRunner = null }) {
   return async (request, response, url) => {
     if (!url.pathname.startsWith('/api/review/curate/')) return false;
     response.setHeader('Cache-Control', 'no-store');
@@ -16,6 +16,28 @@ export function createCurateRoutes({ curate, review = null }) {
         result = curate.lab.page(url.searchParams.get('viewId'), Number(url.searchParams.get('offset') ?? 0));
       } else if (request.method === 'GET' && path === 'lab/comparison') {
         result = curate.lab.comparison(url.searchParams.get('viewId'), Number(url.searchParams.get('groupId') ?? -1));
+      } else if (request.method === 'POST' && path === 'lab/ranks/plan') {
+        result = curate.lab.ranks.plan(await readObject(request, { maxBytes: 8192 }));
+      } else if (request.method === 'POST' && path === 'lab/ranks/run') {
+        const body = await readObject(request, { maxBytes: 8192 });
+        const controller = new AbortController();
+        const close = () => { if (!response.writableFinished) controller.abort(); };
+        response.once('close', close);
+        try {
+          await curate.lab.ranks.run(body, { signal: controller.signal, emit: async event => {
+            if (response.destroyed) { controller.abort(); controller.signal.throwIfAborted(); }
+            if (!response.headersSent) response.writeHead(200, { 'Content-Type': 'application/x-ndjson', 'X-Accel-Buffering': 'no' });
+            // <=40 rows of <=40 ranks: bounded output even for a slow reader.
+            response.write(JSON.stringify(event) + '\n');
+          } });
+          response.end();
+        } catch (error) {
+          if (response.destroyed) return true;
+          if (!response.headersSent) throw error;
+          response.end(JSON.stringify({ type: 'error', code: error instanceof CurateError ? error.code : 'lab_rank_interrupted',
+            message: error instanceof CurateError ? error.message : 'Rank comparison interrupted. Completed rows are retained; no requests were retried.' }) + '\n');
+        } finally { response.removeListener('close', close); }
+        return true;
       } else if (request.method === 'POST' && ['lab/recognition', 'lab/ranking'].includes(path)) {
         const body = await readObject(request, { maxBytes: 4096 });
         const controller = new AbortController();
@@ -41,15 +63,22 @@ export function createCurateRoutes({ curate, review = null }) {
               kind: url.searchParams.get('kind') ?? 'all',
               search: url.searchParams.get('q') ?? '',
               sort: url.searchParams.get('sort') ?? 'oldest',
+              section: url.searchParams.get('section') ?? 'pending', category: url.searchParams.get('category') ?? 'all',
             });
+      } else if (request.method === 'POST' && path === 'groups/status') {
+        const body = await readObject(request, { maxBytes: 12 * 1024 });
+        result = curate.page(body.viewId, body.offset ?? 0, body.limit ?? 50, body);
       } else if (request.method === 'POST' && path === 'groups') {
         const body = await readObject(request, { maxBytes: 4096 });
         result = await curate.openView({
           kind: body.kind,
           search: body.search,
-          sort: body.sort,
+          sort: body.sort, section: body.section, category: body.category,
           replacesViewId: body.replacesViewId,
         });
+      } else if (request.method === 'POST' && path === 'selection') {
+        const body = await readObject(request, { maxBytes: 140 * 1024 });
+        result = await curate.selection(body.viewId, body.groupIds);
       } else if (request.method === 'POST' && path === 'comparisons') {
         const body = await readObject(request, { maxBytes: 4096 });
         await curate.refresh();
@@ -98,6 +127,10 @@ export function createCurateRoutes({ curate, review = null }) {
         curate.store.releaseLease(body.id);
         result = { ok: true };
       } else return false;
+      // Read the live runner state on both initial loads and status polls; it
+      // is not part of the saved grouping snapshot and needs no separate poll.
+      if (path === 'groups' || path === 'groups/status')
+        result = { ...result, enrichRunning: enrichRunner?.isRunning() ?? false };
       sendJson(response, 200, result);
       return true;
     } catch (error) {

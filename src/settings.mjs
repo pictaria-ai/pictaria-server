@@ -487,7 +487,7 @@ const BACKUP_FIELDS = {
 const CURATE_FIELDS = {
   burstGrouping: {
     env: 'CURATE_BURST_GROUPING',
-    label: 'Group same-moment photos into Stacks',
+    label: 'Group photos into Stacks',
     boolean: true,
     read: (config) => config.curateBurstGrouping,
     apply: (config, value) => {

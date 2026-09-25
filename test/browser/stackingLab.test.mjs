@@ -3,9 +3,12 @@ import assert from 'node:assert/strict';
 import { launchChrome, findChrome } from './harness.mjs';
 import { curatePreviewFixture } from './curatePreviewFixture.mjs';
 
+// Isolate explicit lab reads from the now-independent standard Curate scheduler.
+// The lab works with Stacks disabled; background-on behavior has its own tests.
+
 test('stacking lab shows complete partitions, focused dimming, evidence, reset and viewer without curation writes', { timeout: 60000 }, async (t) => {
   if (!findChrome()) return t.skip('Chrome required');
-  const fixture = await curatePreviewFixture({ stackSize: 3, singles: 52 });
+  const fixture = await curatePreviewFixture({ stacking: false, stackSize: 3, singles: 52 });
   const browser = await launchChrome(), page = await browser.newPage();
   t.after(async () => { await browser.stop(); await fixture.stop(); });
   fixture.repo.updateAssetVisuals(fixture.id(1), { thumbhash: Buffer.alloc(21, 0).toString('base64') });
@@ -34,6 +37,14 @@ test('stacking lab shows complete partitions, focused dimming, evidence, reset a
     headers: { 'content-type': 'application/json' }, body: '{}' });
   assert.equal(deniedRanking.status, 401);
   const click = (selector) => page.evaluate(`document.querySelector(${JSON.stringify(selector)}).click()`);
+  const controlsAndPhotosVisible = () => page.evaluate(`(() => {
+    const control = document.querySelector('#use-identities').getBoundingClientRect();
+    const photo = document.querySelector('#lab-photos .photo-image').getBoundingClientRect();
+    const results = document.querySelector('.lab-results').getBoundingClientRect();
+    return control.top >= 0 && control.bottom < innerHeight && photo.top >= results.top &&
+      photo.top + 100 <= Math.min(results.bottom, innerHeight);
+  })()`);
+  await page.send('Emulation.setDeviceMetricsOverride', { width: 1280, height: 800, deviceScaleFactor: 1, mobile: false });
   await page.navigate(`${fixture.base}/curate-stacking-lab.html`);
   await page.waitFor('document.querySelector(".gate-backdrop input")');
   await page.evaluate('document.querySelector(".gate-backdrop input").value="smoke-secret";document.querySelector(".gate-backdrop button").click()');
@@ -47,6 +58,7 @@ test('stacking lab shows complete partitions, focused dimming, evidence, reset a
   assert.match(await page.evaluate('document.querySelector("#result").textContent'), /3 photos → 1 group/);
   await click('#use-hash');
   assert.match(await page.evaluate('document.querySelector("#result").textContent'), /2 groups \(2 \+ 1\)/);
+  assert.equal(await controlsAndPhotosVisible(), true, 'settings changes leave photo results in view');
   await click('#lab-photos .photo-image');
   assert.equal(await page.evaluate('document.querySelectorAll("#lab-photos .dimmed").length'), 1);
   assert.equal(await page.evaluate('document.querySelectorAll("#lab-photos .photo-card").length'), 3);
@@ -70,7 +82,18 @@ test('stacking lab shows complete partitions, focused dimming, evidence, reset a
   // uses the same selected photos and retains rule settings and person labels.
   fixture.assets.find(a => a.id === fixture.id(2)).people = [{ id: 'person-a' }];
   await click('#use-identities');
-  assert.match(await page.evaluate('document.querySelector("#result").textContent'), /2 groups \(1 \+ 2\)/);
+  assert.match(await page.evaluate('document.querySelector("#result").textContent'), /3 groups \(1 \+ 1 \+ 1\)/);
+  await click('#combined-mode');
+  assert.match(await page.evaluate('document.querySelector("#result").textContent'), /3 groups \(1 \+ 1 \+ 1\)/, 'partial identity overlap also separates in combined mode');
+  await page.send('Emulation.setDeviceMetricsOverride', { width: 390, height: 844, deviceScaleFactor: 1, mobile: true });
+  assert.equal(await controlsAndPhotosVisible(), true, 'mobile controls do not push all photo results off screen');
+  assert.equal(await page.evaluate('document.querySelector("#experiment").scrollWidth <= document.querySelector("#experiment").clientWidth'), true);
+  const photoTop = await page.evaluate('document.querySelector("#lab-photos").getBoundingClientRect().top');
+  await click('#lab-controls > summary');
+  assert.ok(await page.evaluate('document.querySelector("#lab-photos").getBoundingClientRect().top') < photoTop, 'collapsing settings frees more room for photos');
+  await click('#lab-controls > summary');
+  await page.send('Emulation.setDeviceMetricsOverride', { width: 1280, height: 800, deviceScaleFactor: 1, mobile: false });
+  await click('#combined-mode');
   assert.match(await page.evaluate('document.querySelectorAll(".lab-reason")[1].textContent'), /different recognized people/);
   await page.evaluate('Object.defineProperty(navigator, "clipboard", { configurable: true, value: { writeText: async text => { window.copiedLabSummary = text; } } })');
   await click('#copy');
@@ -81,7 +104,7 @@ test('stacking lab shows complete partitions, focused dimming, evidence, reset a
   await click('#refresh-recognition');
   await page.waitFor('!document.querySelector("#refresh-recognition").disabled');
   assert.equal(await page.evaluate('document.querySelector("#use-identities").checked'), true);
-  assert.match(await page.evaluate('document.querySelector("#result").textContent'), /1 group/);
+  assert.match(await page.evaluate('document.querySelector("#result").textContent'), /2 groups \(2 \+ 1\)/);
   assert.match(await page.evaluate('document.querySelectorAll(".lab-recognition")[1].textContent'), /Person 1/);
   assert.equal(fixture.detailReads.length, 6);
   await click('#use-people');
@@ -139,7 +162,7 @@ test('stacking lab shows complete partitions, focused dimming, evidence, reset a
 
 test('similarity errors assign no ranks, back off, and clear when opening another experiment', { timeout: 60000 }, async t => {
   if (!findChrome()) return t.skip('Chrome required');
-  const fixture = await curatePreviewFixture({ stackSize: 2, singles: 1 });
+  const fixture = await curatePreviewFixture({ stacking: false, stackSize: 2, singles: 1 });
   const browser = await launchChrome(), page = await browser.newPage();
   t.after(async () => { await browser.stop(); await fixture.stop(); });
   const click = selector => page.evaluate(`document.querySelector(${JSON.stringify(selector)}).click()`);
@@ -171,7 +194,7 @@ test('similarity errors assign no ranks, back off, and clear when opening anothe
 
 test('closing an in-flight ranking search cannot populate a newly opened experiment', { timeout: 60000 }, async t => {
   if (!findChrome()) return t.skip('Chrome required');
-  const fixture = await curatePreviewFixture({ stackSize: 2, singles: 1 });
+  const fixture = await curatePreviewFixture({ stacking: false, stackSize: 2, singles: 1 });
   const browser = await launchChrome(), page = await browser.newPage();
   const entered = Promise.withResolvers(), release = Promise.withResolvers();
   t.after(async () => { release.resolve(); await browser.stop(); await fixture.stop(); });
@@ -195,7 +218,7 @@ test('closing an in-flight ranking search cannot populate a newly opened experim
 
 test('lab distinguishes empty, omitted and failed recognition; closing a refresh cannot update another experiment', { timeout: 60000 }, async t => {
   if (!findChrome()) return t.skip('Chrome required');
-  const fixture = await curatePreviewFixture({ stackSize: 4, singles: 1 });
+  const fixture = await curatePreviewFixture({ stacking: false, stackSize: 4, singles: 1 });
   const browser = await launchChrome(), page = await browser.newPage();
   t.after(async () => { await browser.stop(); await fixture.stop(); });
   fixture.assets[0].people = [{ id: 'person-a' }];
@@ -234,4 +257,63 @@ test('lab distinguishes empty, omitted and failed recognition; closing a refresh
   assert.match(await page.evaluate('document.querySelector("#experiment-title").textContent'), /Explore 1 photo/);
   assert.equal(await page.evaluate('document.querySelector(".lab-recognition").textContent'), 'No recognized people returned by Immich');
   assert.equal(fixture.repo.db.prepare('SELECT count(*) n FROM decision_operations').get().n, 0);
+});
+
+test('multi-reference ranks stream progress, preserve partial cancellation, and feed an explicit combined experiment', { timeout: 60000 }, async t => {
+  if (!findChrome()) return t.skip('Chrome required');
+  const fixture = await curatePreviewFixture({ stacking: false, stackSize: 3, singles: 0, metadataReady: true });
+  const browser = await launchChrome(), page = await browser.newPage();
+  t.after(async () => { await browser.stop(); await fixture.stop(); });
+  const click = selector => page.evaluate(`document.querySelector(${JSON.stringify(selector)}).click()`);
+  for (const path of ['plan', 'run']) {
+    const denied = await fetch(`${fixture.base}/api/review/curate/lab/ranks/${path}`, { method: 'POST',
+      headers: { 'content-type': 'application/json' }, body: '{}' });
+    assert.equal(denied.status, 401);
+  }
+  await page.navigate(`${fixture.base}/curate-stacking-lab.html`);
+  await page.waitFor('document.querySelector(".gate-backdrop input")');
+  await page.evaluate('document.querySelector(".gate-backdrop input").value="smoke-secret";document.querySelector(".gate-backdrop button").click()');
+  await page.waitFor('document.querySelector(".group-card")'); await click('.group-card');
+  await page.waitFor('document.querySelector("#check-group-ranks") && !document.querySelector("#check-group-ranks").disabled && !document.querySelector("#refresh-recognition").disabled');
+  assert.match(await page.evaluate('document.querySelector("#rank-comparison").textContent'), /3 new searches/);
+  assert.equal(fixture.similarityReads.length, 0);
+  await click('#combined-mode'); await click('#use-ranks');
+  assert.equal(await page.evaluate('getComputedStyle(document.querySelector(".threshold-control")).display'), 'none');
+  assert.match(await page.evaluate('document.querySelector("#combined-summary").textContent'), /3 uncertain/);
+  await click('#check-group-ranks');
+  await page.waitFor('document.querySelector("#rank-comparison").textContent.includes("1 of 3 new searches complete")');
+  assert.equal(fixture.similarityReads.length, 1);
+  await click('#rank-comparison .compare-tools button:nth-child(2)');
+  await page.waitFor('document.querySelector("#rank-comparison").textContent.includes("Cancelled.") && !document.querySelector("#check-group-ranks").disabled');
+  assert.match(await page.evaluate('document.querySelector("#rank-comparison").textContent'), /2 new searches/);
+  assert.match(await page.evaluate('document.querySelector("#rank-table tbody").textContent'), /Complete.*Unqueried/s);
+  await click('#check-group-ranks');
+  await page.waitFor('document.querySelector("#rank-comparison").textContent.includes("Pass complete.") && document.querySelector("#check-group-ranks").disabled', { timeoutMs: 20000 });
+  assert.equal(fixture.similarityReads.length, 3);
+  const row = await page.evaluate('[...document.querySelectorAll("#rank-table tbody tr:first-child td")].map(n=>n.textContent)');
+  assert.deepEqual(row.slice(0, 3), ['·', '1 0 outside', '2 0 outside']);
+  assert.equal(await page.evaluate('document.querySelectorAll("#rank-table tbody tr").length'), 3);
+  await click('#rank-table tbody tr:nth-child(2) button');
+  assert.match(await page.evaluate('document.querySelector("#pair-evidence").textContent'), /Photos 1 ↔ 2.*reciprocal near ranks/s);
+  assert.match(await page.evaluate('document.querySelector("#combined-summary").textContent'), /uncertain/, 'rank alone is not proof');
+  const before = fixture.similarityReads.length;
+  await click('#use-hash'); await click('#use-people'); await click('#use-ranks');
+  assert.equal(fixture.similarityReads.length, before);
+  await page.send('Emulation.setDeviceMetricsOverride', { width: 375, height: 812, deviceScaleFactor: 1, mobile: true });
+  assert.equal(await page.evaluate('document.querySelector("#experiment").scrollWidth <= document.querySelector("#experiment").clientWidth'), true);
+  await page.evaluate('Object.defineProperty(navigator,"clipboard",{configurable:true,value:{writeText:async text=>{window.copied=text}}})');
+  await click('#copy');
+  assert.match(await page.evaluate('window.copied'), /Directional ranks.*Photo 2/s);
+  assert.match(await page.evaluate('window.copied'), /0 outside ahead/);
+  assert.match(await page.evaluate('window.copied'), /Photos 1 ↔ 2:[^\n]+\nPhotos 2 ↔ 3:/);
+  assert.equal(await page.evaluate('document.querySelector("#near-hash").value'), '0.025');
+  assert.equal(await page.evaluate('document.querySelector("#far-hash").value'), '0.15');
+  await page.evaluate('document.querySelector("#near-hash").value="0.2";document.querySelector("#near-hash").dispatchEvent(new Event("input"))');
+  assert.equal(await page.evaluate('document.querySelector("#copy").disabled'), true);
+  assert.match(await page.evaluate('document.querySelector("#experiment-error").textContent'), /ordered ThumbHash bands/);
+  await click('#use-hash');
+  assert.equal(await page.evaluate('document.querySelector("#copy").disabled'), false, 'disabled hash bands do not block the other experiments');
+  assert.doesNotMatch(await page.evaluate('window.copied'), /00000000|target-portrait|synthetic/);
+  assert.equal(fixture.repo.db.prepare('SELECT count(*) n FROM decision_operations').get().n, 0);
+  assert.equal(fixture.repo.db.prepare('SELECT count(*) n FROM curate_separations').get().n, 0);
 });

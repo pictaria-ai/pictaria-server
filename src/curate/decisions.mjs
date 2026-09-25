@@ -90,7 +90,7 @@ export class DecisionRepository {
     // Production advice applicability belongs to PIC-116/370. Until that
     // runtime is connected, fail closed instead of blessing an old rank.
     if (mode !== 'manual') throw new CurateError('Applicable keeper advice is not available.', 'curate_advice_unavailable');
-    const snapshot = { comparisonId: comparison.id, ids: [...comparison.ids], material: comparison.material };
+    const snapshot = { comparisonId: comparison.id, ids: [...comparison.ids], material: comparison.material, ...(comparison.reviewState === 'decided' ? { reviewState: 'decided' } : {}), ...(comparison.singlesOnly ? { singlesOnly: true } : {}) };
     validateAssetBatch(snapshot.ids);
     const scope = { kind: 'decision', mode, snapshot };
     return this.repo.transaction(() => {
@@ -147,8 +147,8 @@ export class DecisionRepository {
       } else {
         if (parsed.payload.mode !== 'manual') throw new CurateError('Applicable keeper advice is not available.', 'curate_advice_unavailable');
         const snapshot = parsed.payload.snapshot;
-        if (this.repo.curate.material(snapshot.ids) !== snapshot.material) throw new CurateError('Comparison inputs changed. Refresh Curate.');
-        assertScope(snapshot.ids);
+        if (this.repo.curate.material(snapshot.ids, snapshot.reviewState) !== snapshot.material) throw new CurateError('Comparison inputs changed. Refresh Curate.');
+        assertScope(snapshot.ids, snapshot.reviewState, snapshot.singlesOnly);
         before = snapshot.ids.map(assetId => {
           const rule = ACTION_RULES[parsed.payload.outcomes[assetId]];
           return this.before(assetId, rule.add, rule.remove, parsed.payload.outcomes[assetId]);

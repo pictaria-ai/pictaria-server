@@ -1,19 +1,23 @@
 import { CurateError, fingerprint } from './contracts.mjs';
+import { classifySearchError, problemMessage } from './search-problems.mjs';
 
 export const SIMILARITY_LIMITS = Object.freeze({
   results: 50, timeoutMs: 15_000, responseBytes: 2 * 1024 * 1024,
-  cacheEntries: 40, cacheMs: 10 * 60_000, minIntervalMs: 5_000, failureIntervalMs: 30_000,
+  cacheEntries: 40, cacheMs: 10 * 60_000, minIntervalMs: 2_000, failureIntervalMs: 30_000,
 });
 
-// An explicit, read-only search lane shared by Curate callers. No polling,
-// pagination, fallback, retry, or connection to grouping/keeper decisions.
+// Shared read-only search lane. Callers own demand and composition policy; this
+// transport never paginates, retries, calls AI or makes human decisions.
 export class CurateSimilaritySearch {
-  constructor({ curate, now = Date.now, timeoutMs = SIMILARITY_LIMITS.timeoutMs }) {
+  constructor({ curate, now = Date.now, elapsedNow = () => performance.now(), timeoutMs = SIMILARITY_LIMITS.timeoutMs }) {
     this.curate = curate;
     this.now = now;
+    this.elapsedNow = elapsedNow;
     this.timeoutMs = timeoutMs;
     this.cache = new Map();
     this.nextAt = 0;
+    this.shutdown = new AbortController();
+    this.metrics = { requests: 0, completedSearches: 0, cacheHits: 0, failures: 0, searchMs: 0, lastSearchMs: 0 };
   }
   connectionKey() {
     const client = this.curate.immich;
@@ -28,16 +32,32 @@ export class CurateSimilaritySearch {
     }
   }
   sourceKey(id) {
-    const row = this.curate.repo.db.prepare(`SELECT checksum,file_modified_at,thumbhash,missing_since
-      FROM assets WHERE asset_id=?`).get(id);
+    const row = this.curate.repo.db.prepare(`SELECT a.checksum,a.file_modified_at,a.thumbhash,a.missing_since,p.image_key
+      FROM assets a LEFT JOIN curate_photos p ON p.asset_id=a.asset_id WHERE a.asset_id=?`).get(id);
     if (!row || row.missing_since || !this.curate.repo.reviewListMembership([id]).has(id))
       throw new CurateError('The reference photo is no longer available for this experiment. Rebuild time groups.', 'similarity_reference_changed');
     return fingerprint(row);
   }
-  async search(referenceId, { signal } = {}) {
+  cached(referenceId) {
+    this.settingsChanged();
+    const source = this.sourceKey(referenceId);
+    for (const [id, value] of this.cache) if (value.checkedAt + SIMILARITY_LIMITS.cacheMs <= this.now()) this.cache.delete(id);
+    const value = this.cache.get(fingerprint([this.connection, referenceId, source]));
+    return value ? { ...value, ids: [...value.ids], cached: true } : null;
+  }
+  reserve() {
+    if (this.owner || this.work || this.closed || this.curate.closed)
+      throw new CurateError('Another similarity search is running or stopping. Try again later.', 'similarity_busy', 503);
+    this.owner = Symbol('similarity pass');
+    return this.owner;
+  }
+  release(owner) { if (this.owner === owner) this.owner = null; }
+  async search(referenceId, { signal, owner } = {}) {
     if (typeof referenceId !== 'string' || !referenceId || referenceId.length > 128)
       throw new CurateError('Invalid similarity reference.', 'invalid_curate_query', 400);
     signal?.throwIfAborted();
+    if (this.owner && this.owner !== owner)
+      throw new CurateError('A group similarity check is running. Try again when it finishes.', 'similarity_busy', 503);
     if (this.closed || this.curate.closed)
       throw new CurateError('Similarity search is stopping.', 'similarity_unavailable', 503);
     const original = this.curate.immich;
@@ -48,7 +68,10 @@ export class CurateSimilaritySearch {
     const key = fingerprint([connection, referenceId, source]);
     for (const [id, value] of this.cache) if (value.checkedAt + SIMILARITY_LIMITS.cacheMs <= this.now()) this.cache.delete(id);
     const cached = this.cache.get(key);
-    if (cached) return { ...cached, ids: [...cached.ids], cached: true };
+    if (cached) {
+      this.metrics.cacheHits++;
+      return { ...cached, ids: [...cached.ids], cached: true };
+    }
     if (this.work)
       throw new CurateError('Another similarity search is running. Try again when it finishes.', 'similarity_busy', 503);
     if (this.nextAt > this.now())
@@ -66,7 +89,8 @@ export class CurateSimilaritySearch {
     } finally { this.work = null; this.controller = null; }
   }
   async run(client, referenceId, signal, connection, source) {
-    const started = performance.now();
+    const started = this.elapsedNow();
+    this.metrics.requests++;
     try {
       const response = await client.requestJson('/search/smart', {
         method: 'POST', body: { queryAssetId: referenceId, type: 'IMAGE', visibility: 'timeline',
@@ -85,21 +109,33 @@ export class CurateSimilaritySearch {
       // reference may be absent or appear anywhere in the returned order.
       const ids = items.filter(p => p.id !== referenceId).slice(0, SIMILARITY_LIMITS.results).map(p => p.id);
       return { referenceId, ids, limit: SIMILARITY_LIMITS.results, checkedAt: this.now(),
-        elapsedMs: Math.round(performance.now() - started) };
+        elapsedMs: Math.round(this.elapsedNow() - started) };
     } catch (error) {
-      this.nextAt = Math.max(this.nextAt, this.now() + SIMILARITY_LIMITS.failureIntervalMs);
+      this.metrics.failures++;
+      const code = error instanceof CurateError ? error.code : classifySearchError(error, signal.aborted);
+      // Missing/deleted/inaccessible reference photos do not imply that the
+      // whole service needs a cooldown. Their caller owns per-photo backoff.
+      // Authentication, rate limits, disabled search and other failures still
+      // slow the shared lane, including when the lab is using it.
+      if (!['similarity_embedding_missing', 'similarity_reference_unavailable'].includes(code))
+        this.nextAt = Math.max(this.nextAt, this.now() + SIMILARITY_LIMITS.failureIntervalMs);
       if (error instanceof CurateError) throw error;
-      const message = signal.aborted ? 'Similarity search was interrupted or timed out. Try again when ready.'
-        : [401, 403].includes(error.status) ? 'Immich denied this search. Check the API key’s asset.read permission.'
-        : [400, 404, 422].includes(error.status) ? 'Immich could not search from this photo. Check that Smart Search is enabled and has processed the reference photo.'
-        : error.status === 429 ? 'Immich is busy. Wait before trying again.'
-        : 'Could not load similarity ranks from Immich. Try again later.';
       // Never return upstream bodies, credentials, URLs, or unrelated photos.
-      throw new CurateError(message, 'similarity_unavailable', 503);
+      throw new CurateError(problemMessage(code), code, 503);
+    } finally {
+      const elapsed = Math.max(0, this.elapsedNow() - started);
+      this.metrics.completedSearches++;
+      this.metrics.lastSearchMs = Math.round(elapsed);
+      this.metrics.searchMs += elapsed;
+      // Slow hosts get breathing room after each request. Fast searches keep
+      // the two-second start spacing; failures retain their longer cooldown.
+      if (elapsed >= SIMILARITY_LIMITS.minIntervalMs)
+        this.nextAt = Math.max(this.nextAt, this.now() + Math.min(elapsed, SIMILARITY_LIMITS.failureIntervalMs));
     }
   }
   async close() {
     this.closed = true;
+    this.shutdown.abort();
     this.controller?.abort();
     this.cache.clear();
     await this.work?.catch(() => {});

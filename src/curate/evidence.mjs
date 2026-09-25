@@ -51,6 +51,19 @@ export function observeAsset(asset, previous = {}) {
   return next;
 }
 
+// Keep missing, omitted or malformed observations unknown. An empty list is
+// usable display evidence, but cannot establish that nobody is in the photo.
+export function recognizedIds(serialized) {
+  if (typeof serialized !== 'string' || serialized.length > MAX_EVIDENCE_BYTES) return null;
+  try {
+    const recognition = JSON.parse(serialized);
+    if (recognition?.omitted !== false || !Array.isArray(recognition.ids) ||
+        recognition.ids.length > MAX_PEOPLE || !recognition.ids.every((id) =>
+          typeof id === 'string' && id.length > 0 && id.length <= 128)) return null;
+    return [...new Set(recognition.ids)].sort();
+  } catch { return null; }
+}
+
 // Read the producing schema, never today's active taxonomy or tag spellings.
 // This adapter recognizes only the known explicit none/one/couple contract.
 export function producingPeopleFact(output, schema, configurationId) {
@@ -72,6 +85,18 @@ export function producingPeopleFact(output, schema, configurationId) {
     configurationId: configurationId ?? null,
     contradiction: Number.isInteger(n) && !consistent,
   };
+}
+
+// A category is useful even when “group” cannot be interpreted as an exact count.
+// Keep the same producing-schema and consistency checks used by the lab.
+export function producingPeopleCategory(output, schema, configurationId) {
+  const fact = producingPeopleFact(output, schema, configurationId);
+  if (fact.source !== 'producing-enrich-schema') return { peopleCategory: null, peopleStatus: 'unsupported' };
+  const category = output?.people_count;
+  if (!['none', 'one', 'couple', 'group'].includes(category)) return { peopleCategory: null, peopleStatus: 'unknown' };
+  if (typeof output?.has_people !== 'boolean' || output.has_people !== (category !== 'none'))
+    return { peopleCategory: null, peopleStatus: 'conflicting' };
+  return { peopleCategory: category, peopleStatus: 'known' };
 }
 
 export function photoEvidence({ asset, observation = {}, output, schema, configurationId }) {
@@ -109,6 +134,7 @@ export function photoEvidence({ asset, observation = {}, output, schema, configu
   const evidence = {
     version: EVIDENCE_VERSION,
     fact,
+    category: producingPeopleCategory(output, schema, configurationId),
     recognition,
     image,
     availability,
@@ -124,6 +150,7 @@ export function photoEvidence({ asset, observation = {}, output, schema, configu
     // Producing configuration ID is provenance, not itself a material change.
     factsKey: fingerprint({
       peopleCount: fact.peopleCount,
+      peopleCategory: evidence.category.peopleCategory,
       recognition: { count: evidence.recognition.count, signature: evidence.recognition.signature },
       availability,
     }),

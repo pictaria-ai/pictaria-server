@@ -293,6 +293,7 @@ export class CurateMetadataRefresher {
     return { photos: ids.map(id => results.get(id)) };
   }
   demanded() {
+    if (this.curate.refinement?.enabled()) return true;
     return Boolean(
       this.curate.store
         .prepare("SELECT 1 FROM curate_leases WHERE kind='view' AND expires_at>? LIMIT 1")
