@@ -152,25 +152,38 @@ test(
     );
     assert.equal(
       await page.evaluate(`(() => {
-      const fields=['search','sort','category'].map(id=>document.getElementById(id).getBoundingClientRect());
+      const fields=['filters','sort','category','search'].map(id=>document.getElementById(id).getBoundingClientRect());
       return fields.every(r=>Math.abs((r.top+r.bottom)/2-(fields[0].top+fields[0].bottom)/2)<2)
+        && fields.every((r,i)=>i===0||r.left>=fields[i-1].right)
         && document.body.scrollWidth<=innerWidth;
     })()`),
       true,
-      'desktop filters fit one row',
+      'desktop group tabs lead date, category and search on one row',
     );
     await screenshot(page, 'curate-toolbar-desktop.png');
-    const headerPositions = () => page.evaluate(`['#sections','#refresh','.page-tools','#check-activity','#search','#sort','#count','#refinement','#groups'].map(selector=>{
+    const headerPositions = () => page.evaluate(`['#sections','#refresh','.page-tools','#check-activity','#search','#sort','#count','.view-summary','#groups'].map(selector=>{
       const {x,y}=document.querySelector(selector).getBoundingClientRect();return {selector,x,y};
     })`);
     const stableViews = async () => {
       const initial = await headerPositions();
       for (const selector of ['[data-kind=stacks]','[data-kind=singles]','[data-section=decided]','[data-section=pending]','[data-kind=all]']) {
         await click(selector); await ready();
+        assert.equal(await page.evaluate('document.querySelector("#bulk-label").hidden'),
+          selector === '[data-kind=stacks]' || selector === '[data-kind=all]',
+          'header selection is available only for Singles and Decided');
         assert.deepEqual(await headerPositions(), initial, `header controls stay anchored after ${selector}`);
       }
     };
     await stableViews();
+    for (const width of [901, 1024]) {
+      await page.send('Emulation.setDeviceMetricsOverride', { width, height: 900, deviceScaleFactor: 1, mobile: false });
+      assert.equal(await page.evaluate(`(() => {
+        const tabs=document.querySelector('#filters').getBoundingClientRect();
+        const filters=document.querySelector('#secondary-filters').getBoundingClientRect();
+        return tabs.right<=filters.left && document.body.scrollWidth<=innerWidth;
+      })()`), true, `filters do not overlap at ${width}px`);
+      await stableViews();
+    }
     await page.send('Emulation.setDeviceMetricsOverride', {
       width: 375,
       height: 812,
@@ -184,6 +197,7 @@ test(
     await stableViews();
     const top = await page.evaluate('document.querySelector("#groups").getBoundingClientRect().top');
     assert.ok(top < 520, `mobile photos should be visible on the first screen (${top})`);
+    await click('[data-kind=singles]'); await ready();
     await click('#select-shown');
     assert.equal(await page.evaluate('document.querySelector("#groups").getBoundingClientRect().top'), top);
     assert.equal(await page.evaluate('document.querySelector("#bulk-count").textContent'), '2 checked');
@@ -198,12 +212,14 @@ test(
     assert.equal(await page.evaluate('document.body.scrollWidth<=innerWidth'), true);
     await screenshot(page, 'curate-polish-mobile.png');
     await click('#clear-bulk');
+    await click('[data-kind=all]'); await ready();
     await click('#toggle-filters');
     assert.equal(
       await page.evaluate('getComputedStyle(document.querySelector("#secondary-filters")).display'),
       'grid',
     );
     await stableViews();
+    await screenshot(page, 'curate-toolbar-mobile-expanded.png');
     await page.evaluate(
       'document.querySelector("#sort").value="newest";document.querySelector("#sort").dispatchEvent(new Event("change"))',
     );

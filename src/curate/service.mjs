@@ -1,7 +1,7 @@
 import { reviewConfig } from '../enrich/reviewBuckets.mjs';
 import { Worker } from 'node:worker_threads';
 import { groupPhotos } from './grouping.mjs';
-import { candidateGroups } from './candidate.mjs';
+import { settledCandidateGroups, rememberSettledGroups } from './settled-groups.mjs';
 import { CurateRefinement } from './refinement.mjs';
 import { CurateError } from './contracts.mjs';
 import { CurateMetadataRefresher } from './metadata.mjs';
@@ -65,7 +65,7 @@ export class CurateService {
       // test-only SQLite cannot be shared with a read-only worker
       result = {
         generation: this.store.generation(),
-        ...(this.candidateEnabled ? candidateGroups(this.store.candidateRows(), { stacks, separations: this.store.separations(), ranks: id => this.refinement?.saved.read(id) })
+        ...(this.candidateEnabled ? settledCandidateGroups(this.store, { stacks, connection: this.refinement?.connection })
           : groupPhotos(this.store.pending(), { stacks, separations: this.store.separations() })),
       };
     } else
@@ -88,6 +88,8 @@ export class CurateService {
         });
       });
     this.abort.signal.throwIfAborted();
+    if (this.refinement) result.retentionLimited = await rememberSettledGroups(this.store, this.refinement.saved, result, this.refinement.now());
+    this.abort.signal.throwIfAborted();
     // No await between complete replacement and publication. A concurrent
     // source change remains queued in curate_dirty for the next rebuild.
     const byId = new Map(),
@@ -102,8 +104,8 @@ export class CurateService {
     this.metrics.rebuildMs = performance.now() - start;
     return this.current;
   }
-  async openView({ kind = 'all', search = '', sort = 'oldest', section = 'pending', category = 'all', retryChecks = true, replacesViewId = null } = {}) {
-    if (typeof retryChecks !== 'boolean' || !['pending', 'decided'].includes(section) || typeof category !== 'string' ||
+  async openView({ kind = 'all', search = '', sort = 'oldest', section = 'pending', category = 'all', replacesViewId = null } = {}) {
+    if (!['pending', 'decided'].includes(section) || typeof category !== 'string' ||
         !['all', ...this.categories().map(b => b.id)].includes(category) ||
         !['all', 'stacks', 'singles'].includes(kind) || !['oldest', 'newest'].includes(sort) ||
         typeof search !== 'string' || search.length > 200)
@@ -153,7 +155,6 @@ export class CurateService {
     // Capacity failure is explicit; no page silently drops part of a stack.
     const lease = await this.store.createView(section === 'decided' ? { ...current, method: 'decided' } : current, groups, { replacesViewId, sort, section, category });
     this.metadata.wake();
-    if (retryChecks) this.refinement?.retry();
     return this.page(lease.id);
   }
   categories() {

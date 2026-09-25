@@ -39,6 +39,8 @@ test(
   async (t) => {
     if (!findChrome()) return t.skip('Chrome required');
     const { fixture, page, click } = await open(t, 102);
+    await click('[data-kind=singles]');
+    await page.waitFor('!document.querySelector("#refresh").disabled && !document.querySelector("#bulk-label").hidden');
     await click('#more');
     await page.waitFor(
       'document.querySelectorAll(".group-card").length===100 && !document.querySelector("#refresh").disabled',
@@ -69,7 +71,7 @@ test(
       `document.querySelector('[data-group-id="${anchor.id}"]').getBoundingClientRect().top`,
     );
     assert.ok(Math.abs(y - anchor.y) < 3, `anchor moved ${y - anchor.y}px`);
-    assert.ok(await page.evaluate('window.opens.some(body=>body.retryChecks===false)'));
+    assert.ok(await page.evaluate('window.opens.length>0 && window.opens.every(body=>!("retryChecks" in body))'));
     assert.equal(
       await page.evaluate('document.querySelector("#show-updates,#corrections,#split,#photo-remove")'),
       null,
@@ -97,7 +99,7 @@ test(
     if (!findChrome()) return t.skip('Chrome required');
     const { fixture, page, click } = await open(t, 2);
     await page.evaluate(`window.autoAttempts=0;const upstream=window.fetch;window.fetch=(url,options)=>{
-    if(String(url).endsWith('/curate/groups') && options?.method==='POST' && JSON.parse(options.body).retryChecks===false){
+    if(String(url).endsWith('/curate/groups') && options?.method==='POST' && window.autoAttempts===0){
       window.autoAttempts++;return Promise.resolve(new Response(JSON.stringify({error:{message:'Synthetic update failure'}}),{status:503}));
     }return upstream(url,options);
   };`);

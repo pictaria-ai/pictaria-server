@@ -289,18 +289,24 @@ AI inference run is not required. On older Immich, metadata reads require
 `asset.statistics` as well as the existing asset/tag read permissions to
 check completeness. See [Immich compatibility](IMMICH-COMPATIBILITY.md).
 
-## Curate development preview (PIC-385)
+## Curate development preview (PIC-385 / PIC-387)
 
-This development build advances the Enrich database to **schema 16** and the
-persistent-state contract to **19**. Startup creates the standard complete
-pre-migration recovery snapshot before adding the completed stack-check cache.
+This development build advances the Enrich database to **schema 17** and the
+persistent-state contract to **21**. Startup creates the standard complete
+pre-migration recovery snapshot. The bounded stack-check store retains completed
+matrices and compact terminal incomplete outcomes. Draft retry checkpoints from
+the earlier unreleased preview are discarded. The new contract also protects
+against rolling back to that preview, which cannot interpret incomplete outcomes.
 Existing enrichment, human decisions and settings are preserved. Use that complete
 snapshot to return to a build with an older state contract; switching the image
 alone is not a supported downgrade across this boundary.
 
 With Stacks enabled and Immich configured, metadata reads and paced similarity
 checks now run without opening a browser, including for the existing pending
-backlog. Completed checks survive restarts. These reads do not invoke an AI
+backlog. Finished outcomes survive restarts. A failed similarity search gets one retry
+during its current pass, then settles as incomplete if it fails again. No partial
+pass or retry deadlines are stored. Refresh does not restart finished checks,
+and incomplete stacks remain available for normal human curation. These reads do not invoke an AI
 provider or change human decisions, tags or albums. Disabling Stacks stops new
 background checks. [Scheduling and storage limits](CURATE-ALGORITHM.md#automatic-searches-and-stable-views).
 
