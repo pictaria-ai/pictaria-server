@@ -1,3 +1,4 @@
+import { AI_ATTEMPT_SCHEMA } from '../curate/ai-attempts.mjs';
 import { RANK_SCHEMA, RANK_MEMBER_SCHEMA } from '../curate/rank-store.mjs';
 import { CURATE_SCHEMA, CORRECTION_ACTION_SCHEMA, installCurateTriggers } from '../curate/schema.mjs';
 import { CurateRepository } from '../curate/repository.mjs';
@@ -525,6 +526,7 @@ const ENRICH_MIGRATIONS = [
   // Finished incomplete outcomes share the rank store. Retire draft retry state.
   { version: 17, up(db) { db.exec('DROP TABLE IF EXISTS curate_rank_retries'); } },
   { version: 18, up(db) { db.exec(RANK_MEMBER_SCHEMA); } },
+  { version: 19, up(db) { db.exec(AI_ATTEMPT_SCHEMA); } },
 ];
 
 // The review projection of a normalized output: exactly the fields the

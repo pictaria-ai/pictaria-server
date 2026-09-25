@@ -134,6 +134,11 @@ test(
       'document.querySelectorAll("#photos .photo-card").length===3 && !document.querySelector("#apply").disabled',
     );
     await click('#context-photos [data-view]');
+    // showPhoto opens its shell before awaiting the preview. The read-only
+    // controls belong to the rendered photo, not the previous/loading shell.
+    await page.waitFor(`document.querySelector('#photo-view').open &&
+      document.querySelector('#photo-loading').hidden &&
+      document.querySelector('#photo-large').getAttribute('src').includes('${fixture.contextId}')`);
     assert.equal(await page.evaluate('document.querySelector("#photo-keep").hidden'), true);
     await page.send('Input.dispatchKeyEvent', { type: 'keyDown', key: 'k', code: 'KeyK' });
     assert.equal(await page.evaluate('document.querySelectorAll("#photos [data-keeper][aria-pressed=true]").length'), 0);

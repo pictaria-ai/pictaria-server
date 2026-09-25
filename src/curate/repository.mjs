@@ -5,6 +5,7 @@ import { CurateError, canonicalJson, fingerprint, validatePartition, validateAdv
 import { hasObservationFields, observeAsset, photoEvidence } from './evidence.mjs';
 import { GROUPING_METHOD } from './grouping.mjs';
 import { CurateMetadataStore } from './metadata.mjs';
+import { CurateAiAttempts } from './ai-attempts.mjs';
 
 export const LEASE_MS = 30 * 60_000;
 export const MAX_LEASES = 200;
@@ -21,6 +22,7 @@ export class CurateRepository {
     this.statements = new Map();
     this.viewBuilds = new Map();
     this.metadata = new CurateMetadataStore(this);
+    this.aiAttempts = new CurateAiAttempts(repo);
   }
   prepare(sql) {
     let statement = this.statements.get(sql);

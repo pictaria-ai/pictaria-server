@@ -103,14 +103,71 @@ application state. Older builds cannot read version 8 settings; rollback uses
 that recovery point on the matching earlier build, not an in-place image-only
 downgrade. Synthetic upgrade/restart/restore tests cover this path.
 
+## Durable attempt admission groundwork (PIC-346)
+
+`src/curate/ai-attempts.mjs` stores compact per-role, per-input accounting in
+Enrich's existing SQLite database. `src/curate/ai-execution.mjs` adds a shared
+execution boundary for future workers. Neither is connected to a live worker;
+the preview availability flags remain false. This is a partial implementation
+of PIC-346, not the complete AI lifecycle.
+
+- A request has at most two charged invocations: an initial invocation and one
+  possible retry. The scheduler must explicitly admit each one. This executor
+  never retries by itself. A digest must cover the exact role-relevant input,
+  model/configuration and request contract; the adapter owns that construction.
+- Role enablement, Stacks, shutdown, current inputs and the external admission
+  guard are checked before preparation and immediately before dispatch.
+  Preparation adapters receive a checkpoint for use between downloads and
+  before fallbacks. Enrich's master switch is not a gate for these new roles.
+- The external guard is mandatory, read-only and defaults to deny. It checks
+  provider pauses and an already-reserved revision/cohort budget and scheduling
+  turn; repeated checkpoints must not make repeated reservations. Merely declaring
+  a worker available is insufficient to start a request.
+- The attempt is charged immediately before one provider invocation. Crash
+  uncertainty keeps the charge, including a crash immediately before dispatch.
+  Counts are conservative admission records, not transport or billing metrics.
+  Normal repository opening never releases running work. Startup recovery is
+  explicit and must happen only after exclusive server ownership is established.
+- A persisted running marker prevents simultaneous Curate submissions across
+  both roles. One executor also serializes preparation. This is not fair
+  scheduling with Enrich or a cross-process background worker system.
+- Already-submitted work may finish after a toggle is disabled, if it remains
+  applicable. Input changes invalidate it. Strict validation and synchronous
+  acceptance happen before success is recorded; acceptance and accounting share
+  one database transaction. A stale completion token cannot finish newer work.
+  Dependent work needs fresh admission; the executor creates none.
+- Only the role, input digest, attempt count, state and current ownership token
+  are stored. No raw responses, errors, credentials or photo metadata are stored
+  in this ledger. Completed exact inputs cannot be submitted again. No pruning
+  or retry-reset API is provided in this slice.
+
+The accepting adapter must use the authoritative repository's applicability
+validation, including human decisions and availability. It must not perform
+asynchronous writes inside the acceptance transaction. One `submit` callback
+must make exactly one provider invocation; validation retries belong to a new
+admitted invocation rather than an internal retry loop. Preparation failures
+return without a paid attempt and must not be automatically looped by an adapter.
+An asynchronous validation/acceptance callback is reported as `adapter-error`,
+not a bad model answer. The already-dispatched request remains charged. Handle
+this as an integration fault before admitting more work; it is not evidence of
+a provider outage. Rejecting an asynchronous acceptance callback cannot cancel
+its own later side effects, so acceptance adapters must stay synchronous.
+
+Enrichment schema version 19 / persistent-state contract 24 adds the ledger.
+The normal upgrade recovery point is taken first. Existing settings and
+human decisions are untouched. Rollback to the earlier schema requires restoring
+that recovery point. Synthetic tests cover upgrade, restart, backup and restore,
+including a preserved consumed attempt.
+
 ## Remaining integration
 
 - **PIC-345 / PIC-372:** connect availability to the actual workers and complete
   the cutover and live migration acceptance. This settings slice does not replay
   decided history or establish eligibility for historical referee results.
-- **PIC-346:** persisted attempt/admission budgets, provider pauses and result
-  applicability for the new roles. Provider-internal validation retries must
-  also be accounted for; the legacy safeguards above are not that new lifecycle.
+- **PIC-346:** connect provider pauses, aggregate revision/cohort budgets,
+  settling/coalescing, current-input construction, bounded retention and the
+  authoritative applicability adapter before enabling either role. Provider-internal
+  validation retries must also be accounted for; the legacy safeguards above are not that new lifecycle.
 - **PIC-118:** fair scheduling on shared backends, with independent backends able
   to progress concurrently. The legacy worker still yields to Enrich.
 - **PIC-370 / PIC-116:** validated whole-stack composition checks, then keeper
