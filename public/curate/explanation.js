@@ -14,13 +14,15 @@ export function explanation(comparison, prefix, status = null) {
   panel.setAttribute('role', 'tooltip');
   panel.hidden = true;
   if (status) {
-    const indicator = status.indicator || node('span', 'i', 'similarity-indicator');
-    indicator.removeAttribute('role');
-    indicator.removeAttribute('aria-label');
-    indicator.removeAttribute('title');
-    indicator.setAttribute('aria-hidden', 'true');
-    trigger.replaceChildren(indicator);
-    trigger.classList.add('status-trigger');
+    if (status.indicator) {
+      const indicator = status.indicator;
+      indicator.removeAttribute('role');
+      indicator.removeAttribute('aria-label');
+      indicator.removeAttribute('title');
+      indicator.setAttribute('aria-hidden', 'true');
+      trigger.replaceChildren(indicator);
+      trigger.classList.add('status-trigger');
+    }
     trigger.setAttribute('aria-label', `${status.title || 'Stack comparison'}. ${title}`);
     panel.append(node('strong', status.title || 'Stack comparison', 'why-status'));
     if (status.detail) panel.append(node('p', status.detail));

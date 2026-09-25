@@ -105,6 +105,8 @@ test('candidate preview refines automatically, preserves selections, explains re
     await page.waitFor('!document.querySelector("#refresh").disabled');
     assert.equal(await page.evaluate('document.querySelectorAll(".group-card").length'), 1);
     await click('.group-card'); await page.waitFor('document.querySelectorAll("#photos [data-keeper]").length===5');
+    assert.equal(await page.evaluate('document.querySelector("#comparison-similarity .similarity-indicator")'), null,
+      'normal completion keeps Why without a success badge');
     await click('#comparison-similarity .why-trigger');
     assert.match(await page.evaluate('document.querySelector("#stack-reason").textContent'), /Candidate algorithm 3/);
     assert.match(await page.evaluate('document.querySelector("#stack-reasons").textContent'), /several photos support/);
@@ -188,9 +190,10 @@ test('background status markers and inline progress remain stable on desktop and
     assert.equal(await page.evaluate('document.querySelector("#groups").getBoundingClientRect().top'), gridTop,
       'finishing a check cannot move the grid');
 
-    assert.equal(await page.evaluate('document.querySelector(".group-card[data-similarity=checked] .similarity-indicator").dataset.phase'), 'inconclusive');
+    assert.equal(await page.evaluate('document.querySelector(".group-card[data-similarity=checked] .similarity-indicator").dataset.phase'), 'limited');
+    assert.match(await page.evaluate('document.querySelector(".group-card[data-similarity=checked] .similarity-indicator").title'), /Grouped with limited evidence.*searches finished.*inconclusive/);
     await click('.group-card[data-similarity=checked]');
-    await page.waitFor('document.querySelector("#comparison-similarity .similarity-indicator[data-phase=inconclusive]")');
+    await page.waitFor('document.querySelector("#comparison-similarity .similarity-indicator[data-phase=limited]")');
     assert.match(await page.evaluate('document.querySelector("#comparison-similarity").textContent'), /inconclusive/);
     await click('[data-close=comparison]');
     await page.send('Emulation.setDeviceMetricsOverride', { width: 390, height: 844, deviceScaleFactor: 1, mobile: true });
@@ -206,12 +209,12 @@ test('background status markers and inline progress remain stable on desktop and
     await click('#refresh');
     await page.waitFor('document.querySelector(".group-card[data-similarity=checked]")', { timeoutMs: 42000 });
     assert.equal(fixture.similarityReads.length, 4);
-    assert.equal(await page.evaluate('document.querySelector(".group-card[data-similarity=checked] .similarity-indicator").dataset.phase'), 'inconclusive');
-    assert.match(await page.evaluate('document.querySelector(".group-card[data-similarity=checked] .similarity-status").textContent'), /uncertain/);
+    assert.equal(await page.evaluate('document.querySelector(".group-card[data-similarity=checked] .similarity-indicator").dataset.phase'), 'limited');
+    assert.equal(await page.evaluate('document.querySelector(".group-card[data-similarity=checked] .similarity-status").textContent'), 'Grouped with limited evidence');
     assert.equal(await progress(), '', 'completed checks no longer contribute to remaining work');
   });
 
-test('incomplete similarity checks stay usable and differ from completed inconclusive checks',
+test('incomplete similarity checks stay usable with a quiet indicator and a specific failure explanation',
   { timeout: 40000 }, async t => {
     if (!findChrome()) return t.skip('Chrome required');
     let missing = true;
@@ -228,9 +231,10 @@ test('incomplete similarity checks stay usable and differ from completed inconcl
     await page.navigate(`${fixture.base}/curate-preview.html`);
     await page.waitFor('document.querySelector(".gate-backdrop input")');
     await page.evaluate('document.querySelector(".gate-backdrop input").value="smoke-secret";document.querySelector(".gate-backdrop button").click()');
-    await page.waitFor('document.querySelector(".is-stack .similarity-indicator[data-phase=attention]") && !document.querySelector("#refinement").textContent', { timeoutMs: 15000 });
+    await page.waitFor('document.querySelector(".is-stack .similarity-indicator[data-phase=limited]") && !document.querySelector("#refinement").textContent', { timeoutMs: 15000 });
     assert.equal(fixture.similarityReads.length, 4, 'one retry, then finished incomplete');
     const diagnostic = await page.evaluate('document.querySelector(".is-stack .similarity-indicator").title');
+    assert.match(diagnostic, /Grouped with limited evidence.*could not finish/);
     assert.match(diagnostic, /Immich has no search embedding/);
     assert.doesNotMatch(diagnostic, /retry|need attention/i);
     assert.doesNotMatch(diagnostic, /private-upstream-detail|00000000/);
@@ -247,14 +251,15 @@ test('incomplete similarity checks stay usable and differ from completed inconcl
     await page.waitFor('document.querySelector("#comparison-similarity .why-trigger")');
     await click('#comparison-similarity .why-trigger');
     const explanation = await page.evaluate('document.querySelector("#comparison-similarity").textContent');
-    assert.match(explanation, /not fully checked/);
+    assert.match(explanation, /Grouped with limited evidence/);
+    assert.match(explanation, /Immich has no search embedding/);
     assert.doesNotMatch(explanation, /Next retry:/); assert.match(explanation, /still choose/);
     assert.equal(await page.evaluate('document.querySelector("#photos [data-keeper]").disabled'), false);
     await click('[data-close=comparison]');
     missing = false;
     await click('#refresh');
     await page.waitFor('!document.querySelector("#refresh").disabled && document.querySelector(".is-stack")');
-    assert.equal(await page.evaluate('document.querySelector(".is-stack .similarity-indicator").textContent'), '!');
+    assert.equal(await page.evaluate('document.querySelector(".is-stack .similarity-indicator").textContent'), 'i');
     assert.deepEqual(fixture.similarityReads.map(r => r.queryAssetId), [fixture.id(1), fixture.id(2), fixture.id(3), fixture.id(1)]);
     await click('.is-stack');
     await page.waitFor('document.querySelector("#comparison").open && document.querySelector("#photos [data-choice=approve]") && !document.querySelector("#apply").disabled');

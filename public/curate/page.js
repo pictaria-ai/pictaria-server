@@ -2,7 +2,7 @@ import { CurateClient, request, decisionSummary } from './client.js';
 import { comesAfter } from './order.js';
 import { explanation } from './explanation.js';
 import { PreviewImages } from './preview-images.js';
-import { node, thumbnail, photoCard, groupCard, savedOutcome, outcomeLabel, similarityLabel, similarityIndicator } from './photos.js';
+import { node, thumbnail, photoCard, groupCard, savedOutcome, outcomeLabel, groupSimilarity, similarityLabel, similarityDetail, similarityIndicator } from './photos.js';
 
 const el = (id) => document.getElementById(id);
 const client = new CurateClient();
@@ -191,7 +191,7 @@ function showViewStatus(view) {
   ].filter(Boolean).join(' ');
   const activity = paused ? { state: 'paused' } : refinement?.state === 'searching' || metadata?.state === 'refreshing'
     ? { state: 'checking' } : checking ? { state: 'waiting' } : null;
-  const indicator = similarityIndicator(activity);
+  const indicator = similarityIndicator(activity, { warning: paused });
   if (indicator) {
     indicator.title = indicator.ariaLabel = el('refinement').title || (paused ? 'Stack checks paused' : 'Checking pending stacks in the background');
   }
@@ -209,13 +209,13 @@ function showComparisonSimilarity(status) {
   // A machine update is for the next view, not an instruction to abandon an
   // inspected comparison. Real scope/input conflicts still use the Save guards.
   if (status?.state === 'updated') status = null;
-  const title = status?.state === 'checked' && status.uncertain ? 'Similarity check inconclusive'
-    : status?.state === 'checked' ? 'Similarity checked' : similarityLabel(status);
-  const detail = (status?.problem ? `${status.problem} ` : '') + (['waiting', 'checking'].includes(status?.state)
-      ? 'This stack may change after checking. You can still choose which photos to keep.'
-      : status?.uncertain ? 'The evidence is inconclusive. You can still choose which photos to keep.'
-        : ['incomplete', 'paused', 'limited', 'unavailable'].includes(status?.state)
-          ? 'This stack has not been fully checked. You can still choose which photos to keep.' : '');
+  else status = groupSimilarity(state.groups.find(group => group.id === state.comparison?.groupId), status);
+  const title = similarityLabel(status);
+  const working = ['waiting', 'checking'].includes(status?.state);
+  const detail = [similarityDetail(status), working
+    ? 'This stack may change after checking. You can still choose which photos to keep.'
+    : status?.uncertain || ['incomplete', 'paused', 'limited', 'unavailable'].includes(status?.state)
+      ? 'You can still choose which photos to keep.' : ''].filter(Boolean).join(' ');
   for (const id of ['comparison-similarity','photo-similarity']) {
     const target = el(id);
     target.hidden = (!title && !(state.comparison?.ids.length > 1)) || (id === 'photo-similarity' && state.viewerMode === 'single');
@@ -231,12 +231,12 @@ function showComparisonSimilarity(status) {
     const copy = node('div'), heading = node('div', undefined, 'check-heading');
     heading.append(node('strong', title || 'Stack comparison'));
     if (state.comparison?.ids.length > 1)
-      heading.append(explanation(state.comparison, 'photo-stack-reason'));
+      heading.append(explanation(state.comparison, 'photo-stack-reason', status ? { title, detail } : null));
     copy.append(heading);
     if (detail) copy.append(node('p', detail));
     const indicator = similarityIndicator(status);
     target.replaceChildren(...(indicator ? [indicator] : []), copy);
-    target.classList.toggle('check-pending', Boolean(detail));
+    target.classList.toggle('check-pending', working);
   }
 }
 async function more() {

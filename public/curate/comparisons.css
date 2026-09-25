@@ -227,11 +227,9 @@ button {
   animation: similarity-spin 1.6s linear infinite;
 }
 .similarity-indicator[data-phase='checking'] { color: #60a5fa; animation-duration: .8s; }
-.similarity-indicator[data-phase='done'] { color: #4ade80; }
 .similarity-indicator[data-phase='attention'] { color: #fbbf24; }
-.similarity-indicator[data-phase='inconclusive'] { color: var(--p-muted); }
+.similarity-indicator[data-phase='limited'] { color: var(--p-muted); }
 :root[data-theme='light'] .similarity-indicator[data-phase='checking'] { color: #2563eb; }
-:root[data-theme='light'] .similarity-indicator[data-phase='done'] { color: #178052; }
 :root[data-theme='light'] .similarity-indicator[data-phase='attention'] { color: #aa6400; }
 #comparison-similarity { display: flex; align-items: center; gap: 12px; }
 #comparison-similarity[hidden] { display: none; }

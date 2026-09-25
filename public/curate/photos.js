@@ -74,37 +74,55 @@ export function photoCard(
   return card;
 }
 
+export function groupSimilarity(group, status = group?.similarity) {
+  return status ?? (group?.route === 'candidate-unconfirmed' ? { state: 'unavailable' }
+    : group?.route === 'manual-budget' ? { state: 'limited' }
+    : ['candidate-supported', 'single'].includes(group?.route) ? { state: 'local' } : null);
+}
+function similarityPhase(status) {
+  if (!status) return null;
+  if (status.paused || ['incomplete', 'paused', 'limited', 'unavailable'].includes(status.state)) return 'limited';
+  if (status.state === 'checking' || status.checking) return 'checking';
+  if (status.state === 'waiting' || status.state === 'updated' && status.pending) return 'waiting';
+  return status.uncertain ? 'limited' : null;
+}
 export function similarityLabel(status) {
-  switch (status?.state) {
-    case 'waiting': return 'Waiting for similarity check';
-    case 'checking': return `Checking nearby photos · ${status.done} of ${status.total}`;
-    case 'incomplete': return 'Similarity not fully checked';
-    case 'paused': return 'Similarity check paused';
-    case 'limited': return status.total ? 'Similarity check paused · storage limit' : 'Similarity not checked · automatic limit';
-    case 'updated': return status.paused ? 'Grouping updated · similarity check paused'
-      : status.checking ? 'Grouping updated · checking nearby photos'
-      : status.pending ? 'Grouping updated · checks still pending' : 'Updated grouping available';
-    case 'checked': return status.uncertain ? 'Check complete · similarity uncertain' : 'Similarity checked';
-    case 'local': return 'Ready · no similarity search needed';
-    case 'unavailable': return 'Similarity not checked';
-    default: return '';
+  switch (similarityPhase(status)) {
+    case 'limited': return 'Grouped with limited evidence';
+    case 'waiting': return 'Checking similarity · queued';
+    case 'checking': return 'Checking similarity' + (Number.isFinite(status.done) && Number.isFinite(status.total)
+      ? ` · ${status.done} of ${status.total}` : '');
+    default: return ['checked', 'local'].includes(status?.state) ? 'Ready to curate'
+      : status?.state === 'updated' ? 'Updated grouping available' : '';
   }
 }
+export function similarityDetail(status) {
+  let detail = '';
+  switch (status?.state) {
+    case 'waiting': detail = 'These nearby photos are waiting for a check slot.'; break;
+    case 'checking': detail = 'Similarity searches are running for these nearby photos.'; break;
+    case 'incomplete': detail = 'Similarity checking could not finish.'; break;
+    case 'paused': detail = 'Similarity checking is paused.'; break;
+    case 'limited': detail = status.total ? 'Saved check storage is full.' : 'These photos reached an automatic checking limit.'; break;
+    case 'unavailable': detail = 'Similarity searches are unavailable for this group.'; break;
+    case 'checked': detail = status.uncertain
+      ? 'Similarity searches finished, but the evidence was inconclusive.' : 'Similarity checking finished.'; break;
+    case 'local': detail = 'No similarity search was needed.'; break;
+    case 'updated': detail = 'An updated grouping is available. This view keeps its current photos.'; break;
+  }
+  return [detail, status?.problem].filter(Boolean).join(' ');
+}
 
-export function similarityIndicator(status) {
+export function similarityIndicator(status, { warning = false } = {}) {
   const label = similarityLabel(status);
-  if (!label) return null;
-  const state = status.state;
-  const phase = status.paused ? 'attention' : state === 'checking' || status.checking ? 'checking'
-    : state === 'waiting' || (state === 'updated' && status.pending) ? 'waiting'
-    : ['incomplete', 'paused', 'limited', 'unavailable'].includes(state) ? 'attention'
-    : status.uncertain ? 'inconclusive' : 'done';
-  const indicator = node('span', phase === 'done' ? '✓' : phase === 'attention' ? '!'
-    : phase === 'inconclusive' ? 'i' : '', 'similarity-indicator');
+  // Per-stack limitations are quiet information. Only overall paused work uses a warning.
+  const phase = warning ? 'attention' : similarityPhase(status);
+  if (!label || !phase) return null;
+  const indicator = node('span', phase === 'attention' ? '!' : phase === 'limited' ? 'i' : '', 'similarity-indicator');
   indicator.dataset.phase = phase;
   indicator.setAttribute('role', 'img');
-  indicator.setAttribute('aria-label', label);
-  indicator.title = [label, status.problem].filter(Boolean).join('. ');
+  indicator.title = [label, similarityDetail(status)].filter(Boolean).join('. ');
+  indicator.setAttribute('aria-label', indicator.title);
   return indicator;
 }
 
@@ -164,13 +182,10 @@ export function groupCard(group, open, { decide, select, selected = false, decid
       status.hidden = true; return;
     }
     group.similarity = value;
-    value ??= group.route === 'candidate-unconfirmed' ? { state: 'unavailable' }
-      : group.route === 'manual-budget' ? { state: 'limited' }
-      : ['candidate-supported', 'single'].includes(group.route) ? { state: 'local' } : null;
+    value = groupSimilarity(group, value);
     chip.textContent = group.memberCount > 1 ? `${group.memberCount} photos` : 'Single photo';
     const label = similarityLabel(value);
-    let indicator = similarityIndicator(value);
-    if (indicator?.dataset.phase === 'done') indicator = null;
+    const indicator = similarityIndicator(value);
     if (status.textContent !== label) status.textContent = label;
     status.title = label;
     // Progress temporarily replaces the date. Settled/incomplete details stay

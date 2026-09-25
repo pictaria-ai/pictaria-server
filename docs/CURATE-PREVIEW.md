@@ -13,8 +13,8 @@ PIC-382 adds [candidate stacking algorithm 3](CURATE-ALGORITHM.md): wider time
 candidates, contextual people signals, positive ThumbHash and reciprocal search
 ranks. Repeated searches that strongly favor two separate subgroups can now
 override a misleading ThumbHash match. The linked document owns exact rules,
-bounds and version history. Open the small similarity-status icon beside the
-comparison checkbox controls for a concise explanation. It appears on
+bounds and version history. Open **Why?** or the small similarity-status icon beside
+the comparison checkbox controls for a concise explanation. It appears on
 hover, keyboard focus or tap without moving the photos. Its initial text uses
 plain language grounded in recorded reasons; technical details are secondary.
 The stack lightbox exposes the same explanation through **Why?**.
@@ -190,16 +190,22 @@ group that may form several stacks, so it is not a count of final stack cards.
 Paused work has an attention indicator. Completed checks are quiet on cards; the
 comparison still exposes their status and explanation.
 
-Cards have a small status circle: a muted spinner while queued, a blue spinner
-while checking, an amber **!** for incomplete/unavailable checks, and a muted
-**i** for successfully checked but inconclusive groupings. Text labels explain each state;
-reduced-motion preferences stop the animation. Comparisons resolved locally say
-that no similarity search is needed. The open comparison uses a small icon at
-the right of the checkbox controls, with status and reasons on hover, focus or tap.
-The stack lightbox keeps the status text near the top. Pending, inconclusive or
-incomplete checks explain that manual choices are still possible.
-If an updated grouping becomes available, the notice explains that the current
-comparison stays fixed and closing it lets the grid update.
+Cards and comparisons use three simple presentations:
+
+- **Working:** a spinner labeled **Checking similarity**, with a queued label or
+  progress count where available. Reduced-motion preferences stop the animation.
+- **Ready:** no extra icon. Ordinary completion does not certify a perfect stack.
+  **Why?** remains available in the comparison, including when no search was needed.
+- **Limited evidence:** one muted **i** labeled **Grouped with limited evidence**.
+  This covers incomplete, unavailable, inconclusive and processing-limited checks.
+  Hover explains the specific cause; comparisons expose the same explanation through
+  **Why?**, available on hover, keyboard focus or tap. Successful but inconclusive
+  searches remain distinguishable from failed searches in the explanation.
+
+The open comparison keeps the small indicator or **Why?** at the right of its
+checkbox controls. The stack lightbox uses the same labels and reasons. Manual
+choices remain available in every status. Per-stack limitations do not use an
+amber warning; the header retains that treatment for overall paused work.
 
 Searches stay sequential but can start two seconds apart, up to 30 new automatic
 requests per minute. Slow responses add breathing room. The open comparison gets
@@ -217,8 +223,9 @@ affected cards; the grid adopts the result when browsing pauses. A single
 Checks that leave grouping unchanged do not request a new view. Results are applied as a complete time-candidate
 pass, never one search at a time. Missing targets and successful empty results
 remain unknown unless repeated subgroup evidence resolves the relationship.
-**Check complete · similarity uncertain** keeps the compatible
-time grouping provisional. Failed or unavailable searches do not fragment it.
+Successful searches with inconclusive results keep the compatible time grouping
+provisional, labeled **Grouped with limited evidence**. Failed or unavailable
+searches do not fragment it.
 Completed evidence is saved, so inactivity and server restarts do not repeat
 unchanged checks. Finished incomplete checks retain their safe reason and
 established grouping; interrupted in-flight work can repeat. Changes to photos,
@@ -235,17 +242,15 @@ never change underneath the user. Automatic updates retain the number of loaded
 pages where possible and anchor the scroll position to a surviving card. A failed
 update stops automatic replacement and asks for **Refresh**, disabling decisions
 until the view is reconciled. A failed similarity search gets one retry within the current pass. If it fails
-again, that candidate finishes as **not fully checked** and leaves the pending
+again, that candidate finishes with limited evidence and leaves the pending
 count. Its existing grouping remains usable, and human decisions work normally.
 There is no long-term repair queue or Retry now control. **Refresh** reloads the
 view; it does not restart finished checks.
 
-An amber **!** means **Similarity not fully checked**; its explanation gives a
-short reason. A muted **i** means **Check complete · similarity uncertain**:
-searches succeeded but the evidence was inconclusive. Neither asks the user to
-repair a stack. Completed supported work stays quiet on cards. The header shows
-active progress or paused work; once checks finish, it omits aggregate incomplete
-counts and the idle warning icon. Per-stack explanations remain available.
+Limited evidence does not ask the user to repair a stack. The header shows active
+progress or paused work; once checks finish, it omits aggregate incomplete counts
+and the idle warning icon. Per-stack explanations remain available.
+
 These outcomes survive restart without keeping partial search rows or retry
 deadlines. Source/connection changes may invalidate the outcome normally. Incomplete passes never supply partial ranking evidence
 for regrouping.
@@ -268,6 +273,22 @@ and explains that turning stacks off allows individual review. It never saves a
 page-sized subset as though it were the whole stack. Known thumbnail failures
 block Save until the previews can be retried.
 
+### Planned referee indicators
+
+The optional referees will add two independent indicators when integrated:
+**AI checked** for a successfully checked current grouping, and a gold **★**
+for Keeper Referee recommendations, with stars on the recommended photos and
+a recommendation count in the hover text. Either indicator can appear without
+the other; a keeper star does not imply that the Stack Referee ran.
+
+These badges must describe the current membership and applicable inputs. Changed
+photos or invalidated results must not retain a successful AI badge. A successful
+Stack Referee check can replace the limited-evidence icon when it resolves the
+grouping uncertainty; earlier evidence remains in **Why?**. Queued/running AI work
+uses a spinner naming the step. Unavailable AI results leave manual curation
+available with a quiet explanation rather than a permanent spinner. This is the
+agreed presentation plan only: this preview does not yet display AI referee badges
+or run these referees.
 ## Implementation boundaries
 
 - `public/curate/client.js` owns serialized view/comparison opens, tab ownership
