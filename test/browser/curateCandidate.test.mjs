@@ -8,6 +8,9 @@ import { join } from 'node:path';
 test('hash-supported stack updates automatically after closing, without changing an open selection',
   { timeout: 60000 }, async t => {
     if (!findChrome()) return t.skip('Chrome required');
+    // Launch before the server can start the gated 15-second similarity request.
+    const browser = await launchChrome(), page = await browser.newPage();
+    t.after(() => browser.stop());
     let release;
     const gate = new Promise(resolve => { release = resolve; });
     const fixture = await curatePreviewFixture({ stackSize: 4, singles: 0, metadataReady: true,
@@ -24,8 +27,7 @@ test('hash-supported stack updates automatically after closing, without changing
       }
       },
     });
-    const browser = await launchChrome(), page = await browser.newPage();
-    t.after(async () => { release(); await browser.stop(); await fixture.stop(); });
+    t.after(async () => { release(); await fixture.stop(); });
     const click = selector => page.evaluate(`document.querySelector(${JSON.stringify(selector)}).click()`);
     await page.navigate(`${fixture.base}/curate-preview.html`);
     await page.waitFor('document.querySelector(".gate-backdrop input")');
@@ -52,6 +54,8 @@ test('hash-supported stack updates automatically after closing, without changing
 test('candidate preview refines automatically, preserves selections, explains results and saves multiple keepers',
   { timeout: 60000 }, async t => {
     if (!findChrome()) return t.skip('Chrome required');
+    const browser = await launchChrome(), page = await browser.newPage();
+    t.after(() => browser.stop());
     let release;
     const gate = new Promise(resolve => { release = resolve; });
     const fixture = await curatePreviewFixture({ stackSize: 5, singles: 0, metadataReady: true,
@@ -69,8 +73,7 @@ test('candidate preview refines automatically, preserves selections, explains re
       }
       },
     });
-    const browser = await launchChrome(), page = await browser.newPage();
-    t.after(async () => { release(); await browser.stop(); await fixture.stop(); });
+    t.after(async () => { release(); await fixture.stop(); });
     const click = selector => page.evaluate(`document.querySelector(${JSON.stringify(selector)}).click()`);
     await page.navigate(`${fixture.base}/curate-preview.html`);
     await page.waitFor('document.querySelector(".gate-backdrop input")');
@@ -128,6 +131,8 @@ test('candidate preview refines automatically, preserves selections, explains re
 test('background status markers and inline progress remain stable on desktop and mobile',
   { timeout: 60000 }, async t => {
     if (!findChrome()) return t.skip('Chrome required');
+    const browser = await launchChrome(), page = await browser.newPage();
+    t.after(() => browser.stop());
     let release, first = true;
     const fixture = await curatePreviewFixture({ stackSize: 3, singles: 1, metadataReady: true,
       prepare(fixture) {
@@ -141,8 +146,7 @@ test('background status markers and inline progress remain stable on desktop and
         });
       },
     });
-    const browser = await launchChrome(), page = await browser.newPage();
-    t.after(async () => { release?.(); await browser.stop(); await fixture.stop(); });
+    t.after(async () => { release?.(); await fixture.stop(); });
     const click = selector => page.evaluate(`document.querySelector(${JSON.stringify(selector)}).click()`);
     await page.navigate(`${fixture.base}/curate-preview.html`);
     await page.waitFor('document.querySelector(".gate-backdrop input")');
