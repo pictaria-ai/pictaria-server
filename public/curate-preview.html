@@ -1,5 +1,5 @@
 <!doctype html>
-<html lang="en">
+<html lang="en" class="curate-preview">
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
@@ -37,7 +37,10 @@
         </nav>
         <div class="view-notices">
           <span id="updates" class="p-muted" hidden role="status"><span id="updates-copy"></span></span>
-          <span id="enrich-note" hidden role="status" title="Enrich is running — Stacks may change as photos are added.">Enrich is running — Stacks may change as photos are added.</span>
+          <span id="enrich-note" hidden role="status">
+            <span class="enrich-full">Enrich is running — Stacks may change as photos are added.</span>
+            <span class="enrich-compact">Enrich running — stacks may change.</span>
+          </span>
         </div>
         <div class="refresh-tools">
           <span id="check-activity" aria-live="polite"></span>

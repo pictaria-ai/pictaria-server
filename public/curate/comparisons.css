@@ -1,3 +1,4 @@
+html.curate-preview { scrollbar-gutter: stable; }
 main {
   max-width: 1500px;
   margin: auto;
@@ -67,6 +68,7 @@ button {
 }
 #updates { grid-row: 1; }
 #enrich-note { grid-row: 2; color: var(--p-danger); font-size: 12px; }
+.enrich-compact { display: none; }
 .refresh-tools { grid-column: 3; }
 .toolbar {
   display: grid;
@@ -692,6 +694,8 @@ dialog::backdrop {
 }
 
 @media (max-width: 900px) {
+  .enrich-full { display: none; }
+  .enrich-compact { display: inline; }
   .view-notices { grid-column: 1 / -1; grid-row: 2; }
   .section-tabs, .refresh-tools { grid-row: 1; }
   .toolbar { grid-template-rows: 40px; margin: 12px 0 8px; gap: 8px; }

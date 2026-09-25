@@ -39,6 +39,7 @@ then selection on the left with shown counts and active background progress
 aligned together on the right. The header checkbox appears in Singles and Decided;
 All still allows checking individual single-photo cards. Hiding Pending-only
 filters or the selection checkbox does not move shared controls or the photo grid.
+The page reserves scrollbar space to keep controls aligned between long and short views.
 On narrow screens, **Filters** reveals date order, category and Search controls.
 Counts and progress each keep their own line, and the selection slot remains
 reserved in All and Stacks. Desktop keeps filters visible. The remembered sort is not changed by collapsing them.
@@ -48,7 +49,8 @@ stacks may change as photos are added. It follows the live run state through
 the existing status updates, without needing Refresh or an additional poll.
 The notice stays on the lower of two reserved lines, with temporary update text
 above it, so neither message shifts the other. On narrow screens, these lines
-sit below the header controls.
+sit below the header controls and use the shorter **Enrich running — stacks may
+change.** wording, readable without a hover tooltip.
 
 Search updates after a short typing pause and keeps focus and cursor position
 while loading results. Text entered during an active request becomes the next
@@ -170,8 +172,10 @@ search draft has not been applied.
   only after an accepted save (not a stack draft), and does not shorten the Undo
   window when it disappears. Another save starts a fresh reminder.
   The main page's last-action bar can be dismissed with **×** on its right edge.
-  Dismissing it does not cancel synchronization or Undo; the lightbox and comparison
-  Undo controls remain available. The next saved action shows the bar again.
+  Dismissing it does not cancel synchronization or Undo; **Z** remains available
+  on the grid as well as in the lightbox and comparison. Keyboard shortcuts are
+  ignored while editing a field or while another action is pending. The next saved
+  action shows the bar again.
   The visible Undo affordance does not survive a page reload; saved decisions and
   corrections do. Undo feedback says **Undid choices** and separately reports
   whether the restored tags have synchronized. Older decisions remain accessible

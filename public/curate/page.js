@@ -929,7 +929,7 @@ document.addEventListener('keydown', (event) => {
   if (event.ctrlKey || event.metaKey || event.altKey || event.repeat || state.busy || state.loading || state.opening || state.continuing || client.saved.pending) return;
   const key = event.key.toLowerCase();
   const outcome = {y:'approve',a:'approve',f:'favorite',s:'reviewed',v:'reviewed',n:'reject',r:'reject'}[key];
-  const undo = el('photo-view').open ? el('photo-undo') : el('comparison').open ? el('comparison-undo') : null;
+  const undo = el('photo-view').open ? el('photo-undo') : el('comparison').open ? el('comparison-undo') : el('undo');
   if (key === 'z' && undo && state.undo?.until > Date.now() && !undo.disabled) {
     event.preventDefault(); undo.click(); return;
   }

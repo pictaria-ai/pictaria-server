@@ -16,11 +16,14 @@ All notable changes to Pictaria Server are documented here. This project follows
   text next, and failed requests preserve the search draft.
   A red notice beside the header spinner warns while Enrich is running that
   stacks may change as photos arrive. It keeps a fixed lower line when update
-  text appears above it. Card check progress temporarily replaces
+  text appears above it, with shorter fully visible wording on phones. Reserved
+  scrollbar space prevents sideways movement between long and short views.
+  Card check progress temporarily replaces
   the capture date on the same line, then restores it without resizing cards.
   The lightbox briefly shows **Saved — press Z to undo** after saving, without
   shortening the existing Undo window. The last-action bar has a dismiss button;
   dismissing it leaves Undo available and the next saved action shows it again.
+  **Z** also undoes the last save from the grid, except while editing a field.
   Stack status is simplified to a working spinner, quiet readiness, or a muted
   **i** labeled **Grouped with limited evidence**. Hover and **Why?** retain the
   specific reason, including whether searches failed or finished inconclusively.

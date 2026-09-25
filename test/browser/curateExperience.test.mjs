@@ -85,9 +85,16 @@ test(
     await wait('!document.querySelector("#photo-view").open');
     await click('#dismiss-receipt');
     assert.equal(await page.evaluate('document.querySelector("#receipt").hidden'), true);
-    await click('.group-card:not(.is-stack) .cover');
-    await wait(`${photo(1002)} && !document.querySelector('[data-photo-action=approve]').disabled`);
-    // Dismissing the main-page feedback must leave the same keyboard Undo available.
+    const savedOperations = fixture.repo.db.prepare('SELECT COUNT(*) n FROM decision_operations').get().n;
+    await page.evaluate('document.querySelector("#search").focus()');
+    await key('z'); // Editing a field must not undo the saved choice.
+    assert.equal(fixture.repo.db.prepare('SELECT COUNT(*) n FROM decision_operations').get().n, savedOperations);
+    await page.evaluate('document.activeElement.blur()');
+    await key('z', { modifiers: 2 }); // Preserve native Ctrl-Z.
+    await key('z', { modifiers: 4 }); // Preserve native Meta-Z.
+    assert.equal(fixture.repo.db.prepare('SELECT COUNT(*) n FROM decision_operations').get().n, savedOperations);
+    assert.equal(await page.evaluate('document.querySelector("#photo-view").open || document.querySelector("#comparison").open'), false);
+    // Grid Z still works after dismissing feedback, restoring the prior single.
     await key('z');
     await wait(`${photo(1001)} && !document.querySelector('[data-photo-action=approve]').disabled`);
     assert.ok(
