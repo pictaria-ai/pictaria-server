@@ -46,7 +46,9 @@ reserved in All and Stacks. Desktop keeps filters visible. The remembered sort i
 While Enrich is running, a red notice to the left of the header spinner says
 stacks may change as photos are added. It follows the live run state through
 the existing status updates, without needing Refresh or an additional poll.
-On narrow screens, notices use a reserved line below the header controls.
+The notice stays on the lower of two reserved lines, with temporary update text
+above it, so neither message shifts the other. On narrow screens, these lines
+sit below the header controls.
 
 Search updates after a short typing pause and keeps focus and cursor position
 while loading results. Text entered during an active request becomes the next

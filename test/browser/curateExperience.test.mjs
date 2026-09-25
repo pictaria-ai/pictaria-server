@@ -80,7 +80,9 @@ test(
     await wait('document.querySelector("#photo-undo-hint").hidden');
     assert.deepEqual(await lightboxLayout(), beforeHintFades, 'reminder cannot resize or move the photo');
     assert.equal(await page.evaluate('document.querySelector("#photo-undo").disabled'), false, 'Undo outlives its brief reminder');
-    await click('[data-close=photo-view]');
+    // Native input gives idle regrouping the same pause as a real user closing the viewer.
+    await key('Escape', { code: 'Escape', windowsVirtualKeyCode: 27 });
+    await wait('!document.querySelector("#photo-view").open');
     await click('#dismiss-receipt');
     assert.equal(await page.evaluate('document.querySelector("#receipt").hidden'), true);
     await click('.group-card:not(.is-stack) .cover');
