@@ -2,12 +2,13 @@ import { CurateClient, request, decisionSummary } from './client.js';
 import { comesAfter } from './order.js';
 import { explanation } from './explanation.js';
 import { PreviewImages } from './preview-images.js';
-import { node, thumbnail, photoCard, groupCard, savedOutcome, outcomeLabel, similarityLabel, similarityIndicator } from './photos.js';
+import { node, thumbnail, photoCard, groupCard, savedOutcome, outcomeLabel, groupSimilarity, similarityLabel, similarityDetail, similarityIndicator } from './photos.js';
 
 const el = (id) => document.getElementById(id);
 const client = new CurateClient();
 const previews = new PreviewImages();
 const SORT_PREFERENCE = 'pictaria.curate.sort';
+let undoHintUntil = 0, undoHintTimer;
 const state = {
   section: 'pending', category: 'all', selected: new Set(), removed: new Map(),
   viewerMode: 'stack', actionContext: null, continuing: false,
@@ -83,7 +84,7 @@ function recovery() {
   el('retry-action').disabled = state.busy;
   const locked = state.busy || state.opening || state.continuing || Boolean(client.saved.pending);
   el('refresh').disabled = locked || state.loading;
-  el('search').disabled = locked || state.loading;
+  el('search').disabled = locked;
   el('sort').disabled = el('category').disabled = locked || state.loading;
   el('more').disabled = locked || state.loading;
   for (const button of document.querySelectorAll('#filters button, #sections button, .group-card button, .group-card input'))
@@ -94,6 +95,7 @@ function recovery() {
   selection();
   syncViewer();
   bulkSelection();
+  resumeSearch();
 }
 function selection() {
   el('selection-count').textContent = state.comparison ? decisionSummary(state.outcomes) : '';
@@ -160,6 +162,7 @@ async function refresh({ automatic = false, keepLightbox = false } = {}) {
   }
 }
 function showViewStatus(view) {
+  el('enrich-note').hidden = !view.enrichRunning;
   const loadedStacks = state.groups.filter(g => g.memberCount > 1).length;
   const removedStacks = [...state.removed.values()].filter(g => g.memberCount > 1).length;
   const stacks = Math.max(0, (view.counts?.stacks ?? loadedStacks) - removedStacks);
@@ -177,22 +180,18 @@ function showViewStatus(view) {
   if (state.comparison) el('metadata-retry').hidden = !metadata?.problem;
   const paused = refinement?.state === 'paused' || refinement?.state === 'limited';
   const remaining = refinement?.remainingGroups ?? 0;
-  const incomplete = refinement?.incompleteGroups ?? 0;
   const checking = remaining > 0;
   const progress = checking ? ` · ${remaining.toLocaleString()} remaining` : '';
-  const incompleteLabel = incomplete ? `${incomplete.toLocaleString()} not fully checked` : '';
-  const status = paused ? `Checks paused${progress}` : checking ? `Checking stacks${progress}${incomplete ? ` · ${incompleteLabel}` : ''}`
-    : incompleteLabel ? `${incompleteLabel} · Ready to curate`
+  const status = paused ? `Checks paused${progress}` : checking ? `Checking stacks${progress}`
     : metadata?.problem ? 'Photo information paused'
     : metadata?.state === 'refreshing' ? 'Refreshing photo information' : '';
   el('refinement').textContent = status;
-  el('refinement').title = [refinement?.problem || metadata?.problem,
-    incomplete ? 'These checks have finished with limited information. You can curate the photos normally.' : '',
+  el('refinement').title = [paused ? refinement?.problem : metadata?.problem,
     checking ? 'Remaining checks across all pending photos, including outside this view. Includes queued and in-progress checks. Each check covers nearby photos that may form more than one stack.' : '',
   ].filter(Boolean).join(' ');
   const activity = paused ? { state: 'paused' } : refinement?.state === 'searching' || metadata?.state === 'refreshing'
-    ? { state: 'checking' } : checking ? { state: 'waiting' } : incomplete ? { state: 'incomplete' } : null;
-  const indicator = similarityIndicator(activity);
+    ? { state: 'checking' } : checking ? { state: 'waiting' } : null;
+  const indicator = similarityIndicator(activity, { warning: paused });
   if (indicator) {
     indicator.title = indicator.ariaLabel = el('refinement').title || (paused ? 'Stack checks paused' : 'Checking pending stacks in the background');
   }
@@ -210,13 +209,13 @@ function showComparisonSimilarity(status) {
   // A machine update is for the next view, not an instruction to abandon an
   // inspected comparison. Real scope/input conflicts still use the Save guards.
   if (status?.state === 'updated') status = null;
-  const title = status?.state === 'checked' && status.uncertain ? 'Similarity check inconclusive'
-    : status?.state === 'checked' ? 'Similarity checked' : similarityLabel(status);
-  const detail = (status?.problem ? `${status.problem} ` : '') + (['waiting', 'checking'].includes(status?.state)
-      ? 'This stack may change after checking. You can still choose which photos to keep.'
-      : status?.uncertain ? 'The evidence is inconclusive. You can still choose which photos to keep.'
-        : ['incomplete', 'paused', 'limited', 'unavailable'].includes(status?.state)
-          ? 'This stack has not been fully checked. You can still choose which photos to keep.' : '');
+  else status = groupSimilarity(state.groups.find(group => group.id === state.comparison?.groupId), status);
+  const title = similarityLabel(status);
+  const working = ['waiting', 'checking'].includes(status?.state);
+  const detail = [similarityDetail(status), working
+    ? 'This stack may change after checking. You can still choose which photos to keep.'
+    : status?.uncertain || ['incomplete', 'paused', 'limited', 'unavailable'].includes(status?.state)
+      ? 'You can still choose which photos to keep.' : ''].filter(Boolean).join(' ');
   for (const id of ['comparison-similarity','photo-similarity']) {
     const target = el(id);
     target.hidden = (!title && !(state.comparison?.ids.length > 1)) || (id === 'photo-similarity' && state.viewerMode === 'single');
@@ -232,12 +231,12 @@ function showComparisonSimilarity(status) {
     const copy = node('div'), heading = node('div', undefined, 'check-heading');
     heading.append(node('strong', title || 'Stack comparison'));
     if (state.comparison?.ids.length > 1)
-      heading.append(explanation(state.comparison, 'photo-stack-reason'));
+      heading.append(explanation(state.comparison, 'photo-stack-reason', status ? { title, detail } : null));
     copy.append(heading);
     if (detail) copy.append(node('p', detail));
     const indicator = similarityIndicator(status);
     target.replaceChildren(...(indicator ? [indicator] : []), copy);
-    target.classList.toggle('check-pending', Boolean(detail));
+    target.classList.toggle('check-pending', working);
   }
 }
 async function more() {
@@ -475,6 +474,7 @@ function syncViewer() {
 function syncReceipts() {
   const available = Boolean(state.undo && state.undo.until > Date.now());
   const locked = state.busy || state.loading || state.opening || state.continuing || Boolean(client.saved.pending);
+  el('photo-undo-hint').hidden = !available || locked || Date.now() >= undoHintUntil;
   el('undo').hidden = !available;
   el('undo').disabled = locked || !available;
   for (const prefix of ['photo', 'comparison']) {
@@ -482,6 +482,13 @@ function syncReceipts() {
     el(`${prefix}-receipt-text`).textContent = el('receipt-text').textContent;
     el(`${prefix}-undo`).disabled = locked || !available;
   }
+}
+function showUndoHint() {
+  // This is a brief reminder, independent of the saved action's Undo deadline.
+  clearTimeout(undoHintTimer);
+  undoHintUntil = Date.now() + 5000;
+  syncReceipts();
+  undoHintTimer = setTimeout(syncReceipts, 5000);
 }
 async function action(work, context = null) {
   if (state.busy || state.opening || state.continuing || client.saved.pending) return;
@@ -588,6 +595,7 @@ async function accepted({ kind, result }) {
       state.continuing = false;
       recovery();
     }
+    if (kind === 'decision' && result.undo && result.savedLocally) showUndoHint();
   }
 }
 function renderGroups() {
@@ -615,8 +623,7 @@ function setControls(view) {
 function bulkSelection() {
   const singles = state.groups.filter(g => g.memberCount === 1);
   const locked = state.loading || state.busy || state.continuing || state.autoUpdateFailed || Boolean(client.saved.pending);
-  el('bulk-label').hidden = state.section === 'pending' && state.kind === 'stacks';
-  el('bulk-label-text').textContent = state.section === 'decided' || state.kind === 'singles' ? 'Check shown photos' : 'Check single photos';
+  el('bulk-label').hidden = state.section === 'pending' && state.kind !== 'singles';
   const count = singles.filter(g => state.selected.has(g.id)).length;
   el('select-shown').checked = count > 0 && count === singles.length;
   el('select-shown').indeterminate = count > 0 && count < singles.length;
@@ -650,15 +657,16 @@ function decideSingle(outcome) {
 async function changeFilter(patch) {
   if (state.busy || state.loading || client.saved.pending) return;
   const previous = { kind: state.kind, section: state.section, category: state.category, search: state.search };
-  Object.assign(state,patch);
+  Object.assign(state, { search: el('search').value.trim() }, patch);
   try { await refresh(); }
-  catch (e) { Object.assign(state,previous); if (state.view) setControls(state.view); el('search').value=state.search; throw e; }
+  catch (e) { Object.assign(state,previous); if (state.view) setControls(state.view); throw e; }
 }
 // Delay changes until browsing pauses. An open comparison, a selected batch,
 // or a pending receipt always owns its current snapshot.
 let updateTimer, lastInteraction = 0, lastAutomatic = 0;
 function canUpdate() {
   return !document.hidden && !state.busy && !state.loading && !state.continuing && !client.saved.pending &&
+    el('search').value.trim() === state.search &&
     !state.selected.size && !document.querySelector('dialog[open], .page-tools[open], .card-menu[open]') &&
     !document.activeElement?.matches('input:not([type=checkbox]),select,textarea,[contenteditable=true]');
 }
@@ -713,14 +721,14 @@ window.addEventListener('scroll', () => { lastInteraction = Date.now(); schedule
 document.addEventListener('focusout', () => setTimeout(scheduleUpdates, 0));
 document.addEventListener('visibilitychange', scheduleUpdates);
 for (const menu of document.querySelectorAll('details')) menu.addEventListener('toggle', scheduleUpdates);
-for (const dialog of document.querySelectorAll('dialog')) dialog.addEventListener('close', scheduleUpdates);
+for (const dialog of document.querySelectorAll('dialog')) dialog.addEventListener('close', () => { scheduleUpdates(); resumeSearch(); });
 
 el('toggle-filters').onclick = () => {
   const expanded = el('toggle-filters').getAttribute('aria-expanded') !== 'true';
   el('toggle-filters').setAttribute('aria-expanded', String(expanded));
   document.querySelector('.toolbar').classList.toggle('filters-expanded', expanded);
 };
-el('refresh').onclick = () => run(() => refresh());
+el('refresh').onclick = () => run(() => changeFilter({ search: el('search').value.trim() }));
 el('more').onclick = () => run(more);
 el('sort').onchange = () =>
   run(async () => {
@@ -728,7 +736,7 @@ el('sort').onchange = () =>
     const previous = state.sort;
     state.sort = el('sort').value;
     try {
-      await refresh();
+      await changeFilter({});
     } catch (e) {
       // Failed replacement leaves the displayed cards in their previous order.
       state.sort = previous;
@@ -744,10 +752,26 @@ el('sort').onchange = () =>
 for (const button of document.querySelectorAll('#filters button')) button.onclick = () => run(() => changeFilter({ kind: button.dataset.kind }));
 for (const button of document.querySelectorAll('#sections button')) button.onclick = () => run(() => changeFilter({ section: button.dataset.section }));
 el('category').onchange = () => run(() => changeFilter({ category: el('category').value }));
-let searchTimer;
-el('search').oninput = () => {
+let searchTimer, searchQueued = false;
+function scheduleSearch(delay) {
   clearTimeout(searchTimer);
-  searchTimer = setTimeout(() => run(() => changeFilter({ search: el('search').value.trim() })),300);
+  searchTimer = setTimeout(() => {
+    searchTimer = null;
+    // Keep the latest text through a slow view replacement or an open comparison.
+    // Do not overlap replacements: each request must replace the last accepted view.
+    if (state.loading || el('search').disabled || document.querySelector('dialog[open]')) return;
+    searchQueued = false;
+    const search = el('search').value.trim();
+    if (search !== state.search) run(() => changeFilter({ search }));
+  }, delay);
+}
+function resumeSearch() {
+  // Run after filter rollback/error handling settles, without resetting an active debounce.
+  if (searchQueued && !searchTimer) scheduleSearch(0);
+}
+el('search').oninput = () => {
+  searchQueued = true;
+  scheduleSearch(300);
 };
 el('select-shown').onchange = () => {
   for (const group of state.groups) if (group.memberCount === 1)
@@ -844,6 +868,7 @@ el('undo').onclick = () =>
       ),
     ),
   );
+el('dismiss-receipt').onclick = () => { el('receipt').hidden = true; };
 el('retry-sync').onclick = () =>
   run(async () => {
     await request('operations/retry', { operationId: state.syncId });
@@ -904,7 +929,7 @@ document.addEventListener('keydown', (event) => {
   if (event.ctrlKey || event.metaKey || event.altKey || event.repeat || state.busy || state.loading || state.opening || state.continuing || client.saved.pending) return;
   const key = event.key.toLowerCase();
   const outcome = {y:'approve',a:'approve',f:'favorite',s:'reviewed',v:'reviewed',n:'reject',r:'reject'}[key];
-  const undo = el('photo-view').open ? el('photo-undo') : el('comparison').open ? el('comparison-undo') : null;
+  const undo = el('photo-view').open ? el('photo-undo') : el('comparison').open ? el('comparison-undo') : el('undo');
   if (key === 'z' && undo && state.undo?.until > Date.now() && !undo.disabled) {
     event.preventDefault(); undo.click(); return;
   }

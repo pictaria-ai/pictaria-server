@@ -309,7 +309,7 @@ lifecycle.register('backup', 3000, (timeoutMs) => awaitDrain(backupDrain, timeou
 lifecycle.register('thumbhash-backfill', 3000, (timeoutMs) => awaitDrain(thumbhashBackfill, timeoutMs));
 
 const features = [
-  createCurateRoutes({ curate, review }),
+  createCurateRoutes({ curate, review, enrichRunner }),
   createActivityRoutes({ activityHistory }),
   createEnrichRoutes({ review, aiTagSync, enrichRunner, taxonomy, profiles, repo, requireImmich, config, immich, captionWriteback, referee, activityLog }),
   createAlbumsRoutes({ immich, store: albumStore, config, requireImmich, enrichRepo: repo }),

@@ -7,12 +7,36 @@ All notable changes to Pictaria Server are documented here. This project follows
 
 ### Development
 
+- Curate Preview places All/Stacks/Singles on the left and date, category and
+  Search filters on the right, with Search last. Shown counts and active progress
+  share the right side of the status row; the header checkbox appears in Singles
+  and Decided. Finished incomplete checks keep their per-stack explanations
+  without leaving an aggregate warning in the header. Search stays focused and
+  editable while results load; typing during a slow request applies the latest
+  text next, and failed requests preserve the search draft.
+  A red notice beside the header spinner warns while Enrich is running that
+  stacks may change as photos arrive. It keeps a fixed lower line when update
+  text appears above it, with shorter fully visible wording on phones. Reserved
+  scrollbar space prevents sideways movement between long and short views.
+  Card check progress temporarily replaces
+  the capture date on the same line, then restores it without resizing cards.
+  The lightbox briefly shows **Saved — press Z to undo** after saving, without
+  shortening the existing Undo window. The last-action bar has a dismiss button;
+  dismissing it leaves Undo available and the next saved action shows it again.
+  **Z** also undoes the last save from the grid, except while editing a field.
+  Stack status is simplified to a working spinner, quiet readiness, or a muted
+  **i** labeled **Grouped with limited evidence**. Hover and **Why?** retain the
+  specific reason, including whether searches failed or finished inconclusively.
+  Normal comparisons keep **Why?** without a completion checkmark.
+  Explanations show useful details together without a nested dropdown or duplicate
+  raw wording; the algorithm version remains in a small muted footer.
+
 - Curate Preview settles failed similarity checks after one retry instead of
   keeping a long-term repair queue. Incomplete groupings remain ready for human
   curation, and healthy stacks continue processing. Finished outcomes survive
   restart; partial-pass checkpoints and retry deadlines are removed. Refresh
-  reloads the view without restarting checks. Amber **!** now means not fully
-  checked; a muted **i** means checked but inconclusive. Saving one stack now
+  reloads the view without restarting checks. Failed and inconclusive checks use
+  the same muted information indicator, with distinct explanations. Saving one stack now
   preserves its checked/incomplete neighbours across restart. Upcoming comparisons
   and visible cards get priority; open comparisons no longer prompt users to
   close them for routine grouping updates. Enrich schema 18 /

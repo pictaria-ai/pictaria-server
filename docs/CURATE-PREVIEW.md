@@ -13,10 +13,13 @@ PIC-382 adds [candidate stacking algorithm 3](CURATE-ALGORITHM.md): wider time
 candidates, contextual people signals, positive ThumbHash and reciprocal search
 ranks. Repeated searches that strongly favor two separate subgroups can now
 override a misleading ThumbHash match. The linked document owns exact rules,
-bounds and version history. Open the small similarity-status icon beside the
-comparison checkbox controls for a concise explanation. It appears on
-hover, keyboard focus or tap without moving the photos. Its initial text uses
-plain language grounded in recorded reasons; technical details are secondary.
+bounds and version history. Open **Why?** or the small similarity-status icon beside
+the comparison checkbox controls for a concise explanation. It appears on
+hover, keyboard focus or tap without moving the photos. One expanded explanation
+combines check limitations, plain-language grouping reasons and useful specifics,
+without a nested Technical details dropdown or duplicate raw wording. Recorded
+reasons without a plain-language translation remain visible. A small muted footer
+identifies the algorithm version for troubleshooting.
 The stack lightbox exposes the same explanation through **Why?**.
 
 The current `/curate.html` remains the default during this staging step. The
@@ -34,12 +37,29 @@ in this preview, its proposed partitions are never saved.
 ## Review flow
 
 The header has three stable rows: Pending/Decided with activity, Refresh and More;
-search/date order with category and All/Stacks/Singles; then selection, counts
-and background progress. Hiding Pending-only filters or the selection checkbox
-does not move shared controls or the photo grid. On narrow screens, **Filters**
-reveals search, date order and category controls. Counts and progress each keep
-their own line, and the selection slot remains reserved in Stacks. Desktop keeps
-filters visible. The remembered sort is not changed by collapsing them.
+All/Stacks/Singles on the left with date order, category and Search on the right;
+then selection on the left with shown counts and active background progress
+aligned together on the right. The header checkbox appears in Singles and Decided;
+All still allows checking individual single-photo cards. Hiding Pending-only
+filters or the selection checkbox does not move shared controls or the photo grid.
+The page reserves scrollbar space to keep controls aligned between long and short views.
+On narrow screens, **Filters** reveals date order, category and Search controls.
+Counts and progress each keep their own line, and the selection slot remains
+reserved in All and Stacks. Desktop keeps filters visible. The remembered sort is not changed by collapsing them.
+
+While Enrich is running, a red notice to the left of the header spinner says
+stacks may change as photos are added. It follows the live run state through
+the existing status updates, without needing Refresh or an additional poll.
+The notice stays on the lower of two reserved lines, with temporary update text
+above it, so neither message shifts the other. On narrow screens, these lines
+sit below the header controls and use the shorter **Enrich running — stacks may
+change.** wording, readable without a hover tooltip.
+
+Search updates after a short typing pause and keeps focus and cursor position
+while loading results. Text entered during an active request becomes the next
+search, with only the latest draft submitted. A failed request leaves that draft
+editable; **Refresh** searches it again. Background regrouping waits while a
+search draft has not been applied.
 
 - **Pending** shows all pending photos by default. All, Stacks and Singles
   filter the same view. **All categories** can narrow it to the existing Enrich
@@ -56,14 +76,18 @@ filters visible. The remembered sort is not changed by collapsing them.
 - Cards show a cover, up to three member thumbnails, available caption, capture date/time and stack size. Filenames are omitted.
   Captions are limited to one line with an ellipsis so decision buttons stay
   aligned. Hover for the full caption, or open the lightbox to read it.
+  Waiting/checking progress temporarily replaces the capture date on its existing
+  line. The date returns when checking stops, including incomplete or inconclusive
+  outcomes; those details remain on the status icon and in the comparison.
+  Long progress text is shortened with an ellipsis rather than enlarging the card.
   **Yes / Skip / Fav / No** are direct actions for single photos: Yes keeps a
   photo, Skip marks it reviewed without keeping it, Fav keeps it as a favorite,
   and No marks it Never show. None of these deletes the photo. Click the image for
   large inspection; a stack opens its comparison directly, without a separate
   Compare button. The shared Settings gear
   opens the Curate section, without a second settings button on the page.
-- **Check single photos** checks the singles currently loaded, excluding stacks.
-  In Singles and Decided it reads **Check shown photos**; Stacks hides it.
+- **Check shown photos** checks the currently loaded photos in Singles or Decided.
+  All and Stacks hide this header control; All retains each single-photo checkbox.
   Loading more does not check additional photos. The fixed bottom action bar does not move the grid. Checked singles expose the same
   **Yes / Skip / Fav / No** actions in one undoable operation
   (up to 1,000 photos). The server verifies these are still single photos at both
@@ -146,6 +170,15 @@ filters visible. The remembered sort is not changed by collapsing them.
   second row, and the receipt text is available to assistive technology.
 - Immediate Undo is conditional on no newer human decision on any affected photo.
   The last action remains undoable until its server deadline (30 minutes).
+  After saving, the lightbox shows **Saved — press Z to undo** over the bottom
+  of the photo for five seconds. This reminder does not move the layout, appears
+  only after an accepted save (not a stack draft), and does not shorten the Undo
+  window when it disappears. Another save starts a fresh reminder.
+  The main page's last-action bar can be dismissed with **×** on its right edge.
+  Dismissing it does not cancel synchronization or Undo; **Z** remains available
+  on the grid as well as in the lightbox and comparison. Keyboard shortcuts are
+  ignored while editing a field or while another action is pending. The next saved
+  action shows the bar again.
   The visible Undo affordance does not survive a page reload; saved decisions and
   corrections do. Undo feedback says **Undid choices** and separately reports
   whether the restored tags have synchronized. Older decisions remain accessible
@@ -164,16 +197,22 @@ group that may form several stacks, so it is not a count of final stack cards.
 Paused work has an attention indicator. Completed checks are quiet on cards; the
 comparison still exposes their status and explanation.
 
-Cards have a small status circle: a muted spinner while queued, a blue spinner
-while checking, an amber **!** for incomplete/unavailable checks, and a muted
-**i** for successfully checked but inconclusive groupings. Text labels explain each state;
-reduced-motion preferences stop the animation. Comparisons resolved locally say
-that no similarity search is needed. The open comparison uses a small icon at
-the right of the checkbox controls, with status and reasons on hover, focus or tap.
-The stack lightbox keeps the status text near the top. Pending, inconclusive or
-incomplete checks explain that manual choices are still possible.
-If an updated grouping becomes available, the notice explains that the current
-comparison stays fixed and closing it lets the grid update.
+Cards and comparisons use three simple presentations:
+
+- **Working:** a spinner labeled **Checking similarity**, with a queued label or
+  progress count where available. Reduced-motion preferences stop the animation.
+- **Ready:** no extra icon. Ordinary completion does not certify a perfect stack.
+  **Why?** remains available in the comparison, including when no search was needed.
+- **Limited evidence:** one muted **i** labeled **Grouped with limited evidence**.
+  This covers incomplete, unavailable, inconclusive and processing-limited checks.
+  Hover explains the specific cause; comparisons expose the same explanation through
+  **Why?**, available on hover, keyboard focus or tap. Successful but inconclusive
+  searches remain distinguishable from failed searches in the explanation.
+
+The open comparison keeps the small indicator or **Why?** at the right of its
+checkbox controls. The stack lightbox uses the same labels and reasons. Manual
+choices remain available in every status. Per-stack limitations do not use an
+amber warning; the header retains that treatment for overall paused work.
 
 Searches stay sequential but can start two seconds apart, up to 30 new automatic
 requests per minute. Slow responses add breathing room. The open comparison gets
@@ -191,8 +230,9 @@ affected cards; the grid adopts the result when browsing pauses. A single
 Checks that leave grouping unchanged do not request a new view. Results are applied as a complete time-candidate
 pass, never one search at a time. Missing targets and successful empty results
 remain unknown unless repeated subgroup evidence resolves the relationship.
-**Check complete · similarity uncertain** keeps the compatible
-time grouping provisional. Failed or unavailable searches do not fragment it.
+Successful searches with inconclusive results keep the compatible time grouping
+provisional, labeled **Grouped with limited evidence**. Failed or unavailable
+searches do not fragment it.
 Completed evidence is saved, so inactivity and server restarts do not repeat
 unchanged checks. Finished incomplete checks retain their safe reason and
 established grouping; interrupted in-flight work can repeat. Changes to photos,
@@ -209,19 +249,17 @@ never change underneath the user. Automatic updates retain the number of loaded
 pages where possible and anchor the scroll position to a surviving card. A failed
 update stops automatic replacement and asks for **Refresh**, disabling decisions
 until the view is reconciled. A failed similarity search gets one retry within the current pass. If it fails
-again, that candidate finishes as **not fully checked** and leaves the pending
+again, that candidate finishes with limited evidence and leaves the pending
 count. Its existing grouping remains usable, and human decisions work normally.
 There is no long-term repair queue or Retry now control. **Refresh** reloads the
 view; it does not restart finished checks.
 
-An amber **!** means **Similarity not fully checked**; its explanation gives a
-short reason. A muted **i** means **Check complete · similarity uncertain**:
-searches succeeded but the evidence was inconclusive. Neither asks the user to
-repair a stack. Completed supported work stays quiet on cards. The header shows
-only ongoing checks as remaining, and separately notes finished incomplete
-checks as ready to curate. These outcomes survive restart without keeping
-partial search rows or retry deadlines. Source/connection changes may invalidate
-the outcome normally. Incomplete passes never supply partial ranking evidence
+Limited evidence does not ask the user to repair a stack. The header shows active
+progress or paused work; once checks finish, it omits aggregate incomplete counts
+and the idle warning icon. Per-stack explanations remain available.
+
+These outcomes survive restart without keeping partial search rows or retry
+deadlines. Source/connection changes may invalidate the outcome normally. Incomplete passes never supply partial ranking evidence
 for regrouping.
 
 Accepted pending decisions remove only their cards from the displayed snapshot
@@ -242,6 +280,22 @@ and explains that turning stacks off allows individual review. It never saves a
 page-sized subset as though it were the whole stack. Known thumbnail failures
 block Save until the previews can be retried.
 
+### Planned referee indicators
+
+The optional referees will add two independent indicators when integrated:
+**AI checked** for a successfully checked current grouping, and a gold **★**
+for Keeper Referee recommendations, with stars on the recommended photos and
+a recommendation count in the hover text. Either indicator can appear without
+the other; a keeper star does not imply that the Stack Referee ran.
+
+These badges must describe the current membership and applicable inputs. Changed
+photos or invalidated results must not retain a successful AI badge. A successful
+Stack Referee check can replace the limited-evidence icon when it resolves the
+grouping uncertainty; earlier evidence remains in **Why?**. Queued/running AI work
+uses a spinner naming the step. Unavailable AI results leave manual curation
+available with a quiet explanation rather than a permanent spinner. This is the
+agreed presentation plan only: this preview does not yet display AI referee badges
+or run these referees.
 ## Implementation boundaries
 
 - `public/curate/client.js` owns serialized view/comparison opens, tab ownership

@@ -39,6 +39,8 @@ test(
   async (t) => {
     if (!findChrome()) return t.skip('Chrome required');
     const { fixture, page, click } = await open(t, 102);
+    await click('[data-kind=singles]');
+    await page.waitFor('!document.querySelector("#refresh").disabled && !document.querySelector("#bulk-label").hidden');
     await click('#more');
     await page.waitFor(
       'document.querySelectorAll(".group-card").length===100 && !document.querySelector("#refresh").disabled',

@@ -1,5 +1,5 @@
 <!doctype html>
-<html lang="en">
+<html lang="en" class="curate-preview">
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
@@ -35,7 +35,13 @@
           <button class="p-tab active" data-section="pending">Pending</button>
           <button class="p-tab" data-section="decided">Decided</button>
         </nav>
-        <span id="updates" class="p-muted" hidden role="status"><span id="updates-copy"></span></span>
+        <div class="view-notices">
+          <span id="updates" class="p-muted" hidden role="status"><span id="updates-copy"></span></span>
+          <span id="enrich-note" hidden role="status">
+            <span class="enrich-full">Enrich is running — Stacks may change as photos are added.</span>
+            <span class="enrich-compact">Enrich running — stacks may change.</span>
+          </span>
+        </div>
         <div class="refresh-tools">
           <span id="check-activity" aria-live="polite"></span>
           <button id="refresh" class="p-btn">Refresh</button>
@@ -49,37 +55,37 @@
         </div>
       </div>
       <div class="toolbar">
-        <div id="secondary-filters" class="secondary-filters">
-        <label class="search-label"
-          ><span class="sr-only">Search photos</span
-          ><input id="search" class="p-input" type="search" maxlength="200" placeholder="Search photos"
-        /></label>
-        <label class="sort-label" title="Stacks use their earliest photo. Unknown capture dates appear last.">
-          <span>Date taken</span>
-          <select id="sort" class="p-input">
-            <option value="oldest">Oldest first</option>
-            <option value="newest">Newest first</option>
-          </select>
-        </label>
-        <label id="category-label" class="sort-label"
-          ><span class="sr-only">Enrichment category</span>
-          <select id="category" class="p-input" aria-label="Enrichment category">
-            <option value="all">All categories</option>
-          </select>
-        </label>
-        </div>
         <nav id="filters" class="p-tabs" aria-label="Photo groups">
           <button class="p-tab active" data-kind="all">All</button
           ><button class="p-tab" data-kind="stacks">Stacks</button
           ><button class="p-tab" data-kind="singles">Singles</button>
         </nav>
         <button id="toggle-filters" class="p-btn" aria-expanded="false" aria-controls="secondary-filters">Filters</button>
+        <div id="secondary-filters" class="secondary-filters">
+          <label class="sort-label" title="Stacks use their earliest photo. Unknown capture dates appear last.">
+            <span>Date taken</span>
+            <select id="sort" class="p-input">
+              <option value="oldest">Oldest first</option>
+              <option value="newest">Newest first</option>
+            </select>
+          </label>
+          <label id="category-label" class="sort-label"
+            ><span class="sr-only">Enrichment category</span>
+            <select id="category" class="p-input" aria-label="Enrichment category">
+              <option value="all">All categories</option>
+            </select>
+          </label>
+          <label class="search-label"
+            ><span class="sr-only">Search photos</span
+            ><input id="search" class="p-input" type="search" maxlength="200" placeholder="Search photos"
+          /></label>
+        </div>
       </div>
       <div class="view-status">
         <div class="selection-slot">
-        <label id="bulk-label"
+        <label id="bulk-label" hidden
           ><input id="select-shown" type="checkbox" /><span id="bulk-label-text"
-            >Check single photos</span
+            >Check shown photos</span
           ></label
         >
         </div>
@@ -97,6 +103,7 @@
         <span id="receipt-text"></span><span id="sync" class="p-muted"></span
         ><button id="retry-sync" class="p-btn" hidden>Retry sync</button
         ><button id="undo" class="p-btn" hidden>Undo</button>
+        <button id="dismiss-receipt" class="p-btn quiet" type="button" aria-label="Dismiss last action" title="Dismiss last action"><span aria-hidden="true">×</span></button>
       </div>
       <div id="bulk-actions" class="notice" hidden>
         <strong id="bulk-count"></strong>
@@ -170,6 +177,7 @@
         <div class="lightbox-stage">
           <img id="photo-large" alt="" /><span id="photo-image-error" hidden>Preview unavailable</span>
           <span id="photo-loading" role="status" hidden>Loading photo…</span>
+          <span id="photo-undo-hint" role="status" hidden>Saved — press Z to undo.</span>
         </div>
         <aside class="lightbox-side">
           <div class="lightbox-nav">
