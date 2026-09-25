@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto';
-import { setImmediate } from 'node:timers/promises';
+import { setImmediate, setTimeout as delay } from 'node:timers/promises';
 import { CurateError, fingerprint } from './contracts.mjs';
+import { observeAsset } from './evidence.mjs';
 
 export const METADATA_LIMITS = Object.freeze({
   batch: 500,
@@ -11,7 +12,20 @@ export const METADATA_LIMITS = Object.freeze({
   contextMs: 30 * 60_000,
   timeoutMs: 30_000,
   responseBytes: 1024 * 1024,
+  selectionTimeoutMs: 45_000,
+  selections: 4,
 });
+
+async function waitForLane(work, signal) {
+  let aborted;
+  try {
+    await Promise.race([work.catch(() => {}), new Promise((_, reject) => {
+      aborted = () => reject(signal.reason);
+      signal.addEventListener('abort', aborted, { once: true });
+      if (signal.aborted) aborted();
+    })]);
+  } finally { signal.removeEventListener('abort', aborted); }
+}
 export const METADATA_SCHEMA = `
 CREATE TABLE IF NOT EXISTS curate_metadata (
  asset_id TEXT PRIMARY KEY, source_key TEXT NOT NULL, priority INTEGER NOT NULL,
@@ -179,7 +193,7 @@ export class CurateMetadataStore {
 // One durable, bounded Immich-read lane. It has no AI/provider or tag-writing
 // responsibilities. Normal page responses do not await a metadata request.
 export class CurateMetadataRefresher {
-  constructor({ curate, now = Date.now, automatic = true }) {
+  constructor({ curate, now = Date.now, automatic = true, selectionTimeoutMs = METADATA_LIMITS.selectionTimeoutMs }) {
     this.curate = curate;
     this.store = curate.store.metadata;
     this.now = now;
@@ -187,6 +201,8 @@ export class CurateMetadataRefresher {
     this.work = null;
     this.controller = null;
     this.scheduled = null;
+    this.selections = 0;
+    this.selectionTimeoutMs = selectionTimeoutMs;
   }
   connectionKey(client) {
     return fingerprint([client.baseUrl ?? 'injected', client.apiKey ?? 'injected']);
@@ -200,10 +216,84 @@ export class CurateMetadataRefresher {
   }
   enabled() {
     return (
-      !this.curate.closed && this.curate.config.curateBurstGrouping !== false && this.configured(this.curate.immich)
+      !this.closed && !this.curate.closed && this.curate.config.curateBurstGrouping !== false && this.configured(this.curate.immich)
     );
   }
+  canReadSelection() {
+    return !this.closed && !this.curate.closed && this.configured(this.curate.immich);
+  }
+  // Explicit comparison reads reuse the background lane, claims, cooldown and
+  // backoff. They do not need a page lease or enable background library work.
+  async refreshPhotos(ids, { signal } = {}) {
+    if (this.selections >= METADATA_LIMITS.selections)
+      throw new CurateError('Photo information refresh is busy. Try again shortly.', 'metadata_busy', 503);
+    if (!Array.isArray(ids) || !ids.length || ids.length > METADATA_LIMITS.batch ||
+        new Set(ids).size !== ids.length || ids.some(id => typeof id !== 'string' || !id || id.length > 128))
+      throw new CurateError('Choose up to 500 distinct review photos.', 'invalid_curate_query', 400);
+    if (this.curate.repo.reviewListMembership(ids).size !== ids.length)
+      throw new CurateError('Photo information refresh must target review photos.');
+    const deadline = AbortSignal.any([this.curate.abort.signal, AbortSignal.timeout(this.selectionTimeoutMs),
+      ...(signal ? [signal] : [])]);
+    const key = this.connectionKey(this.curate.immich ?? {});
+    const results = new Map();
+    const failed = (id, outcome) => results.set(id, { id, outcome, checkedAt: null, recognition: null });
+    this.selections++;
+    let ownedWork;
+    try {
+      while (this.work) await waitForLane(this.work, deadline);
+      deadline.throwIfAborted();
+      ownedWork = this.work = (async () => {
+        if (!this.canReadSelection()) { ids.forEach(id => failed(id, 'not-configured')); return; }
+        if (key !== this.connectionKey(this.curate.immich)) return;
+        this.explicitActive = true;
+        this.store.connection(key);
+        this.store.request(ids, this.now(), { force: true });
+        while (results.size < ids.length && !deadline.aborted && this.canReadSelection() &&
+            key === this.connectionKey(this.curate.immich)) {
+          const control = this.store.control();
+          if (Math.max(control.retry_at, this.localRetryAt ?? 0) > this.now()) {
+            ids.filter(id => !results.has(id)).forEach(id => failed(id, this.localProblem ?? control.problem ?? 'retry'));
+            break;
+          }
+          const remaining = ids.filter(id => !results.has(id));
+          const due = [];
+          let next = Infinity;
+          for (const id of remaining) {
+            this.curate.store.flushIds([id]);
+            const row = this.store.row(id);
+            if (!row) { failed(id, 'changed'); continue; }
+            if (row.next_at <= this.now()) due.push(id);
+            else next = Math.min(next, row.next_at);
+          }
+          if (due.length) {
+            await this.run({ ids: due, signal: deadline, report: value => results.set(value.id, value) });
+          } else if (results.size < ids.length) {
+            await delay(Math.max(1, Math.min(1000, next - this.now())), undefined, { signal: deadline });
+          }
+        }
+      })();
+      await ownedWork;
+    } catch (error) {
+      if (!deadline.aborted) {
+        const outcome = error instanceof CurateError ? 'changed' : 'storage-error';
+        if (outcome === 'storage-error') {
+          this.localProblem = outcome;
+          this.localRetryAt = this.now() + METADATA_LIMITS.minIntervalMs;
+        }
+        ids.filter(id => !results.has(id)).forEach(id => failed(id, outcome));
+      }
+    } finally {
+      if (ownedWork && this.work === ownedWork) {
+        this.work = null;
+        this.explicitActive = false;
+      }
+      this.selections--;
+    }
+    for (const id of ids) if (!results.has(id)) failed(id, deadline.aborted ? 'interrupted' : 'changed');
+    return { photos: ids.map(id => results.get(id)) };
+  }
   demanded() {
+    if (this.curate.refinement?.enabled()) return true;
     return Boolean(
       this.curate.store
         .prepare("SELECT 1 FROM curate_leases WHERE kind='view' AND expires_at>? LIMIT 1")
@@ -227,7 +317,7 @@ export class CurateMetadataRefresher {
     };
   }
   wake() {
-    if (!this.automatic || this.scheduled || this.work || !this.enabled() || !this.demanded()) return;
+    if (!this.automatic || this.scheduled || this.work || this.selections || !this.enabled() || !this.demanded()) return;
     this.scheduled = globalThis.setImmediate(() => {
       this.scheduled = null;
       void this.tick().catch(() => {});
@@ -235,7 +325,8 @@ export class CurateMetadataRefresher {
     this.scheduled.unref?.();
   }
   settingsChanged() {
-    if (!this.enabled() || (this.activeKey && this.activeKey !== this.connectionKey(this.curate.immich)))
+    if (!(this.explicitActive ? this.canReadSelection() : this.enabled()) ||
+        (this.activeKey && this.activeKey !== this.connectionKey(this.curate.immich)))
       this.controller?.abort();
     this.wake();
   }
@@ -252,8 +343,9 @@ export class CurateMetadataRefresher {
       });
     return this.work;
   }
-  async run() {
-    if (!this.enabled() || !this.demanded() || this.localRetryAt > this.now()) return { attempted: 0 };
+  async run(selection = null) {
+    const enabled = () => selection ? this.canReadSelection() && !selection.signal.aborted : this.enabled() && this.demanded();
+    if (!enabled() || this.localRetryAt > this.now()) return { attempted: 0 };
     this.localProblem = null;
     this.localRetryAt = null;
     const original = this.curate.immich;
@@ -262,7 +354,8 @@ export class CurateMetadataRefresher {
     const control = this.store.control();
     if (control.retry_at > this.now()) return { attempted: 0 };
     // A paused lane admits one recovery probe, not another 500-photo batch.
-    const ids = this.store.next(this.now(), control.problem ? 1 : METADATA_LIMITS.batch);
+    const ids = selection ? selection.ids.slice(0, control.problem ? 1 : METADATA_LIMITS.batch)
+      : this.store.next(this.now(), control.problem ? 1 : METADATA_LIMITS.batch);
     if (!ids.length) return { attempted: 0 };
     if (control.problem)
       this.curate.store
@@ -274,20 +367,24 @@ export class CurateMetadataRefresher {
     this.controller = new AbortController();
     this.activeKey = key;
     const controller = this.controller;
+    const signal = selection ? AbortSignal.any([controller.signal, selection.signal]) : controller.signal;
     const allowed = () =>
-      this.enabled() && this.demanded() && !controller.signal.aborted && key === this.connectionKey(this.curate.immich);
+      enabled() && !signal.aborted && key === this.connectionKey(this.curate.immich);
+    const report = (id, outcome, extra = {}) => selection?.report({ id, outcome, checkedAt: null, recognition: null, ...extra });
     let cursor = 0,
       failed = false;
     const result = { attempted: 0, updated: 0, unavailable: 0, discarded: 0 };
     const worker = async () => {
-      while (cursor < ids.length && !failed && allowed()) {
+      // Finish the at-most-two active background reads, then yield the lane to
+      // an opened comparison instead of making it wait behind the whole batch.
+      while (cursor < ids.length && !failed && allowed() && (selection || !this.selections)) {
         const claim = this.store.claim(ids[cursor++], this.now());
-        if (!claim) continue;
+        if (!claim) { report(ids[cursor - 1], 'changed'); continue; }
         result.attempted++;
         let applying = false;
         try {
           const asset = await client.getAsset(claim.id, {
-            signal: controller.signal,
+            signal,
             maxBytes: METADATA_LIMITS.responseBytes,
           });
           if (!allowed()) {
@@ -300,16 +397,20 @@ export class CurateMetadataRefresher {
           )
             throw Object.assign(Error('Invalid asset-detail response.'), { code: 'curate_metadata_invalid' });
           applying = true;
+          let accepted = false;
           this.curate.repo.transaction(() => {
             if (!this.store.current(claim)) {
               result.discarded++;
+              report(claim.id, 'changed');
               return;
             }
             this.curate.store.mergeMetadataAsset(asset);
             this.curate.store.flushIds([claim.id]);
             this.store.complete(claim, 'refreshed', this.now());
+            accepted = true;
             result.updated++;
           });
+          if (accepted && selection) report(claim.id, 'refreshed', { checkedAt: this.now(), recognition: observeAsset(asset).recognition ?? null });
           if (control.problem && !failed) this.store.recovered();
         } catch (error) {
           if (applying) throw error;
@@ -326,6 +427,7 @@ export class CurateMetadataRefresher {
             this.curate.repo.transaction(() => {
               if (!this.store.current(claim)) {
                 result.discarded++;
+                report(claim.id, 'changed');
                 return;
               }
               if (missing) {
@@ -336,6 +438,7 @@ export class CurateMetadataRefresher {
                 result.unavailable++;
               }
               this.store.complete(claim, missing ? 'unavailable' : 'invalid-response', this.now());
+              report(claim.id, missing ? 'unavailable' : 'invalid-response');
             });
             if (control.problem && !failed) this.store.recovered();
           } else {
@@ -344,6 +447,7 @@ export class CurateMetadataRefresher {
             if (firstFailure)
               this.store.fail(this.now(), [401, 403].includes(error.status) ? 'permission' : 'connection');
             this.store.defer(claim, this.now(), 'retry');
+            report(claim.id, [401, 403].includes(error.status) ? 'permission' : 'connection');
           }
         }
         await setImmediate();
@@ -370,6 +474,7 @@ export class CurateMetadataRefresher {
     return result;
   }
   async close() {
+    this.closed = true;
     clearImmediate(this.scheduled);
     this.scheduled = null;
     this.controller?.abort();

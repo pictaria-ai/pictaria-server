@@ -246,3 +246,10 @@ The files under `public/brand/` are included under the AGPL for copyright
 purposes. The license does not grant trademark rights in the Pictaria name or
 logos, or permission to present a derived product as official or endorsed by
 Pictaria.
+
+## Curate development preview
+
+The optional [Curate Preview](docs/CURATE-PREVIEW.md) exercises the upcoming human
+comparison flow. Its [versioned stacking algorithm](docs/CURATE-ALGORITHM.md) records
+the candidate rules, rationale, limits and change history while we evaluate v1.3.
+The released Curate workflow remains at `/curate.html`.

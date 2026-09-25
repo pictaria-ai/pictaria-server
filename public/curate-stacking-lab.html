@@ -1,0 +1,99 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Pictaria — Stacking lab</title>
+    <link rel="icon" type="image/png" sizes="32x32" href="/brand/favicon-32.png" />
+    <script src="/theme.js"></script>
+    <script src="/auth-gate.js" defer></script>
+    <script src="/nav.js" defer></script>
+    <link rel="stylesheet" href="/pictaria.css" />
+    <link rel="stylesheet" href="/curate/comparisons.css" />
+    <link rel="stylesheet" href="/curate/stacking-lab.css" />
+  </head>
+  <body>
+    <header class="p-topbar">
+      <a class="p-brand" href="/"><img class="p-brand-word" src="/brand/wordmark.png" alt="Pictaria" /></a>
+      <span class="p-supporter-slot" aria-live="polite"></span>
+      <nav class="p-nav"><a href="/insights.html">Insights</a><a href="/enrich.html">Enrich</a><a href="/curate.html" class="active">Curate</a><a href="/albums.html">Albums</a></nav>
+      <div class="p-grow"></div><a class="p-gear" href="/settings.html" aria-label="Settings">⚙</a>
+    </header>
+    <main>
+      <div class="heading">
+        <div><h1>Stacking lab <span class="p-chip">Testing only</span></h1><p class="p-muted">Explore what makes a good stack.</p></div>
+        <a class="p-btn" href="/curate-preview.html">Back to Curate preview</a>
+      </div>
+      <p class="preview-note">Experiments are temporary. They don’t change your stacks, decisions or settings, and don’t make AI calls.</p>
+      <h2>Start with time</h2>
+      <p class="p-muted">Pending photos form a group when each photo is within the chosen gap of the previous one. There is no total span limit here. Open a group to try stricter rules.</p>
+      <form id="baseline" class="toolbar">
+        <label class="sort-label">Maximum gap <input id="baseline-gap" class="p-input" type="number" min="1" max="180" step="1" value="15" required /> seconds</label>
+        <label class="sort-label">Date taken <select id="sort" class="p-input"><option value="oldest">Oldest first</option><option value="newest">Newest first</option></select></label>
+        <button id="build" class="p-btn" type="submit">Build time groups</button>
+      </form>
+      <p id="count" class="p-muted" aria-live="polite">Loading pending photos…</p>
+      <p id="snapshot-note" class="p-muted lab-small"></p>
+      <p id="error" role="alert" hidden></p>
+      <section id="groups" class="group-grid" aria-label="Time groups"></section>
+      <div class="load-row"><button id="more" class="p-btn" hidden>Load more</button></div>
+    </main>
+    <dialog id="experiment" aria-labelledby="experiment-title">
+      <div class="dialog-frame">
+        <header class="dialog-head"><div><h2 id="experiment-title">Explore time group</h2><p id="experiment-subtitle" class="p-muted"></p></div><div class="lab-head-actions"><button id="copy" class="p-btn" aria-label="Copy experiment summary">Copy</button><button class="p-btn" data-close="experiment">Close</button></div></header>
+        <div class="dialog-body">
+          <p id="experiment-error" role="alert" hidden></p>
+          <div id="experiment-content" hidden>
+            <div class="lab-layout">
+              <details id="lab-controls" class="lab-controls" open>
+                <summary>Stack settings</summary>
+                <div class="lab-control-body">
+                  <div class="lab-settings">
+                    <label class="lab-mode"><input id="combined-mode" type="checkbox" /> Combine evidence</label>
+                    <label class="lab-setting lab-inline">Max gap <span><input id="gap" type="number" min="0" max="180" step="1" aria-label="Maximum gap in seconds" /> s</span></label>
+                    <div class="lab-setting lab-inline"><label><input id="use-span" type="checkbox" /> Max span</label><span><input id="span" aria-label="Maximum total span in seconds" type="number" min="1" max="3600" step="1" value="180" disabled /> s</span></div>
+                    <div class="lab-setting lab-wide">
+                      <label><input id="use-hash" type="checkbox" /> <span id="hash-label">ThumbHash similarity</span></label>
+                      <span class="threshold-control strict-hint"><input id="threshold" aria-label="Maximum ThumbHash distance" type="range" min="0" max="1" step="0.005" value="0.1" disabled /><output id="threshold-value" for="threshold">0.100</output></span>
+                      <div class="combined-hint lab-inline" hidden><label>Close ≤ <input id="near-hash" aria-label="Very close ThumbHash ceiling" type="number" min="0" max="1" step="0.005" value="0.025" /></label><label>Far ≥ <input id="far-hash" aria-label="Clearly different ThumbHash floor" type="number" min="0" max="1" step="0.005" value="0.15" /></label></div>
+                    </div>
+                    <label class="lab-setting"><span><input id="use-people" type="checkbox" /> Enrich people category</span></label>
+                    <label class="lab-setting"><span><input id="use-identities" type="checkbox" /> Same recognized people</span></label>
+                    <div class="lab-setting lab-wide">
+                      <label><input id="use-ranks" type="checkbox" disabled /> Reciprocal search ranks</label>
+                      <div class="combined-hint lab-inline" hidden><label>Outside ≤ <input id="rank-cutoff" aria-label="Maximum outside photos ahead" type="number" min="0" max="49" step="1" value="2" disabled /></label><label>Contrast ≥ <input id="rank-contrast" aria-label="Minimum outside-photo contrast" type="number" min="1" max="49" step="1" value="8" disabled /></label></div>
+                    </div>
+                  </div>
+                  <p id="mode-hint" class="p-muted lab-small">Each enabled rule must pass.</p>
+                  <div class="compare-tools"><button id="reset" class="p-btn">Reset to time only</button></div>
+                  <section class="lab-search" aria-label="Immich search ranks">
+                    <h3>Search ranks</h3>
+                    <div id="rank-comparison"></div>
+                  </section>
+                  <details class="lab-details lab-recognition-tools"><summary>Recognition data</summary><div class="compare-tools"><button id="refresh-recognition" class="p-btn">Refresh from Immich</button></div><p id="recognition-status" class="p-muted lab-small" role="status"></p></details>
+                </div>
+              </details>
+              <section class="lab-results" aria-label="Experiment results" tabindex="0">
+                <div class="lab-result-bar"><p id="result" class="lab-result" aria-live="polite"></p><button id="clear-focus" class="p-btn quiet" disabled>Clear highlight</button></div>
+                <p id="focus-help" class="p-muted lab-small">Click a photo to highlight its group.</p>
+                <section id="lab-photos" class="photo-grid compact" aria-label="Experimental groups"></section>
+                <details class="lab-details"><summary>Group and pair evidence</summary><p id="combined-summary" class="p-muted"></p><div id="pair-evidence" class="lab-small"></div><p id="evidence-note" class="p-muted lab-small"></p></details>
+                <details class="lab-details"><summary>Search rank table</summary><div id="rank-table"></div></details>
+                <details class="lab-details"><summary>Earliest-photo search</summary><div class="compare-tools"><button id="check-ranking" class="p-btn">Check similarity ranking</button><span id="ranking-status" class="p-muted lab-small" role="status"></span></div><p class="p-muted lab-small">Optional single-reference comparison. Ranks appear on the photos; this does not affect grouping.</p></details>
+                <details class="lab-method"><summary>How this experiment works</summary><p>Combined mode tests candidate rules, not final Curate behavior. It joins supported pairs before attaching uncertain photos and checks every cross-group separation. With Same recognized people enabled, any change in the returned identity set splits the group, including Person 1 versus Persons 1 and 2, or no recognized people versus Person 1. Missing or failed recognition stays unknown. This rule takes precedence over visual or rank similarity. Returned rank contrast with supported alternatives can corroborate a people or visual difference; not-returned results stay unknown. Reciprocal near ranks conflicting with Enrich categories stay uncertain unless the recognized-people rule requires separation.</p><p>ThumbHash has three bands: very close can support a pair without other signals, the middle band needs corroboration, and clearly different can corroborate separation. Other signals can still conflict with those observations. Ranks exclude other photos in this selected time group when counting outside photos ahead. This compensates for burst size, but does not prove the excluded photos are true alternatives or turn ranks into distances. All cutoffs need evaluation.</p><p>Ranks are held fixed after each explicit pass. Completed rows survive cancellation or failure; remaining references stay unqueried. Failed references are not retried by “Check remaining”; reset evidence to deliberately revisit them. Reset may reuse a valid 10-minute cache. Closing this window stops further searches. The two AI referees are not called.</p><p>In individual-filter mode, photos are processed oldest first and join the most recently created compatible group. The gap is measured from that group’s last photo; the span from its first. ThumbHash, people-category and recognized-identity checks apply to every member. Changing a threshold can rearrange the partitions rather than just remove photos.</p><p>This is an experimental grouping rule, not an exact replay of either Curate version. ThumbHash is a rough visual descriptor, not an exact duplicate checksum or confidence score. In individual-filter mode, missing or incompatible hashes stay separate when the hash rule is on. In combined mode they stay unknown. Saved stack corrections and duplicate IDs are ignored here. These rules only split the selected time group; widen the starting gap on the main page to explore other neighbors.</p><p>Person 1, Person 2, etc. refer to the same Immich identities throughout this experiment, not across different experiments. Recognition can be incomplete or wrong: this stricter rule can separate similar photos when Immich misses a face. Matching identities do not prove similar composition.</p><p>Opening a group refreshes its recognized identities from Immich. Other evidence comes from the time-group snapshot. The experiment stays fixed until you explicitly refresh recognition or rebuild time groups. A refresh may wait briefly to avoid repeating requests too quickly. Failed or missing recognition stays unknown; it never falls back to old identities. No photos are deleted or marked reviewed.</p></details>
+              </section>
+            </div>
+          </div>
+        </div>
+      </div>
+    </dialog>
+    <dialog id="lab-viewer" aria-labelledby="viewer-title">
+      <div class="dialog-frame">
+        <header class="dialog-head"><h2 id="viewer-title"></h2><a id="immich" class="p-btn" target="_blank" rel="noopener" hidden>Immich ↗</a><button class="p-btn" data-close="lab-viewer">Close</button></header>
+        <div class="dialog-body photo-detail"><img id="viewer-image" alt="" /></div>
+        <footer class="dialog-foot"><button id="previous" class="p-btn">← Previous</button><span id="viewer-position"></span><button id="next" class="p-btn">Next →</button></footer>
+      </div>
+    </dialog>
+    <script type="module" src="/curate/stacking-lab.js"></script>
+  </body>
+</html>

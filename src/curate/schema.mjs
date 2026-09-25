@@ -1,3 +1,4 @@
+import { RANK_SCHEMA } from './rank-store.mjs';
 import { METADATA_SCHEMA } from './metadata.mjs';
 
 // Optional presentation provenance, separate from the authoritative partition.
@@ -31,6 +32,9 @@ CREATE TABLE IF NOT EXISTS curate_photos (
 );
 CREATE INDEX IF NOT EXISTS idx_curate_state_time ON curate_photos(state,captured_ms,asset_id);
 ${METADATA_SCHEMA}
+${RANK_SCHEMA}
+-- Discard non-authoritative checkpoints from the earlier unreleased preview.
+DROP TABLE IF EXISTS curate_rank_retries;
 CREATE TABLE IF NOT EXISTS curate_separations (
  id TEXT PRIMARY KEY, active INTEGER NOT NULL, revision INTEGER NOT NULL, created_at INTEGER NOT NULL, undo_until INTEGER NOT NULL
 );

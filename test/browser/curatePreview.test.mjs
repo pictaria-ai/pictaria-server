@@ -1,11 +1,22 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { setTimeout as delay } from 'node:timers/promises';
 import { launchChrome, findChrome } from './harness.mjs';
 import { curatePreviewFixture } from './curatePreviewFixture.mjs';
 
-test('Curate preview date order is global, remembered and stable until refresh', { timeout: 60000 }, async (t) => {
+test('Curate preview date order is global and remembered across automatic updates', { timeout: 60000 }, async (t) => {
   if (!findChrome()) return t.skip('Chrome required');
-  const fixture = await curatePreviewFixture({ stackSize: 3, singles: 52 });
+  const fixture = await curatePreviewFixture({ stackSize: 3, singles: 52, metadataReady: true,
+    prepare({ repo, assets, id }) {
+      // Sorting must not race an unrelated unconfirmed -> supported route change.
+      // A locally resolved small stack needs no similarity searches.
+      for (let i = 1; i <= 3; i++) {
+        const thumbhash = Buffer.alloc(21, 0).toString('base64');
+        repo.updateAssetVisuals(id(i), { thumbhash });
+        assets.find(a => a.id === id(i)).thumbhash = thumbhash;
+      }
+    },
+  });
   const browser = await launchChrome(),
     page = await browser.newPage();
   t.after(async () => {
@@ -43,9 +54,7 @@ test('Curate preview date order is global, remembered and stable until refresh',
   assert.equal(await page.evaluate('document.querySelector("#sort").value'), 'newest');
   assert.deepEqual(await cards(), [...original].reverse().slice(0, 50));
   fixture.add(3000, 900000, 'latest-arrival');
-  await page.waitFor('!document.querySelector("#updates").hidden');
-  assert.deepEqual(await cards(), [...original].reverse().slice(0, 50));
-  await click('#refresh');
+  await page.waitFor(`document.querySelector('.group-card').dataset.groupId.includes('${fixture.id(3000)}') && !document.querySelector('#refresh').disabled`);
   await ready(50);
   assert.match((await cards())[0], new RegExp(fixture.id(3000)));
   await click('[data-kind=stacks]');
@@ -80,12 +89,13 @@ test('Curate preview date order is global, remembered and stable until refresh',
   await ready(50);
   await click('.group-card');
   await page.waitFor('!document.querySelector("#apply").disabled');
-  await click('#apply');
-  await ready(50);
+  await click('[data-photo-action=reviewed]');
+  await ready(49);
   assert.equal(await page.evaluate('document.querySelector("#sort").value'), 'newest');
   assert.match((await cards())[0], new RegExp(fixture.id(1052)));
-  await click('#undo');
+  await click('#photo-undo');
   await ready(50);
+  await click('[data-close=photo-view]');
   assert.match((await cards())[0], new RegExp(fixture.id(3000)));
   await sort('oldest');
   await ready(50);
@@ -126,7 +136,7 @@ test(
     await click('#context-photos [data-view]');
     assert.equal(await page.evaluate('document.querySelector("#photo-keep").hidden'), true);
     await page.send('Input.dispatchKeyEvent', { type: 'keyDown', key: 'k', code: 'KeyK' });
-    assert.equal(await page.evaluate('document.querySelectorAll("#photos [aria-pressed=true]").length'), 0);
+    assert.equal(await page.evaluate('document.querySelectorAll("#photos [data-keeper][aria-pressed=true]").length'), 0);
     await click('[data-close=photo-view]');
     await click('[data-close=comparison]');
     fixture.repo.setManualFrameTags({
@@ -149,20 +159,19 @@ test(
     await page.waitFor(
       'document.querySelectorAll("#photos .photo-card").length===1 && !document.querySelector("#apply").disabled',
     );
-    for (const id of ['select-all', 'select-none', 'split'])
+    for (const id of ['select-all', 'select-none'])
       assert.equal(await page.evaluate(`document.getElementById('${id}').hidden`), true);
-    assert.equal(await page.evaluate('document.querySelector("#apply").textContent'), 'Mark reviewed');
+    assert.equal(await page.evaluate('document.querySelector("#apply").textContent'), 'Save');
     assert.equal(await page.evaluate('document.querySelector("#apply").classList.contains("primary")'), false);
-    await click('[data-keeper]');
-    assert.equal(await page.evaluate('document.querySelector("#apply").textContent'), 'Keep');
-    await click('#apply');
+    await page.waitFor('document.querySelector("#photo-view").open && document.querySelector("#photo-loading").hidden');
+    await click('[data-photo-action=approve]');
     await page.waitFor('!document.querySelector("#comparison").open && !document.querySelector("#refresh").disabled');
-    assert.equal(fixture.repo.curate.photo(fixture.id(1001)).state, 'approved');
+    assert.ok(fixture.repo.loadAssetTagsFor([fixture.id(1001)])[fixture.id(1001)].includes('frame/eligible'));
   },
 );
 
 test(
-  'Curate preview: complete scopes, stable selections, corrections, conflict and replay',
+  'Curate preview: complete scopes, stable selections, simple controls, conflict and replay',
   { timeout: 90000 },
   async (t) => {
     if (!findChrome()) return t.skip('Chrome required');
@@ -180,6 +189,20 @@ test(
     await page.evaluate(
       'document.querySelector(".gate-backdrop input").value="smoke-secret";document.querySelector(".gate-backdrop button").click()',
     );
+    await wait('document.querySelectorAll(".group-card").length===50 && !document.querySelector("#refresh").disabled');
+
+    // This scenario exercises human decisions on stable inputs. On slower hosts
+    // initial metadata can change between the two comparison-page reads, which
+    // correctly rejects the open as stale. Wait for the fixture's pending photos
+    // to finish refreshing instead of relying on the machine beating that race.
+    const deadline = Date.now() + 15000;
+    while (fixture.repo.db.prepare(`SELECT 1 FROM curate_photos p
+      LEFT JOIN curate_metadata m ON m.asset_id=p.asset_id
+      WHERE p.state='undecided' AND (m.outcome IS NULL OR m.outcome<>'refreshed') LIMIT 1`).get()) {
+      assert.ok(Date.now() < deadline, 'initial fixture metadata did not finish');
+      await delay(50);
+    }
+    await click('#refresh');
     await wait('document.querySelectorAll(".group-card").length===50 && !document.querySelector("#refresh").disabled');
 
     await t.test('paging adds cards, search matches whole stack and all 52 members load before save', async () => {
@@ -202,7 +225,7 @@ test(
       assert.equal(await page.evaluate('document.querySelectorAll("#context-photos .photo-card").length'), 1);
       await click('[data-keeper="' + fixture.id(1) + '"]');
       await click('[data-keeper="' + fixture.id(52) + '"]');
-      assert.equal(await page.evaluate('document.querySelector("#apply").textContent'), 'Keep 2, mark 50 reviewed');
+      assert.equal(await page.evaluate('document.querySelector("#selection-count").textContent'), '2 Yes · 50 Skip');
     });
     await t.test('background additions advertise updates without changing open membership or keepers', async () => {
       fixture.add(2000, 900000, 'new-unrelated');
@@ -269,22 +292,21 @@ test(
       await page.send('Input.dispatchKeyEvent', { type: 'keyUp', key: ' ', code: 'Space', windowsVirtualKeyCode: 32 });
       assert.equal(await page.evaluate('document.querySelector("[data-keeper]").getAttribute("aria-pressed")'), 'true');
       await click('#photos [data-view]');
-      await wait('document.querySelector("#photo-view").open');
+      await wait('document.querySelector("#photo-view").open && !document.querySelector("#photo-keep").disabled');
       await page.evaluate('document.querySelector("#photo-keep").focus()');
       await page.send('Input.dispatchKeyEvent', { type: 'keyDown', key: 'k', code: 'KeyK' });
+      await wait(`!document.querySelector('#photo-keep').disabled && document.querySelector('#photo-large').src.includes('${fixture.id(2)}')`);
       assert.equal(await page.evaluate('document.querySelector("#photo-keep").getAttribute("aria-pressed")'), 'false');
-      await click('#photo-next');
+      // K already advanced to the next actionable photo.
       await click('#photo-keep');
       assert.equal(
         await page.evaluate('document.querySelectorAll("#photos [data-keeper][aria-pressed=true]").length'),
         1,
       );
-      await page.evaluate(
-        'document.querySelector("#photo-outcome").value="favorite";document.querySelector("#photo-outcome").dispatchEvent(new Event("change"))',
-      );
+      await click('[data-stack-choice=favorite]');
       assert.equal(
-        await page.evaluate('document.querySelectorAll("#photos .photo-outcome")[1].textContent'),
-        '★ Favorite',
+        await page.evaluate('document.querySelectorAll("#photos .photo-card")[1].querySelector("[data-choice=favorite]").getAttribute("aria-pressed")'),
+        'true',
       );
       await page.send('Input.dispatchKeyEvent', {
         type: 'keyDown',
@@ -295,33 +317,11 @@ test(
       await wait('!document.querySelector("#photo-view").open && document.querySelector("#comparison").open');
       await page.send('Emulation.clearDeviceMetricsOverride');
     });
-    await t.test('Remove from stack persists; reset is read from current correction state', async () => {
-      await click('[data-view="' + fixture.id(1) + '"]');
-      await click('#photo-remove');
-      await wait('!document.querySelector("#comparison").open && !document.querySelector("#refresh").disabled');
-      assert.equal(fixture.repo.curate.corrections().corrections.length, 1);
-      assert.equal(fixture.repo.curate.photo(fixture.id(1)).state, 'undecided');
-      await page.navigate(`${fixture.base}/curate-preview.html`);
-      await wait('document.querySelectorAll(".group-card").length===1 && !document.querySelector("#refresh").disabled');
-      await click('#corrections');
-      await wait('document.querySelector(".correction-row button")');
-      assert.match(
-        await page.evaluate('document.querySelector(".correction-row strong").textContent'),
-        /target-portrait.jpg removed from a stack of 52/,
-      );
-      await click('.correction-row button');
-      await wait('!document.querySelector("#correction-dialog").open && !document.querySelector("#refresh").disabled');
+    await t.test('stack management is absent while decisions and read-only explanations remain', async () => {
+      assert.equal(await page.evaluate('document.querySelector("#photo-remove,#split,#corrections,#correction-dialog")'), null);
+      assert.equal(await page.evaluate('document.querySelector(".why-trigger")!==null'), true);
       assert.equal(fixture.repo.curate.corrections().corrections.length, 0);
-      await click('.group-card');
-      await wait(
-        'document.querySelectorAll("#photos .photo-card").length===52 && !document.querySelector("#apply").disabled',
-      );
-      await click('#split');
-      await wait('!document.querySelector("#comparison").open && !document.querySelector("#refresh").disabled');
-      assert.equal(fixture.repo.curate.corrections().corrections[0].memberCount, 52);
-      assert.equal(fixture.repo.curate.corrections().corrections[0].action.kind, 'split');
-      await click('#undo');
-      await wait('!document.querySelector("#refresh").disabled && document.querySelectorAll(".group-card").length===1');
+      await click('[data-close=comparison]');
     });
     await t.test('a duplicated tab gets its own view; refreshes do not expire the original tab', async () => {
       const oldSaved = await page.evaluate('sessionStorage.getItem("pictaria.curate.preview")');
@@ -373,7 +373,7 @@ test(
         await wait(
           'document.querySelectorAll("#photos .photo-card").length===51 && !document.querySelector("#apply").disabled',
         );
-        assert.equal(await page.evaluate('document.querySelector("#apply").textContent'), 'Mark all 51 reviewed');
+        assert.equal(await page.evaluate('document.querySelector("#selection-count").textContent'), '51 Skip');
         await click('#apply');
         await wait('!document.querySelector("#comparison").open && !document.querySelector("#refresh").disabled');
         const tags = fixture.repo.db
