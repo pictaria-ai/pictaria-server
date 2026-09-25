@@ -59,6 +59,113 @@ async function httpServer(handler) {
   };
 }
 
+test('explicit selected-photo refresh works without a view or stacks, and preserves missing response evidence', async () =>
+  fixture(async f => {
+    f.service.config.curateBurstGrouping = false;
+    for (const id of ['known', 'empty', 'absent', 'outside']) f.add(id, { people: [{ id: 'old-person' }] });
+    const calls = [];
+    f.service.immich = { async getAsset(id) {
+      calls.push(id);
+      if (id === 'absent') return { id, fileCreatedAt: '2026-01-01T00:00:00Z' };
+      return asset(id, { people: id === 'empty' ? [] : [{ id: 'new-person' }] });
+    } };
+    const result = await f.service.metadata.refreshPhotos(['known', 'empty', 'absent']);
+    assert.deepEqual(calls.sort(), ['absent', 'empty', 'known']);
+    assert.deepEqual(result.photos.map(p => p.recognition?.ids ?? null), [['new-person'], [], null]);
+    assert.ok(result.photos.every(p => p.outcome === 'refreshed' && p.checkedAt === f.now()));
+    assert.equal(f.service.timer, undefined);
+    assert.equal(f.repo.db.prepare('SELECT count(*) n FROM curate_leases').get().n, 0);
+    // Partial source responses keep old cache evidence for other callers, but
+    // that old recognition must not be presented as freshly fetched here.
+    assert.deepEqual(f.repo.curate.details(['absent'])[0].evidence.recognition.ids, ['old-person']);
+    f.advance(31000);
+    await f.service.metadata.refreshPhotos(['known']);
+    assert.equal(calls.filter(id => id === 'known').length, 2, 'explicit refresh bypasses the 24-hour age');
+    await assert.rejects(f.service.metadata.refreshPhotos(['not-listed']), /review photos/);
+    await assert.rejects(f.service.metadata.refreshPhotos(['known', 'known']), /distinct/);
+  }));
+
+test('selected-photo refresh shares the background lane and preserves global backoff', async () =>
+  fixture(async f => {
+    const entered = deferred(), release = deferred();
+    let active = 0, max = 0;
+    const calls = [];
+    f.add('background'); f.add('other1'); f.add('other2'); f.add('selected');
+    f.service.immich = { async getAsset(id) {
+      calls.push(id); max = Math.max(max, ++active);
+      if (id === 'background') { entered.resolve(); await release.promise; }
+      active--;
+      return asset(id);
+    } };
+    await f.open();
+    f.repo.curate.metadata.connection(f.service.metadata.connectionKey(f.service.immich));
+    f.repo.db.prepare('UPDATE curate_metadata SET next_at=? WHERE asset_id=?').run(f.now() + 86400000, 'selected');
+    const background = f.service.metadata.tick();
+    await entered.promise;
+    const selected = f.service.metadata.refreshPhotos(['selected']);
+    await setImmediate();
+    assert.deepEqual(calls, ['background', 'other1']);
+    release.resolve();
+    await background; await selected;
+    assert.deepEqual(calls, ['background', 'other1', 'selected'], 'selected work precedes the rest of the background batch');
+    assert.equal(max, 2);
+    f.advance(31000);
+    f.service.immich.getAsset = async () => { throw Object.assign(Error('private detail'), { status: 403 }); };
+    const denied = await f.service.metadata.refreshPhotos(['selected']);
+    assert.equal(denied.photos[0].outcome, 'permission');
+    assert.equal(denied.photos[0].recognition, null);
+    const paused = await f.service.metadata.refreshPhotos(['background']);
+    assert.equal(paused.photos[0].outcome, 'permission');
+    assert.doesNotMatch(JSON.stringify(paused), /private detail/);
+  }));
+
+test('selection requests respect cooldown, bounded admission, cancellation and the overall deadline', async () =>
+  fixture(async f => {
+    f.add('a');
+    let calls = 0;
+    f.service.immich = { async getAsset(id) { calls++; return asset(id); } };
+    await f.service.metadata.refreshPhotos(['a']);
+    const abort = new AbortController();
+    const waiting = Array.from({ length: 4 }, () => f.service.metadata.refreshPhotos(['a'], { signal: abort.signal }));
+    await assert.rejects(f.service.metadata.refreshPhotos(['a']), /busy/);
+    await setImmediate();
+    assert.equal(calls, 1, 'a manual refresh cannot bypass the 30-second read floor');
+    abort.abort();
+    const cancelled = await Promise.all(waiting);
+    assert.ok(cancelled.every(r => r.photos[0].outcome === 'interrupted'));
+    assert.equal(f.service.metadata.selections, 0);
+    assert.equal(f.service.metadata.work, null);
+    f.service.metadata.selectionTimeoutMs = 20;
+    const keeper = setTimeout(() => {}, 200);
+    try {
+      const timed = await f.service.metadata.refreshPhotos(['a']);
+      assert.equal(timed.photos[0].outcome, 'interrupted');
+      assert.equal(calls, 1);
+    } finally { clearTimeout(keeper); }
+  }));
+
+test('a late selected response cannot overwrite changed evidence or a changed connection', async () =>
+  fixture(async f => {
+    f.add('a');
+    for (const change of ['evidence', 'connection']) {
+      const entered = deferred(), release = deferred();
+      f.service.immich = { baseUrl: 'synthetic', apiKey: change, async getAsset(id) {
+        entered.resolve(); await release.promise; return asset(id, { people: [{ id: 'late' }] });
+      } };
+      const work = f.service.metadata.refreshPhotos(['a']);
+      await entered.promise;
+      f.repo.curate.observe({ id: 'a', people: [{ id: 'newer' }] });
+      if (change === 'connection') f.service.immich = { baseUrl: 'different', apiKey: 'synthetic', getAsset() { throw Error('not called'); } };
+      release.resolve();
+      const result = await work;
+      assert.equal(result.photos[0].outcome, 'changed');
+      assert.equal(result.photos[0].recognition, null);
+      f.repo.curate.flushIds(['a']);
+      assert.deepEqual(f.repo.curate.details(['a'])[0].evidence.recognition.ids, ['newer']);
+      f.advance(31000);
+    }
+  }));
+
 test('one batch admits 500 reads with two in flight; freshness survives restart and page opens', async () =>
   fixture(async (f) => {
     let active = 0,

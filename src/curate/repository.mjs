@@ -205,6 +205,13 @@ export class CurateRepository {
       `SELECT asset_id id,captured_ms time,checksum,duplicate_id duplicateId,rendition_key renditionKey,people_count peopleCount,recognized_count recognizedCount,availability FROM curate_photos WHERE state='undecided' ORDER BY captured_ms,asset_id`,
     ).all();
   }
+  candidateRows() {
+    return this.prepare(`SELECT ${HOT},
+      json_extract(evidence_json,'$.category.peopleCategory') peopleCategory,
+      json_extract(evidence_json,'$.recognition') recognition,
+      json_extract(evidence_json,'$.image.thumbhash') thumbhash
+      FROM curate_photos WHERE state='undecided' ORDER BY captured_ms,asset_id`).all();
+  }
   separations() {
     const rows = this.prepare(
       `SELECT m.separation_id,m.asset_id,m.partition_no FROM curate_separation_members m
@@ -220,13 +227,18 @@ export class CurateRepository {
     }
     return [...byId].map(([id, parts]) => ({ id, partitions: [...parts.values()] }));
   }
+  separationKey(id) {
+    return fingerprint(this.prepare(`SELECT m.separation_id,m.partition_no FROM curate_separation_members m
+      JOIN curate_separations s ON s.id=m.separation_id AND s.active=1
+      WHERE m.asset_id=? ORDER BY m.separation_id`).all(id));
+  }
   photo(id) {
     return this.prepare(`SELECT ${HOT},state,human_key humanKey FROM curate_photos WHERE asset_id=?`).get(id);
   }
   details(ids) {
     return ids.map((id) => {
       const row = this.prepare(
-        `SELECT a.original_path,ls.short_caption,p.state,p.evidence_json,m.checked_at,m.outcome FROM curate_photos p
+        `SELECT a.original_path,ls.short_caption,ls.frame_score,a.file_created_at,p.state,p.evidence_json,m.checked_at,m.outcome FROM curate_photos p
         JOIN assets a ON a.asset_id=p.asset_id LEFT JOIN latest_success ls ON ls.asset_id=p.asset_id
         LEFT JOIN curate_metadata m ON m.asset_id=p.asset_id WHERE p.asset_id=?`,
       ).get(id);
@@ -235,6 +247,7 @@ export class CurateRepository {
         id,
         filename: row.original_path?.split('/').pop() ?? id,
         caption: row.short_caption ?? '',
+        capturedAt: row.file_created_at ?? null, frameScore: row.frame_score ?? null,
         tags: this.prepare('SELECT tag FROM asset_tags WHERE asset_id=? ORDER BY tag').all(id).map(r => r.tag),
         state: row.state,
         evidence: JSON.parse(row.evidence_json),
@@ -246,9 +259,11 @@ export class CurateRepository {
     // Bounded display projection: never expand evidence or a whole stack just
     // to paint its card. Missing source rows do not change saved membership.
     return ids.map(id => {
-      const row = this.prepare(`SELECT a.original_path,ls.short_caption FROM assets a
+      const row = this.prepare(`SELECT a.original_path,a.file_created_at,ls.short_caption,p.state,
+        EXISTS(SELECT 1 FROM asset_tags t WHERE t.asset_id=a.asset_id AND t.tag='frame/favorite') favorite
+        FROM assets a LEFT JOIN curate_photos p ON p.asset_id=a.asset_id
         LEFT JOIN latest_success ls ON ls.asset_id=a.asset_id WHERE a.asset_id=?`).get(id);
-      return { id, filename: row?.original_path?.split('/').pop() || id, caption: row?.short_caption ?? '' };
+      return { id, filename: row?.original_path?.split('/').pop() || id, caption: row?.short_caption ?? '', capturedAt: row?.file_created_at ?? null, state: row?.state ?? 'undecided', favorite: Boolean(row?.favorite) };
     });
   }
   corrections(offset = 0, limit = 50) {
@@ -342,11 +357,11 @@ export class CurateRepository {
     }
     return false;
   }
-  material(ids) {
+  material(ids, reviewState = 'pending') {
     this.flushIds(ids);
     const material = ids.map((id) => {
       const p = this.photo(id);
-      if (!p || p.state !== 'undecided' || p.availability === 'unavailable')
+      if (!p || (reviewState === 'decided' ? p.state === 'undecided' : p.state !== 'undecided') || p.availability === 'unavailable')
         throw new CurateError('A comparison photo changed or is unavailable. Refresh Curate.');
       const constraints = this.prepare(
         `SELECT m.separation_id,m.partition_no,s.revision,s.active FROM curate_separation_members m JOIN curate_separations s ON s.id=m.separation_id WHERE m.asset_id=? ORDER BY m.separation_id`,
@@ -401,15 +416,15 @@ export class CurateRepository {
       return this.lease('comparison', completeScope);
     });
   }
-  encodedGroup(group) {
+  encodedGroup(group, method = GROUPING_METHOD) {
     // Do not store a synthetic single group ID plus a second copy of its UUID.
-    return group.ids.length === 1 && group.id === `single:${GROUPING_METHOD}:${group.ids[0]}`
+    return group.ids.length === 1 && group.id === `single:${method}:${group.ids[0]}`
       ? [group.ids[0], '', group.route]
       : [group.id, JSON.stringify(group.ids), group.route];
   }
-  decodedGroup(row) {
+  decodedGroup(row, method = GROUPING_METHOD) {
     return row.ids_json === ''
-      ? { id: `single:${GROUPING_METHOD}:${row.id}`, ids: [row.id], route: row.route }
+      ? { id: `single:${method}:${row.id}`, ids: [row.id], route: row.route }
       : { id: row.id, ids: JSON.parse(row.ids_json), route: row.route };
   }
   pruneScopes(now) {
@@ -433,15 +448,17 @@ export class CurateRepository {
     ).get(alias.root_id, now);
     return { previous, rootId: alias.root_id };
   }
-  async createView(current, groups, { replacesViewId = null } = {}) {
+  async createView(current, groups, { replacesViewId = null, sort = 'oldest', section = 'pending', category = 'all' } = {}) {
     // Identical ordered memberships share an immutable SQLite snapshot across
     // tabs, retries and filters. They never page a moving current index. Hashing
     // and persistence yield, and all retained snapshot bytes count toward 5 MiB.
-    const hash = createHash('sha256').update(GROUPING_METHOD);
-    let bytes = 0,
+    const method = current.method ?? GROUPING_METHOD;
+    const hash = createHash('sha256').update(method);
+    let bytes = 0, stacks = 0,
       started = performance.now();
     for (const group of groups) {
-      const encoded = JSON.stringify(this.encodedGroup(group));
+      if (group.ids.length > 1) stacks++;
+      const encoded = JSON.stringify(this.encodedGroup(group, method));
       bytes += Buffer.byteLength(encoded) + 4;
       hash.update(encoded).update('\n');
       if (performance.now() - started >= 4) {
@@ -485,8 +502,12 @@ export class CurateRepository {
       }
       const scope = {
         generation: current.generation,
+        method,
+        evidenceRevision: current.evidenceRevision ?? 0,
         stacks: current.stacks,
         total: groups.length,
+        counts: { stacks, singles: groups.length - stacks },
+        sort, section, category,
         snapshotId,
         ...(rootId ? { replacementRootId: rootId } : {}),
       };
@@ -496,7 +517,7 @@ export class CurateRepository {
       return { lease, fresh };
     });
     if (fresh) {
-      const work = this.writeViewSnapshot(snapshotId, groups);
+      const work = this.writeViewSnapshot(snapshotId, groups, method);
       this.viewBuilds.set(snapshotId, work);
       try {
         await work;
@@ -509,14 +530,14 @@ export class CurateRepository {
     }
     return lease;
   }
-  async writeViewSnapshot(snapshotId, groups) {
+  async writeViewSnapshot(snapshotId, groups, method = GROUPING_METHOD) {
     const insert = this.prepare('INSERT INTO curate_view_groups VALUES(?,?,?,?,?)');
     let position = 0;
     while (position < groups.length) {
       const started = performance.now();
       this.repo.transaction(() => {
         do {
-          insert.run(snapshotId, position, ...this.encodedGroup(groups[position]));
+          insert.run(snapshotId, position, ...this.encodedGroup(groups[position], method));
           position++;
         } while (position < groups.length && performance.now() - started < 4);
       });
@@ -530,13 +551,13 @@ export class CurateRepository {
       'SELECT group_id id,ids_json,route FROM curate_view_groups WHERE view_id=? AND position>=? ORDER BY position LIMIT ?',
     )
       .all(view.snapshotId ?? id, offset, limit)
-      .map((row) => this.decodedGroup(row));
+      .map((row) => this.decodedGroup(row, view.method));
   }
   viewGroup(id, groupId) {
     const view = this.getLease(id, 'view');
     const key =
-      view.snapshotId && typeof groupId === 'string' && groupId.startsWith(`single:${GROUPING_METHOD}:`)
-        ? groupId.slice(`single:${GROUPING_METHOD}:`.length)
+      view.snapshotId && typeof groupId === 'string' && groupId.startsWith(`single:${view.method ?? GROUPING_METHOD}:`)
+        ? groupId.slice(`single:${view.method ?? GROUPING_METHOD}:`.length)
         : groupId;
     const row =
       typeof key === 'string' &&
@@ -544,7 +565,14 @@ export class CurateRepository {
         view.snapshotId ?? id,
         key,
       );
-    return row ? this.decodedGroup(row) : null;
+    return row ? this.decodedGroup(row, view.method) : null;
+  }
+  nextViewGroups(id, groupId, limit = 5) {
+    const view = this.getLease(id, 'view');
+    const key = groupId.startsWith(`single:${view.method}:`) ? groupId.slice(`single:${view.method}:`.length) : groupId;
+    const row = this.prepare('SELECT position FROM curate_view_groups WHERE view_id=? AND group_id=?')
+      .get(view.snapshotId ?? id, key);
+    return row ? this.viewGroups(id, row.position + 1, limit) : [];
   }
   getLease(id, kind, now = Date.now()) {
     const row =
@@ -558,7 +586,7 @@ export class CurateRepository {
   }
   assertComparison(leaseId, now = Date.now()) {
     const lease = this.getLease(leaseId, 'comparison', now);
-    if (this.material(lease.ids) !== lease.material)
+    if (this.material(lease.ids, lease.reviewState) !== lease.material)
       throw new CurateError('Comparison inputs changed. Refresh Curate.');
     return lease;
   }

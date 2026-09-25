@@ -5,13 +5,15 @@ import { join } from 'node:path';
 import { Repository } from '../../src/enrich/repository.mjs';
 import { bootServer } from './harness.mjs';
 
-export async function curatePreviewFixture({ stackSize = 52, singles = 52 } = {}) {
+export async function curatePreviewFixture({ stackSize = 52, singles = 52, metadataReady = false, stacking = true, prepare = () => {} } = {}) {
   const dir = mkdtempSync(join(tmpdir(), 'curate-preview-'));
   const repo = new Repository(join(dir, 'enrichment.sqlite'));
   repo.initSchema();
   const assets = [],
     tags = new Map(),
     photoTags = new Map();
+  const detailReads = [], detailResponses = new Map();
+  const similarityReads = [], similarityResponses = new Map();
   const id = (n) => `00000000-0000-0000-0000-${String(n).padStart(12, '0')}`;
   function add(n, seconds, name) {
     const asset = {
@@ -35,6 +37,18 @@ export async function curatePreviewFixture({ stackSize = 52, singles = 52 } = {}
   repo.setManualFrameTags({ assetIds: [contextId], addTags: ['frame/eligible'], removeTags: [], action: 'approve' });
   photoTags.get(contextId).add('frame/eligible');
   tags.set('frame/eligible', 'frame/eligible');
+  await prepare({ repo, id, assets, contextId, similarityResponses, detailResponses });
+  // Seed the same facts that detail requests return, so unrelated interaction
+  // tests do not race an initial source change. Refresh still runs normally.
+  // Metadata/concurrency tests retain the default unobserved source projection.
+  if (metadataReady) {
+    for (const asset of assets) {
+      repo.curate.mergeMetadataAsset({
+        ...asset,
+        tags: [...photoTags.get(asset.id)].map(value => ({ id: value, value })),
+      });
+    }
+  }
   const fake = createServer(async (request, response) => {
     let text = '';
     for await (const c of request) text += c;
@@ -54,7 +68,10 @@ export async function curatePreviewFixture({ stackSize = 52, singles = 52 } = {}
       );
     }
     if (path.startsWith('/api/assets/')) {
+      if (request.method === 'GET') detailReads.push(path.split('/')[3]);
       const asset = assets.find((a) => a.id === path.split('/')[3]);
+      const override = await detailResponses.get(asset?.id)?.(asset);
+      if (override) return json(override.body, override.status);
       return asset
         ? json({ ...asset, tags: [...photoTags.get(asset.id)].map((value) => ({ id: value, value })) })
         : json({}, 404);
@@ -74,6 +91,11 @@ export async function curatePreviewFixture({ stackSize = 52, singles = 52 } = {}
     }
     if (path === '/api/search/metadata')
       return json({ assets: { items: assets, nextPage: null, total: assets.length } });
+    if (path === '/api/search/smart') {
+      similarityReads.push(body);
+      const override = await similarityResponses.get(body.queryAssetId)?.(body);
+      return override ? json(override.body, override.status) : json({ assets: { items: assets.slice(0, body.size) } });
+    }
     if (path === '/api/server/version') return json({ major: 3, minor: 2, patch: 0 });
     if (path === '/api/people') return json({ people: [], total: 0 });
     if (path === '/api/search/statistics') return json({ total: assets.length });
@@ -89,6 +111,7 @@ export async function curatePreviewFixture({ stackSize = 52, singles = 52 } = {}
         IMMICH_PUBLIC_URL: base,
         IMMICH_API_KEY: 'synthetic',
         CURATE_REFEREE_ENABLED: 'false',
+        CURATE_BURST_GROUPING: String(stacking),
       },
     });
   } catch (error) {
@@ -106,6 +129,10 @@ export async function curatePreviewFixture({ stackSize = 52, singles = 52 } = {}
     assets,
     contextId,
     photoTags,
+    detailReads,
+    detailResponses,
+    similarityReads,
+    similarityResponses,
     dir,
     async stop() {
       await server.stop();

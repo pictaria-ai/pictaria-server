@@ -1,16 +1,16 @@
 // Browser-side scope and retry protocol. Rendering never owns operation IDs.
 const ROOT = '/api/review/curate/';
 const KEY = 'pictaria.curate.preview';
-export async function request(path, body) {
+export async function request(path, body, { signal } = {}) {
   const response = await fetch(
     ROOT + path,
-    body === undefined
+    { ...(signal ? { signal } : {}), ...(body === undefined
       ? {}
       : {
           method: 'POST',
           headers: { 'content-type': 'application/json' },
           body: JSON.stringify(body),
-        },
+        }) },
   );
   if (response.status === 401) window.pictariaGate?.show();
   const value = await response.json();
@@ -82,7 +82,8 @@ export class CurateClient {
     this.serial = result.catch(() => {});
     return result;
   }
-  page(viewId, offset = 0, limit = 50) {
+  page(viewId, offset = 0, limit = 50, attention = null) {
+    if (attention) return this.api('groups/status', { viewId, offset, limit, ...attention });
     return this.api(`groups?${new URLSearchParams({ viewId, offset, limit })}`);
   }
   comparison(viewId, groupId) {
@@ -143,14 +144,8 @@ export class CurateClient {
 }
 
 export function decisionSummary(outcomes) {
-  const all = Object.values(outcomes),
-    keep = all.filter((v) => ['approve', 'favorite'].includes(v)).length;
-  const never = all.filter((v) => v === 'reject').length,
-    reviewed = all.length - keep - never;
-  if (all.length === 1)
-    return { approve: 'Keep', favorite: 'Keep as favorite', reviewed: 'Mark reviewed', reject: 'Never show' }[all[0]];
-  if (!keep && !never) return `Mark all ${all.length} reviewed`;
-  return [keep && `Keep ${keep}`, reviewed && `mark ${reviewed} reviewed`, never && `never show ${never}`]
-    .filter(Boolean)
-    .join(', ');
+  const counts = { approve: 0, reviewed: 0, favorite: 0, reject: 0 };
+  for (const value of Object.values(outcomes)) counts[value]++;
+  return [['approve', 'Yes'], ['reviewed', 'Skip'], ['favorite', 'Fav'], ['reject', 'No']]
+    .filter(([value]) => counts[value]).map(([value, label]) => `${counts[value]} ${label}`).join(' · ');
 }

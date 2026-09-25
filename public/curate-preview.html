@@ -1,5 +1,5 @@
 <!doctype html>
-<html lang="en">
+<html lang="en" class="curate-preview">
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
@@ -17,10 +17,11 @@
       <span class="p-supporter-slot" aria-live="polite"></span>
       <nav class="p-nav">
         <a href="/insights.html">Insights</a><a href="/enrich.html">Enrich</a
-        ><a href="/curate.html" class="active">Curate</a><a href="/albums.html">Albums</a>
+        ><a href="/curate-preview.html" class="active">Curate</a><a href="/albums.html">Albums</a
+        ><a href="/metrics.html">Frame</a><a href="/remote.html">Remote</a>
       </nav>
       <div class="p-grow"></div>
-      <a class="p-gear" href="/settings.html" aria-label="Settings">⚙</a>
+      <a class="p-gear" href="/settings.html#sec-curate" aria-label="Settings">⚙</a>
     </header>
     <main>
       <div class="heading">
@@ -28,31 +29,71 @@
           <h1>Curate <span class="p-chip">Preview</span></h1>
           <p class="p-muted">Choose good photos without keeping every repeat.</p>
         </div>
-        <a class="p-btn" href="/curate.html">Current Curate &amp; decided photos</a>
       </div>
-      <p class="preview-note">
-        Try the new manual comparison flow. Choices here are saved to your library. AI recommendations will be added in
-        a later preview.
-      </p>
+      <div class="view-controls">
+        <nav id="sections" class="p-tabs section-tabs" aria-label="Review status">
+          <button class="p-tab active" data-section="pending">Pending</button>
+          <button class="p-tab" data-section="decided">Decided</button>
+        </nav>
+        <div class="view-notices">
+          <span id="updates" class="p-muted" hidden role="status"><span id="updates-copy"></span></span>
+          <span id="enrich-note" hidden role="status">
+            <span class="enrich-full">Enrich is running — Stacks may change as photos are added.</span>
+            <span class="enrich-compact">Enrich running — stacks may change.</span>
+          </span>
+        </div>
+        <div class="refresh-tools">
+          <span id="check-activity" aria-live="polite"></span>
+          <button id="refresh" class="p-btn">Refresh</button>
+          <details class="page-tools">
+            <summary class="p-btn">More</summary>
+            <div>
+              <a class="p-btn" href="/curate-stacking-lab.html">Stacking lab</a>
+              <a class="p-btn" href="/curate.html">Production Curate</a>
+            </div>
+          </details>
+        </div>
+      </div>
       <div class="toolbar">
         <nav id="filters" class="p-tabs" aria-label="Photo groups">
           <button class="p-tab active" data-kind="all">All</button
           ><button class="p-tab" data-kind="stacks">Stacks</button
           ><button class="p-tab" data-kind="singles">Singles</button>
         </nav>
-        <label class="search-label"
-          ><span class="sr-only">Search pending photos</span
-          ><input id="search" class="p-input" type="search" maxlength="200" placeholder="Search photos"
-        /></label>
-        <div class="p-grow"></div>
-        <button id="corrections" class="p-btn">Stack corrections</button
-        ><button id="refresh" class="p-btn">Refresh</button>
+        <button id="toggle-filters" class="p-btn" aria-expanded="false" aria-controls="secondary-filters">Filters</button>
+        <div id="secondary-filters" class="secondary-filters">
+          <label class="sort-label" title="Stacks use their earliest photo. Unknown capture dates appear last.">
+            <span>Date taken</span>
+            <select id="sort" class="p-input">
+              <option value="oldest">Oldest first</option>
+              <option value="newest">Newest first</option>
+            </select>
+          </label>
+          <label id="category-label" class="sort-label"
+            ><span class="sr-only">Enrichment category</span>
+            <select id="category" class="p-input" aria-label="Enrichment category">
+              <option value="all">All categories</option>
+            </select>
+          </label>
+          <label class="search-label"
+            ><span class="sr-only">Search photos</span
+            ><input id="search" class="p-input" type="search" maxlength="200" placeholder="Search photos"
+          /></label>
+        </div>
       </div>
       <div class="view-status">
-        <span id="count" class="p-muted" aria-live="polite">Loading photos…</span
-        ><span id="updates" hidden>Updates available — refresh when you’re ready.</span>
+        <div class="selection-slot">
+        <label id="bulk-label" hidden
+          ><input id="select-shown" type="checkbox" /><span id="bulk-label-text"
+            >Check shown photos</span
+          ></label
+        >
+        </div>
+        <div class="view-summary">
+          <span id="count" class="p-muted" aria-live="polite">Loading photos…</span>
+          <span id="refinement" class="p-muted" role="status"></span>
+        </div>
       </div>
-      <p id="metadata" class="p-muted"></p>
       <div id="error" role="alert" hidden></div>
       <div id="recovery" class="notice" hidden role="status">
         <span>The last action’s response is uncertain. Retry it safely before continuing.</span
@@ -62,6 +103,15 @@
         <span id="receipt-text"></span><span id="sync" class="p-muted"></span
         ><button id="retry-sync" class="p-btn" hidden>Retry sync</button
         ><button id="undo" class="p-btn" hidden>Undo</button>
+        <button id="dismiss-receipt" class="p-btn quiet" type="button" aria-label="Dismiss last action" title="Dismiss last action"><span aria-hidden="true">×</span></button>
+      </div>
+      <div id="bulk-actions" class="notice" hidden>
+        <strong id="bulk-count"></strong>
+        <button class="p-btn" data-bulk="approve" title="Keep for display">Yes</button>
+        <button class="p-btn" data-bulk="reviewed" title="Mark reviewed without keeping">Skip</button>
+        <button class="p-btn gold" data-bulk="favorite" title="Keep as a favorite">Fav</button>
+        <button class="p-btn danger" data-bulk="reject" title="Never show">No</button>
+        <button id="clear-bulk" class="p-btn">Clear checks</button>
       </div>
       <section id="groups" class="group-grid" aria-label="Photos to curate"></section>
       <p id="empty" class="empty" hidden>No pending photos match this view.</p>
@@ -70,17 +120,10 @@
     <dialog id="comparison" aria-labelledby="comparison-title">
       <div class="dialog-frame">
         <header class="dialog-head">
-          <div>
-            <h2 id="comparison-title">Compare photos</h2>
-            <p id="comparison-subtitle" class="p-muted"></p>
-          </div>
+          <h2 id="comparison-title">Compare photos</h2>
           <button class="p-btn" data-close="comparison">Close</button>
         </header>
         <div class="dialog-body">
-          <p id="comparison-help">
-            Select the photos you want to keep. The rest will be marked reviewed. Reviewed photos are not deleted or
-            marked Never show.
-          </p>
           <p id="comparison-state" class="p-muted" aria-live="polite"></p>
           <button id="metadata-retry" class="p-btn quiet" hidden>Retry photo information refresh</button>
           <div id="comparison-error" role="alert" hidden></div>
@@ -94,12 +137,20 @@
             ><button id="preview-retry" class="p-btn">Retry previews</button>
           </div>
           <div class="compare-tools">
-            <button id="select-all" class="p-btn">Select all</button
-            ><button id="select-none" class="p-btn">Clear selection</button>
+            <button id="select-all" class="p-btn">Check all</button
+            ><button id="select-none" class="p-btn">Clear checks</button>
+            <div id="comparison-bulk" class="choice-batch" hidden>
+              <strong id="comparison-bulk-count"></strong>
+              <button class="p-btn" data-comparison-bulk="approve" title="Keep checked photos">Yes</button>
+              <button class="p-btn" data-comparison-bulk="reviewed" title="Mark checked photos reviewed">Skip</button>
+              <button class="p-btn gold" data-comparison-bulk="favorite" title="Keep checked photos as favorites">Fav</button>
+              <button class="p-btn danger" data-comparison-bulk="reject" title="Never show checked photos">No</button>
+            </div>
             <div class="p-grow"></div>
             <label id="compact-label" hidden><input id="compact" type="checkbox" /> Compact grid</label>
-            <button id="split" class="p-btn">Split into singles</button>
+            <div id="comparison-similarity" role="status" hidden></div>
           </div>
+          <p class="comparison-keys p-muted">Focus a photo: ← → or 1–9. Mark: Y Yes · S Skip · F Fav · N No. Enter: save &amp; next after marking. Z: undo last save.</p>
           <section id="photos" class="photo-grid" aria-label="Comparison photos"></section>
           <section id="context" hidden>
             <h3>Already kept nearby</h3>
@@ -111,64 +162,75 @@
           </section>
         </div>
         <footer class="dialog-foot">
-          <span id="selection-count" aria-live="polite"></span
-          ><button id="apply" class="p-btn primary" disabled>Save choices</button>
+          <span id="selection-count" aria-live="polite"></span>
+          <div id="comparison-receipt" class="comparison-receipt" role="status" hidden>
+            <span id="comparison-receipt-text"></span>
+            <button id="comparison-undo" class="p-btn">Undo last save (Z)</button>
+          </div>
+          <div class="save-actions"><button id="apply" class="p-btn" disabled>Save</button>
+          <button id="apply-next" class="p-btn primary" disabled>Save &amp; next</button></div>
         </footer>
       </div>
     </dialog>
     <dialog id="photo-view" aria-labelledby="photo-title">
-      <div class="dialog-frame">
-        <header class="dialog-head">
-          <div>
-            <h2 id="photo-title"></h2>
-            <span id="photo-position" class="p-muted"></span>
-          </div>
-          <a id="immich" class="p-btn" target="_blank" rel="noopener" hidden>Immich ↗</a>
-          <button class="p-btn" data-close="photo-view">Close</button>
-        </header>
-        <div class="dialog-body photo-detail">
-          <img id="photo-large" alt="" />
-          <p id="photo-caption"></p>
-          <div id="photo-tags" class="tags"></div>
-          <div id="photo-secondary" class="viewer-secondary">
-            <label
-              >Decision
-              <select id="photo-outcome">
-                <option value="reviewed">Mark reviewed</option>
-                <option value="approve">Keep</option>
-                <option value="favorite">Keep as favorite</option>
-                <option value="reject">Never show</option>
-              </select></label
-            >
-            <button id="photo-remove" class="p-btn">Remove from stack</button>
-          </div>
+      <div class="lightbox-layout">
+        <div class="lightbox-stage">
+          <img id="photo-large" alt="" /><span id="photo-image-error" hidden>Preview unavailable</span>
+          <span id="photo-loading" role="status" hidden>Loading photo…</span>
+          <span id="photo-undo-hint" role="status" hidden>Saved — press Z to undo.</span>
         </div>
-        <footer class="dialog-foot">
-          <button id="photo-prev" class="p-btn">← Previous</button>
-          <button id="photo-keep" class="p-btn" aria-pressed="false">Keep (K)</button>
+        <aside class="lightbox-side">
+          <div class="lightbox-nav">
+            <button id="photo-prev" class="p-btn" aria-label="Previous photo">←</button>
+            <button id="photo-next" class="p-btn" aria-label="Next photo">→</button>
+            <button class="p-btn" data-close="photo-view">Close</button>
+          </div>
+          <span id="photo-position" class="p-muted"></span>
+          <h2 id="photo-title" class="sr-only">Photo</h2>
+          <p id="photo-date" class="p-muted"></p>
+          <div id="photo-error" role="alert" hidden></div>
+          <button id="photo-refresh" class="p-btn" hidden>Close and refresh</button>
+          <div id="photo-recovery" class="notice" hidden>
+            <span>The response is uncertain. Retry the same decision safely.</span>
+            <button id="photo-retry" class="p-btn">Retry decision</button>
+          </div>
+          <p id="photo-outcome" aria-live="polite"></p>
+          <div id="single-actions" class="lightbox-actions">
+            <button class="p-btn" data-photo-action="approve" title="Keep for display">Yes (Y)</button>
+            <button class="p-btn" data-photo-action="reviewed" title="Mark reviewed without keeping">Skip (S)</button>
+            <button class="p-btn gold" data-photo-action="favorite" title="Keep as a favorite">Fav (F)</button>
+            <button class="p-btn danger" data-photo-action="reject" title="Never show">No (N)</button>
+          </div>
+          <div id="photo-similarity" class="check-notice" role="status" hidden></div>
+          <div id="stack-actions">
+            <div class="lightbox-actions">
+              <button id="photo-keep" class="p-btn" data-stack-choice="approve" title="Keep for display">Yes (Y)</button>
+              <button class="p-btn" data-stack-choice="reviewed" title="Mark reviewed without keeping">Skip (S)</button>
+              <button class="p-btn gold" data-stack-choice="favorite" title="Keep as a favorite">Fav (F)</button>
+              <button class="p-btn danger" data-stack-choice="reject" title="Never show">No (N)</button>
+            </div>
+            <p class="p-muted">Save your choices in the stack comparison.</p>
+            <button id="back-comparison" class="p-btn">Back to comparison</button>
+          </div>
           <span id="photo-readonly" class="p-muted" hidden>Already kept · reference only</span>
-          <button id="photo-next" class="p-btn">Next →</button>
-        </footer>
-      </div>
-    </dialog>
-    <dialog id="correction-dialog" aria-labelledby="correction-title">
-      <div class="dialog-frame">
-        <header class="dialog-head">
-          <h2 id="correction-title">Stack corrections</h2>
-          <button class="p-btn" data-close="correction-dialog">Close</button>
-        </header>
-        <div class="dialog-body">
-          <p>
-            These separations stay in place as your library changes. Resetting a correction allows photos to group
-            again; it doesn’t change your keeper decisions.
-          </p>
-          <div id="correction-list"></div>
-          <div id="correction-error" role="alert" hidden></div>
-          <p id="correction-recovery" class="notice" hidden>
-            The response is uncertain. Close this window and use Retry last action to continue safely.
-          </p>
-          <button id="correction-more" class="p-btn" hidden>Load more</button>
-        </div>
+          <button id="back-pending-photo" class="p-btn" hidden>Back to photo being reviewed</button>
+          <div id="photo-receipt" class="notice" hidden>
+            <span id="photo-receipt-text"></span><button id="photo-undo" class="p-btn">Undo (Z)</button>
+          </div>
+          <p id="photo-keys" class="p-muted"></p>
+          <p id="photo-caption"></p>
+          <p id="photo-score" class="p-muted"></p>
+          <p id="photo-model" class="p-muted" hidden></p>
+          <h3>Tags</h3>
+          <div id="photo-tags" class="tags"></div>
+          <div id="photo-reason" hidden></div>
+          <section id="photo-context" hidden>
+            <h3>Already kept nearby</h3>
+            <p class="p-muted">For reference only.</p>
+            <div id="photo-context-images"></div>
+          </section>
+          <a id="immich" class="p-btn" target="_blank" rel="noopener" hidden>Open in Immich ↗</a>
+        </aside>
       </div>
     </dialog>
     <script type="module" src="/curate/page.js"></script>
