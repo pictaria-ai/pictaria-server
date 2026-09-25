@@ -80,6 +80,12 @@ test(
     await wait('document.querySelector("#photo-undo-hint").hidden');
     assert.deepEqual(await lightboxLayout(), beforeHintFades, 'reminder cannot resize or move the photo');
     assert.equal(await page.evaluate('document.querySelector("#photo-undo").disabled'), false, 'Undo outlives its brief reminder');
+    await click('[data-close=photo-view]');
+    await click('#dismiss-receipt');
+    assert.equal(await page.evaluate('document.querySelector("#receipt").hidden'), true);
+    await click('.group-card:not(.is-stack) .cover');
+    await wait(`${photo(1002)} && !document.querySelector('[data-photo-action=approve]').disabled`);
+    // Dismissing the main-page feedback must leave the same keyboard Undo available.
     await key('z');
     await wait(`${photo(1001)} && !document.querySelector('[data-photo-action=approve]').disabled`);
     assert.ok(
@@ -123,8 +129,19 @@ test(
       ),
       true,
     );
-    await page.send('Emulation.clearDeviceMetricsOverride');
     await click('[data-close=photo-view]');
+    assert.equal(await page.evaluate(`(()=>{
+      const bar=document.querySelector('#receipt').getBoundingClientRect(),
+        dismiss=document.querySelector('#dismiss-receipt').getBoundingClientRect();
+      return bar.right<=innerWidth && Math.abs(bar.right-dismiss.right-11)<1 &&
+        dismiss.left>=bar.left && dismiss.top>=bar.top && dismiss.bottom<=bar.bottom;
+    })()`), true, 'dismiss stays on the right edge when receipt text wraps on mobile');
+    await click('#dismiss-receipt');
+    await click('#refresh');
+    await ready();
+    assert.equal(await page.evaluate('document.querySelector("#receipt").hidden'), true, 'refresh does not reshow dismissed feedback');
+    assert.equal(await page.evaluate('document.querySelector("#undo").disabled'), false);
+    await page.send('Emulation.clearDeviceMetricsOverride');
     // All keeps individual single-photo checks, without a select-all control.
     // Selecting those singles never includes the stack; the batch is atomic/undoable.
     assert.equal(await page.evaluate('document.querySelector("#bulk-label").hidden'), true);
@@ -137,6 +154,7 @@ test(
     await wait(
       'document.querySelectorAll(".group-card").length===1 && !document.querySelector("#refresh").disabled',
     );
+    assert.equal(await page.evaluate('document.querySelector("#receipt").hidden'), false, 'the next saved action shows fresh feedback');
     assert.ok(
       !(fixture.repo.loadAssetTagsFor([fixture.id(1)])[fixture.id(1)] || []).includes('frame/reviewed'),
     );

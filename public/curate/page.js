@@ -868,6 +868,7 @@ el('undo').onclick = () =>
       ),
     ),
   );
+el('dismiss-receipt').onclick = () => { el('receipt').hidden = true; };
 el('retry-sync').onclick = () =>
   run(async () => {
     await request('operations/retry', { operationId: state.syncId });

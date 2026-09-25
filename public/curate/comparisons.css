@@ -136,6 +136,24 @@ button {
   border: 1px solid var(--p-line);
   border-radius: var(--p-radius);
 }
+#receipt { position: relative; padding-right: 54px; }
+#dismiss-receipt {
+  position: absolute;
+  right: 10px;
+  top: 50%;
+  transform: translateY(-50%);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  padding: 0;
+  border-color: transparent;
+  color: var(--p-muted);
+  font-size: 22px;
+  line-height: 1;
+}
+#dismiss-receipt:hover { background: var(--p-panel-2); }
 [role='alert'] {
   padding: 12px;
   color: var(--p-danger);

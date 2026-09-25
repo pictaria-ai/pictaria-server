@@ -167,6 +167,9 @@ search draft has not been applied.
   of the photo for five seconds. This reminder does not move the layout, appears
   only after an accepted save (not a stack draft), and does not shorten the Undo
   window when it disappears. Another save starts a fresh reminder.
+  The main page's last-action bar can be dismissed with **×** on its right edge.
+  Dismissing it does not cancel synchronization or Undo; the lightbox and comparison
+  Undo controls remain available. The next saved action shows the bar again.
   The visible Undo affordance does not survive a page reload; saved decisions and
   corrections do. Undo feedback says **Undid choices** and separately reports
   whether the restored tags have synchronized. Older decisions remain accessible

@@ -18,7 +18,8 @@ All notable changes to Pictaria Server are documented here. This project follows
   stacks may change as photos arrive. Card check progress temporarily replaces
   the capture date on the same line, then restores it without resizing cards.
   The lightbox briefly shows **Saved — press Z to undo** after saving, without
-  shortening the existing Undo window.
+  shortening the existing Undo window. The last-action bar has a dismiss button;
+  dismissing it leaves Undo available and the next saved action shows it again.
 
 - Curate Preview settles failed similarity checks after one retry instead of
   keeping a long-term repair queue. Incomplete groupings remain ready for human
