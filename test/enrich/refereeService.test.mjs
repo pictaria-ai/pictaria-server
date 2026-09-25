@@ -627,6 +627,115 @@ test('the referee yields to enrichment and respects the toggles', async () => {
   });
 });
 
+test('Stacks off suppresses the legacy worker without clearing its saved referee preference', async () => {
+  await withRepo(async (repo) => {
+    const config = { enrichEnabled: true, curateRefereeEnabled: true, curateBurstGrouping: false };
+    const service = new RefereeService({ repo, config, immich: {}, review: fakeReview(makeRows()), enrichRunner: { isRunning: () => false } });
+    let prepared = false;
+    service.makeProvider = () => { prepared = true; throw new Error('disabled'); };
+    await service.tick();
+    assert.equal(await service.refereeGroup(service.pendingGroups()[0]), false);
+    assert.equal(prepared, false);
+    assert.equal(service.status().enabled, false);
+    assert.equal(config.curateRefereeEnabled, true);
+    config.curateBurstGrouping = true;
+    assert.equal(service.enabled(), true);
+    config.enrichEnabled = false;
+    assert.equal(service.enabled(), false, 'legacy Enrich-off preference remains inactive until migration');
+  });
+});
+
+for (const stop of ['stacks', 'referee', 'enrich', 'pause', 'shutdown', 'enrich-running']) {
+  test(`referee stops during preparation when ${stop} changes, without charging a failure`, async () => {
+    await withRepo(async (repo) => {
+      let fetched = 0;
+      let submitted = 0;
+      let running = false;
+      const config = { enrichEnabled: true, curateRefereeEnabled: true, curateBurstGrouping: true };
+      const service = new RefereeService({
+        repo, config, review: fakeReview(makeRows()), enrichRunner: { isRunning: () => running },
+        immich: { getAssetThumbnail: async () => {
+          fetched += 1;
+          if (stop === 'stacks') config.curateBurstGrouping = false;
+          if (stop === 'referee') config.curateRefereeEnabled = false;
+          if (stop === 'enrich') config.enrichEnabled = false;
+          if (stop === 'pause') service.setPaused(true);
+          if (stop === 'shutdown') await service.stop(0);
+          if (stop === 'enrich-running') running = true;
+          return { data: Buffer.from('synthetic'), contentType: 'image/jpeg' };
+        } },
+      });
+      service.makeProvider = () => ({ analyzeImages: async () => { submitted += 1; } });
+      await service.tick();
+      assert.equal(fetched, 1);
+      assert.equal(submitted, 0);
+      assert.equal(service.status().lastError, null);
+      assert.equal(service.status().deferredGroups, 0);
+      assert.equal(repo.refereeStats().groups, 0);
+    });
+  });
+}
+
+test('turning Stacks off during the final download prevents submission and allows a later fresh attempt', async () => {
+  await withRepo(async (repo) => {
+    let fetched = 0;
+    let submitted = 0;
+    const config = { enrichEnabled: true, curateRefereeEnabled: true, curateBurstGrouping: true };
+    const service = new RefereeService({
+      repo, config, review: fakeReview(makeRows()), enrichRunner: { isRunning: () => false },
+      immich: { getAssetThumbnail: async () => {
+        if (++fetched === 3) config.curateBurstGrouping = false;
+        return { data: Buffer.from('synthetic'), contentType: 'image/jpeg' };
+      } },
+    });
+    service.makeProvider = () => ({ providerName: 'fake', modelName: 'fake', analyzeImages: async () => {
+      submitted += 1;
+      // An already-submitted call may finish, even if the role is turned off.
+      config.curateRefereeEnabled = false;
+      return { normalizedOutput: { photos: [1, 2, 3].map((photo) => ({ photo, rank: photo, keep: photo === 1 })) } };
+    } });
+    await service.tick();
+    assert.equal(fetched, 3);
+    assert.equal(submitted, 0);
+    assert.equal(service.status().deferredGroups, 0);
+    config.curateBurstGrouping = true;
+    await service.tick();
+    assert.equal(submitted, 1);
+    assert.equal(repo.refereeStats().groups, 1);
+  });
+});
+
+test('a provider change during photo preparation cannot retarget the accepted referee job', async () => {
+  await withRepo(async (repo) => {
+    const requests = [];
+    const config = {
+      enrichEnabled: true, curateRefereeEnabled: true, curateBurstGrouping: true,
+      defaultProvider: 'local_lmstudio',
+      providers: { local_lmstudio: {
+        modelName: 'first-model', apiKey: 'synthetic-first-key', baseUrl: 'http://localhost:1234/v1',
+        fetchImpl: async (url, options) => {
+          requests.push({ url, body: JSON.parse(options.body), headers: options.headers });
+          return { ok: true, json: async () => ({ choices: [{ message: { content: JSON.stringify({ photos: [1, 2, 3].map((photo) => ({ photo, rank: photo, keep: photo === 1 })) }) } }] }) };
+        },
+      } },
+    };
+    const service = new RefereeService({
+      repo, config, review: fakeReview(makeRows()), enrichRunner: { isRunning: () => false },
+      immich: { getAssetThumbnail: async () => {
+        Object.assign(config.providers.local_lmstudio, { modelName: 'next-model', apiKey: 'synthetic-next-key', baseUrl: 'http://localhost:4321/v1' });
+        return { data: Buffer.from('synthetic'), contentType: 'image/jpeg' };
+      } },
+    });
+    await service.tick();
+    assert.equal(requests.length, 1);
+    assert.equal(String(requests[0].url), 'http://localhost:1234/v1/chat/completions');
+    assert.equal(requests[0].body.model, 'first-model');
+    assert.equal(requests[0].headers.Authorization, 'Bearer synthetic-first-key');
+    assert.equal(repo.refereeRecentGroups(1)[0].model, 'first-model');
+    assert.equal(service.makeProvider().modelName, 'next-model');
+  });
+});
+
 test('pause is cooperative: the in-flight stack finishes, then the worker idles until resumed', async () => {
   await withRepo(async (repo) => {
     let called = 0;

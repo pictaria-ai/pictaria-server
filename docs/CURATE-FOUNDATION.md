@@ -7,6 +7,8 @@ this foundation. The legacy grouping path must be removed at that cutover;
 maintaining two permanent grouping implementations is not the plan.
 The [PIC-369 manual comparison preview](CURATE-PREVIEW.md) exercises these APIs
 before AI integration and default-page cutover. It is not linked from the main navigation.
+See [AI integration](CURATE-AI.md) for the shared provider groundwork and the
+remaining referee controls, scheduling and migration work.
 
 ## Grouping and evidence
 
@@ -32,13 +34,14 @@ unsupported producing schemas stay unknown. Equal counts do not prove matching
 subjects. Empty recognition is never described as complete. This is a conservative
 initial rule with limited visual calibration, not a universal composition detector.
 
-The foundation now admits bounded background asset-detail refresh while a saved
-Curate view is live. `GET /assets/{id}` supplies `people`, `isEdited`, orientation
+The candidate service admits bounded background asset-detail refresh for pending
+review photos without requiring an open browser. `GET /assets/{id}` supplies `people`, `isEdited`, orientation
 and availability when Immich provides them; unsupported or unfetched fields stay
 unknown. Normal list/comparison responses never wait for these requests. Updated
 evidence can change the next view, while an already-open view keeps its membership.
-The released Curate page still uses the old path until PIC-369's cutover; it does
-not open these foundation views or start their refresh demand.
+The released Curate page still uses the old grouping path until PIC-369's cutover.
+Background evidence supply is shared with the candidate service, not triggered
+by loading more cards. See the metadata lane below for its bounds and gates.
 
 Saved human separations apply to every group member even when the soft comparison
 budget is exhausted. A new bridge cannot reunite separated photos. A removed photo
@@ -126,7 +129,8 @@ recognition are returned per photo without substituting cached recognition.
 Returned recognition is the bounded observation from that response, not a claim
 that the full photo has been recognized. Normal partial-response merging into
 the shared cache remains unchanged. There is no new persistent schema or job
-history. Automatic background refresh retains its original view/Stacks gating.
+history. Automatic candidate-service refresh uses the Stacks/connection gates
+described above; explicit lab reads do not enable automatic work.
 
 The shared Immich client accepts caller cancellation and a smaller response bound
 for this lane; other callers retain their existing defaults. Metadata refresh
