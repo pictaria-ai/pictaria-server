@@ -45,8 +45,8 @@ One server-owned `AiRequestScheduler` is shared by Enrich, the legacy referee,
 and the single `CurateAiExecution` instance composed for both future roles.
 Scheduling only admits work that its worker considers ready; it does not remove
 the legacy referee's wait-for-Enrich rule above. For the new roles, ready work
-on a shared resource gives Enrich a turn of **up to five provider calls or
-60 seconds, whichever comes first**, followed by one Curate call when it is
+on a shared resource gives Enrich a turn of **up to ten provider calls or
+five minutes, whichever comes first**, followed by one Curate call when it is
 waiting. A Curate call is one Stack Referee request or one Photo Referee batch,
 not a multi-call chain. These values are internal constants, without Settings
 or environment overrides. With no competing eligible work, continue without
@@ -54,11 +54,11 @@ artificial pauses.
 
 A turn starts when Enrich first obtains the resource. It spans the intervening
 per-photo downloads and local persistence, so those short gaps do not turn
-five calls into one. An already-used turn is not reset when Curate arrives.
+ten calls into one. An already-used turn is not reset when Curate arrives.
 At the time threshold, stop starting further Enrich calls; never abort a call
 already running. If Enrich is between calls, the deadline releases the resource
 without waiting for another photo to become ready. A slow call can exceed
-60 seconds, so this is not a maximum user wait or an inference timeout.
+five minutes, so this is not a maximum user wait or an inference timeout.
 A completed/cancelled run releases unused time. A failed call also releases
 the turn before validation/overload retry work or retry sleeps. Every retry
 must reacquire a scheduling turn; it cannot hold the resource through backoff.
@@ -82,11 +82,14 @@ Curate has at most one active scheduling turn across both roles/backends.
 Among ready Curate sessions, at most two preferred comparisons can precede
 the oldest waiting session. Future role workers still own selection of upcoming
 comparisons, open-comparison stability and settled/latest-input coalescing.
-Before activation, their readiness checks must account for related photos still
-arriving from an active Enrich run; a quiet 30-second interval alone does not
-prove that a non-contiguous burst has finished. This belongs in the role input
-selection, not a new legacy queue-repair mechanism. The arbiter does not
-discover groups or enqueue AI work itself.
+For v1.3, keep the planned 30-second settling delay and current-input validation,
+without inspecting the remaining Enrich queue to predict future stack members.
+Longer Enrich turns may reduce repeated judgments when related photos arrive
+together, but do not prove a stack is complete. Some repeated work is an accepted
+tradeoff for simpler scheduling. Dispatched calls still consume the existing
+attempt/per-photo allowances, so a later stack revision may receive no fresh AI
+advice if its allowance is exhausted; human curation remains available. The
+arbiter does not discover groups or enqueue AI work itself.
 
 Enrich and the existing Curate page distinguish waiting for an AI turn from
 running inference. A settings change rechecks queued role controls but does not

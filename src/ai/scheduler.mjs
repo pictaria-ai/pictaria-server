@@ -2,8 +2,8 @@ import { createHash } from 'node:crypto';
 import { enrichmentProviderConfiguration, ProviderRequestError } from '../enrich/providers.mjs';
 import { awaitDrain } from '../lifecycle.mjs';
 
-export const ENRICH_TURN_CALLS = 5;
-export const ENRICH_TURN_MS = 60_000;
+export const ENRICH_TURN_CALLS = 10;
+export const ENRICH_TURN_MS = 5 * 60_000;
 const MAX_SESSIONS = 200;
 
 // Conservative resource identity from the pinned adapter. Models, credentials

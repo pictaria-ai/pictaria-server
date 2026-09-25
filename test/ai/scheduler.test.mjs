@@ -29,14 +29,14 @@ test('resource identity groups models, credentials, API paths and loopback alias
   assert.notEqual(aiResourceKey(provider('http://other.test:8000/v1')), key);
   assert.notEqual(aiResourceKey(provider('http://localhost:9000/v1')), key);
   assert.throws(() => aiResourceKey({ providerName: 'unknown' }), /endpoint/);
-  assert.equal(ENRICH_TURN_CALLS, 5); assert.equal(ENRICH_TURN_MS, 60_000);
+  assert.equal(ENRICH_TURN_CALLS, 10); assert.equal(ENRICH_TURN_MS, 300_000);
 });
 
-test('five Enrich calls share a turn across downloads/persistence; Curate gets one call', async () => fixture(async (s, t) => {
+test('ten Enrich calls share a turn across downloads/persistence; Curate gets one call', async () => fixture(async (s, t) => {
   const enrich = s.session(provider(), 'enrich'), curate = s.session(provider(), 'curate');
   const order = [];
   const e = (async () => {
-    for (let i = 1; i <= 12; i++) {
+    for (let i = 1; i <= 22; i++) {
       await enrich.run(() => { order.push(`e${i}`); t.advance(10_000); });
       await turn(); // real asynchronous work between individual photos
     }
@@ -44,29 +44,32 @@ test('five Enrich calls share a turn across downloads/persistence; Curate gets o
   })();
   const c = (async () => { for (let i = 1; i <= 3; i++) await curate.run(() => order.push(`c${i}`)); curate.close(); })();
   await Promise.all([e, c]);
-  assert.deepEqual(order, ['e1','e2','e3','e4','e5','c1','e6','e7','e8','e9','e10','c2','e11','e12','c3']);
+  assert.deepEqual(order, [
+    ...Array.from({length:10},(_,i)=>`e${i+1}`),'c1',
+    ...Array.from({length:10},(_,i)=>`e${i+11}`),'c2','e21','e22','c3',
+  ]);
 }));
 
-for (const [duration, count] of [[20_000, 3], [70_000, 1]])
+for (const [duration, count] of [[20_000, 10], [70_000, 5], [310_000, 1]])
   test(`a ${duration}ms Enrich call yields after ${count}, without preemption`, async () => fixture(async (s, t) => {
     const e = s.session(provider(), 'enrich'), c = s.session(provider(), 'curate'), order = [];
-    await Promise.all([(async () => { for (let i=0;i<5;i++) await e.run(() => { order.push('e'); t.advance(duration); }); e.close(); })(),
+    await Promise.all([(async () => { for (let i=0;i<12;i++) await e.run(() => { order.push('e'); t.advance(duration); }); e.close(); })(),
       c.run(() => order.push('c'))]);
     assert.equal(order.indexOf('c'), count);
   }));
 
-test('60-second deadline yields during a gap between photos, with no new Enrich call needed', async () => fixture(async (s, t) => {
+test('five-minute deadline yields during a gap between photos, with no new Enrich call needed', async () => fixture(async (s, t) => {
   const e = s.session(provider(), 'enrich'), c = s.session(provider(), 'curate');
   await e.run(() => {});
   let ran = false; const request = c.run(() => { ran = true; });
   await turn(); assert.equal(ran, false);
-  t.advance(59_999); await turn(); assert.equal(ran, false);
+  t.advance(299_999); await turn(); assert.equal(ran, false);
   t.advance(1); await request; assert.equal(ran, true);
 }));
 
 test('a late-arriving Curate request does not grant an already-used Enrich turn a fresh budget', async () => fixture(async s => {
   const e = s.session(provider(), 'enrich'), c = s.session(provider(), 'curate'), order = [];
-  for (let i=0;i<8;i++) await e.run(() => {}); // no waiting Curate: no artificial stop
+  for (let i=0;i<12;i++) await e.run(() => {}); // no waiting Curate: no artificial stop
   await Promise.all([e.run(() => order.push('e')), c.run(() => order.push('c'))]);
   assert.deepEqual(order, ['c','e']);
 }));
@@ -75,11 +78,11 @@ test('long active requests finish after deadline; waiting requests never overlap
   const e = s.session(provider(), 'enrich'), c = s.session(provider(), 'curate'), gate = deferred();
   const active = e.run(() => gate.promise); await turn();
   let ran = false; const waiting = c.run(() => { ran = true; });
-  t.advance(200_000); await turn(); assert.equal(ran, false);
+  t.advance(600_000); await turn(); assert.equal(ran, false);
   gate.resolve(); await Promise.all([active, waiting]); assert.equal(ran, true);
 }));
 
-test('an Enrich error/backoff releases its turn; other work is not held for 60 seconds', async () => fixture(async s => {
+test('an Enrich error/backoff releases its turn; other work is not held for five minutes', async () => fixture(async s => {
   const e = s.session(provider(), 'enrich'), c = s.session(provider(), 'curate'), order=[];
   const first = e.run(() => { order.push('failure'); throw Error('synthetic'); });
   const other = c.run(() => order.push('curate'));

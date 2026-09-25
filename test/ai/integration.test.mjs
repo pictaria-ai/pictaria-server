@@ -32,7 +32,7 @@ function config(fetchImpl) {
     enrichEnabled:true,curateBurstGrouping:true,curateRefereeEnabled:true,curateRefereeModel:'referee-model',
     providers:{local_lmstudio:{...provider,fetchImpl}}};
 }
-test('real Enrich and the new Curate executor share five-call turns with different models on one endpoint',async()=>fixture(async f=>{
+test('real Enrich and the new Curate executor share ten-call turns with different models on one endpoint',async()=>fixture(async f=>{
   const started=deferred(),release=deferred(),order=[];
   const cfg=config(async()=>{
     order.push('enrich');
@@ -42,15 +42,15 @@ test('real Enrich and the new Curate executor share five-call turns with differe
   });
   const runner=new EnrichJobRunner({repo:f.repo,immich,taxonomy,config:cfg,aiScheduler:f.scheduler});
   const ex=execution(f),curateProvider={...provider,modelName:'referee-model'};
-  runner.start({assetIds:Array.from({length:10},(_,i)=>`e${i}`),sendToCurate:false});
+  runner.start({assetIds:Array.from({length:20},(_,i)=>`e${i}`),sendToCurate:false});
   await started.promise;
   const check=ex.run(job({provider:curateProvider,backendKey:aiBackendKey(curateProvider),
     submit:async()=>{order.push('curate');return {};}}));await turn();
   assert.equal(ex.schedulingStatus().state,'waiting');
   release.resolve();const [,result]=await Promise.all([runner.runPromise,check]);
   assert.equal(runner.status().error,null,JSON.stringify(runner.status().log));
-  assert.deepEqual(order,[...Array(5).fill('enrich'),'curate',...Array(5).fill('enrich')]);
-  assert.equal(runner.status().counters.succeeded,10);assert.equal(result.state,'succeeded');
+  assert.deepEqual(order,[...Array(10).fill('enrich'),'curate',...Array(10).fill('enrich')]);
+  assert.equal(runner.status().counters.succeeded,20);assert.equal(result.state,'succeeded');
   assert.equal(runner.status().scheduling.state,'idle');
 }));
 

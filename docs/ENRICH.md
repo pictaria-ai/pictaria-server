@@ -1246,8 +1246,8 @@ line explains this wait. A request already submitted may finish; a new Enrich
 run on the same service waits for that request rather than overlapping it.
 Turning the referee toggle off stops new work; existing verdicts stay.
 The new preview referees will use [shared request scheduling](CURATE-AI.md#shared-request-scheduling-pic-118)
-once their readiness and worker integration is complete: up to five Enrich
-calls or 60 seconds, then one ready Curate call. On a shared slow local model,
+once their readiness and worker integration is complete: up to ten Enrich
+calls or five minutes, then one ready Curate call. On a shared slow local model,
 that allows Curate progress at the cost of a longer Enrich run. Both preview
 roles remain unavailable until that integration is complete.
 Errors are handled the patient way: when a judgment fails — the model
