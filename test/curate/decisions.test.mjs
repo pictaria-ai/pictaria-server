@@ -331,7 +331,7 @@ test('schema-13 pending/dead jobs adopt local latest intent once; upgrade and re
  await fixture(async f=>{f.seed();f.repo.recordDecision({assetIds:[IDS[0]],action:'approve',...{addTags:['frame/eligible'],removeTags:[]}});f.accept('frame_hide',IDS[0]);
  const old=f.repo.nextSyncJob();f.repo.deadLetterSyncJob(old.id,'old failure');
  f.repo.db.exec('DELETE FROM decision_intents; DELETE FROM decision_meta; PRAGMA user_version=13');const tags=local(f,IDS[0]);
- await f.restart();assert.equal(f.repo.db.prepare('PRAGMA user_version').get().user_version,16);assert.deepEqual(local(f,IDS[0]),tags);assert.equal(f.repo.deadSyncJobCount(),1);
+ await f.restart();assert.equal(f.repo.db.prepare('PRAGMA user_version').get().user_version,18);assert.deepEqual(local(f,IDS[0]),tags);assert.equal(f.repo.deadSyncJobCount(),1);
  f.repo.retryDeadSyncJobs(old.id);await f.drain();assert.ok(f.immich.assets.get(IDS[0]).has('frame/never-show'));assert.equal(f.immich.assets.get(IDS[0]).has('frame/eligible'),false);
  });
 });

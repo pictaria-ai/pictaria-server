@@ -2,8 +2,9 @@
 // completed candidate-member evidence is durable and scoped to its exact inputs.
 import { CurateRankStore } from './rank-store.mjs';
 import { CANDIDATE_METHOD } from './candidate.mjs';
+import { problemCode, problemMessage } from './search-problems.mjs';
 export const REFINEMENT_LIMITS = Object.freeze({ cohorts: 32, views: 200,
-  activeMs: 60_000, attentionMs: 12_000, requestsPerMinute: 30, retryMs: 60_000, retryMaxMs: 15 * 60_000 });
+  activeMs: 60_000, attentionMs: 12_000, requestsPerMinute: 30, maxAttempts: 2 });
 
 export class CurateRefinement {
   constructor(curate, { now = Date.now } = {}) {
@@ -31,17 +32,21 @@ export class CurateRefinement {
     }
     if (!this.enabled()) { this.controller?.abort(); this.entries.clear(); this.views.clear(); }
   }
-  retry() { for (const e of this.entries.values()) e.retryAt = 0; }
+  nextReference(entry) {
+    const remaining = entry.referenceIds.filter(id => !Object.hasOwn(entry.rows, id));
+    return remaining.find(id => !entry.errors[id]) ?? remaining[0];
+  }
   snapshot() {
     this.settingsChanged();
     if (!this.enabled()) return {};
-    return Object.fromEntries((this.curate.current?.scopes ?? []).filter(s => this.saved.has(s.id))
+    return Object.fromEntries((this.curate.current?.scopes ?? [])
+      .filter(s => this.saved.has(s.id) && !this.saved.problem(s.id))
       .map(s => [s.id, this.saved.read(s.id)]));
   }
   admit(scope) {
     if (!scope?.needsRanks || this.saved.has(scope.id) || this.entries.has(scope.id) || this.entries.size >= REFINEMENT_LIMITS.cohorts) return;
     this.entries.set(scope.id, { ...scope, rows: Object.create(null), coverage: Object.create(null),
-      admittedAt: this.now(), failures: 0, retryAt: 0 });
+      errors: Object.create(null), admittedAt: this.now() });
   }
   sync() {
     if (!this.enabled() || this.curate.building || !this.curate.current) return;
@@ -51,11 +56,10 @@ export class CurateRefinement {
     const priorities = this.priorities();
     const pending = scopes.filter(s => s.needsRanks && !this.saved.has(s.id))
       .sort((a,b) => (priorities.get(a.id) ?? 2) - (priorities.get(b.id) ?? 2));
-    // Make room for an inspected comparison without dropping an in-flight or
-    // partially completed pass. The evicted untouched candidate remains queued.
     for (const scope of pending) {
       if (priorities.has(scope.id) && !this.entries.has(scope.id) && this.entries.size >= REFINEMENT_LIMITS.cohorts) {
-        const spare = [...this.entries.values()].reverse().find(e => !priorities.has(e.id) && e.id !== this.running?.id && !Object.keys(e.rows).length && !e.failures);
+        const spare = [...this.entries.values()].reverse().find(e => !priorities.has(e.id) && e.id !== this.running?.id &&
+          !Object.keys(e.rows).length && !Object.keys(e.errors).length);
         if (spare) this.entries.delete(spare.id);
       }
       this.admit(scope);
@@ -91,6 +95,7 @@ export class CurateRefinement {
     if (!view) return;
     if (groups) view.visible = groups.map(g => g.ids[0]);
     view.focus = comparison?.ids[0] ?? null;
+    view.next = comparison ? this.curate.store.nextViewGroups(viewId, comparison.id, 5).map(g => g.ids[0]) : [];
     view.attentionAt = this.now();
   }
   priorities() {
@@ -100,11 +105,14 @@ export class CurateRefinement {
       if (view.attentionAt + REFINEMENT_LIMITS.attentionMs <= this.now()) continue;
       const scope = id => this.curate.current?.scopeByMember?.get(id)?.id;
       for (const id of view.visible ?? []) {
+        if (id === view.focus) continue;
         const key = scope(id);
         if (key && !priorities.has(key)) priorities.set(key, 1);
       }
-      const focus = scope(view.focus);
-      if (focus) priorities.set(focus, 0);
+      for (const [index, id] of (view.next ?? []).entries()) {
+        const key = scope(id), priority = index / 5;
+        if (key) priorities.set(key, Math.min(priorities.get(key) ?? 2, priority));
+      }
     }
     return priorities;
   }
@@ -122,33 +130,37 @@ export class CurateRefinement {
     const first = group.ids[0], current = this.curate.current?.byMember.get(first);
     if (current?.id !== group.id) {
       const pending = [...new Set(group.ids.map(id => this.curate.current?.scopeByMember?.get(id)))].filter(s => s?.needsRanks);
-      return { state: 'updated', pending: pending.length > 0,
-        checking: pending.some(s => s.id === this.running?.id || Object.keys(this.entries.get(s.id)?.rows ?? {}).length > 0),
-        paused: pending.some(s => this.entries.get(s.id)?.retryAt > this.now()),
+      const checking = pending.filter(s => !this.saved.has(s.id));
+      return { state: 'updated', pending: checking.length > 0,
+        checking: checking.some(s => s.id === this.running?.id),
         uncertain: group.ids.some(id => this.curate.current?.byMember.get(id)?.route === 'candidate-unconfirmed') };
     }
-    // Every unchanged candidate group is contained in one time scope.
-    const scope = this.curate.current?.scopeByMember?.get(first), entry = this.entries.get(scope?.id);
+    const scope = this.curate.current?.scopeByMember?.get(first);
     if (!scope || !current.ids.some(id => scope.referenceIds.includes(id)) || (!scope.needsRanks && !this.saved.has(scope.id)))
       return group.route === 'manual-budget' ? { state: 'limited' } : null;
-    const total = scope.referenceIds.length, done = this.saved.has(scope.id) ? total : Object.keys(entry?.rows ?? {}).length;
-    return { state: done === total && this.saved.has(scope.id) ? 'checked' : entry?.retryAt > this.now() ? 'paused' :
-      this.storageFull ? 'limited' : done || scope.id === this.running?.id ? 'checking' : 'waiting',
-      done, total, ...(done === total && current.route === 'candidate-unconfirmed' ? { uncertain: true } : {}) };
+    const code = this.saved.problem(scope.id), entry = this.entries.get(scope.id), total = scope.referenceIds.length;
+    if (code) return { state: 'incomplete', problemCode: code, problem: problemMessage(code), total };
+    if (this.saved.has(scope.id)) return { state: 'checked', done: total, total,
+      ...(current.route === 'candidate-unconfirmed' ? { uncertain: true } : {}) };
+    const done = Object.keys(entry?.rows ?? {}).length;
+    return { state: this.storageFull ? 'limited' : done || scope.id === this.running?.id || Object.keys(entry?.errors ?? {}).length
+      ? 'checking' : 'waiting', done, total };
   }
   status(viewId, groups = []) {
     this.sync();
     const scopes = this.enabled() ? (this.curate.current?.scopes ?? []).filter(s => s.needsRanks || this.saved.has(s.id)) : [];
     const pendingScopes = scopes.filter(s => !this.saved.has(s.id));
+    const incomplete = scopes.filter(s => this.saved.problem(s.id));
     const pending = pendingScopes.reduce((n,s) => n + s.referenceIds.length - Object.keys(this.entries.get(s.id)?.rows ?? {}).length, 0);
-    const retryAt = Math.min(...[...this.entries.values()].filter(e => e.retryAt > this.now()).map(e => e.retryAt));
-    const readyToRun = [...this.entries.values()].some(e => e.retryAt <= this.now());
-    const state = this.curate.backgroundError ? 'paused' : !pendingScopes.length ? 'idle' : this.storageFull ? 'limited' : this.work ? 'searching' : readyToRun ? 'waiting' : 'paused';
+    const codes = [...new Set(incomplete.map(s => this.saved.problem(s.id)))].sort();
+    const state = this.curate.backgroundError ? 'paused' : this.storageFull || this.curate.current?.retentionLimited ? 'limited' :
+      !pendingScopes.length ? 'idle' : this.work ? 'searching' : 'waiting';
     const view = this.views.get(viewId);
     return { state, pending, limited: state === 'limited',
-      problem: this.curate.backgroundError || (state === 'limited' ? 'Saved check storage is full. Existing results are preserved.' : state === 'paused' ? 'Stack checks paused; retrying automatically.' : null),
-      retryAt: Number.isFinite(retryAt) ? retryAt : null,
-      totalGroups: scopes.length, checkedGroups: scopes.length - pendingScopes.length,
+      problem: this.curate.backgroundError || (state === 'limited' ? 'Saved check storage is full. Some groupings may be recalculated after decisions.' :
+        codes.length ? codes.map(problemMessage).join(' ') : null),
+      problemCodes: codes, incompleteGroups: incomplete.length,
+      totalGroups: scopes.length, checkedGroups: scopes.length - pendingScopes.length - incomplete.length,
       remainingGroups: pendingScopes.length,
       ready: [...new Map([...(view?.groups.values() ?? []), ...groups].map(g => [g.id, g])).values()]
         .filter(g => this.groupStatus(g)?.state === 'updated').length,
@@ -171,22 +183,23 @@ export class CurateRefinement {
       return;
     }
     if (!this.enabled() || this.curate.metadata.work || this.curate.building) return;
-    for (const entry of this.entries.values()) if (entry.referenceIds.every(id => Object.hasOwn(entry.rows, id))) {
-      if (entry.retryAt > this.now()) continue;
-      try {
-        if (!this.publish(entry)) return;
-        await this.curate.refresh(); this.sync();
-      } catch { this.defer(entry); }
+    // Retain finished in-memory results when storage is temporarily unavailable;
+    // retry only the local save, never the Immich searches that already finished.
+    for (const entry of this.entries.values()) if (entry.problemCode || entry.referenceIds.every(id => Object.hasOwn(entry.rows, id))) {
+      if (!this.publish(entry)) return;
+      await this.curate.refresh(); this.sync();
     }
     const lane = this.curate.similarity;
     if (lane.owner || lane.work) return;
     this.requests = this.requests.filter(time => time + 60_000 > this.now());
     const priorities = this.priorities();
-    const entry = [...active].map(id => this.entries.get(id)).filter(e => e && this.needed(e) && e.retryAt <= this.now() &&
-      e.referenceIds.some(id => !Object.hasOwn(e.rows, id)))
-      .sort((a, b) => (priorities.get(a.id) ?? 2) - (priorities.get(b.id) ?? 2))[0];
+    // A group with a failed reference yields to groups without failures, even
+    // when it has browser attention. Among peers, keep attention and queue order.
+    const entry = [...this.entries.values()].filter(e => active.has(e.id) && this.needed(e) && this.nextReference(e))
+      .sort((a, b) => Number(Object.keys(a.errors).length > 0) - Number(Object.keys(b.errors).length > 0) ||
+        (priorities.get(a.id) ?? 2) - (priorities.get(b.id) ?? 2))[0];
     if (!entry) return;
-    const id = entry.referenceIds.find(id => !Object.hasOwn(entry.rows, id));
+    const id = this.nextReference(entry);
     // A cached result costs no Immich work and should not wait on network pacing.
     if (!lane.cached(id) && (lane.nextAt > lane.now() || this.requests.length >= REFINEMENT_LIMITS.requestsPerMinute)) return;
     const connection = this.connection;
@@ -211,29 +224,46 @@ export class CurateRefinement {
         // mismatch and never an automatic reason to page/retry the search.
         entry.rows[id] = row;
         entry.coverage[id] = { returned: result.ids.length, limit: result.limit, outside };
-        entry.failures = 0; entry.retryAt = 0;
+        delete entry.errors[id];
         // Publish one complete matrix. A refreshed view must never consume a
         // mixture of queried and not-yet-queried directions from this pass.
         if (entry.referenceIds.every(id => Object.hasOwn(entry.rows, id))) {
           if (this.publish(entry)) await this.curate.refresh();
         }
       } catch (error) {
-        if (!signal.aborted && !['similarity_busy', 'similarity_cooldown', 'similarity_reference_changed'].includes(error.code))
-          this.defer(entry);
+        if (!signal.aborted && !['similarity_busy', 'similarity_cooldown', 'similarity_reference_changed'].includes(error.code)) {
+          await this.curate.refresh();
+          if (!signal.aborted && connection === this.connection && this.entries.get(entry.id) === entry && this.valid(entry))
+            this.failed(entry, error, id);
+        }
       } finally { this.controller = null; this.running = null; }
     })();
     try { await this.work; } finally { this.work = null; }
   }
-  defer(entry) {
-    entry.retryAt = this.now() + Math.min(REFINEMENT_LIMITS.retryMaxMs,
-      REFINEMENT_LIMITS.retryMs * 2 ** Math.min(entry.failures++, 4));
+  failed(entry, error, id) {
+    const code = problemCode(error);
+    entry.errors[id] = (entry.errors[id] ?? 0) + 1;
+    if (entry.errors[id] >= REFINEMENT_LIMITS.maxAttempts) {
+      // A terminal outcome, not a repair queue. Discard partial rows rather
+      // than let incomplete directional evidence change stack membership.
+      entry.problemCode = code;
+      this.publish(entry);
+    } else {
+      this.entries.delete(entry.id); this.entries.set(entry.id, entry);
+    }
   }
   publish(entry) {
-    if (!this.saved.save(entry, this.now())) { this.storageFull = true; this.storageBlockedId = entry.id; return false; }
+    try {
+      if (!this.saved.save(entry, this.now())) throw new Error('Check storage full');
+    } catch {
+      this.storageFull = true; this.storageBlockedId = entry.id; return false;
+    }
     this.storageFull = false;
     this.entries.delete(entry.id);
-    this.metrics.completedGroups++;
-    this.metrics.completionMs += this.now() - entry.admittedAt;
+    if (!entry.problemCode) {
+      this.metrics.completedGroups++;
+      this.metrics.completionMs += this.now() - entry.admittedAt;
+    }
     this.revision++;
     return true;
   }

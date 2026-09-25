@@ -1,5 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { writeFileSync } from 'node:fs';
+import { join } from 'node:path';
 import { launchChrome, findChrome } from './harness.mjs';
 import { curatePreviewFixture } from './curatePreviewFixture.mjs';
 
@@ -37,11 +39,13 @@ test(
       'document.querySelectorAll("#photos [data-keeper]").length===3 && !document.querySelector("#apply").disabled',
     );
     await click('#photos .photo-image');
-    await wait('document.querySelector("#photo-view").open');
+    await wait('document.querySelector("#photo-view").open && document.querySelector("#photo-loading").hidden');
     assert.equal(await page.evaluate('document.querySelectorAll("#photos [data-keeper][aria-pressed=true]").length'), 0);
     await key('y');
     assert.equal(fixture.repo.db.prepare('SELECT COUNT(*) n FROM decision_operations').get().n, 0);
+    assert.equal(await page.evaluate('document.querySelector("#photo-undo-hint").hidden'), true, 'drafts never announce a save');
     assert.equal(await page.evaluate('document.querySelectorAll("#photos [data-keeper][aria-pressed=true]").length'), 1); // Y changes only the draft
+    await key('ArrowLeft'); // Y advanced; browse back before changing that draft.
     await key('s');
     assert.equal(await page.evaluate('document.querySelectorAll("#photos [data-keeper][aria-pressed=true]").length'), 0);
     await click('#back-comparison');
@@ -61,11 +65,42 @@ test(
     await key('y');
     await wait(`${photo(1002)} && !document.querySelector('[data-photo-action=approve]').disabled`);
     assert.ok(fixture.repo.loadAssetTagsFor([fixture.id(1001)])[fixture.id(1001)].includes('frame/eligible'));
+    await wait('!document.querySelector("#photo-undo-hint").hidden');
+    assert.match(await page.evaluate('document.querySelector("#photo-undo-hint").textContent'), /Saved.*Z to undo/);
+    const lightboxLayout = () => page.evaluate(`['.lightbox-stage','.lightbox-side','#photo-large'].map(s=>{
+      const r=document.querySelector(s).getBoundingClientRect();return [r.x,r.y,r.width,r.height];
+    })`);
+    const beforeHintFades = await lightboxLayout();
+    assert.equal(await page.evaluate(`(()=>{
+      const hint=document.querySelector('#photo-undo-hint').getBoundingClientRect(),
+        stage=document.querySelector('.lightbox-stage').getBoundingClientRect();
+      return hint.left>=stage.left && hint.right<=stage.right && hint.bottom<=stage.bottom &&
+        stage.bottom-hint.bottom<30;
+    })()`), true, 'reminder is visible at the bottom of the modal image area');
+    await wait('document.querySelector("#photo-undo-hint").hidden');
+    assert.deepEqual(await lightboxLayout(), beforeHintFades, 'reminder cannot resize or move the photo');
+    assert.equal(await page.evaluate('document.querySelector("#photo-undo").disabled'), false, 'Undo outlives its brief reminder');
+    // Native input gives idle regrouping the same pause as a real user closing the viewer.
+    await key('Escape', { code: 'Escape', windowsVirtualKeyCode: 27 });
+    await wait('!document.querySelector("#photo-view").open');
+    await click('#dismiss-receipt');
+    assert.equal(await page.evaluate('document.querySelector("#receipt").hidden'), true);
+    const savedOperations = fixture.repo.db.prepare('SELECT COUNT(*) n FROM decision_operations').get().n;
+    await page.evaluate('document.querySelector("#search").focus()');
+    await key('z'); // Editing a field must not undo the saved choice.
+    assert.equal(fixture.repo.db.prepare('SELECT COUNT(*) n FROM decision_operations').get().n, savedOperations);
+    await page.evaluate('document.activeElement.blur()');
+    await key('z', { modifiers: 2 }); // Preserve native Ctrl-Z.
+    await key('z', { modifiers: 4 }); // Preserve native Meta-Z.
+    assert.equal(fixture.repo.db.prepare('SELECT COUNT(*) n FROM decision_operations').get().n, savedOperations);
+    assert.equal(await page.evaluate('document.querySelector("#photo-view").open || document.querySelector("#comparison").open'), false);
+    // Grid Z still works after dismissing feedback, restoring the prior single.
     await key('z');
     await wait(`${photo(1001)} && !document.querySelector('[data-photo-action=approve]').disabled`);
     assert.ok(
       !(fixture.repo.loadAssetTagsFor([fixture.id(1001)])[fixture.id(1001)] || []).includes('frame/eligible'),
     );
+    assert.equal(await page.evaluate('document.querySelector("#photo-undo-hint").hidden'), true);
     // Lost acceptance stays on the current photo and replays the same operation.
     await page.evaluate(`window.realFetch=window.fetch;window.fetch=async(...args)=>{
     const r=await window.realFetch(...args);if(String(args[0]).endsWith('/operations/apply')){
@@ -75,10 +110,12 @@ test(
       '!document.querySelector("#photo-recovery").hidden && !document.querySelector("#photo-retry").disabled',
     );
     assert.equal(await page.evaluate(photo(1001)), true);
+    assert.equal(await page.evaluate('document.querySelector("#photo-undo-hint").hidden'), true, 'uncertain acceptance must not advertise Undo');
     const operations = fixture.repo.db.prepare('SELECT COUNT(*) n FROM decision_operations').get().n;
     await key('n'); // unresolved response locks further decisions
     await click('#photo-retry');
     await wait(`${photo(1002)} && !document.querySelector('[data-photo-action=approve]').disabled`);
+    assert.equal(await page.evaluate('document.querySelector("#photo-undo-hint").hidden'), false, 'a new accepted save starts another reminder');
     assert.equal(fixture.repo.db.prepare('SELECT COUNT(*) n FROM decision_operations').get().n, operations);
     await page.send('Emulation.setDeviceMetricsOverride', {
       width: 375,
@@ -87,24 +124,46 @@ test(
       mobile: true,
     });
     assert.equal(await page.evaluate('document.querySelector("#photo-view").scrollWidth<=innerWidth'), true);
+    assert.equal(await page.evaluate(`(()=>{
+      const r=document.querySelector('#photo-undo-hint').getBoundingClientRect();
+      return r.left>=0 && r.right<=innerWidth && r.top>=0 && r.bottom<=innerHeight;
+    })()`), true);
+    if (process.env.PICTARIA_TEST_SCREENSHOTS) {
+      const {data}=await page.send('Page.captureScreenshot',{format:'png'});
+      writeFileSync(join(process.env.PICTARIA_TEST_SCREENSHOTS,'curate-undo-hint-mobile.png'),Buffer.from(data,'base64'));
+    }
     assert.equal(
       await page.evaluate(
         'document.querySelector(".lightbox-side").getBoundingClientRect().top >= document.querySelector(".lightbox-stage").getBoundingClientRect().bottom - 1',
       ),
       true,
     );
-    await page.send('Emulation.clearDeviceMetricsOverride');
     await click('[data-close=photo-view]');
-    // Selecting shown singles never includes the stack; saved batch is atomic/undoable.
-    await click('#select-shown');
+    assert.equal(await page.evaluate(`(()=>{
+      const bar=document.querySelector('#receipt').getBoundingClientRect(),
+        dismiss=document.querySelector('#dismiss-receipt').getBoundingClientRect();
+      return bar.right<=innerWidth && Math.abs(bar.right-dismiss.right-11)<1 &&
+        dismiss.left>=bar.left && dismiss.top>=bar.top && dismiss.bottom<=bar.bottom;
+    })()`), true, 'dismiss stays on the right edge when receipt text wraps on mobile');
+    await click('#dismiss-receipt');
+    await click('#refresh');
+    await ready();
+    assert.equal(await page.evaluate('document.querySelector("#receipt").hidden'), true, 'refresh does not reshow dismissed feedback');
+    assert.equal(await page.evaluate('document.querySelector("#undo").disabled'), false);
+    await page.send('Emulation.clearDeviceMetricsOverride');
+    // All keeps individual single-photo checks, without a select-all control.
+    // Selecting those singles never includes the stack; the batch is atomic/undoable.
+    assert.equal(await page.evaluate('document.querySelector("#bulk-label").hidden'), true);
+    await page.evaluate('document.querySelectorAll(".group-card:not(.is-stack) [data-select]").forEach(input=>input.click())');
     assert.equal(
       await page.evaluate('document.querySelector("#bulk-count").textContent'),
-      '2 photos selected',
+      '2 checked',
     );
     await click('[data-bulk=reviewed]');
     await wait(
       'document.querySelectorAll(".group-card").length===1 && !document.querySelector("#refresh").disabled',
     );
+    assert.equal(await page.evaluate('document.querySelector("#receipt").hidden'), false, 'the next saved action shows fresh feedback');
     assert.ok(
       !(fixture.repo.loadAssetTagsFor([fixture.id(1)])[fixture.id(1)] || []).includes('frame/reviewed'),
     );
@@ -118,9 +177,14 @@ test(
     assert.equal(await page.evaluate('document.querySelectorAll(".group-card").length'), 2);
     await click(`.group-card[data-group-id="single:decided:${fixture.id(1001)}"] .cover`);
     await wait(`document.querySelector('#photo-view').open && ${photo(1001)}`);
+    assert.equal(await page.evaluate('document.querySelector("#photo-outcome").textContent'), 'Current: Fav');
+    assert.match(await page.evaluate('document.querySelector("#photo-position").textContent'), /^\d+ of \d+ photos$/);
+    assert.equal(await page.evaluate(`document.querySelector('.group-card[data-group-id="single:decided:${fixture.id(1001)}"] .p-chip').hidden`), true);
+    assert.equal(await page.evaluate(`document.querySelector('.group-card[data-group-id="single:decided:${fixture.id(1001)}"] [aria-pressed=true]').dataset.quick`), 'favorite');
+    assert.equal(await page.evaluate('document.querySelector("[data-photo-action=approve]").classList.contains("primary")'), false);
     await key('n');
     await wait(
-      `${photo(1001)} && !document.querySelector('[data-photo-action=approve]').disabled && document.querySelector('.group-card[data-group-id="single:decided:${fixture.id(1001)}"] .p-chip').textContent==='No'`,
+      `${photo(1001)} && !document.querySelector('[data-photo-action=approve]').disabled && document.querySelector('.group-card[data-group-id="single:decided:${fixture.id(1001)}"] [data-quick=reject]').getAttribute('aria-pressed')==='true'`,
     );
     // Re-open waits for the accepted decision; an older matching image is not completion.
     await wait('!document.querySelector("#photo-undo").disabled');
@@ -212,7 +276,7 @@ test(
       'document.querySelectorAll(".group-card").length===50 && !document.querySelector("#refresh").disabled',
     );
     await page.evaluate(
-      'document.querySelector("#select-shown").click();document.querySelector("#more").click()',
+      'document.querySelectorAll(".group-card [data-select]").forEach(input=>input.click());document.querySelector("#more").click()',
     );
     await page.waitFor(
       'document.querySelectorAll(".group-card").length===51 && !document.querySelector("#refresh").disabled',

@@ -227,6 +227,11 @@ export class CurateRepository {
     }
     return [...byId].map(([id, parts]) => ({ id, partitions: [...parts.values()] }));
   }
+  separationKey(id) {
+    return fingerprint(this.prepare(`SELECT m.separation_id,m.partition_no FROM curate_separation_members m
+      JOIN curate_separations s ON s.id=m.separation_id AND s.active=1
+      WHERE m.asset_id=? ORDER BY m.separation_id`).all(id));
+  }
   photo(id) {
     return this.prepare(`SELECT ${HOT},state,human_key humanKey FROM curate_photos WHERE asset_id=?`).get(id);
   }
@@ -254,9 +259,11 @@ export class CurateRepository {
     // Bounded display projection: never expand evidence or a whole stack just
     // to paint its card. Missing source rows do not change saved membership.
     return ids.map(id => {
-      const row = this.prepare(`SELECT a.original_path,a.file_created_at,ls.short_caption,p.state FROM assets a LEFT JOIN curate_photos p ON p.asset_id=a.asset_id
+      const row = this.prepare(`SELECT a.original_path,a.file_created_at,ls.short_caption,p.state,
+        EXISTS(SELECT 1 FROM asset_tags t WHERE t.asset_id=a.asset_id AND t.tag='frame/favorite') favorite
+        FROM assets a LEFT JOIN curate_photos p ON p.asset_id=a.asset_id
         LEFT JOIN latest_success ls ON ls.asset_id=a.asset_id WHERE a.asset_id=?`).get(id);
-      return { id, filename: row?.original_path?.split('/').pop() || id, caption: row?.short_caption ?? '', capturedAt: row?.file_created_at ?? null, state: row?.state ?? 'undecided' };
+      return { id, filename: row?.original_path?.split('/').pop() || id, caption: row?.short_caption ?? '', capturedAt: row?.file_created_at ?? null, state: row?.state ?? 'undecided', favorite: Boolean(row?.favorite) };
     });
   }
   corrections(offset = 0, limit = 50) {
@@ -559,6 +566,13 @@ export class CurateRepository {
         key,
       );
     return row ? this.decodedGroup(row, view.method) : null;
+  }
+  nextViewGroups(id, groupId, limit = 5) {
+    const view = this.getLease(id, 'view');
+    const key = groupId.startsWith(`single:${view.method}:`) ? groupId.slice(`single:${view.method}:`.length) : groupId;
+    const row = this.prepare('SELECT position FROM curate_view_groups WHERE view_id=? AND group_id=?')
+      .get(view.snapshotId ?? id, key);
+    return row ? this.viewGroups(id, row.position + 1, limit) : [];
   }
   getLease(id, kind, now = Date.now()) {
     const row =

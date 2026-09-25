@@ -3,7 +3,7 @@ import { CurateError } from '../curate/contracts.mjs';
 
 // Production foundation for PIC-368/369. The existing /api/review/assets UI
 // contract is intentionally unchanged until complete keeper-set actions land.
-export function createCurateRoutes({ curate, review = null }) {
+export function createCurateRoutes({ curate, review = null, enrichRunner = null }) {
   return async (request, response, url) => {
     if (!url.pathname.startsWith('/api/review/curate/')) return false;
     response.setHeader('Cache-Control', 'no-store');
@@ -73,7 +73,7 @@ export function createCurateRoutes({ curate, review = null }) {
         result = await curate.openView({
           kind: body.kind,
           search: body.search,
-          sort: body.sort, section: body.section, category: body.category, retryChecks: body.retryChecks,
+          sort: body.sort, section: body.section, category: body.category,
           replacesViewId: body.replacesViewId,
         });
       } else if (request.method === 'POST' && path === 'selection') {
@@ -127,6 +127,10 @@ export function createCurateRoutes({ curate, review = null }) {
         curate.store.releaseLease(body.id);
         result = { ok: true };
       } else return false;
+      // Read the live runner state on both initial loads and status polls; it
+      // is not part of the saved grouping snapshot and needs no separate poll.
+      if (path === 'groups' || path === 'groups/status')
+        result = { ...result, enrichRunning: enrichRunner?.isRunning() ?? false };
       sendJson(response, 200, result);
       return true;
     } catch (error) {

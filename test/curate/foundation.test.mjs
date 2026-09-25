@@ -102,7 +102,7 @@ test('schema-14 corrections retain their original partitions without inventing a
     repo.db.exec('DROP TABLE curate_separation_actions; PRAGMA user_version=14');
     const migrated = new Repository(path);
     try {
-      assert.deepEqual(migrated.initSchema().applied,[15,16]);
+      assert.deepEqual(migrated.initSchema().applied,[15,16,17,18]);
       assert.equal(migrated.curate.corrections().corrections[0].action, null);
       assert.deepEqual(migrated.curate.separate(c.id,[['a'],['b']]),receipt);
       assert.deepEqual(migrated.curate.separations()[0].partitions,[['a'],['b']]);
@@ -516,7 +516,7 @@ test('migration from schema 12 queues only review rows; corrections/evidence/vie
     db.close();
     const migrated = new Repository(legacy);
     try {
-      assert.deepEqual(migrated.initSchema().applied, [13, 14, 15, 16]);
+      assert.deepEqual(migrated.initSchema().applied, [13, 14, 15, 16, 17, 18]);
       assert.equal(migrated.db.prepare('SELECT COUNT(*) n FROM curate_dirty').get().n, 2);
       await migrated.curate.flush();
       assert.equal(migrated.curate.photo('a').recognizedCount, null);
@@ -587,13 +587,28 @@ test('equal capture dates and unknown dates have deterministic order in both dir
     assert.deepEqual(ids(await service.openView({sort: 'newest'})), ['b', 'a', 'y', 'z']);
   }));
 
+test('grid previews are bounded and include favorite status without loading tags or evidence', async () =>
+  fixture(async ({ repo, service, add }) => {
+    for (let i=0;i<12;i++) add(`p${i}`,i);
+    const view=await service.openView();
+    assert.equal(view.groups[0].memberCount,12);
+    assert.equal(view.groups[0].photos.length,3);
+    assert.ok(view.groups[0].photos.every(photo => !('tags' in photo) && !('evidence' in photo)));
+    repo.setManualFrameTags({assetIds:['p0'],addTags:['frame/eligible','frame/favorite'],removeTags:[],action:'favorite'});
+    const decided=await service.openView({section:'decided'});
+    const photo=decided.groups[0].photos[0];
+    assert.equal(photo.state,'approved');
+    assert.equal(photo.favorite,true);
+  }));
+
 test('foundation HTTP routes return complete groups and reject malformed or stale actions', async () =>
   fixture(async ({ repo, service, add }) => {
     const { createServer } = await import('node:http');
     const { createCurateRoutes } = await import('../../src/routes/curate.mjs');
     add('a');
     add('b', 1);
-    const route = createCurateRoutes({ curate: service });
+    let enrichRunning = false;
+    const route = createCurateRoutes({ curate: service, enrichRunner: { isRunning: () => enrichRunning } });
     const server = createServer(async (req, res) => {
       try {
         if (!(await route(req, res, new URL(req.url, 'http://local')))) res.writeHead(404).end();
@@ -616,8 +631,15 @@ test('foundation HTTP routes return complete groups and reject malformed or stal
       assert.equal((await (await fetch(base + 'groups?sort=newest')).json()).sort, 'newest');
       assert.equal((await (await post('groups', {sort: 'newest'})).json()).sort, 'newest');
       const v = await (await fetch(base + 'groups')).json();
+      assert.equal(v.enrichRunning, false);
+      enrichRunning = true;
+      assert.equal((await (await post('groups/status', { viewId: v.viewId, visibleGroupIds: [] })).json()).enrichRunning, true);
+      assert.equal((await (await post('groups', {})).json()).enrichRunning, true);
+      assert.equal((await (await fetch(base + 'groups?viewId=' + v.viewId)).json()).enrichRunning, true);
+      enrichRunning = false;
+      assert.equal((await (await post('groups/status', { viewId: v.viewId, visibleGroupIds: [] })).json()).enrichRunning, false);
       assert.equal(v.groups[0].memberCount, 2);
-      assert.equal(v.groups[0].photos.length, 1);
+      assert.equal(v.groups[0].photos.length, 2);
       assert.ok(v.groups[0].photos.every(p => !Object.hasOwn(p, 'evidence')));
       assert.equal((await post('comparisons', null)).status, 400);
       const c = await (await post('comparisons', { viewId: v.viewId, groupId: v.groups[0].id })).json();

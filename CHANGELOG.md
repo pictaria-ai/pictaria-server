@@ -7,6 +7,69 @@ All notable changes to Pictaria Server are documented here. This project follows
 
 ### Development
 
+- Curate Preview places All/Stacks/Singles on the left and date, category and
+  Search filters on the right, with Search last. Shown counts and active progress
+  share the right side of the status row; the header checkbox appears in Singles
+  and Decided. Finished incomplete checks keep their per-stack explanations
+  without leaving an aggregate warning in the header. Search stays focused and
+  editable while results load; typing during a slow request applies the latest
+  text next, and failed requests preserve the search draft.
+  A red notice beside the header spinner warns while Enrich is running that
+  stacks may change as photos arrive. It keeps a fixed lower line when update
+  text appears above it, with shorter fully visible wording on phones. Reserved
+  scrollbar space prevents sideways movement between long and short views.
+  Card check progress temporarily replaces
+  the capture date on the same line, then restores it without resizing cards.
+  The lightbox briefly shows **Saved — press Z to undo** after saving, without
+  shortening the existing Undo window. The last-action bar has a dismiss button;
+  dismissing it leaves Undo available and the next saved action shows it again.
+  **Z** also undoes the last save from the grid, except while editing a field.
+  Stack status is simplified to a working spinner, quiet readiness, or a muted
+  **i** labeled **Grouped with limited evidence**. Hover and **Why?** retain the
+  specific reason, including whether searches failed or finished inconclusively.
+  Normal comparisons keep **Why?** without a completion checkmark.
+  Explanations show useful details together without a nested dropdown or duplicate
+  raw wording; the algorithm version remains in a small muted footer.
+
+- Curate Preview settles failed similarity checks after one retry instead of
+  keeping a long-term repair queue. Incomplete groupings remain ready for human
+  curation, and healthy stacks continue processing. Finished outcomes survive
+  restart; partial-pass checkpoints and retry deadlines are removed. Refresh
+  reloads the view without restarting checks. Failed and inconclusive checks use
+  the same muted information indicator, with distinct explanations. Saving one stack now
+  preserves its checked/incomplete neighbours across restart. Upcoming comparisons
+  and visible cards get priority; open comparisons no longer prompt users to
+  close them for routine grouping updates. Enrich schema 18 /
+  persistent-state contract 22 retains the normal pre-migration snapshot and
+  discards retry checkpoints from the earlier unreleased preview.
+
+- Curate Preview now distinguishes saved outcomes (including Fav) from drafts
+  and checked batches. Stack keyboard choices advance without saving; **Save &
+  next** continues with the latest grouping in the chosen date order. Undo is
+  available inside the next stack; Enter cannot save an untouched comparison.
+  Stack cards gain member previews and capture times, completed status is quieter, and Why
+  uses plain-language explanations. Mobile filters collapse, bulk actions stay
+  fixed below the grid, and comparisons retain the full uncropped images.
+  Decided cards subtly shade the current decision button instead of putting a
+  duplicate label over the photo; the lightbox uses the same shading.
+  Selected stack draft buttons use those same subtle fills for all four choices,
+  both beneath comparison photos and in the lightbox.
+  Stack comparisons combine the title and photo count, omit the instruction
+  paragraph, and place the check-status icon beside the checkbox controls.
+  They align decision buttons beneath equal-height uncropped photo
+  areas, and keep counts, Undo and Save actions in a slimmer footer.
+  Single-photo navigation and decisions retain the lightbox through loading,
+  preload adjacent images, and swap photos only when ready, avoiding the white
+  comparison-window flash. Open in Immich is compact and vertically centered;
+  the stack action now reads **Save** alongside **Save & next**.
+  **Save & next** stays the primary action regardless of the chosen outcomes.
+  Card captions stay on one line with an ellipsis, keeping decision buttons
+  aligned; single-photo checkboxes have even padding. Background progress shows
+  how many checks remain across all pending photos, including outside the view.
+  The page header uses stable view, filter and results rows: Refresh and More
+  sit beside Pending/Decided, shared controls stay anchored when optional
+  filters disappear, and the selection slot remains reserved in Stacks.
+
 - Curate checks now run in the background with Stacks enabled, including after
   server startup and new Enrich arrivals. Opening the page or Load more is no
   longer required. Complete checks survive restarts; active slots turn over to
@@ -61,7 +124,7 @@ All notable changes to Pictaria Server are documented here. This project follows
   Healthy searches now start two seconds apart (up to 30 automatic requests per
   minute), with extra delay on slow responses. Open comparisons and visible
   cards take priority; cached evidence avoids network waits. Small queued/checking
-  spinners, green ready checks and amber attention markers make progress visible
+  spinners and amber attention markers make progress visible
   without relying on color alone. Diagnostic counters expose request/latency and
   queue-completion measurements; grouping rules and search coverage are unchanged.
   Comparisons include **Why this stack?**, and unconfirmed time groups are labeled.
