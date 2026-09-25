@@ -8,6 +8,7 @@ const el = (id) => document.getElementById(id);
 const client = new CurateClient();
 const previews = new PreviewImages();
 const SORT_PREFERENCE = 'pictaria.curate.sort';
+let undoHintUntil = 0, undoHintTimer;
 const state = {
   section: 'pending', category: 'all', selected: new Set(), removed: new Map(),
   viewerMode: 'stack', actionContext: null, continuing: false,
@@ -473,6 +474,7 @@ function syncViewer() {
 function syncReceipts() {
   const available = Boolean(state.undo && state.undo.until > Date.now());
   const locked = state.busy || state.loading || state.opening || state.continuing || Boolean(client.saved.pending);
+  el('photo-undo-hint').hidden = !available || locked || Date.now() >= undoHintUntil;
   el('undo').hidden = !available;
   el('undo').disabled = locked || !available;
   for (const prefix of ['photo', 'comparison']) {
@@ -480,6 +482,13 @@ function syncReceipts() {
     el(`${prefix}-receipt-text`).textContent = el('receipt-text').textContent;
     el(`${prefix}-undo`).disabled = locked || !available;
   }
+}
+function showUndoHint() {
+  // This is a brief reminder, independent of the saved action's Undo deadline.
+  clearTimeout(undoHintTimer);
+  undoHintUntil = Date.now() + 5000;
+  syncReceipts();
+  undoHintTimer = setTimeout(syncReceipts, 5000);
 }
 async function action(work, context = null) {
   if (state.busy || state.opening || state.continuing || client.saved.pending) return;
@@ -586,6 +595,7 @@ async function accepted({ kind, result }) {
       state.continuing = false;
       recovery();
     }
+    if (kind === 'decision' && result.undo && result.savedLocally) showUndoHint();
   }
 }
 function renderGroups() {

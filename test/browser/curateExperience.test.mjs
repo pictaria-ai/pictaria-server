@@ -1,5 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { writeFileSync } from 'node:fs';
+import { join } from 'node:path';
 import { launchChrome, findChrome } from './harness.mjs';
 import { curatePreviewFixture } from './curatePreviewFixture.mjs';
 
@@ -41,6 +43,7 @@ test(
     assert.equal(await page.evaluate('document.querySelectorAll("#photos [data-keeper][aria-pressed=true]").length'), 0);
     await key('y');
     assert.equal(fixture.repo.db.prepare('SELECT COUNT(*) n FROM decision_operations').get().n, 0);
+    assert.equal(await page.evaluate('document.querySelector("#photo-undo-hint").hidden'), true, 'drafts never announce a save');
     assert.equal(await page.evaluate('document.querySelectorAll("#photos [data-keeper][aria-pressed=true]").length'), 1); // Y changes only the draft
     await key('ArrowLeft'); // Y advanced; browse back before changing that draft.
     await key('s');
@@ -62,11 +65,27 @@ test(
     await key('y');
     await wait(`${photo(1002)} && !document.querySelector('[data-photo-action=approve]').disabled`);
     assert.ok(fixture.repo.loadAssetTagsFor([fixture.id(1001)])[fixture.id(1001)].includes('frame/eligible'));
+    await wait('!document.querySelector("#photo-undo-hint").hidden');
+    assert.match(await page.evaluate('document.querySelector("#photo-undo-hint").textContent'), /Saved.*Z to undo/);
+    const lightboxLayout = () => page.evaluate(`['.lightbox-stage','.lightbox-side','#photo-large'].map(s=>{
+      const r=document.querySelector(s).getBoundingClientRect();return [r.x,r.y,r.width,r.height];
+    })`);
+    const beforeHintFades = await lightboxLayout();
+    assert.equal(await page.evaluate(`(()=>{
+      const hint=document.querySelector('#photo-undo-hint').getBoundingClientRect(),
+        stage=document.querySelector('.lightbox-stage').getBoundingClientRect();
+      return hint.left>=stage.left && hint.right<=stage.right && hint.bottom<=stage.bottom &&
+        stage.bottom-hint.bottom<30;
+    })()`), true, 'reminder is visible at the bottom of the modal image area');
+    await wait('document.querySelector("#photo-undo-hint").hidden');
+    assert.deepEqual(await lightboxLayout(), beforeHintFades, 'reminder cannot resize or move the photo');
+    assert.equal(await page.evaluate('document.querySelector("#photo-undo").disabled'), false, 'Undo outlives its brief reminder');
     await key('z');
     await wait(`${photo(1001)} && !document.querySelector('[data-photo-action=approve]').disabled`);
     assert.ok(
       !(fixture.repo.loadAssetTagsFor([fixture.id(1001)])[fixture.id(1001)] || []).includes('frame/eligible'),
     );
+    assert.equal(await page.evaluate('document.querySelector("#photo-undo-hint").hidden'), true);
     // Lost acceptance stays on the current photo and replays the same operation.
     await page.evaluate(`window.realFetch=window.fetch;window.fetch=async(...args)=>{
     const r=await window.realFetch(...args);if(String(args[0]).endsWith('/operations/apply')){
@@ -76,10 +95,12 @@ test(
       '!document.querySelector("#photo-recovery").hidden && !document.querySelector("#photo-retry").disabled',
     );
     assert.equal(await page.evaluate(photo(1001)), true);
+    assert.equal(await page.evaluate('document.querySelector("#photo-undo-hint").hidden'), true, 'uncertain acceptance must not advertise Undo');
     const operations = fixture.repo.db.prepare('SELECT COUNT(*) n FROM decision_operations').get().n;
     await key('n'); // unresolved response locks further decisions
     await click('#photo-retry');
     await wait(`${photo(1002)} && !document.querySelector('[data-photo-action=approve]').disabled`);
+    assert.equal(await page.evaluate('document.querySelector("#photo-undo-hint").hidden'), false, 'a new accepted save starts another reminder');
     assert.equal(fixture.repo.db.prepare('SELECT COUNT(*) n FROM decision_operations').get().n, operations);
     await page.send('Emulation.setDeviceMetricsOverride', {
       width: 375,
@@ -88,6 +109,14 @@ test(
       mobile: true,
     });
     assert.equal(await page.evaluate('document.querySelector("#photo-view").scrollWidth<=innerWidth'), true);
+    assert.equal(await page.evaluate(`(()=>{
+      const r=document.querySelector('#photo-undo-hint').getBoundingClientRect();
+      return r.left>=0 && r.right<=innerWidth && r.top>=0 && r.bottom<=innerHeight;
+    })()`), true);
+    if (process.env.PICTARIA_TEST_SCREENSHOTS) {
+      const {data}=await page.send('Page.captureScreenshot',{format:'png'});
+      writeFileSync(join(process.env.PICTARIA_TEST_SCREENSHOTS,'curate-undo-hint-mobile.png'),Buffer.from(data,'base64'));
+    }
     assert.equal(
       await page.evaluate(
         'document.querySelector(".lightbox-side").getBoundingClientRect().top >= document.querySelector(".lightbox-stage").getBoundingClientRect().bottom - 1',

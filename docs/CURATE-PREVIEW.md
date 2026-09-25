@@ -163,6 +163,10 @@ search draft has not been applied.
   second row, and the receipt text is available to assistive technology.
 - Immediate Undo is conditional on no newer human decision on any affected photo.
   The last action remains undoable until its server deadline (30 minutes).
+  After saving, the lightbox shows **Saved — press Z to undo** over the bottom
+  of the photo for five seconds. This reminder does not move the layout, appears
+  only after an accepted save (not a stack draft), and does not shorten the Undo
+  window when it disappears. Another save starts a fresh reminder.
   The visible Undo affordance does not survive a page reload; saved decisions and
   corrections do. Undo feedback says **Undid choices** and separately reports
   whether the restored tags have synchronized. Older decisions remain accessible

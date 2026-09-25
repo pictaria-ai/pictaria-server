@@ -563,7 +563,8 @@ dialog::backdrop {
 .lightbox-side .tags { justify-content: flex-start; margin: 0; }
 .lightbox-side .tags span { max-width: 100%; overflow-wrap: anywhere; }
 .lightbox-side #immich { display: inline-flex; align-items: center; justify-content: center; align-self: flex-start; width: auto; text-align: center; text-decoration: none; line-height: 1.2; }
-#photo-loading { position: absolute; bottom: 22px; left: 50%; transform: translateX(-50%); padding: 6px 12px; border-radius: 6px; background: rgb(8 10 13 / .8); color: #fff; font-size: 13px; white-space: nowrap; }
+#photo-loading, #photo-undo-hint { position: absolute; bottom: 22px; left: 50%; transform: translateX(-50%); padding: 6px 12px; border-radius: 6px; background: rgb(8 10 13 / .8); color: #fff; font-size: 13px; white-space: nowrap; }
+#photo-undo-hint { pointer-events: none; }
 #photo-view.loading-initial #photo-large, #photo-view.loading-initial #photo-image-error,
 #photo-view.loading-initial .lightbox-side > :not(.lightbox-nav, #photo-error, #photo-refresh) { visibility: hidden; }
 .lightbox-side #stack-actions > .p-btn { width: 100%; }

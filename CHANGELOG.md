@@ -17,6 +17,8 @@ All notable changes to Pictaria Server are documented here. This project follows
   A red notice beside the header spinner warns while Enrich is running that
   stacks may change as photos arrive. Card check progress temporarily replaces
   the capture date on the same line, then restores it without resizing cards.
+  The lightbox briefly shows **Saved — press Z to undo** after saving, without
+  shortening the existing Undo window.
 
 - Curate Preview settles failed similarity checks after one retry instead of
   keeping a long-term repair queue. Incomplete groupings remain ready for human
