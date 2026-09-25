@@ -26,13 +26,85 @@ Provider instances contain credentials and stay in memory; they are not job
 records or public status objects. The legacy referee retains its minimum
 20-minute request timeout, preserving any longer configured timeout.
 
-The legacy referee now checks Stacks, its existing enable switch, Enrich,
-pause/shutdown and whether Enrich is running before preparation, between
-downloads (including fallback renditions), and before provider submission.
-Stopping during preparation creates no verdict, failure or size deferral. A
-submitted request can finish; its result keeps the provider/model actually used.
-The existing worker retains its Enrich dependency until the new runtime replaces
-it. This change does not activate AI on the preview page.
+The legacy referee checks Stacks, its existing enable switch, Enrich and
+pause/shutdown before preparation, between downloads (including fallbacks),
+and before provider submission. It retains the released rule of waiting for
+the active Enrich run to finish, even on an independent backend. One burst's
+photos can arrive non-contiguously; judging a partial stack would pay for it
+again when later members arrive. This temporary readiness rule remains until
+the new runtime replaces the legacy worker. A queued legacy group is also
+rechecked against pending groups before preparation. Stopping during
+preparation creates no verdict, failure or size deferral. A submitted request
+can finish; its result keeps the provider/model actually used. Shared scheduling
+prevents overlap if a new Enrich run starts during an already-submitted legacy
+request on that service. Neither new preview referee is activated here.
+
+## Shared request scheduling (PIC-118)
+
+One server-owned `AiRequestScheduler` is shared by Enrich, the legacy referee,
+and the single `CurateAiExecution` instance composed for both future roles.
+Scheduling only admits work that its worker considers ready; it does not remove
+the legacy referee's wait-for-Enrich rule above. For the new roles, ready work
+on a shared resource gives Enrich a turn of **up to ten provider calls or
+five minutes, whichever comes first**, followed by one Curate call when it is
+waiting. A Curate call is one Stack Referee request or one Photo Referee batch,
+not a multi-call chain. These values are internal constants, without Settings
+or environment overrides. With no competing eligible work, continue without
+artificial pauses.
+
+A turn starts when Enrich first obtains the resource. It spans the intervening
+per-photo downloads and local persistence, so those short gaps do not turn
+ten calls into one. An already-used turn is not reset when Curate arrives.
+At the time threshold, stop starting further Enrich calls; never abort a call
+already running. If Enrich is between calls, the deadline releases the resource
+without waiting for another photo to become ready. A slow call can exceed
+five minutes, so this is not a maximum user wait or an inference timeout.
+A completed/cancelled run releases unused time. A failed call also releases
+the turn before validation/overload retry work or retry sleeps. Every retry
+must reacquire a scheduling turn; it cannot hold the resource through backoff.
+Waiting time is outside the measured provider-analysis duration.
+
+Once the preview referees are connected and enabled, an Enrich run on a shared
+backend will take longer while eligible Curate work is waiting: each Enrich
+turn yields to a multi-photo AI call. This can be noticeable on slow local
+models. It is the tradeoff for Curate making progress during a long Enrich run;
+an independent backend or no eligible Curate work avoids that contention.
+
+Resource identity comes from the actual pinned adapter's HTTP(S) origin.
+Different models, API paths or credentials on that origin are not assumed to
+have independent capacity; common loopback aliases are normalized. Different
+origins may run concurrently. This cannot discover shared hardware or quotas
+behind distinct proxies/host aliases. The resource digest is separate from the
+credential-sensitive durable provider-pause digest. No endpoint, credential,
+photo metadata or model response is included in public scheduling status.
+
+Curate has at most one active scheduling turn across both roles/backends.
+Among ready Curate sessions, at most two preferred comparisons can precede
+the oldest waiting session. Future role workers still own selection of upcoming
+comparisons, open-comparison stability and settled/latest-input coalescing.
+For v1.3, keep the planned 30-second settling delay and current-input validation,
+without inspecting the remaining Enrich queue to predict future stack members.
+Longer Enrich turns may reduce repeated judgments when related photos arrive
+together, but do not prove a stack is complete. Some repeated work is an accepted
+tradeoff for simpler scheduling. Dispatched calls still consume the existing
+attempt/per-photo allowances, so a later stack revision may receive no fresh AI
+advice if its allowance is exhausted; human curation remains available. The
+arbiter does not discover groups or enqueue AI work itself.
+
+Enrich and the existing Curate page distinguish waiting for an AI turn from
+running inference. A settings change rechecks queued role controls but does not
+move a pinned request to another resource. Shutdown cancels queued work and
+boundedly drains active work without preemption for fairness. Scheduling queues
+are deliberately in memory; durable attempts and provider protection remain
+separate. Restart does not authorize resetting or recovering their ledgers.
+
+This slice connects **request arbitration**, not the remaining activation
+lifecycle. The composed preview executor uses its durable limits and verifies
+its scheduling turn before preparing/dispatching, but availability remains
+false. Sharing durable provider pauses with Enrich, explicit connection
+verification/status, exclusive-owner startup recovery, authoritative retention
+selection and settling/coalescing remain prerequisites before activating new
+roles. Existing Enrich and legacy referee error policies are unchanged here.
 
 ## Settings and scope (PIC-345)
 
@@ -222,10 +294,10 @@ restart, backup and restore preserve charges, pauses and settled limited inputs.
 Use the pre-migration recovery point for rollback to an older schema.
 
 The layer is tested through the executor but **not connected to live workers**.
-Both preview roles remain unavailable. PIC-118 still owns shared Enrich/Curate
-arbitration and wiring provider protection to Enrich. Production startup recovery,
+Both preview roles remain unavailable. Request arbitration is now connected under PIC-118;
+sharing durable provider protection with Enrich remains an activation prerequisite. Production startup recovery,
 settling/coalescing and authoritative cleanup selection must be composed there
-before enabling roles; this patch does not change released Enrich behavior.
+before enabling roles; the limits layer does not yet change released Enrich error behavior.
 The enablement work must also expose paused status with an explicit connection
 verification/recovery action. There is no general AI connection-test control in
 Settings today (the existing connectivity check is for Immich), so do not assume
@@ -247,8 +319,8 @@ the pause.
   settling/coalescing, current-input construction, protected cleanup references and the
   authoritative applicability adapter before enabling either role. Provider-internal
   validation retries must also be accounted for; the legacy safeguards above are not that new lifecycle.
-- **PIC-118:** fair scheduling on shared backends, with independent backends able
-  to progress concurrently. The legacy worker still yields to Enrich.
+- **PIC-118:** request arbitration is implemented as described above. Complete
+  shared provider-pause/recovery integration alongside PIC-346 before activation.
 - **PIC-370 / PIC-116:** validated whole-stack composition checks, then keeper
   suggestions using the accepted production quality criteria and multiple
   keepers. Human choices always win. Finished incomplete checks may leave

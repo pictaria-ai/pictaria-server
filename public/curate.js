@@ -970,6 +970,9 @@ async function loadRefereeStrip() {
     } else if (st.lastError) {
       dot = 'bad';
       parts.push(`retrying after an error: ${st.lastError}`);
+    } else if (st.scheduling?.state === 'waiting') {
+      dot = 'warn';
+      parts.push('waiting for its AI turn');
     } else if (st.working) {
       dot = 'ok';
       const mins = st.currentForMs ? Math.floor(st.currentForMs / 60000) : 0;

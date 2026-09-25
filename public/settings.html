@@ -822,7 +822,7 @@
         { key: 'refereeProvider', type: 'select', labels: { '': 'Follow Enrich provider', local_lmstudio: 'LM Studio (local)', local_ollama: 'Ollama (local)', openai_compatible: 'OpenAI-compatible', cloud_ollama: 'Ollama (cloud)', cloud_openai: 'OpenAI (cloud)', openrouter: 'OpenRouter (cloud)', venice: 'Venice (cloud)' }, desc: 'Follow Enrich provider uses the provider currently selected on the Enrich page; a change there applies when the next check starts. Choose a specific provider here to keep Curate independent.' },
         { key: 'refereeModel', type: 'text', placeholder: 'empty = the provider’s usual model', desc: 'Optional. Leave blank to use the chosen provider’s configured model. If the referee follows Enrich, this override must also be valid for every provider you select there; clear it or choose a fixed referee provider when switching providers. A smaller vision model works well here, but it must accept multiple images.', docs: 'https://docs.venice.ai/models/overview' },
         { group: 'Current Curate page', groupDesc: 'Applies only to the existing Curate page, not Curate Preview.' },
-        { key: 'refereeEnabled', type: 'switch', desc: 'Recommends a keeper and shows a gold star. Requires Stacks and Enrich to be on; works while Enrich is idle.' },
+        { key: 'refereeEnabled', type: 'switch', desc: 'Recommends a keeper and shows a gold star. Requires Stacks and Enrich to be on; waits for the current Enrich run to finish.' },
         { groupEnd: true },
       ],
       insights: [

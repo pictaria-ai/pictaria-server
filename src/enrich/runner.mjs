@@ -120,6 +120,7 @@ export async function analyzeWithValidationRetry(provider, image, {
   onProviderResponse = () => {},
   signal = null,
   photoTiming = null,
+  aiSession = null,
 }) {
   const prompts = [userPrompt];
   // Every local provider (local_*), plus generic endpoints that explicitly
@@ -149,7 +150,11 @@ export async function analyzeWithValidationRetry(provider, image, {
           const decisions = mapOutputToTags(normalized, taxonomy);
           return { result, normalized, decisions, retryCount: attemptIndex + overloadRetryCount };
         };
-        return await (photoTiming ? photoTiming.analyze(analyze) : analyze());
+        const request = () => {
+          if (shouldStop() || signal?.aborted) throw new RetryWaitCancelledError();
+          return photoTiming ? photoTiming.analyze(analyze) : analyze();
+        };
+        return await (aiSession ? aiSession.run(request) : request());
       } catch (error) {
         if (isRetryableProviderOverload(error) && overloadRetryCount < overloadRetryLimit) {
           const retryIndex = overloadRetryCount;
@@ -224,6 +229,7 @@ async function executeBatch({
   signal = null,
   configuration = null,
   timingSession,
+  aiSession = null,
 }) {
   immich = captureClient(immich);
   if (provider) provider = captureClient(provider);
@@ -465,6 +471,7 @@ async function executeBatch({
             onProviderResponse: noteProviderResponse,
             signal,
             photoTiming,
+            aiSession,
           },
         );
         // One transaction: a run may never read as 'succeeded' without its
@@ -512,8 +519,10 @@ async function executeBatch({
       } catch (error) {
         photoErrorKind = stage === 'provider' ? timingErrorKind(error) : `${stage}_error`;
         if (error?.cancelled || error instanceof RetryWaitCancelledError) photoOutcome = 'cancelled';
-        if (error instanceof RetryWaitCancelledError) {
-          log('stopping early: cancellation requested during provider retry wait');
+        if (error instanceof RetryWaitCancelledError || error?.code === 'ai_schedule_cancelled') {
+          log(error?.code === 'ai_schedule_cancelled'
+            ? 'stopping early: cancellation requested while waiting for an AI turn'
+            : 'stopping early: cancellation requested during provider retry wait');
           stopped = true;
           break;
         }

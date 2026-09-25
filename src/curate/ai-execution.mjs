@@ -1,4 +1,6 @@
 import { curateAiRoleEnabled } from './ai-policy.mjs';
+import { AiSchedulingCancelled } from '../ai/scheduler.mjs';
+import { aiBackendKey } from './ai-limits.mjs';
 import { ProviderRequestError } from '../enrich/providers.mjs';
 
 class AdmissionStopped extends Error {
@@ -31,23 +33,26 @@ function failureReason(error, phase) {
   return 'request-failed';
 }
 
-// Shared, deliberately unwired execution seam for the two future workers.
+// Shared execution boundary for the two future workers (still unavailable).
 // It does not select jobs or provide retries. Optional limits are connected by
-// the shared runtime owner; the mandatory read-only admit callback checks the
-// scheduler's turn. Repeated preparation checkpoints never charge a call.
-// Omit it and no work can start, even when a role is declared available.
+// shared runtime owner. A scheduler-owned turn, or an explicit read-only admit
+// callback in isolated tests, gates preparation and dispatch. Repeated
+// preparation checkpoints never charge a call; neither authority defaults on.
 export class CurateAiExecution {
   #busy = false;
-  constructor({ attempts, limits, getConfig, availability, stopped = () => false, admit = () => false }) {
+  #queued = false;
+  #turn = null;
+  constructor({ attempts, limits, getConfig, availability, stopped = () => false, admit = () => false, scheduler = null }) {
     this.attempts = attempts;
     this.limits = limits;
     this.getConfig = getConfig;
     this.availability = availability;
     this.stopped = stopped;
     this.admit = admit;
+    this.scheduler = scheduler;
   }
 
-  #reason(job) {
+  #reason(job, requireTurn = true) {
     if (this.stopped()) return 'stopped';
     if (!curateAiRoleEnabled(this.getConfig(), job.role, this.availability)) return 'disabled';
     // All admission/applicability callbacks are synchronous. A Promise cannot
@@ -55,11 +60,51 @@ export class CurateAiExecution {
     if (job.isCurrent() !== true) return 'stale';
     const limit = this.limits?.eligibility(job);
     if (limit && limit !== 'eligible') return limit;
-    if (this.admit(job) !== true) return 'waiting';
+    if (requireTurn && (this.scheduler ? this.#turn?.ownsTurn() !== true : this.admit(job) !== true)) return 'waiting';
     return null;
   }
 
   async run(job) {
+    if (!this.scheduler) return this.#execute(job);
+    if (this.#queued || this.#busy) return { state: 'busy' };
+    if (this.stopped()) return { state: 'stopped' };
+    if (!curateAiRoleEnabled(this.getConfig(), job.role, this.availability)) return { state: 'disabled' };
+    // Copy identity before waiting; the scheduler's turn cannot authorize a
+    // different set of photos substituted while Enrich is still running.
+    job = Object.freeze({ ...job,
+      photoIds: Object.freeze([...(job.photoIds ?? [])]),
+      contextPhotoIds: Object.freeze([...(job.contextPhotoIds ?? [])]),
+    });
+    if (this.limits && job.backendKey !== aiBackendKey(job.provider))
+      throw new TypeError('Curate AI provider must match its pinned admission identity.');
+    const eligible = this.attempts.eligibility(job.role, job.inputKey);
+    if (eligible !== 'eligible') return { state: eligible };
+    const reason = this.#reason(job, false);
+    if (reason) {
+      if (reason === 'photo-limit') this.limits.settleLimited(job);
+      return { state: reason };
+    }
+    this.#queued = true;
+    let session;
+    try {
+      session = this.scheduler.session(job.provider, 'curate', {
+        priority: job.priority === true,
+        eligible: () => !this.stopped() && curateAiRoleEnabled(this.getConfig(), job.role, this.availability)
+          && job.isCurrent() === true,
+      });
+      this.#turn = session;
+      return await session.run(() => this.#execute(job));
+    } catch (error) {
+      if (error instanceof AiSchedulingCancelled) return { state: this.scheduler.stopped ? 'stopped' : this.#reason(job, false) ?? 'stopped' };
+      throw error;
+    } finally {
+      session?.close(); this.#turn = null; this.#queued = false;
+    }
+  }
+
+  schedulingStatus() { return this.#turn?.status() ?? { state: 'idle', reason: null }; }
+
+  async #execute(job) {
     job = Object.freeze({ ...job,
       ...(job.photoIds ? { photoIds: Object.freeze([...job.photoIds]) } : {}),
       ...(job.contextPhotoIds ? { contextPhotoIds: Object.freeze([...job.contextPhotoIds]) } : {}),

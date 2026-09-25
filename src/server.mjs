@@ -19,6 +19,9 @@ import { TagWriteCoordinator } from './enrich/tagWriteCoordinator.mjs';
 import { AiTagSyncService } from './enrich/aiTagSync.mjs';
 import { CaptionWritebackService } from './enrich/captionWriteback.mjs';
 import { RefereeService } from './enrich/refereeService.mjs';
+import { AiRequestScheduler } from './ai/scheduler.mjs';
+import { CurateAiExecution } from './curate/ai-execution.mjs';
+import { CURATE_AI_AVAILABILITY } from './curate/ai-policy.mjs';
 import { EnrichJobRunner } from './enrich/jobRunner.mjs';
 import { EnrichScheduler } from './enrich/scheduler.mjs';
 import { EnrichmentProfiles, ProfileError } from './enrich/profiles.mjs';
@@ -136,6 +139,7 @@ settingsStore.onApplied = () => {
   }
   immichPing = emptyImmichStatus();
   enrichScheduler.settingsChanged();
+  aiScheduler.refresh();
   captionWriteback.wake();
   aiTagSync.wake();
   curate.settingsChanged();
@@ -188,9 +192,15 @@ const review = new ReviewService({ repo, immich, taxonomy, config, tagWrites, lo
 const curate = new CurateService({ repo, config, immich, review, candidateOptions: { enabled: true } });
 const captionWriteback = new CaptionWritebackService({ repo, immich, config, log: (message) => console.log(`[Pictaria] ${message}`) });
 const aiTagSync = new AiTagSyncService({ repo, immich, review, tagWrites, config, log: message => console.log(`[Pictaria] ${message}`) });
-const enrichRunner = new EnrichJobRunner({ repo, immich, taxonomy, config, profiles, onTagsQueued: () => aiTagSync.wake() });
+const aiScheduler = new AiRequestScheduler();
+// One shared executor for both forthcoming roles. Availability remains false;
+// role adapters and the durable recovery/retention lifecycle precede activation.
+curate.ai = new CurateAiExecution({ attempts: repo.curate.aiAttempts, limits: repo.curate.aiLimits,
+  getConfig: () => config, availability: CURATE_AI_AVAILABILITY,
+  stopped: () => lifecycle.stopped, scheduler: aiScheduler });
+const enrichRunner = new EnrichJobRunner({ repo, immich, taxonomy, config, profiles, aiScheduler, onTagsQueued: () => aiTagSync.wake() });
 const enrichScheduler = new EnrichScheduler({ runner: enrichRunner, repo, config });
-const referee = new RefereeService({ repo, immich, review, enrichRunner, config, log: (message) => console.log(`[Pictaria] ${message}`) });
+const referee = new RefereeService({ repo, immich, review, enrichRunner, config, aiScheduler, log: (message) => console.log(`[Pictaria] ${message}`) });
 const albumStore = new SmartAlbumStore(config.albums.dataFile, { installationSecret });
 const albumScheduler = new SmartAlbumScheduler({ immich, store: albumStore, config: config.albums, enrichRepo: repo });
 const frameHub = createFrameHub();
@@ -296,6 +306,7 @@ lifecycle.register('review-sync', 3000, (timeoutMs) => review.stopSyncWorker(tim
 lifecycle.register('ai-tag-sync', 3000, timeoutMs => aiTagSync.stop(timeoutMs));
 lifecycle.register('caption-writeback', 3000, (timeoutMs) => captionWriteback.stop(timeoutMs));
 lifecycle.register('enrich-runner', 3000, (timeoutMs) => enrichRunner.stop(timeoutMs));
+lifecycle.register('ai-scheduler', 3000, timeoutMs => aiScheduler.stop(timeoutMs));
 lifecycle.register('enrich-scheduler', 3000, () => enrichScheduler.stop());
 lifecycle.register('insights-collector', 3000, (timeoutMs) => insightsCollector.stop(timeoutMs));
 lifecycle.register('curate-referee', 3000, (timeoutMs) => referee.stop(timeoutMs));

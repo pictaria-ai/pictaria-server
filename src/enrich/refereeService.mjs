@@ -1,4 +1,5 @@
 import { createHash } from 'node:crypto';
+import { AiSchedulingCancelled } from '../ai/scheduler.mjs';
 
 import { awaitDrain } from '../lifecycle.mjs';
 import { MAX_STACK_MEMBERS } from './reviewService.mjs';
@@ -13,8 +14,8 @@ export { REFEREE_PROMPT_VERSION, buildRefereeUserPrompt, refereeJsonSchema, norm
 // multi-image request ranks the members by keeper quality and explains why.
 // Design rules (DESIGN-NOTES §6):
 //   - suggestions only — the human decides; nothing here writes decisions
-//   - compute is patient: a resumable background worker that yields to
-//     enrichment (never both on the model at once) and works the backlog
+//   - compute is patient: a resumable background worker waiting for the
+//     active enrichment run to finish, then working the backlog
 //     most-undecided-first (group size breaks ties)
 //   - a verdict is keyed to the group's exact membership; when membership
 //     changes (new photos arrive), the group is simply refereed again
@@ -45,12 +46,14 @@ export function refereeGroupKey(assetIds) {
 }
 
 export class RefereeService {
-  constructor({ repo, immich, review, enrichRunner, config, log = () => {} }) {
+  constructor({ repo, immich, review, enrichRunner, config, log = () => {}, aiScheduler = null }) {
     this.repo = repo;
     this.immich = immich;
     this.review = review;
     this.enrichRunner = enrichRunner;
     this.config = config;
+    this.aiScheduler = aiScheduler;
+    this.aiSession = null;
     this.log = log;
     this._timer = null;
     this._tickPromise = null; // in-flight poll, drained by stop()
@@ -107,6 +110,7 @@ export class RefereeService {
   // name. Returns false when the wait gave up.
   async stop(timeoutMs = 3000) {
     this._stopped = true;
+    this.aiSession?.close();
     if (this._timer) clearInterval(this._timer);
     this._timer = null;
     return awaitDrain(this._tickPromise, timeoutMs);
@@ -120,6 +124,9 @@ export class RefereeService {
   }
 
   canStartWork() {
+    // Keep the released readiness rule until cutover: photos from one burst
+    // need not be adjacent in the Enrich queue. A shared turn alone cannot
+    // prove membership is settled, even on an independent provider.
     return !this._stopped && !this._paused && this.enabled() && !this.enrichRunner.isRunning();
   }
 
@@ -129,6 +136,7 @@ export class RefereeService {
     const next = Boolean(paused);
     if (next !== this._paused) {
       this._paused = next;
+      if (next) this.aiSession?.close();
       this.log(next ? 'referee: paused by user' : 'referee: resumed by user');
     }
     return this.status();
@@ -203,7 +211,9 @@ export class RefereeService {
       current: this._current,
       currentSize: this._currentSize,
       currentForMs: this._currentStartedAt ? Date.now() - this._currentStartedAt : null,
-      yielding: !this._working && !this._paused && this.enabled() && this.enrichRunner.isRunning(),
+      scheduling: this.aiSession?.status() ?? { state: 'idle', reason: null },
+      yielding: !this._stopped && !this._paused && this.enabled()
+        && (this.aiSession?.status().state === 'waiting' || (!this._working && this.enrichRunner.isRunning())),
       remaining,
       batchDone: this._batchDone,
       lastError: this._lastError,
@@ -218,9 +228,9 @@ export class RefereeService {
     if (this._lastError && Date.now() - this._lastErrorAt < this._errorBackoffMs) return;
     this._working = true;
     try {
-      // Contiguous block: keep going while there is work and the model is
-      // free — re-checked before every group so enrichment never waits for
-      // more than the group in flight.
+      // Keep selecting while work remains. The shared scheduler admits one
+      // request at a time and yields between groups; preparation rechecks the
+      // live controls, including waiting for Enrich to finish.
       while (this.canStartWork()) {
         const group = this.pendingGroups().find(
           (g) => !this.repo.refereeHasGroup(g.key) && !this._deferredGroups.has(g.key),
@@ -340,6 +350,29 @@ export class RefereeService {
   async refereeGroup(group) {
     if (!this.canStartWork()) return false;
     const provider = this.makeProvider();
+    if (!this.aiScheduler) return this.performGroup(group, provider);
+    const session = this.aiScheduler.session(provider, 'curate', { eligible: () => this.canStartWork() });
+    this.aiSession = session;
+    try {
+      // Claim the turn before downloads, so preparation cannot hoard a whole
+      // stack's renditions while a long local Enrich request is running.
+      return await session.run(() => {
+        // The queue may have changed during a long Enrich turn. Re-select on
+        // the next tick iteration instead of judging a no-longer-pending group.
+        if (!this.pendingGroups().some(candidate => candidate.key === group.key)) return false;
+        return this.performGroup(group, provider);
+      });
+    } catch (error) {
+      if (error instanceof AiSchedulingCancelled) return false;
+      throw error;
+    } finally {
+      session.close();
+      if (this.aiSession === session) this.aiSession = null;
+    }
+  }
+
+  async performGroup(group, provider) {
+    if (!this.canStartWork()) return false;
     this._current = group.key;
     this._currentSize = group.members.length;
     this._currentStartedAt = Date.now();

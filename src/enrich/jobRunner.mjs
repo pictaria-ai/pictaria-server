@@ -11,13 +11,15 @@ import { configuredSecrets, sanitizeDiagnostic } from '../diagnostics.mjs';
 const LOG_TAIL_LIMIT = 500;
 
 export class EnrichJobRunner {
-  constructor({ repo, immich, taxonomy, config, profiles = null, onTagsQueued = () => {} }) {
+  constructor({ repo, immich, taxonomy, config, profiles = null, onTagsQueued = () => {}, aiScheduler = null }) {
     this.repo = repo;
     this.immich = immich;
     this.taxonomy = taxonomy;
     this.config = config;
     this.profiles = profiles;
     this.onTagsQueued = onTagsQueued;
+    this.aiScheduler = aiScheduler;
+    this.aiSession = null;
     this.state = idleState();
     this.runPromise = null;
     this.runLifecycle = null;
@@ -34,6 +36,7 @@ export class EnrichJobRunner {
   status() {
     return {
       ...this.state,
+      scheduling: this.aiSession?.status() ?? { state: 'idle', reason: null },
       activeProfile: this.profiles?.list().find(p => p.isActive) ?? null,
       log: [...this.state.log],
       defaults: { provider: this.config.defaultProvider, imageSource: this.config.imageSource, profileId: this.profiles?.list().find(p => p.isActive)?.id ?? null },
@@ -478,11 +481,18 @@ export class EnrichJobRunner {
   async #run(execution, assetIds, lifecycle) {
     const { provider, configuration } = execution;
     let listed = 0;
+    let aiSession;
     try {
+      aiSession = this.aiScheduler?.session(provider, 'enrich', {
+        signal: lifecycle.providerAbortController.signal,
+        eligible: () => !this.stopped && !this.state.cancelRequested,
+      });
+      this.aiSession = aiSession;
       const { counters, listedForReview } = await runBatch({
         immich: execution.immich,
         repo: this.repo,
         provider,
+        aiSession,
         configuration,
         timingRunId: lifecycle.timingRunId,
         taxonomy: configuration.taxonomy,
@@ -519,6 +529,8 @@ export class EnrichJobRunner {
       this.state.finishedAt = new Date().toISOString();
       this.#log(`run failed: ${this.state.error}`);
     } finally {
+      aiSession?.close();
+      if (this.aiSession === aiSession) this.aiSession = null;
       this.state.running = false;
       this.state.cancelRequested = false;
       try {
