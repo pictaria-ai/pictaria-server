@@ -7,6 +7,16 @@ All notable changes to Pictaria Server are documented here. This project follows
 
 ### Development
 
+- Settings → Curate separates optional Stack Referee and Keeper Referee
+  preferences, with **Uncertain stacks** (recommended) or **All stacks** scope
+  for the Stack Referee. Preview AI workers are not connected yet: controls
+  show their availability and cannot newly enable an unavailable role. The
+  existing-page referee remains separate. Both new roles default off; upgrades
+  preserve the previously effective keeper preference without activating a
+  dormant legacy switch. Stacks off preserves dependent preferences. Settings
+  version 8 / persistent-state contract 23 create the standard recovery point;
+  older-build rollback requires restoring it. See [Curate AI](docs/CURATE-AI.md).
+
 - Curate's existing AI referee stops preparing new work when Stacks, the
   referee or Enrich is disabled, when paused, or during shutdown. It rechecks
   those controls between photo downloads and before submitting to the provider;

@@ -1,6 +1,7 @@
 import { existsSync, realpathSync, statSync } from 'node:fs';
 import { basename, dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { STACK_REFEREE_SCOPES } from './curate/ai-policy.mjs';
 import { HISTORY_LIMITS } from './enrich/historyRetention.mjs';
 
 const ROOT_DIR = resolve(dirname(fileURLToPath(import.meta.url)), '..');
@@ -96,6 +97,11 @@ export function loadConfig(env = process.env) {
     // the chosen model whenever enrichment is idle. Provider/model empty =
     // the enrichment defaults; a smaller vision model works well here.
     curateRefereeEnabled: parseBoolean(env.CURATE_REFEREE_ENABLED),
+    // Independent preview preferences. Runtime availability is server-owned;
+    // these values cannot enable a worker that has not been connected yet.
+    curateStackRefereeEnabled: parseBoolean(env.CURATE_STACK_REFEREE_ENABLED),
+    curateStackRefereeScope: parseStackRefereeScope(env.CURATE_STACK_REFEREE_SCOPE),
+    curateKeeperRefereeEnabled: parseBoolean(env.CURATE_KEEPER_REFEREE_ENABLED),
     curateRefereeProvider: env.CURATE_REFEREE_PROVIDER || '',
     curateRefereeModel: env.CURATE_REFEREE_MODEL || '',
     // Aggregate byte ceiling per referee group (all sources count). The
@@ -442,4 +448,11 @@ function parseBoolean(value) {
 
 function clamp(value, min, max) {
   return Math.max(min, Math.min(max, value));
+}
+
+function parseStackRefereeScope(value = 'uncertain') {
+  if (!STACK_REFEREE_SCOPES.includes(value)) {
+    throw new Error('CURATE_STACK_REFEREE_SCOPE must be uncertain or all.');
+  }
+  return value;
 }

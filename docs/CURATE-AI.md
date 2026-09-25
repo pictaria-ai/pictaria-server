@@ -31,14 +31,76 @@ pause/shutdown and whether Enrich is running before preparation, between
 downloads (including fallback renditions), and before provider submission.
 Stopping during preparation creates no verdict, failure or size deferral. A
 submitted request can finish; its result keeps the provider/model actually used.
-The Enrich dependency remains until an explicit migration preserves previously
-inactive settings. This change does not activate AI on the preview page.
+The existing worker retains its Enrich dependency until the new runtime replaces
+it. This change does not activate AI on the preview page.
+
+## Settings and scope (PIC-345)
+
+Settings → Curate now distinguishes the two preview roles from the existing
+page's referee. Each role has its own switch. Both default off on a fresh
+installation; neither new role depends on Enrich being enabled. Turning Stacks
+off pauses the dependent controls without erasing their choices. The shared
+provider and optional model override apply to both roles and the existing
+referee. The existing referee's control and status are under **Current Curate
+page** and keep their existing Enrich dependency.
+
+The preview workers are **not connected yet**. Their controls say so, and the
+API rejects newly enabling an unavailable worker, including clearing an override
+that would enable it through environment fallback. Saved on preferences may be
+turned off before integration; saving unrelated settings preserves them.
+Availability comes from server composition, not user settings or an environment
+switch. An on preference is not reported as an active worker while unavailable.
+
+When the Stack Referee is enabled, its scope is:
+
+- **Uncertain stacks (recommended):** compositions that remain unresolved after
+  deterministic checks settle. This includes terminal incomplete similarity and
+  budget-limited compositions, subject to the worker's separate request limits.
+  A supported candidate does not become uncertain simply because a people tag
+  or another optional fact is missing.
+- **All stacks:** also checks supported pending compositions. This costs more AI
+  calls and uses the same prompt, provider, validation and result handling.
+
+Both scopes exclude singles, decided history and a stack with a still-current
+valid AI check (including a split result). Both wait for outstanding deterministic
+work. Changing scope does not change the deterministic grouping algorithm, clear
+similarity evidence, change human decisions or rerun valid advice.
+
+The shared selection helper in `src/curate/ai-policy.mjs` implements this scope
+contract but does not submit requests. `candidate-supported` is the current
+algorithm's support classification; under **Uncertain stacks** it is skipped as
+a deliberate cost/coverage choice. It is **not** a guarantee of correct grouping,
+an AI check, or a validated exact-image bypass. Unsupported/unknown routes stay
+eligible rather than guessing from explanatory text or UI icons. The future
+worker must provide current membership, decision and settled-check facts, then
+separately enforce provider limits, pause state, budgets and revision validity.
+
+This selective policy is the September 24 owner-approved refinement of the
+earlier check-every-group plan. Missing evidence alone should not create an
+unbounded repair/retry workflow. Humans can curate provisional stacks.
+
+## Upgrade and rollback
+
+Settings version 8 / persistent-state contract 23 preserve the previously
+**effective** keeper preference. During upgrade, if there is no explicit new
+Keeper Referee setting or nonempty environment preference, the old referee setting is
+copied only when both Enrich and Stacks were enabled. The resulting true **or
+false** is saved once. Saved overrides take precedence over environment defaults. Empty environment
+forwarding (as in Compose) is treated as unspecified; use `false` to opt out.
+A later Enrich toggle or restart cannot reinterpret a dormant legacy preference.
+Stack Referee defaults off. Existing legacy settings are retained separately;
+no historical verdict becomes current preview advice and no AI work starts here.
+
+The standard pre-migration recovery point retains the original settings and
+application state. Older builds cannot read version 8 settings; rollback uses
+that recovery point on the matching earlier build, not an in-place image-only
+downgrade. Synthetic upgrade/restart/restore tests cover this path.
 
 ## Remaining integration
 
-- **PIC-345 / PIC-372:** separate Stack Referee and Keeper Referee controls,
-  shared provider presentation and migration of effective prior preferences.
-  Both roles default off; the new roles will be independent of Enrich's switch.
+- **PIC-345 / PIC-372:** connect availability to the actual workers and complete
+  the cutover and live migration acceptance. This settings slice does not replay
+  decided history or establish eligibility for historical referee results.
 - **PIC-346:** persisted attempt/admission budgets, provider pauses and result
   applicability for the new roles. Provider-internal validation retries must
   also be accounted for; the legacy safeguards above are not that new lifecycle.
