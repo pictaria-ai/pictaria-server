@@ -7,6 +7,14 @@ All notable changes to Pictaria Server are documented here. This project follows
 
 ### Development
 
+- Shared execution groundwork for the optional Stack Referee and Photo Referee
+  remembers up to two request attempts per exact input across restart, rechecks
+  role controls before submission, and accepts current results atomically.
+  Both preview workers remain unavailable while provider safeguards, churn
+  budgets and scheduling are integrated. Enrichment schema 19 / persistent-state
+  contract 24 uses the standard pre-migration recovery point. See
+  [Curate AI](docs/CURATE-AI.md).
+
 - Password prompts reliably appear even when a page receives an immediate
   authentication response during startup. The shared gate now loads before
   page callers and builds its dialog only when needed, including early calls
