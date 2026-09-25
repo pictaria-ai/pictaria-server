@@ -967,6 +967,11 @@ async function loadRefereeStrip() {
       parts.push('pausing — finishing the stack being judged, then stopping');
     } else if (st.paused) {
       parts.push('paused — not using the AI model until you resume');
+    } else if (['paused', 'cooldown', 'recovery-ready'].includes(st.aiConnection?.state)) {
+      dot = 'warn';
+      parts.push(st.aiConnection.state === 'paused'
+        ? 'AI connection paused — verify it in Settings → AI Providers'
+        : 'AI connection waiting for one recovery attempt');
     } else if (st.lastError) {
       dot = 'bad';
       parts.push(`retrying after an error: ${st.lastError}`);

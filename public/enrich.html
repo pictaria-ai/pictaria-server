@@ -189,6 +189,7 @@
       </div>
       <div id="enrichStatusLine" class="es-line"></div>
       <div id="enrichStatusLine2" class="es-line es-line2" hidden></div>
+      <div id="aiConnectionNote" class="es-line es-line2" hidden><span></span> <a href="/settings.html#sec-providers">AI Providers settings</a></div>
       <div id="enrichProgress" class="es-progress" hidden>
         <span class="p-score-track"><span id="enrichBar" class="p-score-fill" style="width: 0%"></span></span>
         <span id="enrichBarText" class="p-muted"></span>
@@ -494,6 +495,9 @@
         } else {
           statusLine1 = 'Idle — ready to analyze photos';
         }
+        const connectionNote = el('aiConnectionNote');
+        connectionNote.hidden = !['paused', 'cooldown', 'recovery-ready'].includes(status.aiConnection?.state);
+        connectionNote.querySelector('span').textContent = status.aiConnection?.message ?? '';
         el('enrichStatusLine').textContent = statusLine1;
         el('enrichStatusLine').title = status.running && status.cancelRequested
           ? 'Stopping the active model request. An interrupted photo and the queue item stay for the next run.'

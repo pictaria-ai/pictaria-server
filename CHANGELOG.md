@@ -7,6 +7,14 @@ All notable changes to Pictaria Server are documented here. This project follows
 
 ### Development
 
+- Connected shared AI failure protection to server-managed Enrich and the
+  existing Curate referee. Shared failures stop repeated queue-wide requests;
+  temporary failures get at most one delayed recovery attempt. Settings → AI
+  Providers now shows connection status and offers an explicit synthetic-image
+  verification call. Startup recovers interrupted work only after claiming
+  exclusive database ownership, without resetting spent attempts. Both new
+  referees remain unavailable pending the remaining lifecycle/worker integration.
+
 - Added shared AI scheduling groundwork: up to ten Enrich calls or five
   minutes, then one waiting Curate call. Active requests finish before switching,
   retry waits release the service, and independent services can run concurrently.

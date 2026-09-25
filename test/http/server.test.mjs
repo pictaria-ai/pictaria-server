@@ -821,34 +821,6 @@ test('HTTP surface with a password set', async (t) => {
       await independent.stop();
     }
 
-    // A restarted process for this installation reloads the persisted secret
-    // and accepts the session. A real restart reuses the complete persistent
-    // data directory; sharing only SETTINGS_PATH would be a split-brain
-    // configuration that the persistent-state guard correctly refuses.
-    const restarted = await bootServer({
-      password: 'test-secret',
-      dataDir: server.dir,
-    });
-    try {
-      const acrossRestart = await fetch(`${restarted.base}/api/enrich/status`, { headers: { Cookie: token } });
-      assert.equal(acrossRestart.status, 200);
-    } finally {
-      await restarted.stop();
-    }
-
-    // The signing key remains bound to APP_PASSWORD, so changing the password
-    // still invalidates every outstanding session immediately.
-    const changedPassword = await bootServer({
-      password: 'different-secret',
-      dataDir: server.dir,
-    });
-    try {
-      const invalidated = await fetch(`${changedPassword.base}/api/enrich/status`, { headers: { Cookie: token } });
-      assert.equal(invalidated.status, 401);
-    } finally {
-      await changedPassword.stop();
-    }
-
     // Tampered and garbage tokens fail fast — an expired/broken session is
     // not a password guess, so no brute-force delay.
     const started = Date.now();
@@ -1757,4 +1729,25 @@ test('health validates the Immich version, key, and required permissions', async
     await patchSettings({ immichApiKey: 'good-key', immichBaseUrl: 'http://127.0.0.1:9' });
     assert.equal((await health()).immich, 'unreachable');
   });
+});
+
+
+test('session tokens survive a sequential installation restart and are invalidated by a password change', async t => {
+  const dir = mkdtempSync(join(tmpdir(), 'pictaria-session-restart-'));
+  let server;
+  t.after(async () => { await server?.stop(); rmSync(dir, { recursive: true, force: true }); });
+  server = await bootServer({ password: 'test-secret', dataDir: dir });
+  const response = await fetch(`${server.base}/api/session`, {
+    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ password: 'test-secret' }),
+  });
+  assert.equal(response.status, 200);
+  const token = response.headers.getSetCookie().find(cookie => cookie.startsWith('pictaria_session=')).split(';')[0];
+  await server.stop(); server = null;
+  // Reuse all persistent state after the old process has exited. Two live
+  // servers cannot own the same database merely by choosing different ports.
+  server = await bootServer({ password: 'test-secret', dataDir: dir });
+  assert.equal((await fetch(`${server.base}/api/enrich/status`, { headers: { Cookie: token } })).status, 200);
+  await server.stop(); server = null;
+  server = await bootServer({ password: 'different-secret', dataDir: dir });
+  assert.equal((await fetch(`${server.base}/api/enrich/status`, { headers: { Cookie: token } })).status, 401);
 });

@@ -92,6 +92,9 @@
     /* Buttons never compress — a long save/error note wraps beside them
        instead of squeezing them into a two-line pill. */
     .save-row { display: flex; align-items: center; gap: 10px; padding: 12px 0 4px; }
+    .ai-connection { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; margin: 14px 0; }
+    .ai-connection-copy { flex: 1 1 240px; min-width: 0; overflow-wrap: anywhere; }
+    .ai-connection .p-btn { flex-shrink: 0; }
     .save-row .p-btn { flex-shrink: 0; }
     .save-note { font-size: 12px; color: var(--p-muted); flex: 1; min-width: 0; }
     .save-note.bad { color: var(--p-danger); }
@@ -302,6 +305,9 @@
           <button id="save-providers" class="p-btn primary">Save AI Providers settings</button>
           <span id="note-providers" class="save-note"></span>
         </div>
+        <p class="setting-desc">Verification uses your saved settings and sends one small synthetic image to the model. It may incur a small provider charge. No library photos are used.</p>
+        <div id="ai-connections"></div>
+        <div id="ai-verification-note" class="setting-desc" role="status" aria-live="polite"></div>
       </div>
     </details>
 
@@ -1219,6 +1225,7 @@
       void loadCaptionWbStatus();
       void loadRefereeStatus();
       void loadServerVersion();
+      void loadAiConnections();
     }
 
     // The running build's version (authed health payload) — the findable
@@ -1232,6 +1239,71 @@
         }
       } catch { /* the section simply shows no version line */ }
     }
+
+    // Status reads never contact the model and do not replace edited form fields.
+    let aiStatusEpoch = 0;
+    let verifyingAi = false;
+    function renderAiConnections(rows) {
+      const container = el('ai-connections');
+      const current = new Set();
+      for (const row of rows ?? []) {
+        const target = row.target;
+        if (typeof target !== 'string') continue;
+        current.add(target);
+        let item = el(`ai-row-${target}`);
+        if (!item) {
+          item = document.createElement('div'); item.className = 'ai-connection'; item.id = `ai-row-${target}`;
+          item.dataset.target = target;
+          const copy = document.createElement('div'); copy.className = 'ai-connection-copy';
+          const label = document.createElement('strong');
+          label.textContent = target === 'enrich' ? 'Default Enrich connection' : target === 'curate' ? 'Curate connection'
+            : `${ENRICH_PROVIDER_NAMES[row.provider] ?? row.provider} connection`;
+          const status = document.createElement('div'); status.className = 'setting-desc'; status.id = `ai-connection-${target}`;
+          const button = document.createElement('button'); button.className = 'p-btn'; button.id = `verify-ai-${target}`;
+          button.dataset.target = target; button.textContent = 'Verify connection';
+          copy.append(label, status); item.append(copy, button); container.append(item);
+        }
+        el(`ai-connection-${target}`).textContent = [ENRICH_PROVIDER_NAMES[row.provider] ?? row.provider, row.model, row.message].filter(Boolean).join(' · ');
+        el(`verify-ai-${target}`).disabled = verifyingAi || !row.canVerify;
+      }
+      for (const item of [...container.children]) if (!current.has(item.dataset.target)) item.remove();
+    }
+    async function loadAiConnections() {
+      const epoch = ++aiStatusEpoch;
+      try {
+        const response = await fetch('/api/ai/connections', { headers: headers() });
+        if (!response.ok) throw new Error('Connection status unavailable.');
+        const body = await response.json();
+        if (epoch === aiStatusEpoch) renderAiConnections(body.connections);
+      } catch {
+        if (epoch !== aiStatusEpoch) return;
+        for (const item of el('ai-connections').children) {
+          item.querySelector('.setting-desc').textContent = 'Connection status unavailable.';
+          item.querySelector('button').disabled = true;
+        }
+      }
+    }
+    el('ai-connections').addEventListener('click', async event => {
+        const button = event.target.closest('button[data-target]');
+        if (!button || verifyingAi) return;
+        const target = button.dataset.target;
+        verifyingAi = true;
+        ++aiStatusEpoch;
+        for (const item of el('ai-connections').querySelectorAll('button')) item.disabled = true;
+        const note = el('ai-verification-note');
+        note.textContent = 'Waiting for an AI turn, then verifying…';
+        try {
+          const response = await fetch('/api/ai/connections/verify', { method: 'POST',
+            headers: headers({ 'Content-Type': 'application/json' }), body: JSON.stringify({ target }) });
+          const body = await response.json();
+          if (!response.ok) throw new Error(body?.error?.message ?? 'Verification failed.');
+          note.textContent = body.message;
+        } catch (error) { note.textContent = error.message; }
+        finally { verifyingAi = false; await loadAiConnections(); }
+    });
+    setInterval(() => {
+      if (!document.hidden && el('sec-providers').open && !verifyingAi) void loadAiConnections();
+    }, 10000);
 
     // --- referee status line ---
 
@@ -1252,6 +1324,7 @@
         status.groups ? `${status.groups.toLocaleString()} group${status.groups === 1 ? '' : 's'} refereed` : null,
         status.remaining ? `${status.remaining.toLocaleString()} waiting` : null,
         status.working ? 'working now' : null,
+        status.aiConnection?.state === 'paused' ? 'AI connection paused — see AI Providers above' : null,
         status.lastError ? `last error: ${status.lastError.slice(0, 80)}` : null,
       ].filter(Boolean).join(' · ');
     }

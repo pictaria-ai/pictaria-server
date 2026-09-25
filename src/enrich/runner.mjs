@@ -1,3 +1,4 @@
+import { AiConnectionPaused } from '../ai/connections.mjs';
 import { timingErrorKind } from './timing.mjs';
 import { EnrichDiscovery } from './discovery.mjs';
 import { readFileSync } from 'node:fs';
@@ -121,6 +122,7 @@ export async function analyzeWithValidationRetry(provider, image, {
   signal = null,
   photoTiming = null,
   aiSession = null,
+  aiConnections = null,
 }) {
   const prompts = [userPrompt];
   // Every local provider (local_*), plus generic endpoints that explicitly
@@ -137,12 +139,13 @@ export async function analyzeWithValidationRetry(provider, image, {
     while (true) {
       try {
         const analyze = async () => {
-          const result = await provider.analyzeImage(image, {
+          const submit = () => provider.analyzeImage(image, {
             systemPrompt,
             userPrompt: prompts[attemptIndex],
             jsonSchema,
             signal,
           });
+          const result = await (aiConnections ? aiConnections.run(provider, submit) : submit());
           // A completed provider response proves a persistent 429/503 wave has
           // ended even if local schema validation later rejects its content.
           onProviderResponse();
@@ -156,10 +159,13 @@ export async function analyzeWithValidationRetry(provider, image, {
         };
         return await (aiSession ? aiSession.run(request) : request());
       } catch (error) {
-        if (isRetryableProviderOverload(error) && overloadRetryCount < overloadRetryLimit) {
+        if (isRetryableProviderOverload(error) && overloadRetryCount < overloadRetryLimit
+            && (!aiConnections || aiConnections.status(provider).state === 'cooldown')) {
           const retryIndex = overloadRetryCount;
           overloadRetryCount += 1;
-          const delay = overloadRetryDelay(error, retryIndex);
+          const delay = aiConnections
+            ? Math.max(0, aiConnections.status(provider).retryAt - aiConnections.limits.now())
+            : overloadRetryDelay(error, retryIndex);
           log(`${error.status} — retrying in ${formatRetryDelay(delay)} (${overloadRetryCount}/${overloadRetryLimit})`);
           if (!await waitForRetry(delay, { shouldStop, sleep: retrySleep })) {
             throw new RetryWaitCancelledError();
@@ -230,9 +236,13 @@ async function executeBatch({
   configuration = null,
   timingSession,
   aiSession = null,
+  aiConnections = null,
 }) {
   immich = captureClient(immich);
   if (provider) provider = captureClient(provider);
+  if (provider && aiConnections && ['paused', 'cooldown'].includes(aiConnections.status(provider).state)) {
+    aiConnections.assertAvailable(provider);
+  }
   const diagnosticSecrets = configuredSecrets(immich, provider);
   if (maxAnalyzed !== null && maxAnalyzed < 1) {
     throw new Error('maxAnalyzed must be greater than 0');
@@ -472,6 +482,7 @@ async function executeBatch({
             signal,
             photoTiming,
             aiSession,
+            aiConnections,
           },
         );
         // One transaction: a run may never read as 'succeeded' without its
@@ -526,6 +537,8 @@ async function executeBatch({
           stopped = true;
           break;
         }
+        // Denied work was never submitted. Keep it queued without a failed-photo strike.
+        if (error instanceof AiConnectionPaused) throw error;
         const cancelledMidRequest = error?.name === 'ProviderRequestError' && error.cancelled === true;
         if (overloadRetryLimit > 0 && isRetryableProviderOverload(error)) {
           exhaustedOverloadPhotos += 1;
@@ -537,7 +550,8 @@ async function executeBatch({
             );
           }
         }
-        const infrastructure = isInfrastructureFailure(error);
+        const infrastructure = isInfrastructureFailure(error)
+          || (stage === 'provider' && aiConnections && ['paused', 'cooldown'].includes(aiConnections.status(provider).state));
         const diagnostic = sanitizeDiagnostic(error instanceof Error ? error.message : error, {
           secrets: diagnosticSecrets,
         });
@@ -557,6 +571,9 @@ async function executeBatch({
           break;
         }
         log(`  failed: ${diagnostic}`);
+        // A shared connection failure stops the run, retaining its queue item.
+        // Do not discover a dead provider again on each remaining photo.
+        if (stage === 'provider' && aiConnections) aiConnections.assertAvailable(provider);
         // Every photo failing from the start means the provider is down or
         // misconfigured, not that the photos are hard — stop before burning
         // a per-asset failure strike on the whole slice. A retry batch is

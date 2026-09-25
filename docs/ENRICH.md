@@ -663,24 +663,32 @@ in the standard SQLite backup and restore.
   request and finish metadata. The remaining message text is controlled by the
   upstream provider, so review it before posting it publicly in case that
   provider echoed request content in its message.
-- **Rate limits, outages, and timeouts never cost a photo anything.**
-  Failures are classified by *whose fault they are*. When a provider reports
-  a temporary rate limit (429) or unavailable service (503), Enrich retries
-  that same photo twice before moving on. It follows the provider's
-  `Retry-After` request between one second and five minutes; without one it
-  waits 15 seconds, then 30 seconds. The live run log shows each retry, and
-  Cancel interrupts those waits promptly. If two photos exhaust both retries
-  without a successful provider response in between, Enrich skips further
-  overload waits until the provider responds successfully again. It still
-  makes one ordinary attempt per photo so it can detect that recovery.
-  That keeps an exhausted quota from stretching the existing fast-failure
-  check across more than 20 minutes of requested wait. If both attempts still
-  fail — or for another clearly environmental error such as a timeout, dropped
-  connection, auth error (401/403), or other 5xx — the result records as an
-  **infrastructure failure**: it shows up in the run's failure count, but it is
-  never counted against the photo, and the next run over the same slice retries
-  every affected photo automatically. Nothing to reset, nothing lost.
-  Immich-side network errors and 5xx are treated the same way.
+- **Shared connection failures pause AI work without penalizing photos.**
+  Server-managed Enrich and Curate share connection protection. A bad API key
+  (401/403) or unavailable endpoint/model routing (404/405) pauses immediately.
+  Temporary rate limits, network failures, timeouts and server errors allow
+  at most one recovery request after at least 30 seconds, honoring a longer
+  `Retry-After`. For 429/503, Enrich waits and retries the same photo once;
+  Cancel interrupts the wait. Other shared failures stop the run and retain its
+  queued job. A later eligible request can use the single recovery opportunity.
+  A second shared failure leaves the connection paused. Pictaria does not test
+  every remaining photo against a broken provider.
+
+  Settings → AI Providers shows the pause reason and **Verify connection**.
+  Save corrected settings first. Verification sends one synthetic image, uses
+  the saved model/timeout and may incur a provider charge; no library photo is
+  used. Once verified, run the stopped Enrich job again. Verification does not
+  refund Curate attempts or revisit settled comparisons. Refreshing, restarting
+  and toggling features do not clear pauses. Independent connections can keep
+  working, and manual curation remains available.
+
+  Actual transport failures record as **infrastructure failures**, which do not
+  count toward a photo's content-failure limit; untouched photos get no failure
+  record. Bad model answers and request-specific content rejections remain photo
+  failures, not shared outages. Immich-side errors retain their existing handling.
+  The standalone CLI keeps its older two-retry overload policy; shared scheduling
+  and protection run in the server. See [Curate AI](CURATE-AI.md#live-connection-protection-and-startup)
+  for connection identity and restart behavior.
 - **A photo that keeps genuinely failing is dropped after two strikes.**
   Failures the provider pins on the request itself — most commonly a
   response the schema rejects (an unparseable answer, too many tags) —
@@ -1250,14 +1258,14 @@ once their readiness and worker integration is complete: up to ten Enrich
 calls or five minutes, then one ready Curate call. On a shared slow local model,
 that allows Curate progress at the cost of a longer Enrich run. Both preview
 roles remain unavailable until that integration is complete.
-Errors are handled the patient way: when a judgment fails — the model
-overloaded (429), unreachable, or returning garbage — the strip shows
-*"retrying after an error"* with the message. The referee follows a provider's
-`Retry-After` guidance up to five minutes, or waits five minutes when no hint
-is supplied, before touching the provider again. The stack is **not**
-marked judged, so the exact same group is retried once the backoff ends.
-Nothing is skipped or lost to a flaky provider; a batch just takes longer.
-The activity popup keeps the recent errors if you want the history.
+The existing referee retains its five-minute error backoff (or a provider hint
+up to five minutes) for ordinary failed judgments. Shared provider protection
+additionally gates every request: cooldown cannot be shortened by that legacy
+backoff, and terminal pauses require connection verification/correction in
+Settings → AI Providers. The strip distinguishes a paused connection from an
+ordinary pending retry. A malformed answer for one stack does not pause the
+provider. The activity popup keeps recent errors; manual decisions remain
+available throughout.
 
 Image bytes are budgeted, not left to luck. One group's request never
 exceeds a hard aggregate ceiling — 96 MB of raw image bytes by default,

@@ -180,7 +180,7 @@ test('a crash during recovery leaves the connection paused even after another re
   assert.equal((await f.execution(owner).run(f.job(2, ['new']))).state, 'provider-paused');
   assert.equal(f.limits.finish(first), false);
   assert.equal(f.limits.finish(recovery), false);
-  assert.equal(owner.limits.connectionVerified(backendKey), true);
+  assert.equal(owner.limits.finish(owner.limits.startProvider(backendKey, { verification: true })), true);
   assert.equal((await f.execution(owner).run(f.job())).state, 'exhausted', 'explicit verification does not refund work');
   assert.equal((await f.execution(owner).run(f.job(2, ['new']))).state, 'succeeded');
 }));
@@ -202,7 +202,7 @@ test('interrupted recovery and cancellation do not grant another recovery attemp
   await f.execution().run(f.job(1, ['a'], { submit: async () => { throw unavailable(); } }));
   f.tick(30_000);
   const ticket = f.limits.start(f.job(1, ['a']), f.attempts);
-  assert.equal(f.limits.connectionVerified(backendKey), false, 'connection check cannot release active owner');
+  assert.equal(f.limits.startProvider(backendKey, { verification: true }).state, 'provider-busy', 'connection check cannot release active owner');
   f.limits.finish(ticket, new ProviderRequestError('cancelled', { cancelled: true }));
   f.attempts.finish(ticket, 'failed');
   assert.equal(f.limits.providerStatus(backendKey).state, 'paused');

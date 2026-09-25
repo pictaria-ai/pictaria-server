@@ -115,6 +115,11 @@ export class ProviderRequestError extends Error {
   }
 }
 
+function parseProviderAnswer(text, parse = parseJsonContent) {
+  try { return parse(text); }
+  catch { throw new ProviderRequestError('Provider returned an answer that was not valid JSON', { status: 200, invalidResponse: true }); }
+}
+
 // Retry-After permits either seconds or an HTTP date. A malformed or past
 // value is no hint; callers retain their normal fallback behavior.
 export function parseRetryAfterMs(value, now = Date.now()) {
@@ -205,9 +210,9 @@ export class OpenAiProvider {
     }, { signal });
     const outputText = extractOpenAiOutputText(rawOutput);
     if (!outputText) {
-      throw new Error('OpenAI response did not include output_text');
+      throw new ProviderRequestError('OpenAI response did not include output_text', { status: 200, invalidResponse: true });
     }
-    return { rawOutput, normalizedOutput: JSON.parse(outputText) };
+    return { rawOutput, normalizedOutput: parseProviderAnswer(outputText, JSON.parse) };
   }
 
   async generateProse({ systemPrompt, userPrompt, images = [], maxOutputTokens, imageDetail }) {
@@ -315,17 +320,17 @@ export class LmStudioProvider {
     );
     const outputText = extractSchemaConstrainedChoiceContent(rawOutput);
     if (!outputText) {
-      throw new Error('LM Studio response did not include message content');
+      throw new ProviderRequestError('LM Studio response did not include message content', { status: 200, invalidResponse: true });
     }
     try {
-      return { rawOutput, normalizedOutput: parseJsonContent(outputText) };
+      return { rawOutput, normalizedOutput: parseProviderAnswer(outputText) };
     } catch (error) {
       // The fallback channel can contain private chain-of-thought rather than
       // the requested schema JSON. JSON.parse errors quote the rejected input,
       // so replace them with a fixed diagnostic when that channel was used.
       const ordinaryContent = extractChoiceMessageContent(rawOutput);
       if (!(typeof ordinaryContent === 'string' && ordinaryContent.trim())) {
-        throw new Error('LM Studio returned schema output that was not valid JSON');
+        throw new ProviderRequestError('LM Studio returned schema output that was not valid JSON', { status: 200, invalidResponse: true });
       }
       throw error;
     }
@@ -421,14 +426,14 @@ export class OpenAiCompatibleProvider {
     );
     const outputText = extractSchemaConstrainedChoiceContent(rawOutput);
     if (!outputText) {
-      throw new Error('OpenAI-compatible response did not include message content');
+      throw new ProviderRequestError('OpenAI-compatible response did not include message content', { status: 200, invalidResponse: true });
     }
     try {
-      return { rawOutput, normalizedOutput: parseJsonContent(outputText) };
+      return { rawOutput, normalizedOutput: parseProviderAnswer(outputText) };
     } catch (error) {
       const ordinaryContent = extractChoiceMessageContent(rawOutput);
       if (!(typeof ordinaryContent === 'string' && ordinaryContent.trim())) {
-        throw new Error('OpenAI-compatible provider returned JSON output that was not valid JSON');
+        throw new ProviderRequestError('OpenAI-compatible provider returned JSON output that was not valid JSON', { status: 200, invalidResponse: true });
       }
       throw error;
     }
@@ -526,9 +531,9 @@ export class OpenRouterProvider {
     const outputText = extractChoiceMessageContent(rawOutput);
     if (!outputText) {
       const detail = openRouterEmptyContentDiagnostic(rawOutput, this.apiKey);
-      throw new Error(`OpenRouter response did not include message content${detail ? `: ${detail}` : ''}`);
+      throw new ProviderRequestError(`OpenRouter response did not include message content${detail ? `: ${detail}` : ''}`, { status: 200, invalidResponse: true });
     }
-    return { rawOutput, normalizedOutput: JSON.parse(outputText) };
+    return { rawOutput, normalizedOutput: parseProviderAnswer(outputText, JSON.parse) };
   }
 
   async generateProse({ systemPrompt, userPrompt, images = [], maxOutputTokens }) {
@@ -679,11 +684,11 @@ export class VeniceProvider {
     }, { signal });
     const outputText = extractChoiceMessageContent(rawOutput);
     if (!outputText) {
-      throw new Error('Venice response did not include message content');
+      throw new ProviderRequestError('Venice response did not include message content', { status: 200, invalidResponse: true });
     }
     // Tolerant parse: Venice models without response-schema support may still
     // fence or pad the JSON.
-    return { rawOutput, normalizedOutput: parseJsonContent(outputText) };
+    return { rawOutput, normalizedOutput: parseProviderAnswer(outputText) };
   }
 
   async generateProse({ systemPrompt, userPrompt, images = [], maxOutputTokens }) {
@@ -756,9 +761,9 @@ export class OllamaCloudProvider {
     }, { signal });
     const content = extractOllamaMessageContent(rawOutput);
     if (!content) {
-      throw new Error('Ollama response did not include message content');
+      throw new ProviderRequestError('Ollama response did not include message content', { status: 200, invalidResponse: true });
     }
-    return { rawOutput, normalizedOutput: parseJsonContent(content) };
+    return { rawOutput, normalizedOutput: parseProviderAnswer(content) };
   }
 
   async generateProse({ systemPrompt, userPrompt, images = [], maxOutputTokens }) {
@@ -857,9 +862,9 @@ export class OllamaLocalProvider {
     );
     const content = extractOllamaMessageContent(rawOutput);
     if (!content) {
-      throw new Error('Ollama response did not include message content');
+      throw new ProviderRequestError('Ollama response did not include message content', { status: 200, invalidResponse: true });
     }
-    return { rawOutput, normalizedOutput: parseJsonContent(content) };
+    return { rawOutput, normalizedOutput: parseProviderAnswer(content) };
   }
 
   async generateProse({ systemPrompt, userPrompt, images = [], maxOutputTokens }) {

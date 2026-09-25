@@ -46,13 +46,14 @@ export function refereeGroupKey(assetIds) {
 }
 
 export class RefereeService {
-  constructor({ repo, immich, review, enrichRunner, config, log = () => {}, aiScheduler = null }) {
+  constructor({ repo, immich, review, enrichRunner, config, log = () => {}, aiScheduler = null, aiConnections = null }) {
     this.repo = repo;
     this.immich = immich;
     this.review = review;
     this.enrichRunner = enrichRunner;
     this.config = config;
     this.aiScheduler = aiScheduler;
+    this.aiConnections = aiConnections;
     this.aiSession = null;
     this.log = log;
     this._timer = null;
@@ -205,6 +206,7 @@ export class RefereeService {
       this._batchDone = 0;
     }
     return {
+      aiConnection: this.connectionStatus(),
       enabled: this.enabled(),
       working: this._working,
       paused: this._paused,
@@ -223,8 +225,16 @@ export class RefereeService {
     };
   }
 
+  connectionStatus() {
+    if (!this.aiConnections) return null;
+    try { return this.aiConnections.status(this.makeProvider()); }
+    catch { return { state: 'paused', reason: 'configuration' }; }
+  }
+
   async tick() {
     if (this._working || !this.canStartWork()) return;
+    const connection = this.connectionStatus();
+    if (connection && !['ready', 'recovery-ready'].includes(connection.state)) return;
     if (this._lastError && Date.now() - this._lastErrorAt < this._errorBackoffMs) return;
     this._working = true;
     try {
@@ -427,7 +437,8 @@ export class RefereeService {
     this._previewFallbacks.budget += result.stats.budget;
     this._previewFallbacks.thumbnail += result.stats.thumbnail;
     const images = result.images;
-    const { normalizedOutput } = await provider.analyzeImages(images, buildRefereeRequest(group.members));
+    const submit = () => provider.analyzeImages(images, buildRefereeRequest(group.members));
+    const { normalizedOutput } = await (this.aiConnections ? this.aiConnections.run(provider, submit) : submit());
     const picks = normalizePicks(normalizedOutput, group.members);
     this.repo.refereeRecordGroup({
       groupKey: group.key,

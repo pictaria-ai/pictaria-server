@@ -59,7 +59,10 @@ export class CurateAiExecution {
     // accidentally authorize work using a stale answer.
     if (job.isCurrent() !== true) return 'stale';
     const limit = this.limits?.eligibility(job);
-    if (limit && limit !== 'eligible') return limit;
+    // An Enrich call may own this provider right now. Join the scheduler's
+    // queue, then require full admission once the turn is actually ours.
+    if (limit && limit !== 'eligible'
+        && !(limit === 'provider-busy' && this.scheduler && !requireTurn)) return limit;
     if (requireTurn && (this.scheduler ? this.#turn?.ownsTurn() !== true : this.admit(job) !== true)) return 'waiting';
     return null;
   }

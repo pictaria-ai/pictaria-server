@@ -1,4 +1,4 @@
-import { createHash } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import { enrichmentProviderConfiguration, ProviderRequestError } from '../enrich/providers.mjs';
 
 export const AI_WINDOW_MS = 30 * 60_000;
@@ -82,6 +82,27 @@ export class CurateAiLimits {
     return { state: row.state, reason: row.reason };
   }
 
+  // Enrich, legacy Curate and explicit verification share the same ownership
+  // as new Curate requests, without consuming Curate photo/input allowances.
+  // Verification is deliberate; it may cross a terminal pause, never an active
+  // request or an unexpired provider cooldown.
+  startProvider(backendKey, { verification = false } = {}) {
+    return this.repo.transaction(() => {
+      const provider = this.providerStatus(backendKey);
+      if (!['ready', 'recovery-ready'].includes(provider.state)
+          && !(verification && provider.state === 'paused')) return { state: `provider-${provider.state}` };
+      const ticket = { state: 'started', backendKey, token: randomUUID() };
+      this.#ownProvider(ticket, verification || provider.state === 'recovery-ready');
+      return ticket;
+    });
+  }
+
+  #ownProvider(ticket, recovering) {
+    this.repo.db.prepare(`INSERT INTO curate_ai_backends VALUES(?,'ready',NULL,NULL,?,?,?)
+      ON CONFLICT(backend_key) DO UPDATE SET token=excluded.token,recovering=excluded.recovering,updated_ms=excluded.updated_ms`)
+      .run(ticket.backendKey, ticket.token, Number(recovering), this.now());
+  }
+
   eligibility(job) {
     const keys = photoKeys(job);
     if (this.repo.db.prepare('SELECT 1 FROM curate_ai_skipped_inputs WHERE role=? AND input_key=?')
@@ -116,9 +137,7 @@ export class CurateAiLimits {
       for (const key of photoKeys(job)) insert.run(job.role, key, ticket.token, now);
       this.repo.db.prepare(`INSERT INTO curate_ai_attempt_age VALUES(?,?,?)
         ON CONFLICT(role,input_key) DO UPDATE SET updated_ms=excluded.updated_ms`).run(job.role, job.inputKey, now);
-      this.repo.db.prepare(`INSERT INTO curate_ai_backends VALUES(?,'ready',NULL,NULL,?,0,?)
-        ON CONFLICT(backend_key) DO UPDATE SET token=excluded.token,recovering=?,updated_ms=excluded.updated_ms`)
-        .run(job.backendKey, ticket.token, now, Number(provider.state === 'recovery-ready'));
+      this.#ownProvider({ ...ticket, backendKey: job.backendKey }, provider.state === 'recovery-ready');
       return { ...ticket, backendKey: job.backendKey };
     });
   }
@@ -134,6 +153,7 @@ export class CurateAiLimits {
       let state = 'ready', reason = null, retryAt = null;
       if (error instanceof ProviderRequestError) {
         if ([401, 403].includes(error.status)) { state = 'paused'; reason = 'auth'; }
+        else if ([404, 405].includes(error.status)) { state = 'paused'; reason = 'configuration'; }
         else if (error.invalidResponse) { /* Answer failure, not an outage. */ }
         else if (error.cancelled) {
           if (row.recovering) { state = 'paused'; reason = 'interrupted'; }
@@ -170,16 +190,6 @@ export class CurateAiLimits {
         token=NULL,recovering=0,updated_ms=? WHERE token IS NOT NULL`).run(now + AI_RECOVERY_DELAY_MS, now);
       return attempts.recoverInterrupted();
     });
-  }
-
-  // Call only after a deliberate successful connection test/correction. Never
-  // from a refresh, restart, preference toggle or per-stack retry. This does not
-  // refund any photo/input allowance or enqueue previously settled comparisons.
-  connectionVerified(backendKey) {
-    if (!validKey(backendKey)) throw new TypeError('Invalid AI backend identity.');
-    return this.repo.db.prepare(`UPDATE curate_ai_backends SET state='ready',reason=NULL,retry_at=NULL,
-      recovering=0,updated_ms=? WHERE backend_key=? AND token IS NULL`)
-      .run(this.now(), backendKey).changes === 1;
   }
 
   // Cleanup is explicit and bounded. The lifecycle owner supplies only inputs
