@@ -26,7 +26,7 @@ two scenes match. Missing information stays unknown. Enrich is optional; existin
 supported Enrich results remain usable even if future enrichment is disabled.
 
 Human separations always win. No AI calls are made by this candidate algorithm.
-The optional Stack Referee and Keeper Referee remain separate future integrations.
+The optional Stack Referee and Photo Referee remain separate future integrations.
 “Supported” below describes this rule's evidence, **not** an AI check or permission
 to bypass one. The preview's keeper decisions are still entirely human.
 
@@ -318,7 +318,7 @@ Curate page, update the main user guide and remove superseded staging descriptio
 
 Similarity checks settle first, followed by the optional AI Stack Referee. Work
 still pending waits; a finished-incomplete check does not permanently block the
-enabled Keeper Referee. It may recommend keepers from the retained group with a
+enabled Photo Referee. It may recommend keepers from the retained group with a
 clear not-fully-checked label. Provider/configuration safeguards, request budgets,
 response validation and human authority still apply. Failed check output never
 becomes a valid partition. This is the September 24 contract for PIC-370/PIC-116;

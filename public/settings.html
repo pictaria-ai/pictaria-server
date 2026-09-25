@@ -7,7 +7,7 @@
   <link rel="icon" type="image/png" sizes="32x32" href="/brand/favicon-32.png">
   <link rel="apple-touch-icon" href="/brand/apple-touch-icon.png">
   <script src="/theme.js"></script>
-  <script src="/auth-gate.js" defer></script>
+  <script src="/auth-gate.js"></script>
   <script src="/nav.js" defer></script>
   <link rel="stylesheet" href="/pictaria.css">
   <style>
@@ -224,7 +224,7 @@
     .profile-dialog .profile-discard { margin: 16px 0; max-width: none; }
     .profile-dialog #profileEditorNote { position: sticky; bottom: 0; background: var(--p-bg); margin: 0; padding: 8px 0; }
     .profile-dialog #profileEditorNote:empty { display: none; }
-    .field.enrich-paused { opacity: .55; }
+    .field.enrich-paused, .field.curate-disabled { opacity: .65; }
     @media (max-width: 600px) {
       .profile-dialog { width: 100vw; height: 100dvh; max-height: 100dvh; margin: 0; border: 0; border-radius: 0; padding: 0 16px; }
     }
@@ -814,9 +814,16 @@
       ],
       curate: [
         { key: 'burstGrouping', type: 'switch', desc: 'Groups similar photos using capture time and available photo information, so you can compare them together. Turn off to review photos individually.' },
-        { key: 'refereeEnabled', type: 'switch', desc: 'The gold star: whenever enrichment is idle, an AI model compares each Stack side by side — people-shots beat empty scenes, open eyes beat blinks — and explains its pick in the compare view. Needs enrichment enabled; works through the backlog on its own, most-undecided Stacks first. A background worker with no start or cancel: an enrich run always takes priority (the referee finishes its current Stack, then waits), and it resumes by itself when enrichment is idle. Pause it any time from the Curate strip.', docs: 'https://github.com/pictaria-ai/pictaria-server/blob/main/docs/ENRICH.md' },
-        { key: 'refereeProvider', type: 'select', labels: { '': 'Follow Enrich provider', local_lmstudio: 'LM Studio (local)', local_ollama: 'Ollama (local)', openai_compatible: 'OpenAI-compatible', cloud_ollama: 'Ollama (cloud)', cloud_openai: 'OpenAI (cloud)', openrouter: 'OpenRouter (cloud)', venice: 'Venice (cloud)' }, desc: 'Follow Enrich provider uses the provider currently selected on the Enrich page; a change there applies when the next Stack starts. Choose a specific provider here to keep Curate independent.' },
+        { division: 'Curate Preview AI', divisionDesc: 'Optional help with grouping and choosing photos. These controls become available as each referee is connected to the preview.' },
+        { key: 'stackRefereeEnabled', type: 'switch', desc: 'Checks whether photos belong together and splits different subjects into separate stacks.' },
+        { key: 'stackRefereeScope', type: 'select', labels: { uncertain: 'Uncertain stacks (recommended)', all: 'All stacks' }, desc: 'Uncertain stacks: check compositions that remain unresolved after similarity checks finish. All stacks: also check supported compositions; uses more AI calls. Applies to pending stacks without a current AI check.' },
+        { key: 'keeperRefereeEnabled', type: 'switch', desc: 'Suggests the best photos within each stack. You can accept or change the suggestions, including choosing more than one photo.' },
+        { division: 'Shared AI model', divisionDesc: 'Used by the current-page referee and, when available, both preview referees. Provider connections are managed under Enrich; the preview referees will not require Enrich to be on.' },
+        { key: 'refereeProvider', type: 'select', labels: { '': 'Follow Enrich provider', local_lmstudio: 'LM Studio (local)', local_ollama: 'Ollama (local)', openai_compatible: 'OpenAI-compatible', cloud_ollama: 'Ollama (cloud)', cloud_openai: 'OpenAI (cloud)', openrouter: 'OpenRouter (cloud)', venice: 'Venice (cloud)' }, desc: 'Follow Enrich provider uses the provider currently selected on the Enrich page; a change there applies when the next check starts. Choose a specific provider here to keep Curate independent.' },
         { key: 'refereeModel', type: 'text', placeholder: 'empty = the provider’s usual model', desc: 'Optional. Leave blank to use the chosen provider’s configured model. If the referee follows Enrich, this override must also be valid for every provider you select there; clear it or choose a fixed referee provider when switching providers. A smaller vision model works well here, but it must accept multiple images.', docs: 'https://docs.venice.ai/models/overview' },
+        { group: 'Current Curate page', groupDesc: 'Applies only to the existing Curate page, not Curate Preview.' },
+        { key: 'refereeEnabled', type: 'switch', desc: 'Recommends a keeper and shows a gold star. Requires Stacks and Enrich to be on; works while Enrich is idle.' },
+        { groupEnd: true },
       ],
       insights: [
         { key: 'refreshIntervalHours', type: 'number', width: 110 },
@@ -874,6 +881,7 @@
     // last server-rendered value, and comes clean again if the edit is
     // reverted. Secrets render blank, so any typed text counts as a change.
     const cleanState = {};
+    let curateSettings = {};
     const cleanVoice = {};
 
     function updateVoiceDirty() {
@@ -1045,7 +1053,10 @@
           input.dataset.type = row.type;
           input.addEventListener('input', () => updateDirty(section));
           input.addEventListener('change', () => updateDirty(section));
-          if (section === 'enrich' && row.key === 'enabled') input.addEventListener('change', syncEnrichDependents);
+          if (section === 'enrich' && row.key === 'enabled') input.addEventListener('change', () => {
+            syncEnrichDependents(); syncCurateDependents();
+          });
+          if (section === 'curate') input.addEventListener('change', syncCurateDependents);
           if (row.type === 'secret') {
             // Eye toggle so a key can be checked as it's typed.
             const EYE = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>';
@@ -1126,6 +1137,7 @@
             field.append(warning);
           }
           target.append(field);
+          if (section === 'curate' && row.key === 'refereeEnabled') target.append(el('refereeLine'));
           if (section === 'enrich' && row.key === 'captionWriteback') {
             target.append(el('captionWbStatus'));
           }
@@ -1147,6 +1159,7 @@
     }
 
     function render(settings) {
+      curateSettings = settings.curate ?? {};
       buildForms(settings);
       for (const [section, rows] of Object.entries(SPEC)) {
         for (const row of rows) {
@@ -1200,6 +1213,7 @@
           : 'Follow Enrich provider';
       }
       syncEnrichDependents();
+      syncCurateDependents();
       renderSubs(settings);
       void loadBackupStatus();
       void loadCaptionWbStatus();
@@ -1259,6 +1273,35 @@
         status.lastError ? `latest error: ${status.lastError}` : null,
         !pending && !done && !failed ? 'nothing synced yet — use "Write existing captions now" to include photos enriched before this was turned on' : null,
       ].filter(Boolean).join(' · ');
+    }
+
+    function syncCurateDependents() {
+      const stacks = el('f2-curate-burstGrouping')?.checked;
+      for (const key of ['stackRefereeEnabled', 'stackRefereeScope', 'keeperRefereeEnabled', 'refereeProvider', 'refereeModel', 'refereeEnabled']) {
+        const input = el(`f2-curate-${key}`);
+        if (!input) continue;
+        const field = input.closest('.field');
+        const meta = curateSettings[key];
+        const unavailable = meta?.available === false;
+        const legacyPaused = key === 'refereeEnabled' && !el('f2-enrich-enabled')?.checked;
+        const scope = key === 'stackRefereeScope';
+        field.hidden = scope && !el('f2-curate-stackRefereeEnabled')?.checked;
+        // A saved on preference may be switched off, then restored while still
+        // editing. Once saved off, an unavailable worker cannot be enabled.
+        input.disabled = !stacks || legacyPaused || (unavailable && meta.value !== true)
+          || (scope && curateSettings.stackRefereeEnabled?.available !== true);
+        field.classList.toggle('curate-disabled', input.disabled);
+        let note = field.querySelector('.curate-state-note');
+        if (!note) {
+          note = document.createElement('p'); note.className = 'setting-desc curate-state-note';
+          note.id = `curate-state-${key}`; input.setAttribute('aria-describedby', note.id);
+          field.append(note);
+        }
+        note.textContent = !stacks ? 'Paused while Stacks is off. Your choices are preserved.'
+          : unavailable ? meta.availabilityNotice
+          : legacyPaused ? 'Paused while Enrich is off.' : '';
+        note.hidden = !note.textContent;
+      }
     }
 
     function syncEnrichDependents() {
@@ -1387,7 +1430,10 @@
       if (settings.curate?.burstGrouping) {
         el('sub-curate').textContent = [
           settings.curate.burstGrouping.value ? 'photo stacks' : 'flat queue',
-          settings.curate.refereeEnabled?.value ? 'referee on' : null,
+          settings.curate.stackRefereeEnabled?.active ? 'Stack Referee on' : null,
+          settings.curate.keeperRefereeEnabled?.active ? 'Photo Referee on' : null,
+          settings.curate.burstGrouping.value && settings.enrich?.enabled?.value
+            && settings.curate.refereeEnabled?.value ? 'current-page referee on' : null,
         ].filter(Boolean).join(' · ');
       }
       if (settings.insights?.refreshIntervalHours) {

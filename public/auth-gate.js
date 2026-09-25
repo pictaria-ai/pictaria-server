@@ -6,7 +6,10 @@
 // too — the browser never stores the raw password), and reloads the page so
 // every feature initializes normally.
 (() => {
+  // Loaded synchronously in <head>, before any page can handle a fast 401.
+  // The dialog remains lazy; callers before <body> are coalesced until ready.
   let overlay = null;
+  let showPending = false;
 
   function build() {
     if (overlay) {
@@ -111,6 +114,16 @@
 
   window.pictariaGate = {
     show() {
+      if (!document.body) {
+        if (!showPending) {
+          showPending = true;
+          document.addEventListener('DOMContentLoaded', () => {
+            showPending = false;
+            window.pictariaGate.show();
+          }, { once: true });
+        }
+        return;
+      }
       build();
       overlay.hidden = false;
       document.body.style.overflow = 'hidden';
@@ -122,9 +135,8 @@
   // and browsers whose stored credential still works never see the gate's
   // login handler — so they would keep the raw password forever. On every
   // load, exchange the leftover key for an HttpOnly session cookie and only
-  // then remove it. This runs async, after page scripts have already read the
-  // key into memory, so in-flight header auth keeps working for the rest of
-  // the page's life; every later load rides the session cookie.
+  // then remove it. Current page scripts use the session cookie only; no
+  // other script reads the legacy key or sends it as a request header.
   async function purgeLegacyPassword() {
     const legacyPassword = localStorage.getItem('pictariaAppPassword');
     if (legacyPassword === null) {

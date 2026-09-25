@@ -3,8 +3,11 @@ import { createHash } from 'node:crypto';
 import { awaitDrain } from '../lifecycle.mjs';
 import { MAX_STACK_MEMBERS } from './reviewService.mjs';
 import { fetchImage, PROVIDER_RETRY_AFTER_CAP_MS } from './runner.mjs';
-import { createProvider } from './providers.mjs';
+import { buildRefereeRequest, normalizePicks } from './referee-contract.mjs';
+import { createCurateAiProvider } from '../curate/ai-config.mjs';
 import { configuredSecrets, sanitizeDiagnostic } from '../diagnostics.mjs';
+
+export { REFEREE_PROMPT_VERSION, buildRefereeUserPrompt, refereeJsonSchema, normalizePicks } from './referee-contract.mjs';
 
 // Group referee (Curate's gold star): for each "same moment" group, ONE
 // multi-image request ranks the members by keeper quality and explains why.
@@ -18,7 +21,6 @@ import { configuredSecrets, sanitizeDiagnostic } from '../diagnostics.mjs';
 //   - people beat empty scenes unless technically bad; face counts are
 //     injected as text so the model judges quality, not presence
 //   - eyes_closed is a required per-photo field with an honest "unsure" out
-export const REFEREE_PROMPT_VERSION = 'referee-v2';
 
 const POLL_MS = 60000;
 const ERROR_BACKOFF_MS = 5 * 60000;
@@ -38,93 +40,8 @@ export const REFEREE_MAX_IMAGE_BYTES = 25 * 1024 * 1024;
 // the budget degrade to their previews, mirroring the per-image cap.
 export const REFEREE_GROUP_BYTE_BUDGET = 96 * 1024 * 1024;
 
-const SYSTEM_PROMPT = [
-  'You are a photo-culling referee. You receive several photos taken moments apart',
-  '(a burst, re-shoots, or duplicates) and rank them by which is most worth keeping',
-  'for display in a home photo frame.',
-  '',
-  'Ranking rules, in priority order:',
-  '1. A photo that clearly shows people beats a photo of the same scene without',
-  '   people — unless the people shot is technically bad (badly blurred, person',
-  '   cut off, all eyes closed).',
-  '2. Among photos of people: everyone sharp, eyes open, and natural expressions',
-  '   beat blinks, grimaces, and motion blur.',
-  '3. Otherwise judge sharpness, composition, and overall appeal.',
-  '',
-  'For every photo, check each clearly visible face for closed eyes or mid-blink.',
-  'Use "unsure" when faces are too small to judge confidently.',
-  'Also assign every photo a subject_group number. Photos of essentially the',
-  'same subject share a number (start at 1). Use a second group ONLY when the',
-  'set clearly contains different subjects — e.g. shots of people AND separate',
-  'shots of just the scenery, or two genuinely different scenes. Near-identical',
-  'shots, re-framings, and small zoom changes are the SAME subject. When in',
-  'doubt, use one group.',
-  'Mark keep=true for the best photo of each subject_group.',
-  'Keep each note short (one sentence) and concrete: it is shown to the user as',
-  'the reason for the pick.',
-  'Return strict JSON only.',
-].join('\n');
-
-export function refereeJsonSchema(memberCount) {
-  return {
-    type: 'object',
-    additionalProperties: false,
-    required: ['same_subject', 'photos'],
-    properties: {
-      same_subject: {
-        type: 'boolean',
-        description: 'Whether all photos show essentially the same subject (vs a mixed set that merely shares a time and place).',
-      },
-      photos: {
-        type: 'array',
-        minItems: memberCount,
-        maxItems: memberCount,
-        items: {
-          type: 'object',
-          additionalProperties: false,
-          required: ['photo', 'rank', 'keep', 'eyes_closed', 'note', 'subject_group'],
-          properties: {
-            photo: { type: 'integer', description: '1-based index of the photo, in the order provided.' },
-            rank: { type: 'integer', description: '1 = most worth keeping.' },
-            subject_group: { type: 'integer', minimum: 1, description: 'Photos of the same subject share a number; a clearly different subject gets the next number. When in doubt, 1.' },
-            keep: { type: 'boolean' },
-            eyes_closed: { type: 'string', enum: ['yes', 'no', 'unsure'] },
-            note: { type: 'string' },
-          },
-        },
-      },
-    },
-  };
-}
-
 export function refereeGroupKey(assetIds) {
   return createHash('sha1').update([...assetIds].sort().join('\n')).digest('hex');
-}
-
-export function buildRefereeUserPrompt(members) {
-  const lines = members.map((member, index) => {
-    const facts = [];
-    if (member.capturedAt) facts.push(`taken ${String(member.capturedAt).replace('T', ' ').slice(0, 19)}`);
-    facts.push(describePeople(member));
-    return `Photo ${index + 1}: ${facts.filter(Boolean).join(' · ')}`;
-  });
-  return [
-    `These ${members.length} photos were taken within minutes of each other.`,
-    'Known facts from face detection and prior analysis:',
-    ...lines,
-    '',
-    'Rank them by keeper quality following your rules, check faces for closed',
-    'eyes, and pick the best 1-2 to keep.',
-  ].join('\n');
-}
-
-function describePeople(member) {
-  const tags = member.aiTags ?? [];
-  if (tags.includes('ai/people/group')) return '3+ people detected';
-  if (tags.includes('ai/people/couple')) return '2 people detected';
-  if (tags.includes('ai/people/one')) return '1 person detected';
-  if (tags.includes('ai/people/none')) return 'no people detected';
-  return 'people unknown (not yet analyzed)';
 }
 
 export class RefereeService {
@@ -182,8 +99,8 @@ export class RefereeService {
     this._timer.unref?.();
   }
 
-  // Shutdown drain: stop the poll, signal the worker (the contiguous block
-  // checks _stopped between groups), and wait briefly for an in-flight
+  // Shutdown drain: stop the poll, signal preparation and the contiguous block,
+  // and wait briefly for an in-flight
   // group. A group verdict is minutes of model work with no abort handle,
   // so the budget is deliberately short: a laggard is abandoned, not
   // awaited to the end — verdicts are recomputable and the caller warns by
@@ -196,12 +113,18 @@ export class RefereeService {
   }
 
   enabled() {
-    return Boolean(this.config.enrichEnabled) && Boolean(this.config.curateRefereeEnabled);
+    // Retain the released Enrich dependency until PIC-372 deliberately migrates
+    // inactive preferences. Stacks off must also stop this legacy worker.
+    return this.config.curateBurstGrouping !== false
+      && Boolean(this.config.enrichEnabled) && Boolean(this.config.curateRefereeEnabled);
   }
 
-  // Pause is cooperative: an in-flight group always finishes (its verdict is
-  // minutes of model work — throwing it away helps nobody), then the worker
-  // idles until resumed. Lasts until resume or a server restart.
+  canStartWork() {
+    return !this._stopped && !this._paused && this.enabled() && !this.enrichRunner.isRunning();
+  }
+
+  // Pause is cooperative: a submitted request may finish, but photo preparation
+  // stops before another download/submission. Lasts until resume or restart.
   setPaused(paused) {
     const next = Boolean(paused);
     if (next !== this._paused) {
@@ -291,15 +214,14 @@ export class RefereeService {
   }
 
   async tick() {
-    if (this._working || this._stopped || this._paused || !this.enabled()) return;
-    if (this.enrichRunner.isRunning()) return; // the model belongs to enrichment
+    if (this._working || !this.canStartWork()) return;
     if (this._lastError && Date.now() - this._lastErrorAt < this._errorBackoffMs) return;
     this._working = true;
     try {
       // Contiguous block: keep going while there is work and the model is
       // free — re-checked before every group so enrichment never waits for
       // more than the group in flight.
-      while (!this._stopped && !this._paused && this.enabled() && !this.enrichRunner.isRunning()) {
+      while (this.canStartWork()) {
         const group = this.pendingGroups().find(
           (g) => !this.repo.refereeHasGroup(g.key) && !this._deferredGroups.has(g.key),
         );
@@ -307,8 +229,8 @@ export class RefereeService {
           this._batchDone = 0; // queue drained — the run is over
           break;
         }
-        // false = deferred (couldn't fit the byte budget) — not judged, and
-        // deliberately not counted; the worker moves on to the next group.
+        // false = deferred for size, or stopped during preparation. Neither is
+        // judged or counted. Recheck the current gates before another group.
         if (await this.refereeGroup(group)) {
           this._batchDone += 1;
         }
@@ -342,12 +264,7 @@ export class RefereeService {
   }
 
   makeProvider() {
-    const name = this.config.curateRefereeProvider || this.config.defaultProvider;
-    const options = { ...(this.config.providers?.[name] ?? {}) };
-    if (this.config.curateRefereeModel) options.modelName = this.config.curateRefereeModel;
-    // Only ever raise the timeout — a user-configured longer one wins.
-    options.timeoutMs = Math.max(Number(options.timeoutMs) || 0, REFEREE_TIMEOUT_MS);
-    return createProvider(name, options);
+    return createCurateAiProvider(this.config, { minimumTimeoutMs: REFEREE_TIMEOUT_MS });
   }
 
   // The configured aggregate ceiling for one group's images, every source
@@ -386,6 +303,9 @@ export class RefereeService {
     for (const member of group.members) {
       let fetched = null;
       for (let rung = startRung; rung < chain.length && !fetched; rung += 1) {
+        // A setting/pause/shutdown can change during the preceding download.
+        // Stop before another fetch (including a smaller-rendition fallback).
+        if (!this.canStartWork()) return { cancelled: true };
         const source = chain[rung];
         const cap = Math.min(REFEREE_MAX_IMAGE_BYTES, budget - groupBytes);
         if (cap <= 0) return null;
@@ -418,6 +338,7 @@ export class RefereeService {
   }
 
   async refereeGroup(group) {
+    if (!this.canStartWork()) return false;
     const provider = this.makeProvider();
     this._current = group.key;
     this._currentSize = group.members.length;
@@ -445,12 +366,16 @@ export class RefereeService {
         this.log(`referee: group won't fit with per-member degradation; retrying every member at ${chain[startRung]} size`);
       }
       result = await this.attemptGroupFetch(group, chain, startRung, budget);
+      if (result?.cancelled) return false;
       if (result && startRung > 0) {
         // A whole-tier restart degraded every member below the configured
         // source — count them so the diagnostics reflect what was sent.
         result.stats[chain[startRung] === 'thumbnail' ? 'thumbnail' : 'budget'] += group.members.length;
       }
     }
+    // Downloads are read-only; a stopped preparation is neither a provider
+    // failure nor a permanent size deferral. Already-submitted calls may finish.
+    if (!this.canStartWork()) return false;
     if (!result) {
       // A verdict is keyed to the group's exact membership — judging a
       // subset would be wrong, so the group defers instead of exceeding
@@ -469,12 +394,7 @@ export class RefereeService {
     this._previewFallbacks.budget += result.stats.budget;
     this._previewFallbacks.thumbnail += result.stats.thumbnail;
     const images = result.images;
-    const { normalizedOutput } = await provider.analyzeImages(images, {
-      systemPrompt: SYSTEM_PROMPT,
-      userPrompt: buildRefereeUserPrompt(group.members),
-      jsonSchema: refereeJsonSchema(group.members.length),
-      schemaName: 'pictaria_group_referee',
-    });
+    const { normalizedOutput } = await provider.analyzeImages(images, buildRefereeRequest(group.members));
     const picks = normalizePicks(normalizedOutput, group.members);
     this.repo.refereeRecordGroup({
       groupKey: group.key,
@@ -499,44 +419,4 @@ export class RefereeService {
 function formatBackoff(ms) {
   if (ms >= 60000 && ms % 60000 === 0) return `${ms / 60000}m`;
   return `${Math.max(0, Math.round(ms / 1000))}s`;
-}
-
-// Turn the model's photo-indexed answers into asset-keyed picks, defending
-// against duplicate/missing indices: every member ends up with exactly one
-// rank, holes filled in model order.
-export function normalizePicks(output, members) {
-  const answers = Array.isArray(output?.photos) ? output.photos : [];
-  const byIndex = new Map();
-  for (const answer of answers) {
-    const index = Number(answer?.photo);
-    if (Number.isInteger(index) && index >= 1 && index <= members.length && !byIndex.has(index)) {
-      byIndex.set(index, answer);
-    }
-  }
-  const usedRanks = new Set();
-  const picks = members.map((member, position) => {
-    const answer = byIndex.get(position + 1) ?? {};
-    let rank = Number.isInteger(Number(answer.rank)) ? Number(answer.rank) : null;
-    if (rank === null || rank < 1 || rank > members.length || usedRanks.has(rank)) rank = null;
-    if (rank !== null) usedRanks.add(rank);
-    return {
-      assetId: member.assetId,
-      rank,
-      keep: Boolean(answer.keep),
-      eyesClosed: ['yes', 'no', 'unsure'].includes(answer.eyes_closed) ? answer.eyes_closed : null,
-      note: typeof answer.note === 'string' ? answer.note.slice(0, 300) : null,
-      subjectGroup:
-        Number.isInteger(Number(answer.subject_group)) && Number(answer.subject_group) >= 1 && Number(answer.subject_group) <= members.length
-          ? Number(answer.subject_group)
-          : 1,
-    };
-  });
-  let nextFree = 1;
-  for (const pick of picks) {
-    if (pick.rank !== null) continue;
-    while (usedRanks.has(nextFree)) nextFree += 1;
-    pick.rank = nextFree;
-    usedRanks.add(nextFree);
-  }
-  return picks;
 }

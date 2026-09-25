@@ -1,11 +1,13 @@
-// Evaluation adapter only. Capture the released service's real prompt/schema
-// with inert dependencies; never start its worker, fetch images or write state.
+// Evaluation adapter only. Use the unchanged released request contract directly;
+// never instantiate a worker, fetch images or write state.
 import { readFileSync } from 'node:fs';
 import { createHash } from 'node:crypto';
-import { RefereeService, normalizePicks } from '../../src/enrich/refereeService.mjs';
+import { buildRefereeRequest, normalizePicks } from '../../src/enrich/referee-contract.mjs';
 
 export const RELEASED_BASELINE = 'v1.2.1-referee-v2';
-const SERVICE_SHA256 = 'a96070cf641e45e9a4610db5124a8bc85074c485bc51c490c64c80dd58744894';
+// Extracted from the v1.2.1 service (SHA256 a96070cf…44894), with identical
+// request objects verified for every supported 2–10-photo input size.
+const CONTRACT_SHA256 = 'd7fbe87d391ef88f7c13ec8b9dd9212a23f7a657695e1f7ec19bda66d9758fbd';
 
 export async function releasedPrompt(ids, photos = []) {
   if (ids.length < 2 || ids.length > 10 || new Set(ids).size !== ids.length
@@ -14,29 +16,13 @@ export async function releasedPrompt(ids, photos = []) {
       || (p.aiTags != null && (!Array.isArray(p.aiTags) || p.aiTags.some(t => typeof t !== 'string'))))) {
     throw Error('invalid released baseline inputs');
   }
-  const source = readFileSync(new URL('../../src/enrich/refereeService.mjs', import.meta.url));
-  if (createHash('sha256').update(source).digest('hex') !== SERVICE_SHA256) {
-    throw Error('released baseline source changed');
+  const source = readFileSync(new URL('../../src/enrich/referee-contract.mjs', import.meta.url));
+  if (createHash('sha256').update(source).digest('hex') !== CONTRACT_SHA256) {
+    throw Error('released baseline contract changed');
   }
-  const forbidden = new Proxy({}, { get() { throw Error('baseline dependency accessed'); } });
-  const service = new RefereeService({ repo: forbidden, immich: forbidden,
-    review: forbidden, enrichRunner: forbidden, config: { imageSource: 'preview' } });
-  const intercepted = Symbol('captured request');
-  let prompt;
-  service.makeProvider = () => ({ analyzeImages: async (_images, request) => {
-    prompt = request;
-    throw intercepted; // stop before normalization/persistence
-  } });
-  service.attemptGroupFetch = async () => ({ images: [], stats: { oversized: 0, budget: 0, thumbnail: 0 } });
-  try {
-    await service.refereeGroup({ key: 'offline-baseline', members: photos.map((p, i) => ({
-      assetId: ids[i], capturedAt: p.capturedAt, aiTags: p.aiTags,
-    })) });
-    throw Error('baseline request not captured');
-  } catch (error) {
-    if (error !== intercepted) throw error;
-  }
-  return prompt;
+  return buildRefereeRequest(photos.map((p, i) => ({
+    assetId: ids[i], capturedAt: p.capturedAt, aiTags: p.aiTags,
+  })));
 }
 
 // The released normalizer can fill missing ranks and coerce values. Preserve its

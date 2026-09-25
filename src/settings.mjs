@@ -1,5 +1,6 @@
 import { isDeepStrictEqual } from 'node:util';
 import { join } from 'node:path';
+import { CURATE_AI_AVAILABILITY, STACK_REFEREE_SCOPES, curateAiRoleEnabled } from './curate/ai-policy.mjs';
 
 import { writePrivateFileAtomicSync } from './atomicFile.mjs';
 import { parseBoundedJsonFileSync } from './boundedFile.mjs';
@@ -494,9 +495,27 @@ const CURATE_FIELDS = {
       config.curateBurstGrouping = Boolean(value);
     },
   },
+  stackRefereeEnabled: {
+    env: 'CURATE_STACK_REFEREE_ENABLED', label: 'Stack Referee', boolean: true,
+    role: 'stack',
+    read: (config) => config.curateStackRefereeEnabled ?? false,
+    apply: (config, value) => { config.curateStackRefereeEnabled = Boolean(value); },
+  },
+  stackRefereeScope: {
+    env: 'CURATE_STACK_REFEREE_SCOPE', label: 'Check with the Stack Referee',
+    enum: STACK_REFEREE_SCOPES,
+    read: (config) => config.curateStackRefereeScope ?? 'uncertain',
+    apply: (config, value) => { config.curateStackRefereeScope = value; },
+  },
+  keeperRefereeEnabled: {
+    env: 'CURATE_KEEPER_REFEREE_ENABLED', label: 'Photo Referee', boolean: true,
+    role: 'keeper',
+    read: (config) => config.curateKeeperRefereeEnabled ?? false,
+    apply: (config, value) => { config.curateKeeperRefereeEnabled = Boolean(value); },
+  },
   refereeEnabled: {
     env: 'CURATE_REFEREE_ENABLED',
-    label: 'AI referee for Stacks',
+    label: 'Current-page AI referee',
     boolean: true,
     read: (config) => config.curateRefereeEnabled,
     apply: (config, value) => {
@@ -505,7 +524,7 @@ const CURATE_FIELDS = {
   },
   refereeProvider: {
     env: 'CURATE_REFEREE_PROVIDER',
-    label: 'Referee provider',
+    label: 'Curate AI provider',
     enum: ['', 'local_lmstudio', 'local_ollama', 'openai_compatible', 'cloud_ollama', 'cloud_openai', 'openrouter', 'venice'],
     read: (config) => config.curateRefereeProvider,
     apply: (config, value) => {
@@ -514,7 +533,7 @@ const CURATE_FIELDS = {
   },
   refereeModel: {
     env: 'CURATE_REFEREE_MODEL',
-    label: 'Referee model override',
+    label: 'Curate AI model override',
     read: (config) => config.curateRefereeModel,
     apply: (config, value) => {
       config.curateRefereeModel = value;
@@ -559,7 +578,7 @@ const SECTIONS = {
 
 const PROTOTYPE_SPECIAL_KEYS = new Set(['__proto__', 'prototype', 'constructor']);
 
-export const SETTINGS_VERSION = 7;
+export const SETTINGS_VERSION = 8;
 
 // Only credentials whose destination authority can vary belong here. Fixed
 // public APIs (OpenAI, ElevenLabs, Geoapify) do not need a stored binding.
@@ -677,6 +696,9 @@ const SETTINGS_MIGRATIONS = new Map([
     return migrated;
   }],
   [6, (state) => ({ ...structuredClone(state), version: 7 })],
+  // The effective legacy preference also depends on environment defaults.
+  // SettingsStore.load materializes that preference once, at the upgrade boot.
+  [7, (state) => ({ ...structuredClone(state), version: 8 })],
 ]);
 
 // The persisted contract intentionally excludes labels and help copy: those
@@ -712,10 +734,11 @@ export class SettingsError extends Error {
 }
 
 export class SettingsStore {
-  constructor({ filePath, config, env = process.env }) {
+  constructor({ filePath, config, env = process.env, curateAiAvailability = CURATE_AI_AVAILABILITY }) {
     this.filePath = filePath;
     this.config = config;
     this.env = env;
+    this.curateAiAvailability = { ...curateAiAvailability };
     // Called after every update() so the server can re-point long-lived
     // objects (e.g. the shared Immich client) at the new config values.
     this.onApplied = null;
@@ -766,6 +789,17 @@ export class SettingsStore {
           }
         }
       }
+      if (result.from < 8 && !Object.hasOwn(this.overrides.curate, 'keeperRefereeEnabled')
+        && !String(this.env.CURATE_KEEPER_REFEREE_ENABLED ?? '').trim()) {
+        // Preserve what could actually run before the upgrade. A dormant old
+        // switch must not turn into paid work merely because Enrich becomes
+        // independent. Persist false too, so later restarts do not reinterpret it.
+        // Empty environment forwarding (Compose) is not an explicit opt-out.
+        this.overrides.curate.keeperRefereeEnabled = Boolean(
+          this.#effective('curate', 'refereeEnabled') && this.#effective('enrich', 'enabled')
+          && this.#effective('curate', 'burstGrouping') !== false,
+        );
+      }
       if (result.from < 3) {
         this.#bindLegacySavedCredentials();
       }
@@ -808,6 +842,13 @@ export class SettingsStore {
           value: field.secret ? '' : effective,
           configured: field.secret ? Boolean(effective) : undefined,
           source: this.#source(section, key, field),
+          ...(field.role ? {
+            available: this.curateAiAvailability[field.role] === true,
+            active: curateAiRoleEnabled(this.config, field.role, this.curateAiAvailability),
+            availabilityNotice: this.curateAiAvailability[field.role] === true ? ''
+              : 'Not available in Curate Preview yet.' + (effective === true
+                ? ' Your preference is saved for when it is connected.' : ''),
+          } : {}),
           ...(bindingIssue ? {
             credentialUnavailable: true,
             credentialNotice: bindingIssue.notice,
@@ -847,6 +888,14 @@ export class SettingsStore {
           continue;
         }
         staged[section][key] = coerce(field, key, raw, this);
+      }
+    }
+    for (const [key, field] of Object.entries(CURATE_FIELDS)) {
+      if (!field.role || this.curateAiAvailability[field.role] === true) continue;
+      const before = this.#effective('curate', key);
+      const after = Object.hasOwn(staged.curate, key) ? staged.curate[key] : this.baseline.curate[key];
+      if (after === true && before !== true) {
+        throw new SettingsError(`${field.label} is not available in Curate Preview yet.`);
       }
     }
     this.#stageSavedCredentialBindings(patch, staged, stagedBindings);

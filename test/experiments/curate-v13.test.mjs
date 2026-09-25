@@ -16,7 +16,7 @@ import { visionPrompt, compareLabels, evaluateImages, publicEvaluationSummary } 
 import { releasedPrompt, inspectReleasedAnswer } from '../../experiments/curate-v13/released-baseline.mjs';
 import { buildRefereeUserPrompt, refereeJsonSchema } from '../../src/enrich/refereeService.mjs';
 
-test('released baseline captures the pinned service contract without fetching or recording anything', async () => {
+test('released baseline uses the pinned request contract without fetching or recording anything', async () => {
   const photos = [{ id: 'p10', capturedAt: '2026-01-01T12:00:00Z', aiTags: ['ai/people/one'] }, { id: 'p11' }];
   const prompt = await releasedPrompt(photos.map(p => p.id), photos);
   assert.equal(prompt.schemaName, 'pictaria_group_referee');

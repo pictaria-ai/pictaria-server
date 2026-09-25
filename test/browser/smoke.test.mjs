@@ -1776,7 +1776,7 @@ test('admin UI smoke: gate, Insights lens, Curate, Smart Albums', { timeout: 120
     );
     assert.match(
       await page.evaluate('document.querySelector("label[for=f2-curate-refereeModel]").textContent'),
-      /Referee model override/,
+      /Curate AI model override/,
     );
     assert.match(
       await page.evaluate('document.getElementById("f2-curate-refereeModel").closest(".field").querySelector(".setting-desc").textContent'),

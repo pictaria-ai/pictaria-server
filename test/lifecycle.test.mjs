@@ -362,7 +362,7 @@ function refereeFixture({ getAssetThumbnail }) {
   return { service, recorded };
 }
 
-test('referee stop() drains the in-flight group and halts the contiguous block', async () => {
+test('referee stop() drains an active download without submitting a new provider request', async () => {
   const { opened, release } = gate();
   let fetching = false;
   const { service, recorded } = refereeFixture({
@@ -379,12 +379,12 @@ test('referee stop() drains the in-flight group and halts the contiguous block',
   const stopPromise = service.stop(2000);
   release();
   assert.equal(await stopPromise, true);
-  assert.equal(recorded.size, 1, 'the in-flight verdict lands; no next group starts');
+  assert.equal(recorded.size, 0, 'the active download finishes but no new provider request starts');
   assert.equal(service._timer, null);
   assert.equal(service.status().working, false);
 });
 
-test('referee stop() gives up (false) on a group stuck in a long provider call', async () => {
+test('referee stop() gives up (false) on a group stuck in a long download', async () => {
   const { opened, release } = gate();
   const { service } = refereeFixture({
     getAssetThumbnail: async (assetId) => {
@@ -396,4 +396,26 @@ test('referee stop() gives up (false) on a group stuck in a long provider call',
   assert.equal(await service.stop(50), false);
   release(); // let the dangling tick settle before the test ends
   await service._tickPromise;
+});
+
+
+test('referee stop() drains an already-submitted provider request and preserves its verdict', async () => {
+  const { opened, release } = gate();
+  let submitted = false;
+  const { service, recorded } = refereeFixture({
+    getAssetThumbnail: async () => ({ data: Buffer.from('synthetic'), contentType: 'image/jpeg' }),
+  });
+  const provider = service.makeProvider();
+  service.makeProvider = () => ({ ...provider, analyzeImages: async () => {
+    submitted = true;
+    await opened;
+    return provider.analyzeImages();
+  } });
+  service._tickPromise = service.tick();
+  await waitFor(() => submitted);
+  const stopping = service.stop(2000);
+  release();
+  assert.equal(await stopping, true);
+  assert.equal(recorded.size, 1);
+  assert.equal(service.status().working, false);
 });
