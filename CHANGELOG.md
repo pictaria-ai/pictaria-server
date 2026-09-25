@@ -14,6 +14,9 @@ All notable changes to Pictaria Server are documented here. This project follows
   without leaving an aggregate warning in the header. Search stays focused and
   editable while results load; typing during a slow request applies the latest
   text next, and failed requests preserve the search draft.
+  A red notice beside the header spinner warns while Enrich is running that
+  stacks may change as photos arrive. Card check progress temporarily replaces
+  the capture date on the same line, then restores it without resizing cards.
 
 - Curate Preview settles failed similarity checks after one retry instead of
   keeping a long-term repair queue. Incomplete groupings remain ready for human

@@ -43,6 +43,11 @@ On narrow screens, **Filters** reveals date order, category and Search controls.
 Counts and progress each keep their own line, and the selection slot remains
 reserved in All and Stacks. Desktop keeps filters visible. The remembered sort is not changed by collapsing them.
 
+While Enrich is running, a red notice to the left of the header spinner says
+stacks may change as photos are added. It follows the live run state through
+the existing status updates, without needing Refresh or an additional poll.
+On narrow screens, notices use a reserved line below the header controls.
+
 Search updates after a short typing pause and keeps focus and cursor position
 while loading results. Text entered during an active request becomes the next
 search, with only the latest draft submitted. A failed request leaves that draft
@@ -64,6 +69,10 @@ search draft has not been applied.
 - Cards show a cover, up to three member thumbnails, available caption, capture date/time and stack size. Filenames are omitted.
   Captions are limited to one line with an ellipsis so decision buttons stay
   aligned. Hover for the full caption, or open the lightbox to read it.
+  Waiting/checking progress temporarily replaces the capture date on its existing
+  line. The date returns when checking stops, including incomplete or inconclusive
+  outcomes; those details remain on the status icon and in the comparison.
+  Long progress text is shortened with an ellipsis rather than enlarging the card.
   **Yes / Skip / Fav / No** are direct actions for single photos: Yes keeps a
   photo, Skip marks it reviewed without keeping it, Fav keeps it as a favorite,
   and No marks it Never show. None of these deletes the photo. Click the image for

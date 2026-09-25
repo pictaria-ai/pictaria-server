@@ -35,7 +35,10 @@
           <button class="p-tab active" data-section="pending">Pending</button>
           <button class="p-tab" data-section="decided">Decided</button>
         </nav>
-        <span id="updates" class="p-muted" hidden role="status"><span id="updates-copy"></span></span>
+        <div class="view-notices">
+          <span id="updates" class="p-muted" hidden role="status"><span id="updates-copy"></span></span>
+          <span id="enrich-note" hidden role="status" title="Enrich is running — Stacks may change as photos are added.">Enrich is running — Stacks may change as photos are added.</span>
+        </div>
         <div class="refresh-tools">
           <span id="check-activity" aria-live="polite"></span>
           <button id="refresh" class="p-btn">Refresh</button>

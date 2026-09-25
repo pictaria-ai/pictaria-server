@@ -607,7 +607,8 @@ test('foundation HTTP routes return complete groups and reject malformed or stal
     const { createCurateRoutes } = await import('../../src/routes/curate.mjs');
     add('a');
     add('b', 1);
-    const route = createCurateRoutes({ curate: service });
+    let enrichRunning = false;
+    const route = createCurateRoutes({ curate: service, enrichRunner: { isRunning: () => enrichRunning } });
     const server = createServer(async (req, res) => {
       try {
         if (!(await route(req, res, new URL(req.url, 'http://local')))) res.writeHead(404).end();
@@ -630,6 +631,13 @@ test('foundation HTTP routes return complete groups and reject malformed or stal
       assert.equal((await (await fetch(base + 'groups?sort=newest')).json()).sort, 'newest');
       assert.equal((await (await post('groups', {sort: 'newest'})).json()).sort, 'newest');
       const v = await (await fetch(base + 'groups')).json();
+      assert.equal(v.enrichRunning, false);
+      enrichRunning = true;
+      assert.equal((await (await post('groups/status', { viewId: v.viewId, visibleGroupIds: [] })).json()).enrichRunning, true);
+      assert.equal((await (await post('groups', {})).json()).enrichRunning, true);
+      assert.equal((await (await fetch(base + 'groups?viewId=' + v.viewId)).json()).enrichRunning, true);
+      enrichRunning = false;
+      assert.equal((await (await post('groups/status', { viewId: v.viewId, visibleGroupIds: [] })).json()).enrichRunning, false);
       assert.equal(v.groups[0].memberCount, 2);
       assert.equal(v.groups[0].photos.length, 2);
       assert.ok(v.groups[0].photos.every(p => !Object.hasOwn(p, 'evidence')));

@@ -125,9 +125,13 @@ export function groupCard(group, open, { decide, select, selected = false, decid
     description.title = photo.caption;
     caption.append(description);
   }
-  if (photo.capturedAt) caption.append(node('small', new Date(photo.capturedAt).toLocaleString([], { dateStyle: 'medium', timeStyle: 'short' })));
+  const meta = node('div', undefined, 'card-meta');
+  const date = node('small', photo.capturedAt
+    ? new Date(photo.capturedAt).toLocaleString([], { dateStyle: 'medium', timeStyle: 'short' }) : '', 'capture-date');
+  date.title = date.textContent;
   const status = node('small', undefined, 'similarity-status');
-  caption.append(status);
+  meta.append(date, status);
+  caption.append(meta);
   const actions = node('div', undefined, 'card-actions');
   if (group.memberCount > 1) {
     card.classList.add('is-stack');
@@ -156,6 +160,7 @@ export function groupCard(group, open, { decide, select, selected = false, decid
   card.updateSimilarity = (value) => {
     if (decided) {
       chip.hidden = true;
+      date.hidden = false;
       status.hidden = true; return;
     }
     group.similarity = value;
@@ -167,7 +172,12 @@ export function groupCard(group, open, { decide, select, selected = false, decid
     let indicator = similarityIndicator(value);
     if (indicator?.dataset.phase === 'done') indicator = null;
     if (status.textContent !== label) status.textContent = label;
-    status.hidden = !label || ['local','checked'].includes(value?.state) && !value?.uncertain;
+    status.title = label;
+    // Progress temporarily replaces the date. Settled/incomplete details stay
+    // on the cover icon, so neither status changes nor long labels grow cards.
+    const active = indicator && ['waiting', 'checking'].includes(indicator.dataset.phase);
+    date.hidden = Boolean(active);
+    status.hidden = !active;
     if (marker.firstChild?.title !== indicator?.title || marker.firstChild?.dataset.phase !== indicator?.dataset.phase)
       marker.replaceChildren(...(indicator ? [indicator] : []));
     card.dataset.similarity = value?.state ?? '';

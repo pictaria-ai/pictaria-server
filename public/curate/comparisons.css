@@ -49,14 +49,23 @@ button {
   border-bottom: 1px solid var(--p-line);
 }
 .section-tabs { grid-column: 1; }
-.view-controls #updates {
+.view-notices {
   grid-column: 2;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  min-width: 0;
+  min-height: 36px;
+  text-align: right;
+}
+.view-notices > span {
   min-width: 0;
   overflow: hidden;
   white-space: nowrap;
   text-overflow: ellipsis;
-  text-align: right;
+  line-height: 18px;
 }
+#enrich-note { color: var(--p-danger); font-size: 12px; }
 .refresh-tools { grid-column: 3; }
 .toolbar {
   display: grid;
@@ -229,6 +238,9 @@ button {
 .group-caption small {
   color: var(--p-muted);
 }
+.card-meta { min-width: 0; height: 20px; line-height: 20px; }
+.card-meta small { display: block; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.card-meta small[hidden] { display: none; }
 .group-card[data-similarity='updated'] {
   border-color: var(--p-accent);
 }
@@ -662,6 +674,8 @@ dialog::backdrop {
 }
 
 @media (max-width: 900px) {
+  .view-notices { grid-column: 1 / -1; grid-row: 2; }
+  .section-tabs, .refresh-tools { grid-row: 1; }
   .toolbar { grid-template-rows: 40px; margin: 12px 0 8px; gap: 8px; }
   #filters { grid-column: 1; justify-self: start; }
   #toggle-filters { display: inline-flex; align-items: center; justify-content: center; grid-column: 2; grid-row: 1; }

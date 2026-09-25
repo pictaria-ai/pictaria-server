@@ -161,6 +161,7 @@ async function refresh({ automatic = false, keepLightbox = false } = {}) {
   }
 }
 function showViewStatus(view) {
+  el('enrich-note').hidden = !view.enrichRunning;
   const loadedStacks = state.groups.filter(g => g.memberCount > 1).length;
   const removedStacks = [...state.removed.values()].filter(g => g.memberCount > 1).length;
   const stacks = Math.max(0, (view.counts?.stacks ?? loadedStacks) - removedStacks);
