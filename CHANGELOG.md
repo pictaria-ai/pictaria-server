@@ -7,10 +7,22 @@ All notable changes to Pictaria Server are documented here. This project follows
 
 ### Development
 
+- Added an opt-in human-only Curate comparison preview at `/curate-preview.html`:
+  stable complete stacks, multiple keeper selection, explicit reviewed remainder,
+  persistent Remove from stack / Split into singles corrections, reset, conditional
+  Undo and saved-versus-synced feedback. Interrupted actions can be retried safely
+  after a reload. This is an implementation preview, not the v1.3 default-page or
+  AI cutover. Photos toggle Keep directly; large comparisons default to a compact
+  grid, and the large viewer supports Keep (K), Favorite and Never show. Singles
+  have simpler controls; zero-keeper saves are neutral; Undo and conflict messages
+  explain the current state. Correction history identifies the removed photo or
+  split action. Enrichment schema 15 / persistent-state contract 18 adds this
+  action history and requires checkpoint restoration for rollback. See
+  [preview scope and testing](docs/CURATE-PREVIEW.md).
 - Added coherent Curate keeper/remainder operations, exact retry receipts,
   conditional Undo and synchronization status. The existing Keep best and Undo
   controls use atomic/conditional operations without changing their layout;
-  the new multi-keeper comparison UI follows in PIC-369.
+  the new multi-keeper comparison preview is described above.
 - Curate and Frame Favorite/Hide now share durable decision-tag intent. Delayed
   retries respect newer choices, and failed Frame writes remain recoverable.
   Frame replies after the remote mutation while verification/repair continues in

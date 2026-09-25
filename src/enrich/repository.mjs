@@ -1,4 +1,4 @@
-import { CURATE_SCHEMA, installCurateTriggers } from '../curate/schema.mjs';
+import { CURATE_SCHEMA, CORRECTION_ACTION_SCHEMA, installCurateTriggers } from '../curate/schema.mjs';
 import { CurateRepository } from '../curate/repository.mjs';
 import { copyFileSync, mkdirSync, readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
@@ -519,6 +519,7 @@ const ENRICH_MIGRATIONS = [
     db.exec('INSERT OR IGNORE INTO curate_dirty(asset_id) SELECT asset_id FROM review_list');
   } },
   { version: 14, up(db) { db.exec(DECISION_SCHEMA); } },
+  { version: 15, up(db) { db.exec(CORRECTION_ACTION_SCHEMA); } },
 ];
 
 // The review projection of a normalized output: exactly the fields the

@@ -5,6 +5,8 @@ page and released referee continue using their existing interfaces. PIC-368
 supplies [coherent decisions/sync/Undo](CURATE-DECISIONS.md) and PIC-369 moves the comparison UI onto
 this foundation. The legacy grouping path must be removed at that cutover;
 maintaining two permanent grouping implementations is not the plan.
+The [PIC-369 manual comparison preview](CURATE-PREVIEW.md) exercises these APIs
+before AI integration and default-page cutover. It is not linked from the main navigation.
 
 ## Grouping and evidence
 

@@ -1,5 +1,16 @@
 import { METADATA_SCHEMA } from './metadata.mjs';
 
+// Optional presentation provenance, separate from the authoritative partition.
+// Existing corrections deliberately have no inferred action.
+export const CORRECTION_ACTION_SCHEMA = `
+CREATE TABLE IF NOT EXISTS curate_separation_actions (
+ separation_id TEXT PRIMARY KEY, kind TEXT NOT NULL CHECK(kind IN ('remove','split')), asset_id TEXT
+);
+CREATE TRIGGER IF NOT EXISTS curate_separation_action_cleanup AFTER DELETE ON curate_separations BEGIN
+ DELETE FROM curate_separation_actions WHERE separation_id=OLD.id;
+END;
+`;
+
 // Additive schema on the existing enrichment DB. Detailed evidence stays cold;
 // the worker reads only compact grouping fields. No raw AI response history.
 export const CURATE_SCHEMA = `
@@ -23,6 +34,8 @@ ${METADATA_SCHEMA}
 CREATE TABLE IF NOT EXISTS curate_separations (
  id TEXT PRIMARY KEY, active INTEGER NOT NULL, revision INTEGER NOT NULL, created_at INTEGER NOT NULL, undo_until INTEGER NOT NULL
 );
+CREATE INDEX IF NOT EXISTS idx_curate_separation_active_time ON curate_separations(active,created_at DESC,id);
+${CORRECTION_ACTION_SCHEMA}
 CREATE TABLE IF NOT EXISTS curate_separation_members (
  separation_id TEXT NOT NULL, asset_id TEXT NOT NULL, partition_no INTEGER NOT NULL,
  PRIMARY KEY(separation_id,asset_id)

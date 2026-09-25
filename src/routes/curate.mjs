@@ -50,9 +50,19 @@ export function createCurateRoutes({ curate, review = null }) {
         const body = await readObject(request, { maxBytes: 4096 });
         result = curate.repo.decisions.retry(body.operationId);
         review?.wakeSyncWorker();
+      } else if (request.method === 'GET' && path === 'separations') {
+        if (url.searchParams.has('id')) result = { correction: curate.store.correction(url.searchParams.get('id')) };
+        else result = curate.store.corrections(Number(url.searchParams.get('offset') ?? 0), Number(url.searchParams.get('limit') ?? 50));
+      } else if (request.method === 'POST' && path === 'metadata/refresh') {
+        const body = await readObject(request, { maxBytes: 4096 });
+        const comparison = curate.store.getLease(body.comparisonId, 'comparison');
+        const offset = body.offset ?? 0;
+        if (!Number.isSafeInteger(offset) || offset < 0)
+          throw new CurateError('Invalid metadata page.', 'invalid_curate_query', 400);
+        result = curate.requestMetadataRefresh([...comparison.ids, ...comparison.contextIds].slice(offset, offset + 500));
       } else if (request.method === 'POST' && path === 'separations') {
         const body = await readObject(request, { maxBytes: 5 * 1024 * 1024 });
-        result = await curate.separate(body.comparisonId, body.partitions);
+        result = await curate.separate(body.comparisonId, body.partitions, body.action ?? null);
       } else if (request.method === 'POST' && path === 'separations/reset') {
         const body = await readObject(request, { maxBytes: 4096 });
         if (

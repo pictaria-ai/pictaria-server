@@ -71,6 +71,44 @@ const row = (id, time, extra = {}) => ({
   ...extra,
 });
 
+test('correction action survives restart and replay; a two-photo Remove is not inferred to be Split', async () =>
+  fixture(async ({repo, service, add, path}) => {
+    add('a', 0, {originalPath:'/photos/A.jpg'}); add('b', 1);
+    const view = await service.openView(), c = service.comparison(view.viewId, view.groups[0].id);
+    const partitions = [['a'], ['b']];
+    await assert.rejects(service.separate(c.id, partitions, {kind:'remove',assetId:'b'}), /does not match/);
+    assert.equal(repo.curate.corrections().corrections.length, 0);
+    const receipt = await service.separate(c.id, partitions, {kind:'remove',assetId:'a'});
+    assert.deepEqual(await service.separate(c.id, partitions, {kind:'remove',assetId:'a'}), receipt);
+    await assert.rejects(service.separate(c.id, partitions, {kind:'split'}), /different action/);
+    await service.close();
+    const reopened = new Repository(path);
+    try {
+      reopened.initSchema();
+      const action = reopened.curate.corrections().corrections[0].action;
+      assert.equal(action.kind, 'remove'); assert.equal(action.photo.filename, 'A.jpg');
+      reopened.curate.resetSeparation(c.id, 1);
+      assert.deepEqual(reopened.curate.separate(c.id, partitions, Date.now(), {kind:'remove',assetId:'a'}), receipt);
+      assert.equal(reopened.curate.correction(c.id).active, 0);
+    } finally { reopened.close(); }
+  }));
+
+test('schema-14 corrections retain their original partitions without inventing action metadata', async () =>
+  fixture(async ({repo, service, add, path}) => {
+    add('a'); add('b', 1);
+    const view=await service.openView(), c=service.comparison(view.viewId,view.groups[0].id);
+    const receipt = await service.separate(c.id,[['a'],['b']]);
+    await service.close();
+    repo.db.exec('DROP TABLE curate_separation_actions; PRAGMA user_version=14');
+    const migrated = new Repository(path);
+    try {
+      assert.deepEqual(migrated.initSchema().applied,[15]);
+      assert.equal(migrated.curate.corrections().corrections[0].action, null);
+      assert.deepEqual(migrated.curate.separate(c.id,[['a'],['b']]),receipt);
+      assert.deepEqual(migrated.curate.separations()[0].partitions,[['a'],['b']]);
+    } finally { migrated.close(); }
+  }));
+
 test('producing evidence recognizes only supported, mutually consistent counts', () => {
   for (const [value, n] of [
     ['none', 0],
@@ -478,7 +516,7 @@ test('migration from schema 12 queues only review rows; corrections/evidence/vie
     db.close();
     const migrated = new Repository(legacy);
     try {
-      assert.deepEqual(migrated.initSchema().applied, [13, 14]);
+      assert.deepEqual(migrated.initSchema().applied, [13, 14, 15]);
       assert.equal(migrated.db.prepare('SELECT COUNT(*) n FROM curate_dirty').get().n, 2);
       await migrated.curate.flush();
       assert.equal(migrated.curate.photo('a').recognizedCount, null);
@@ -512,10 +550,16 @@ test('foundation HTTP routes return complete groups and reject malformed or stal
     try {
       const v = await (await fetch(base + 'groups')).json();
       assert.equal(v.groups[0].memberCount, 2);
+      assert.equal(v.groups[0].photos.length, 1);
+      assert.ok(v.groups[0].photos.every(p => !Object.hasOwn(p, 'evidence')));
       assert.equal((await post('comparisons', null)).status, 400);
       const c = await (await post('comparisons', { viewId: v.viewId, groupId: v.groups[0].id })).json();
       assert.equal((await post('separations', { comparisonId: c.id, partitions: [['a'], ['a']] })).status, 400);
       assert.equal((await post('separations', { comparisonId: c.id, partitions: [['a'], ['b']] })).status, 200);
+      const corrections = await (await fetch(base + 'separations')).json();
+      assert.equal(corrections.corrections[0].id, c.id);
+      assert.equal(corrections.corrections[0].memberCount, 2);
+      assert.equal((await fetch(base + 'separations?limit=51')).status, 400);
       const second = await (await post('groups', {})).json();
       assert.equal(second.total, 2);
       assert.equal((await fetch(base + 'groups?replacesViewId=' + v.viewId)).status, 400);
@@ -539,6 +583,14 @@ test('foundation HTTP routes return complete groups and reject malformed or stal
       assert.equal((await post('groups', null)).status, 400);
       assert.equal((await fetch(base + 'groups?viewId=missing')).status, 409);
       assert.equal(repo.db.prepare('SELECT COUNT(*) n FROM manual_overrides').get().n, 0);
+      const reset = await (await post('separations/reset', {id:c.id, revision:1})).json();
+      assert.equal(reset.revision, 2);
+      assert.equal((await (await fetch(base + 'separations')).json()).corrections.length, 0);
+      const currentCorrection = await (await fetch(base + 'separations?id='+c.id)).json();
+      assert.equal(currentCorrection.correction.active, 0);
+      assert.equal(currentCorrection.correction.revision, 2);
+      const replay = await (await post('separations', {comparisonId:c.id, partitions:[['a'],['b']]})).json();
+      assert.equal(replay.revision, 1, 'immutable receipt must not be mistaken for current active state');
     } finally {
       await new Promise((resolve) => server.close(resolve));
     }
