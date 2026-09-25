@@ -120,8 +120,8 @@ of PIC-346, not the complete AI lifecycle.
   Preparation adapters receive a checkpoint for use between downloads and
   before fallbacks. Enrich's master switch is not a gate for these new roles.
 - The external guard is mandatory, read-only and defaults to deny. It checks
-  provider pauses and an already-reserved revision/cohort budget and scheduling
-  turn; repeated checkpoints must not make repeated reservations. Merely declaring
+  the scheduler’s turn. When connected, `CurateAiLimits` separately checks
+  provider pauses and photo allowances; repeated checkpoints do not charge calls. Merely declaring
   a worker available is insufficient to start a request.
 - The attempt is charged immediately before one provider invocation. Crash
   uncertainty keeps the charge, including a crash immediately before dispatch.
@@ -138,8 +138,9 @@ of PIC-346, not the complete AI lifecycle.
   Dependent work needs fresh admission; the executor creates none.
 - Only the role, input digest, attempt count, state and current ownership token
   are stored. No raw responses, errors, credentials or photo metadata are stored
-  in this ledger. Completed exact inputs cannot be submitted again. No pruning
-  or retry-reset API is provided in this slice.
+  in this ledger. Completed exact inputs cannot be submitted again. The limits
+  layer adds explicit obsolete-record cleanup; there is no per-stack retry-reset
+  API.
 
 The accepting adapter must use the authoritative repository's applicability
 validation, including human decisions and availability. It must not perform
@@ -159,13 +160,91 @@ human decisions are untouched. Rollback to the earlier schema requires restoring
 that recovery point. Synthetic tests cover upgrade, restart, backup and restore,
 including a preserved consumed attempt.
 
+## Bounded provider and photo limits (PIC-346)
+
+The September 25 policy replaces the earlier prototype cohort budget with a
+per-photo allowance. `CurateAiLimits`, supplied to the **one shared** executor,
+charges each actionable photo at most three times per referee in a rolling
+30 minutes. Retries count, including timeouts whose upstream outcome is unknown.
+The separate limit of two invocations per unchanged role/input still applies.
+Already-kept read-only context does not consume that allowance: reusing the
+same references must not deny advice to unrelated stacks. Each Photo Referee
+batch charges only its actionable members, not references or other batches.
+Model/backend changes do not create a fresh allowance for the same photos.
+`photoIds` lists **all** submitted photos; `contextPhotoIds` identifies a unique
+subset of at most eight already-kept references. At least one actionable photo
+must remain, and the total envelope still includes context (at most 30 images
+and the separate provider/byte limits). The authoritative role adapter supplies
+and validates this distinction; it is not a client-supplied exemption. Context
+remains part of the exact-input identity and read-only in the result contract.
+
+Exact attempt, photo charges and provider ownership are admitted in one SQLite
+transaction immediately before dispatch. Checking admission during preparation
+is read-only. A comparison denied by its photo limit is durably settled without
+AI; expiry, restart or refresh does not make that same input eligible again.
+There is no timer, retry loop, repair queue or per-stack reset in this layer.
+The scheduler may consider genuinely changed eligible input after settling.
+
+Provider protection uses an opaque digest of the pinned adapter's normalized
+endpoint and credentials. Different models on that same connection share the
+pause; independent connections can continue. This failure identity is not proof
+that different credentials use independent hardware: PIC-118 must arbitrate the
+actual shared resource separately. Neither secrets nor URLs are saved.
+The first authentication failure pauses the connection. A temporary failure
+waits at least 30 seconds, respecting a longer Retry-After, then allows **one**
+recovery request. If that request fails with another shared error, the connection
+stays paused. A successful response, even one with invalid answer content,
+proves connectivity and releases the guard; invalid answers retain their input
+attempt charge. Unknown transport faults pause as configuration/integration
+failures instead of walking the rest of the queue.
+
+`providerStatus()` exposes only ready/busy/cooldown/recovery-ready/paused and a
+fixed reason. These are integration facts, not new UI labels in this patch.
+`connectionVerified()` is reserved for a deliberate successful connection test
+or correction. Never call it on refresh, restart, a preference toggle or a
+per-stack retry. It neither refunds allowances nor enqueues settled inputs.
+
+Only the exclusive server owner may call `recoverInterrupted(attempts)` before
+starting either role. It keeps all charges. An interrupted ordinary request
+enters the normal 30-second cooldown and gets at most one recovery request;
+an interrupted recovery request stays paused. Repeating startup neither moves
+that deadline nor grants another recovery. Opening another repository does not
+steal live work. `pruneObsolete()` accepts
+up to 200 input identities that the lifecycle owner has established are no
+longer current/queued or referenced by comparisons, Undo or advice. It waits
+out the 30-minute window, never removes a running attempt, and deletes expired
+photo charges in bounded passes. No elapsed-time scan may retire current exact
+inputs. Paused connections persist; idle healthy guard rows can be discarded
+safely. Older attempt rows without age evidence are retained conservatively.
+
+Schema 20 / persistent-state contract 25 adds these compact tables. Upgrade,
+restart, backup and restore preserve charges, pauses and settled limited inputs.
+Use the pre-migration recovery point for rollback to an older schema.
+
+The layer is tested through the executor but **not connected to live workers**.
+Both preview roles remain unavailable. PIC-118 still owns shared Enrich/Curate
+arbitration and wiring provider protection to Enrich. Production startup recovery,
+settling/coalescing and authoritative cleanup selection must be composed there
+before enabling roles; this patch does not change released Enrich behavior.
+The enablement work must also expose paused status with an explicit connection
+verification/recovery action. There is no general AI connection-test control in
+Settings today (the existing connectivity check is for Immich), so do not assume
+that path is already wired. A new successful, authorized Enrich request on the
+same pinned connection may verify recovery from a transient/interrupted pause;
+an older in-flight success must not clear a newer failure. Authentication and
+configuration pauses need explicit correction/verification. Do not schedule
+hourly probes, create work solely to test connectivity, refund exhausted inputs
+or revisit settled limited comparisons. Shared scheduling must make those
+recovery entry points available without allowing ordinary queued work to bypass
+the pause.
+
 ## Remaining integration
 
 - **PIC-345 / PIC-372:** connect availability to the actual workers and complete
   the cutover and live migration acceptance. This settings slice does not replay
   decided history or establish eligibility for historical referee results.
-- **PIC-346:** connect provider pauses, aggregate revision/cohort budgets,
-  settling/coalescing, current-input construction, bounded retention and the
+- **PIC-346:** connect provider pauses, the per-photo limits above,
+  settling/coalescing, current-input construction, protected cleanup references and the
   authoritative applicability adapter before enabling either role. Provider-internal
   validation retries must also be accounted for; the legacy safeguards above are not that new lifecycle.
 - **PIC-118:** fair scheduling on shared backends, with independent backends able

@@ -7,6 +7,15 @@ All notable changes to Pictaria Server are documented here. This project follows
 
 ### Development
 
+- Curate AI groundwork now persists a three-comparison per-actionable-photo/referee allowance,
+  settles limited inputs without a repair loop, and pauses a failing provider
+  with at most one delayed recovery request. Shared read-only reference photos
+  do not consume unrelated stacks' allowances, but still count toward request
+  size limits. An interrupted ordinary request gets its one recovery opportunity;
+  an interrupted recovery remains paused. Dispatched attempts remain charged.
+  Schema 20 / persistent-state contract 25 preserve this state across restart
+  and restore. Preview referees remain unavailable pending scheduler/worker wiring.
+
 - Shared execution groundwork for the optional Stack Referee and Photo Referee
   remembers up to two request attempts per exact input across restart, rechecks
   role controls before submission, and accepts current results atomically.

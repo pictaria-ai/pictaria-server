@@ -102,7 +102,7 @@ test('schema-14 corrections retain their original partitions without inventing a
     repo.db.exec('DROP TABLE curate_separation_actions; PRAGMA user_version=14');
     const migrated = new Repository(path);
     try {
-      assert.deepEqual(migrated.initSchema().applied,[15,16,17,18,19]);
+      assert.deepEqual(migrated.initSchema().applied,[15,16,17,18,19,20]);
       assert.equal(migrated.curate.corrections().corrections[0].action, null);
       assert.deepEqual(migrated.curate.separate(c.id,[['a'],['b']]),receipt);
       assert.deepEqual(migrated.curate.separations()[0].partitions,[['a'],['b']]);
@@ -516,7 +516,7 @@ test('migration from schema 12 queues only review rows; corrections/evidence/vie
     db.close();
     const migrated = new Repository(legacy);
     try {
-      assert.deepEqual(migrated.initSchema().applied, [13, 14, 15, 16, 17, 18, 19]);
+      assert.deepEqual(migrated.initSchema().applied, [13, 14, 15, 16, 17, 18, 19, 20]);
       assert.equal(migrated.db.prepare('SELECT COUNT(*) n FROM curate_dirty').get().n, 2);
       await migrated.curate.flush();
       assert.equal(migrated.curate.photo('a').recognizedCount, null);
