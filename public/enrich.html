@@ -472,7 +472,7 @@
           // never grows or wraps when Cancel is pressed; the detail rides
           // in the hover title instead.
           statusLine1 = [
-            status.cancelRequested ? 'Cancelling…' : 'Running',
+            status.cancelRequested ? 'Cancelling…' : status.scheduling?.state === 'waiting' ? 'Waiting for AI turn' : 'Running',
             status.title,
             status.profile ? profileUI.label(status.profile) : null,
             `${status.provider}${status.model ? ` · ${status.model}` : ''}`,

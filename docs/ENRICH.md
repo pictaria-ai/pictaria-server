@@ -1237,14 +1237,17 @@ per-photo scores can't do — and its pick gets a **gold ★** plus a short
 why-line under every member in the compare view (including an explicit
 "eyes closed" flag). The referee's rules: photos with people beat photos of
 the same scene without people unless the people shot is technically bad;
-open eyes and sharp faces beat blinks and blur. It runs on its own whenever
-enrichment is idle, works through the backlog most-undecided-first (group
-size breaks ties), and re-referees a group only if its membership changes. There is deliberately
-no start or cancel: enrichment always has priority on the model — starting
-an enrich run never waits for the referee (the referee finishes the one
-Stack it's judging, which can share the model for a few minutes, then
-pauses until the run ends and resumes by itself). Turning the toggle off
-in Settings stops it after the in-flight Stack; existing verdicts stay.
+open eyes and sharp faces beat blinks and blur. It works through the backlog
+most-undecided-first (group size breaks ties), and re-referees a group only if
+its membership changes. When Enrich and Curate use the same AI service, Enrich
+gets up to five calls or 60 seconds before a waiting referee gets one call.
+The current request always finishes first; a slow local request can take longer
+than that. Different models on the same service still share turns. Independent
+services can work concurrently, and either side continues freely when the other
+has no work. Retry backoff does not hold the shared service. These scheduling
+limits are internal, not user settings. The status line shows when a worker is
+waiting for its AI turn. Turning the referee toggle off stops new work;
+an already-submitted verdict may finish and existing verdicts stay.
 Errors are handled the patient way: when a judgment fails — the model
 overloaded (429), unreachable, or returning garbage — the strip shows
 *"retrying after an error"* with the message. The referee follows a provider's
