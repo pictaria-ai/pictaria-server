@@ -508,7 +508,7 @@ const CURATE_FIELDS = {
     apply: (config, value) => { config.curateStackRefereeScope = value; },
   },
   keeperRefereeEnabled: {
-    env: 'CURATE_KEEPER_REFEREE_ENABLED', label: 'Keeper Referee', boolean: true,
+    env: 'CURATE_KEEPER_REFEREE_ENABLED', label: 'Photo Referee', boolean: true,
     role: 'keeper',
     read: (config) => config.curateKeeperRefereeEnabled ?? false,
     apply: (config, value) => { config.curateKeeperRefereeEnabled = Boolean(value); },

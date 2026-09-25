@@ -90,7 +90,7 @@ unbounded repair/retry workflow. Humans can curate provisional stacks.
 
 Settings version 8 / persistent-state contract 23 preserve the previously
 **effective** keeper preference. During upgrade, if there is no explicit new
-Keeper Referee setting or nonempty environment preference, the old referee setting is
+Photo Referee setting or nonempty environment preference, the old referee setting is
 copied only when both Enrich and Stacks were enabled. The resulting true **or
 false** is saved once. Saved overrides take precedence over environment defaults. Empty environment
 forwarding (as in Compose) is treated as unspecified; use `false` to opt out.
@@ -122,3 +122,11 @@ Keep these stages inside the existing provider transports and Curate records.
 Do not introduce a second active worker for the same legacy referee queue or a
 permanent parallel grouping pipeline. Default-page cutover and release acceptance
 remain separate from this configuration groundwork.
+
+### Public names and compatibility
+
+The two optional roles are **Stack Referee** (checks stack composition) and
+**Photo Referee** (recommends the best photos within a stack). Recommendations
+do not discard photos; the user makes the final decisions. Existing internal
+`keeper` role identifiers and `CURATE_KEEPER_REFEREE_ENABLED` remain unchanged
+for settings and storage compatibility.

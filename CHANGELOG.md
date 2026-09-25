@@ -17,7 +17,7 @@ All notable changes to Pictaria Server are documented here. This project follows
   distinguish saved on preferences from off defaults; an unsaved opt-out can
   be reversed without reloading Settings.
 
-- Settings → Curate separates optional Stack Referee and Keeper Referee
+- Settings → Curate separates optional Stack Referee and Photo Referee
   preferences, with **Uncertain stacks** (recommended) or **All stacks** scope
   for the Stack Referee. Preview AI workers are not connected yet: controls
   show their availability and cannot newly enable an unavailable role. The
@@ -31,7 +31,7 @@ All notable changes to Pictaria Server are documented here. This project follows
   referee or Enrich is disabled, when paused, or during shutdown. It rechecks
   those controls between photo downloads and before submitting to the provider;
   already-submitted calls may finish. Shared provider selection now lives in one
-  job-start resolver for the upcoming Stack and Keeper Referees. This groundwork
+  job-start resolver for the upcoming Stack and Photo Referees. This groundwork
   preserves the current prompt, saved settings and legacy Enrich dependency.
 
 - Curate Preview places All/Stacks/Singles on the left and date, category and

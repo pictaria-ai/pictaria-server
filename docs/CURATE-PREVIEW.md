@@ -284,7 +284,7 @@ block Save until the previews can be retried.
 
 The optional referees will add two independent indicators when integrated:
 **AI checked** for a successfully checked current grouping, and a gold **★**
-for Keeper Referee recommendations, with stars on the recommended photos and
+for Photo Referee recommendations, with stars on the recommended photos and
 a recommendation count in the hover text. Either indicator can appear without
 the other; a keeper star does not imply that the Stack Referee ran.
 

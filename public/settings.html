@@ -1431,7 +1431,7 @@
         el('sub-curate').textContent = [
           settings.curate.burstGrouping.value ? 'photo stacks' : 'flat queue',
           settings.curate.stackRefereeEnabled?.active ? 'Stack Referee on' : null,
-          settings.curate.keeperRefereeEnabled?.active ? 'Keeper Referee on' : null,
+          settings.curate.keeperRefereeEnabled?.active ? 'Photo Referee on' : null,
           settings.curate.burstGrouping.value && settings.enrich?.enabled?.value
             && settings.curate.refereeEnabled?.value ? 'current-page referee on' : null,
         ].filter(Boolean).join(' · ');
