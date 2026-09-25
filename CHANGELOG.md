@@ -7,12 +7,14 @@ All notable changes to Pictaria Server are documented here. This project follows
 
 ### Development
 
-- Enrich and Curate now share AI request turns on the same service: up to five
-  Enrich calls or 60 seconds, then one waiting Curate call. Active requests
-  finish before switching, retry waits release the service, and independent
-  services can run concurrently. Status distinguishes waiting for an AI turn.
-  The shared scheduler also gates the future Stack and Photo Referee executor;
-  both preview roles remain unavailable pending lifecycle and worker integration.
+- Added shared AI scheduling groundwork: up to five Enrich calls or 60
+  seconds, then one waiting Curate call. Active requests finish before switching,
+  retry waits release the service, and independent services can run concurrently.
+  The existing-page referee still waits for Enrich to finish, avoiding extra
+  paid judgments on partially enriched stacks. Both preview referees remain
+  unavailable pending lifecycle and worker integration. Once enabled, their
+  shared-service turns will make long Enrich runs slower while Curate has ready
+  work, especially on slow local models, in exchange for Curate making progress.
 
 - Curate AI groundwork now persists a three-comparison per-actionable-photo/referee allowance,
   settles limited inputs without a repair loop, and pauses a failing provider

@@ -1239,15 +1239,17 @@ why-line under every member in the compare view (including an explicit
 the same scene without people unless the people shot is technically bad;
 open eyes and sharp faces beat blinks and blur. It works through the backlog
 most-undecided-first (group size breaks ties), and re-referees a group only if
-its membership changes. When Enrich and Curate use the same AI service, Enrich
-gets up to five calls or 60 seconds before a waiting referee gets one call.
-The current request always finishes first; a slow local request can take longer
-than that. Different models on the same service still share turns. Independent
-services can work concurrently, and either side continues freely when the other
-has no work. Retry backoff does not hold the shared service. These scheduling
-limits are internal, not user settings. The status line shows when a worker is
-waiting for its AI turn. Turning the referee toggle off stops new work;
-an already-submitted verdict may finish and existing verdicts stay.
+its membership changes. The existing-page referee waits for the active Enrich
+run to finish, even when it uses an independent AI service, so it does not pay
+to judge a partial stack before later photos from that run arrive. The status
+line explains this wait. A request already submitted may finish; a new Enrich
+run on the same service waits for that request rather than overlapping it.
+Turning the referee toggle off stops new work; existing verdicts stay.
+The new preview referees will use [shared request scheduling](CURATE-AI.md#shared-request-scheduling-pic-118)
+once their readiness and worker integration is complete: up to five Enrich
+calls or 60 seconds, then one ready Curate call. On a shared slow local model,
+that allows Curate progress at the cost of a longer Enrich run. Both preview
+roles remain unavailable until that integration is complete.
 Errors are handled the patient way: when a judgment fails — the model
 overloaded (429), unreachable, or returning garbage — the strip shows
 *"retrying after an error"* with the message. The referee follows a provider's

@@ -28,19 +28,24 @@ records or public status objects. The legacy referee retains its minimum
 
 The legacy referee checks Stacks, its existing enable switch, Enrich and
 pause/shutdown before preparation, between downloads (including fallbacks),
-and before provider submission. The server now shares AI turns with Enrich;
-it no longer waits for an entire Enrich run to finish. A queued legacy group
-is rechecked against the pending groups before preparation. Stopping during
+and before provider submission. It retains the released rule of waiting for
+the active Enrich run to finish, even on an independent backend. One burst's
+photos can arrive non-contiguously; judging a partial stack would pay for it
+again when later members arrive. This temporary readiness rule remains until
+the new runtime replaces the legacy worker. A queued legacy group is also
+rechecked against pending groups before preparation. Stopping during
 preparation creates no verdict, failure or size deferral. A submitted request
-can finish; its result keeps the provider/model actually used. The existing
-worker retains its Enrich dependency until the new runtime replaces it.
-Neither new preview referee is activated here.
+can finish; its result keeps the provider/model actually used. Shared scheduling
+prevents overlap if a new Enrich run starts during an already-submitted legacy
+request on that service. Neither new preview referee is activated here.
 
 ## Shared request scheduling (PIC-118)
 
 One server-owned `AiRequestScheduler` is shared by Enrich, the legacy referee,
 and the single `CurateAiExecution` instance composed for both future roles.
-On a shared resource, an Enrich turn permits **up to five provider calls or
+Scheduling only admits work that its worker considers ready; it does not remove
+the legacy referee's wait-for-Enrich rule above. For the new roles, ready work
+on a shared resource gives Enrich a turn of **up to five provider calls or
 60 seconds, whichever comes first**, followed by one Curate call when it is
 waiting. A Curate call is one Stack Referee request or one Photo Referee batch,
 not a multi-call chain. These values are internal constants, without Settings
@@ -59,6 +64,12 @@ the turn before validation/overload retry work or retry sleeps. Every retry
 must reacquire a scheduling turn; it cannot hold the resource through backoff.
 Waiting time is outside the measured provider-analysis duration.
 
+Once the preview referees are connected and enabled, an Enrich run on a shared
+backend will take longer while eligible Curate work is waiting: each Enrich
+turn yields to a multi-photo AI call. This can be noticeable on slow local
+models. It is the tradeoff for Curate making progress during a long Enrich run;
+an independent backend or no eligible Curate work avoids that contention.
+
 Resource identity comes from the actual pinned adapter's HTTP(S) origin.
 Different models, API paths or credentials on that origin are not assumed to
 have independent capacity; common loopback aliases are normalized. Different
@@ -70,8 +81,12 @@ photo metadata or model response is included in public scheduling status.
 Curate has at most one active scheduling turn across both roles/backends.
 Among ready Curate sessions, at most two preferred comparisons can precede
 the oldest waiting session. Future role workers still own selection of upcoming
-comparisons, open-comparison stability and settled/latest-input coalescing;
-the arbiter does not discover groups or enqueue AI work itself.
+comparisons, open-comparison stability and settled/latest-input coalescing.
+Before activation, their readiness checks must account for related photos still
+arriving from an active Enrich run; a quiet 30-second interval alone does not
+prove that a non-contiguous burst has finished. This belongs in the role input
+selection, not a new legacy queue-repair mechanism. The arbiter does not
+discover groups or enqueue AI work itself.
 
 Enrich and the existing Curate page distinguish waiting for an AI turn from
 running inference. A settings change rechecks queued role controls but does not

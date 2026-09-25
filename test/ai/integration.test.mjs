@@ -8,6 +8,7 @@ import { setImmediate as turn } from 'node:timers/promises';
 import { Repository } from '../../src/enrich/repository.mjs';
 import { EnrichJobRunner } from '../../src/enrich/jobRunner.mjs';
 import { RefereeService } from '../../src/enrich/refereeService.mjs';
+import { ReviewService } from '../../src/enrich/reviewService.mjs';
 import { analyzeWithValidationRetry } from '../../src/enrich/runner.mjs';
 import { AiRequestScheduler } from '../../src/ai/scheduler.mjs';
 import { CurateAiExecution } from '../../src/curate/ai-execution.mjs';
@@ -31,34 +32,76 @@ function config(fetchImpl) {
     enrichEnabled:true,curateBurstGrouping:true,curateRefereeEnabled:true,curateRefereeModel:'referee-model',
     providers:{local_lmstudio:{...provider,fetchImpl}}};
 }
-function referee(f,cfg,runner) {
-  for (const id of ['r1','r2']) f.repo.upsertAsset({id,originalPath:`${id}.jpg`});
-  return new RefereeService({repo:f.repo,immich,config:cfg,enrichRunner:runner,aiScheduler:f.scheduler,
-    review:{annotatedReviewRows:()=>['r1','r2'].map(assetId=>({assetId,burstId:'stack',state:'undecided',aiTags:[]}))}});
-}
-
-test('real Enrich and legacy referee workers share five-call turns with different models on one endpoint',async()=>fixture(async f=>{
+test('real Enrich and the new Curate executor share five-call turns with different models on one endpoint',async()=>fixture(async f=>{
   const started=deferred(),release=deferred(),order=[];
-  const cfg=config(async(_url,options)=>{
-    const request=JSON.parse(options.body),isRef=request.model==='referee-model';
-    order.push(isRef?'curate':'enrich');
+  const cfg=config(async()=>{
+    order.push('enrich');
     if(order.length===1){started.resolve();await release.promise;}
     f.advance(10_000);
-    const output=isRef?{same_subject:true,photos:[{photo:1,rank:1,keep:true,eyes_closed:'no'},{photo:2,rank:2,keep:false,eyes_closed:'no'}]}:sampleOutput();
-    return {ok:true,status:200,json:async()=>({choices:[{message:{content:JSON.stringify(output)}}]})};
+    return {ok:true,status:200,json:async()=>({choices:[{message:{content:JSON.stringify(sampleOutput())}}]})};
   });
   const runner=new EnrichJobRunner({repo:f.repo,immich,taxonomy,config:cfg,aiScheduler:f.scheduler});
-  const ref=referee(f,cfg,runner);
+  const ex=execution(f),curateProvider={...provider,modelName:'referee-model'};
   runner.start({assetIds:Array.from({length:10},(_,i)=>`e${i}`),sendToCurate:false});
   await started.promise;
-  const check=ref.tick();await turn();
-  assert.equal(ref.status().scheduling.state,'waiting');assert.equal(ref.status().yielding,true);
-  release.resolve();await Promise.all([runner.runPromise,check]);
+  const check=ex.run(job({provider:curateProvider,backendKey:aiBackendKey(curateProvider),
+    submit:async()=>{order.push('curate');return {};}}));await turn();
+  assert.equal(ex.schedulingStatus().state,'waiting');
+  release.resolve();const [,result]=await Promise.all([runner.runPromise,check]);
   assert.equal(runner.status().error,null,JSON.stringify(runner.status().log));
   assert.deepEqual(order,[...Array(5).fill('enrich'),'curate',...Array(5).fill('enrich')]);
-  assert.equal(runner.status().counters.succeeded,10);assert.equal(runner.status().error,null);
-  assert.equal(f.repo.refereeStats().groups,1);assert.equal(runner.status().scheduling.state,'idle');
+  assert.equal(runner.status().counters.succeeded,10);assert.equal(result.state,'succeeded');
+  assert.equal(runner.status().scheduling.state,'idle');
 }));
+
+for(const independent of [false,true]) {
+  test(`legacy referee waits for non-contiguous Enrich arrivals on a ${independent?'separate':'shared'} backend`,async()=>fixture(async f=>{
+    const ids=[...Array.from({length:4},(_,i)=>`a${i}`),...Array.from({length:4},(_,i)=>`s${i}`),
+      ...Array.from({length:6},(_,i)=>`b${i}`),...Array.from({length:4},(_,i)=>`a${i+4}`)];
+    const calls=[],ticks=[],observed=[];
+    let runner,ref;
+    const cfg=config(async(_url,options)=>{
+      const request=JSON.parse(options.body),isRef=request.model==='referee-model';
+      f.advance(10_000);
+      const count=isRef?request.messages.flatMap(m=>Array.isArray(m.content)?m.content:[])
+        .filter(part=>part.type==='image_url').length:1;
+      if(isRef)calls.push({count,duringEnrich:runner.isRunning()});
+      const output=isRef?{same_subject:true,photos:Array.from({length:count},(_,i)=>({
+        photo:i+1,rank:i+1,keep:i===0,eyes_closed:'no'}))}:sampleOutput();
+      return {ok:true,status:200,json:async()=>({choices:[{message:{content:JSON.stringify(output)}}]})};
+    });
+    if(independent){
+      cfg.curateRefereeProvider='openai_compatible';
+      cfg.providers.openai_compatible={...cfg.providers.local_lmstudio,baseUrl:'http://independent.test:8000/v1'};
+    }
+    const fakeImmich={...immich,getAsset:async id=>{
+      const n=Number(id.slice(1)),seconds=id[0]==='a'?n*5:id[0]==='b'?600+n*5:1200+n*600;
+      return {id,originalPath:`${id}.jpg`,fileCreatedAt:new Date(Date.UTC(2026,0,1)+seconds*1000).toISOString()};
+    },getAssetThumbnail:async(...args)=>{
+      if(runner.isRunning()){
+        // Poll between photos while the real review list grows. Do not await a
+        // tick here: a queued referee turn must not deadlock an Enrich request.
+        ticks.push(ref.tick());
+        observed.push({sizes:ref.pendingGroups().map(g=>g.members.length),yielding:ref.status().yielding});
+      }
+      return immich.getAssetThumbnail(...args);
+    }};
+    const review=new ReviewService({repo:f.repo,immich:fakeImmich,taxonomy,config:cfg});
+    runner=new EnrichJobRunner({repo:f.repo,immich:fakeImmich,taxonomy,config:cfg,aiScheduler:f.scheduler});
+    ref=new RefereeService({repo:f.repo,immich:fakeImmich,review,config:cfg,enrichRunner:runner,aiScheduler:f.scheduler});
+    runner.start({assetIds:ids,sendToCurate:true});await runner.runPromise;await Promise.all(ticks);
+    assert.equal(runner.status().error,null,JSON.stringify(runner.status().log));
+    assert.equal(runner.status().counters.succeeded,18);
+    assert.ok(observed.some(s=>s.sizes.includes(4)),'partial burst was visible during Enrich');
+    assert.ok(observed.every(s=>s.yielding),'legacy status explains the Enrich wait');
+    assert.deepEqual(calls,[],'no partial stack paid for while Enrich was running');
+    assert.deepEqual(ref.pendingGroups().map(g=>g.members.length),[8,6]);
+    await ref.tick();await ref.tick();
+    assert.equal(ref.status().lastError,null);
+    assert.deepEqual(calls,[{count:8,duringEnrich:false},{count:6,duringEnrich:false}]);
+    assert.equal(f.repo.refereeStats().groups,2);assert.equal(ref.status().yielding,false);
+  }));
+}
 
 test('Enrich waiting cancellation records no failed photo and sends no provider request',async()=>fixture(async f=>{
   let requests=0;const cfg=config(async()=>{requests++;assert.fail('unexpected call');});

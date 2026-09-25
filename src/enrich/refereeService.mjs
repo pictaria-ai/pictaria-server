@@ -14,8 +14,8 @@ export { REFEREE_PROMPT_VERSION, buildRefereeUserPrompt, refereeJsonSchema, norm
 // multi-image request ranks the members by keeper quality and explains why.
 // Design rules (DESIGN-NOTES §6):
 //   - suggestions only — the human decides; nothing here writes decisions
-//   - compute is patient: a resumable background worker sharing request turns
-//     with enrichment on the same backend, and working the backlog
+//   - compute is patient: a resumable background worker waiting for the
+//     active enrichment run to finish, then working the backlog
 //     most-undecided-first (group size breaks ties)
 //   - a verdict is keyed to the group's exact membership; when membership
 //     changes (new photos arrive), the group is simply refereed again
@@ -124,7 +124,10 @@ export class RefereeService {
   }
 
   canStartWork() {
-    return !this._stopped && !this._paused && this.enabled() && (this.aiScheduler !== null || !this.enrichRunner.isRunning());
+    // Keep the released readiness rule until cutover: photos from one burst
+    // need not be adjacent in the Enrich queue. A shared turn alone cannot
+    // prove membership is settled, even on an independent provider.
+    return !this._stopped && !this._paused && this.enabled() && !this.enrichRunner.isRunning();
   }
 
   // Pause is cooperative: a submitted request may finish, but photo preparation
@@ -209,8 +212,8 @@ export class RefereeService {
       currentSize: this._currentSize,
       currentForMs: this._currentStartedAt ? Date.now() - this._currentStartedAt : null,
       scheduling: this.aiSession?.status() ?? { state: 'idle', reason: null },
-      yielding: this.aiScheduler ? this.aiSession?.status().state === 'waiting'
-        : !this._working && !this._paused && this.enabled() && this.enrichRunner.isRunning(),
+      yielding: !this._stopped && !this._paused && this.enabled()
+        && (this.aiSession?.status().state === 'waiting' || (!this._working && this.enrichRunner.isRunning())),
       remaining,
       batchDone: this._batchDone,
       lastError: this._lastError,
@@ -227,7 +230,7 @@ export class RefereeService {
     try {
       // Keep selecting while work remains. The shared scheduler admits one
       // request at a time and yields between groups; preparation rechecks the
-      // live controls. Standalone callers retain the earlier idle-only guard.
+      // live controls, including waiting for Enrich to finish.
       while (this.canStartWork()) {
         const group = this.pendingGroups().find(
           (g) => !this.repo.refereeHasGroup(g.key) && !this._deferredGroups.has(g.key),
