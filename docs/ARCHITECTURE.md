@@ -74,6 +74,11 @@ existing durable sync queue. The multi-keeper comparison UI follows separately.
 
 ## Conventions
 
+- **Browser login startup**: pages load `auth-gate.js` synchronously in the
+  document head so an early 401 can always call `pictariaGate.show()`. The gate
+  builds its dialog lazily; calls before the body exists are coalesced until
+  DOM readiness. Keep this ordering when adding pages. It does not change
+  server-side authentication or cookie handling.
 - **Auth**: everything under `/api/` requires the app password when
   `APP_PASSWORD` is set — accepted as `X-App-Password` header,
   `Authorization: Bearer`, or the HttpOnly `pictaria_session` cookie issued

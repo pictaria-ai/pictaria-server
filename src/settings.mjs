@@ -846,7 +846,8 @@ export class SettingsStore {
             available: this.curateAiAvailability[field.role] === true,
             active: curateAiRoleEnabled(this.config, field.role, this.curateAiAvailability),
             availabilityNotice: this.curateAiAvailability[field.role] === true ? ''
-              : 'Not available in Curate Preview yet. Your preference is saved for when it is connected.',
+              : 'Not available in Curate Preview yet.' + (effective === true
+                ? ' Your preference is saved for when it is connected.' : ''),
           } : {}),
           ...(bindingIssue ? {
             credentialUnavailable: true,

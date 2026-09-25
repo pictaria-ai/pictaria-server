@@ -27,6 +27,7 @@ test('fresh install defaults off, uncertain scope; API cannot activate unavailab
     assert.equal(store.describe().curate[key].value, false);
     assert.equal(store.describe().curate[key].available, false);
     assert.equal(store.describe().curate[key].active, false);
+    assert.equal(store.describe().curate[key].availabilityNotice, 'Not available in Curate Preview yet.');
     const before = persisted();
     assert.throws(() => store.update({ curate: { [key]: true, refereeModel: 'must-not-save' } }), /not available/);
     assert.deepEqual(persisted(), before);
@@ -37,7 +38,6 @@ test('fresh install defaults off, uncertain scope; API cannot activate unavailab
   assert.equal(fresh.config.curateStackRefereeEnabled, false);
   assert.equal(fresh.config.curateKeeperRefereeEnabled, false);
   assert.equal(loadConfig({ CURATE_REFEREE_ENABLED: 'true' }).curateKeeperRefereeEnabled, false);
-  assert.throws(() => loadConfig({ CURATE_STACK_REFEREE_SCOPE: 'typo' }), /uncertain or all/);
   assert.throws(() => store.update({ curate: { stackRefereeScope: 'typo' } }), /stackRefereeScope/);
 });
 
@@ -51,6 +51,7 @@ test('upgrade snapshots effective legacy keeper preference once, without turning
     assert.equal(f.config.curateRefereeEnabled, referee, 'legacy preference preserved separately');
     assert.equal(f.config.curateStackRefereeEnabled, false);
     assert.equal(f.store.describe().curate.keeperRefereeEnabled.active, false);
+    assert.equal(f.store.describe().curate.keeperRefereeEnabled.availabilityNotice.includes('Your preference is saved'), expected);
     f.store.update({ curate: { refereeModel: 'custom' } });
     const restarted = f.open({ ENRICH_ENABLED: String(!enrich), CURATE_REFEREE_ENABLED: String(!referee) });
     assert.equal(restarted.config.curateKeeperRefereeEnabled, expected, 'restart cannot reinterpret legacy state');

@@ -450,9 +450,12 @@ function clamp(value, min, max) {
   return Math.max(min, Math.min(max, value));
 }
 
-function parseStackRefereeScope(value = 'uncertain') {
-  if (!STACK_REFEREE_SCOPES.includes(value)) {
-    throw new Error('CURATE_STACK_REFEREE_SCOPE must be uncertain or all.');
-  }
-  return value;
+function parseStackRefereeScope(value) {
+  const scope = String(value ?? '').trim().toLowerCase();
+  if (!scope) return 'uncertain';
+  if (STACK_REFEREE_SCOPES.includes(scope)) return scope;
+  // This optional preference must not prevent startup. Do not echo arbitrary
+  // environment contents into logs; the conservative fallback never enables AI.
+  console.warn('[Pictaria] Invalid CURATE_STACK_REFEREE_SCOPE; using uncertain (expected uncertain or all).');
+  return 'uncertain';
 }

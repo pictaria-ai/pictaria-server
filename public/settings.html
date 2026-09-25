@@ -7,7 +7,7 @@
   <link rel="icon" type="image/png" sizes="32x32" href="/brand/favicon-32.png">
   <link rel="apple-touch-icon" href="/brand/apple-touch-icon.png">
   <script src="/theme.js"></script>
-  <script src="/auth-gate.js" defer></script>
+  <script src="/auth-gate.js"></script>
   <script src="/nav.js" defer></script>
   <link rel="stylesheet" href="/pictaria.css">
   <style>
@@ -819,7 +819,7 @@
         { key: 'stackRefereeScope', type: 'select', labels: { uncertain: 'Uncertain stacks (recommended)', all: 'All stacks' }, desc: 'Uncertain stacks: check compositions that remain unresolved after similarity checks finish. All stacks: also check supported compositions; uses more AI calls. Applies to pending stacks without a current AI check.' },
         { key: 'keeperRefereeEnabled', type: 'switch', desc: 'Suggests the best photos within each stack. You can accept or change the suggestions, including choosing more than one photo.' },
         { division: 'Shared AI model', divisionDesc: 'Used by the current-page referee and, when available, both preview referees. Provider connections are managed under Enrich; the preview referees will not require Enrich to be on.' },
-        { key: 'refereeProvider', type: 'select', labels: { '': 'Follow Enrich provider', local_lmstudio: 'LM Studio (local)', local_ollama: 'Ollama (local)', openai_compatible: 'OpenAI-compatible', cloud_ollama: 'Ollama (cloud)', cloud_openai: 'OpenAI (cloud)', openrouter: 'OpenRouter (cloud)', venice: 'Venice (cloud)' }, desc: 'Follow Enrich provider uses the provider currently selected on the Enrich page; a change there applies when the next Stack starts. Choose a specific provider here to keep Curate independent.' },
+        { key: 'refereeProvider', type: 'select', labels: { '': 'Follow Enrich provider', local_lmstudio: 'LM Studio (local)', local_ollama: 'Ollama (local)', openai_compatible: 'OpenAI-compatible', cloud_ollama: 'Ollama (cloud)', cloud_openai: 'OpenAI (cloud)', openrouter: 'OpenRouter (cloud)', venice: 'Venice (cloud)' }, desc: 'Follow Enrich provider uses the provider currently selected on the Enrich page; a change there applies when the next check starts. Choose a specific provider here to keep Curate independent.' },
         { key: 'refereeModel', type: 'text', placeholder: 'empty = the provider’s usual model', desc: 'Optional. Leave blank to use the chosen provider’s configured model. If the referee follows Enrich, this override must also be valid for every provider you select there; clear it or choose a fixed referee provider when switching providers. A smaller vision model works well here, but it must accept multiple images.', docs: 'https://docs.venice.ai/models/overview' },
         { group: 'Current Curate page', groupDesc: 'Applies only to the existing Curate page, not Curate Preview.' },
         { key: 'refereeEnabled', type: 'switch', desc: 'Recommends a keeper and shows a gold star. Requires Stacks and Enrich to be on; works while Enrich is idle.' },
@@ -1286,9 +1286,9 @@
         const legacyPaused = key === 'refereeEnabled' && !el('f2-enrich-enabled')?.checked;
         const scope = key === 'stackRefereeScope';
         field.hidden = scope && !el('f2-curate-stackRefereeEnabled')?.checked;
-        // An inherited on preference may be switched off before integration.
-        // An unavailable worker cannot be newly enabled by this UI or the API.
-        input.disabled = !stacks || legacyPaused || (unavailable && !input.checked)
+        // A saved on preference may be switched off, then restored while still
+        // editing. Once saved off, an unavailable worker cannot be enabled.
+        input.disabled = !stacks || legacyPaused || (unavailable && meta.value !== true)
           || (scope && curateSettings.stackRefereeEnabled?.available !== true);
         field.classList.toggle('curate-disabled', input.disabled);
         let note = field.querySelector('.curate-state-note');

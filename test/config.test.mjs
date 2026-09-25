@@ -210,3 +210,21 @@ test('persistent-state collision checks resolve symlink aliases and existing fil
     rmSync(dir, { recursive: true, force: true });
   }
 });
+
+test('optional Stack Referee scope normalizes environment values and falls back without blocking startup', t => {
+  const warnings = [];
+  t.mock.method(console, 'warn', (...args) => warnings.push(args.join(' ')));
+  for (const [value, expected] of [[undefined, 'uncertain'], ['', 'uncertain'], ['  ', 'uncertain'],
+    ['All', 'all'], [' ALL ', 'all'], [' uncertain', 'uncertain'], ['UNCERTAIN', 'uncertain']]) {
+    const config = loadConfig({ CURATE_STACK_REFEREE_SCOPE: value });
+    assert.equal(config.curateStackRefereeScope, expected);
+    assert.equal(config.curateStackRefereeEnabled, false);
+  }
+  assert.deepEqual(warnings, []);
+  const config = loadConfig({ CURATE_STACK_REFEREE_SCOPE: 'private-invalid-input' });
+  assert.equal(config.curateStackRefereeScope, 'uncertain');
+  assert.equal(config.curateStackRefereeEnabled, false);
+  assert.equal(warnings.length, 1);
+  assert.match(warnings[0], /Invalid CURATE_STACK_REFEREE_SCOPE; using uncertain/);
+  assert.doesNotMatch(warnings[0], /private-invalid-input/);
+});

@@ -39,10 +39,15 @@ test('Curate AI settings distinguish unavailable workers, preserve preferences a
   await click('burstGrouping');
   // Permit opting out of a previously saved/on preference before integration.
   await click('stackRefereeEnabled'); await click('keeperRefereeEnabled');
-  assert.equal(await page.evaluate(`${input('stackRefereeEnabled')}.disabled`), true);
+  assert.equal(await page.evaluate(`${input('stackRefereeEnabled')}.disabled`), false, 'unsaved opt-out can be reversed');
+  await click('stackRefereeEnabled');
+  assert.equal(await page.evaluate(`${input('stackRefereeEnabled')}.checked`), true);
+  await click('stackRefereeEnabled');
   assert.equal(await page.evaluate(`${input('stackRefereeScope')}.closest('.field').hidden`), true);
   await page.evaluate('document.querySelector("#save-curate").click()');
   await page.waitFor('document.querySelector("#note-curate").textContent.includes("Saved")');
+  assert.equal(await page.evaluate(`${input('stackRefereeEnabled')}.disabled`), true, 'saved opt-out cannot enable an unavailable role');
+  assert.doesNotMatch(await page.evaluate('document.querySelector("#curate-state-stackRefereeEnabled").textContent'), /Your preference is saved/);
   const result = await page.evaluate(`fetch('/api/settings',{method:'PATCH',headers:{'Content-Type':'application/json'},body:JSON.stringify({curate:{stackRefereeEnabled:true}})}).then(r=>r.status)`);
   assert.equal(result, 400, 'the server also rejects unavailable activation');
 

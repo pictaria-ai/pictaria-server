@@ -7,6 +7,16 @@ All notable changes to Pictaria Server are documented here. This project follows
 
 ### Development
 
+- Password prompts reliably appear even when a page receives an immediate
+  authentication response during startup. The shared gate now loads before
+  page callers and builds its dialog only when needed, including early calls
+  before the page body exists.
+- Curate's optional Stack Referee scope accepts blank, spaced and mixed-case
+  environment values. Invalid values log a short warning and use **Uncertain
+  stacks** without preventing startup or enabling AI. Unavailable-role notes
+  distinguish saved on preferences from off defaults; an unsaved opt-out can
+  be reversed without reloading Settings.
+
 - Settings → Curate separates optional Stack Referee and Keeper Referee
   preferences, with **Uncertain stacks** (recommended) or **All stacks** scope
   for the Stack Referee. Preview AI workers are not connected yet: controls

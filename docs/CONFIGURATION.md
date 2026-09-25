@@ -175,7 +175,7 @@ files.
 | `CURATE_BURST_GROUPING` | `true` | Collapse same-moment photos (bursts, re-shoots, duplicates) into stacked cards in the Curate queue. Off = flat photo-by-photo queue. **UI** |
 | `CURATE_REFEREE_ENABLED` | `false` | Existing Curate page referee (gold star). Requires Stacks and Enrich enabled; runs while Enrich is idle. Separate from the preview roles below. **UI** |
 | `CURATE_STACK_REFEREE_ENABLED` | `false` | Preview Stack Referee preference. Worker not connected yet; an environment value cannot make it available. **UI** |
-| `CURATE_STACK_REFEREE_SCOPE` | `uncertain` | `uncertain` or `all`: unresolved compositions after deterministic checks settle, or all eligible pending stacks. Does not repeat a current valid AI check. **UI** |
+| `CURATE_STACK_REFEREE_SCOPE` | `uncertain` | `uncertain` or `all` (case/whitespace ignored; blank defaults to `uncertain`, invalid environment values warn and fall back): unresolved compositions after deterministic checks settle, or all eligible pending stacks. Does not repeat a current valid AI check. **UI** |
 | `CURATE_KEEPER_REFEREE_ENABLED` | `false` | Preview Keeper Referee preference. Worker not connected yet. Upgrade preserves the effective legacy preference unless explicitly overridden; see [Curate AI](CURATE-AI.md). **UI** |
 | `CURATE_REFEREE_PROVIDER` | *(empty)* | Referee provider; empty = follow the provider currently selected on Enrich. Lives under Settings → Curate. **UI** |
 | `CURATE_REFEREE_MODEL` | *(empty)* | Referee model; empty = the chosen provider's usual model. It must accept multiple images. Lives under Settings → Curate. **UI** |

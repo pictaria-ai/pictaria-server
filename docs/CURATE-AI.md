@@ -48,8 +48,15 @@ The preview workers are **not connected yet**. Their controls say so, and the
 API rejects newly enabling an unavailable worker, including clearing an override
 that would enable it through environment fallback. Saved on preferences may be
 turned off before integration; saving unrelated settings preserves them.
-Availability comes from server composition, not user settings or an environment
+An unsaved opt-out can be reversed; once saved off, it cannot be enabled until
+the worker is available. The saved-preference notice appears only for an on
+preference. Availability comes from server composition, not user settings or an environment
 switch. An on preference is not reported as an active worker while unavailable.
+
+`CURATE_STACK_REFEREE_SCOPE` ignores surrounding whitespace and letter case.
+Blank values use `uncertain`. Invalid environment values warn without echoing
+the supplied value and fall back to `uncertain`; they neither block startup nor
+enable AI. Invalid values submitted through the Settings API remain rejected.
 
 When the Stack Referee is enabled, its scope is:
 
