@@ -3,6 +3,10 @@
 const copy = new Map([
   ['Stacking is off.', 'Stacking is turned off.'],
   [
+    'Time candidates use a 90-second gap and a 3-minute total span.',
+    'Nearby photos are compared within a 90-second gap and a 3-minute total span.',
+  ],
+  [
     'No other pending photo within the time limits.',
     'No other pending photo was taken close enough in time.',
   ],
@@ -18,10 +22,10 @@ const copy = new Map([
     'Matching original checksums and compatible renditions support grouping.',
     'Matching original files support this group.',
   ],
-  ['Close ThumbHash descriptors support visual similarity.', 'Similar-looking previews support this group.'],
+  ['Close ThumbHash descriptors support visual similarity.', 'Similar-looking previews (ThumbHash) support this group.'],
   [
     'Reciprocal nearby Immich search ranks support this composition.',
-    'Immich’s similar-photo searches support this group.',
+    'Matches in both directions from Immich’s similar-photo searches support this group.',
   ],
   [
     'An asymmetric search match was retained through strong support from the established core.',
@@ -33,12 +37,20 @@ const copy = new Map([
   ],
   ['Saved human separations were respected.', 'A previously saved stack correction was respected.'],
   [
+    'Saved human separations and supported people differences were respected.',
+    'Grouping respects saved stack corrections and supported differences in people.',
+  ],
+  [
+    'Distant ThumbHash values or missing search results alone are not evidence of a different subject.',
+    'A different preview fingerprint or a missing search match alone does not establish a different subject.',
+  ],
+  [
     'Grouped by capture time; similarity not established.',
     'Taken close together, but similarity has not been established.',
   ],
   [
     'Automatic composition checks are limited to 40 photos and a bounded rebuild budget.',
-    'This group reached an automatic checking limit.',
+    'This group reached an automatic checking limit (40 photos or the processing budget).',
   ],
   [
     'Membership preserved from the opened Curate view.',
@@ -55,8 +67,9 @@ export function plainReasons(comparison) {
       seconds < 60 ? `Taken within ${seconds} seconds.` : `Taken within ${Math.ceil(seconds / 60)} minutes.`,
     );
   }
-  for (const reason of comparison.reasons ?? []) if (copy.has(reason)) result.push(copy.get(reason));
+  // Keep unmapped recorded reasons visible too: there is no separate raw-details panel.
+  for (const reason of comparison.reasons ?? []) result.push(copy.get(reason) ?? reason);
   return result.length
-    ? result
-    : ['The saved grouping is shown below. See details for the available explanation.'];
+    ? [...new Set(result)]
+    : ['No further grouping explanation is available for this saved view.'];
 }

@@ -32,19 +32,14 @@ export function explanation(comparison, prefix, status = null) {
   reasons.id = `${prefix}s`;
   reasons.append(...plainReasons(comparison).map((reason) => node('li', reason)));
   panel.append(reasons);
-  const details = node('details', undefined, 'why-details');
-  details.append(node('summary', 'Technical details'));
-  const raw = node('ul');
-  raw.append(...(comparison.reasons || []).map(reason => node('li', reason)));
-  details.append(raw);
   const algorithm = node(
     'p',
     /^candidate-\d+$/.test(comparison.algorithm)
       ? `Candidate algorithm ${comparison.algorithm.split('-')[1]} · no AI stack check`
       : 'Grouping from this saved view',
-    'p-muted',
+    'p-muted why-algorithm',
   );
-  details.append(algorithm); panel.append(details);
+  panel.append(algorithm);
   let pinned = false;
   wrap.dismiss = () => {
     panel.hidden = true;
@@ -58,7 +53,6 @@ export function explanation(comparison, prefix, status = null) {
     panel.style.left = `${Math.max(12, Math.min(rect.left, innerWidth - width - 12))}px`;
     panel.style.top = `${Math.max(12, rect.bottom + height > innerHeight - 12 ? rect.top - height : rect.bottom)}px`;
   };
-  details.addEventListener('toggle', () => { if (!panel.hidden) show(); });
   wrap.addEventListener('pointerenter', (event) => {
     if (event.pointerType === 'mouse') show();
   });

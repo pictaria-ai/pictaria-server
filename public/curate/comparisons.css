@@ -644,7 +644,7 @@ dialog::backdrop {
 .why-content { position: fixed; z-index: 10; width: min(360px,calc(100vw - 32px)); max-height: min(420px,calc(100dvh - 32px)); overflow: auto; box-sizing: border-box; padding: 14px; border: 1px solid var(--p-line); border-radius: 8px; background: var(--p-panel); color: var(--p-text); box-shadow: var(--p-shadow); font-size: 13px; line-height: 1.5; }
 .why-content ul { margin: 8px 0; padding-left: 18px; }
 .why-content li { margin: 5px 0; }
-.why-content p { font-size: 11px; }
+.why-content .why-algorithm { font-size: 11px; }
 @media (max-width: 600px) {
   .photo-grid.compact .photo-choices { grid-template-columns: repeat(2,minmax(0,1fr)); }
 }
@@ -679,8 +679,6 @@ dialog::backdrop {
 :is([data-quick=approve], [data-photo-action=approve], [data-choice=approve], [data-stack-choice=approve]) { --decision-tint: var(--p-accent); }
 :is([data-quick=favorite], [data-photo-action=favorite], [data-choice=favorite], [data-stack-choice=favorite]) { --decision-tint: var(--p-gold); }
 :is([data-quick=reject], [data-photo-action=reject], [data-choice=reject], [data-stack-choice=reject]) { --decision-tint: var(--p-danger); }
-.why-details { font-size: 11px; color: var(--p-muted); margin-top: 10px; }
-.why-details summary { cursor: pointer; }
 @media (max-width: 760px) {
   .heading p { font-size: 13px; }
   #bulk-actions { gap: 7px; padding: 10px; }

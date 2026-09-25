@@ -15,8 +15,11 @@ ranks. Repeated searches that strongly favor two separate subgroups can now
 override a misleading ThumbHash match. The linked document owns exact rules,
 bounds and version history. Open **Why?** or the small similarity-status icon beside
 the comparison checkbox controls for a concise explanation. It appears on
-hover, keyboard focus or tap without moving the photos. Its initial text uses
-plain language grounded in recorded reasons; technical details are secondary.
+hover, keyboard focus or tap without moving the photos. One expanded explanation
+combines check limitations, plain-language grouping reasons and useful specifics,
+without a nested Technical details dropdown or duplicate raw wording. Recorded
+reasons without a plain-language translation remain visible. A small muted footer
+identifies the algorithm version for troubleshooting.
 The stack lightbox exposes the same explanation through **Why?**.
 
 The current `/curate.html` remains the default during this staging step. The

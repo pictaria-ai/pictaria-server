@@ -28,6 +28,8 @@ All notable changes to Pictaria Server are documented here. This project follows
   **i** labeled **Grouped with limited evidence**. Hover and **Why?** retain the
   specific reason, including whether searches failed or finished inconclusively.
   Normal comparisons keep **Why?** without a completion checkmark.
+  Explanations show useful details together without a nested dropdown or duplicate
+  raw wording; the algorithm version remains in a small muted footer.
 
 - Curate Preview settles failed similarity checks after one retry instead of
   keeping a long-term repair queue. Incomplete groupings remain ready for human
