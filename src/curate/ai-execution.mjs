@@ -5,7 +5,20 @@ class AdmissionStopped extends Error {
   constructor(reason) { super(reason); this.reason = reason; }
 }
 
+class AdapterContractError extends TypeError {}
+
+function synchronous(value) {
+  if (value && typeof value.then === 'function') {
+    // Observe rejection as well as fulfillment: a buggy async adapter must not
+    // also cause an unhandled rejection after we report its contract error.
+    Promise.resolve(value).catch(() => {});
+    throw new AdapterContractError('Curate AI validation and acceptance must be synchronous.');
+  }
+  return value;
+}
+
 function failureReason(error, phase) {
+  if (error instanceof AdapterContractError) return 'adapter-error';
   if (phase === 'prepare') return 'preparation-failed';
   if (phase === 'validate') return 'invalid-answer';
   if (phase === 'accept') return 'acceptance-failed';
@@ -74,16 +87,14 @@ export class CurateAiExecution {
         return { state: 'stale' };
       }
       phase = 'validate';
-      const result = job.validate(response);
-      if (result && typeof result.then === 'function') throw new TypeError('AI validation must be synchronous.');
+      const result = synchronous(job.validate(response));
       phase = 'accept';
       // Acceptance and its accounting commit together. The accepting adapter
       // must synchronously revalidate material/human inputs in this transaction.
       this.attempts.repo.transaction(() => {
         if (job.isCurrent() !== true) throw new AdmissionStopped('stale');
         if (!this.attempts.finish(ticket, 'succeeded')) throw new AdmissionStopped('superseded');
-        const accepted = job.accept(result);
-        if (accepted && typeof accepted.then === 'function') throw new TypeError('AI acceptance must be synchronous.');
+        synchronous(job.accept(result));
       });
       return { state: 'succeeded', attempts: ticket.attempts };
     } catch (error) {

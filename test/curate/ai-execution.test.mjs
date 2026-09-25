@@ -194,3 +194,19 @@ test('attempt store rejects unsupported roles, non-digest identities and forged 
   assert.equal(store.finish({ ...ticket, token: 'wrong' }, 'succeeded'), false);
   assert.equal(store.status('stack', key).state, 'running');
 }));
+
+test('async validation/acceptance is an adapter error, retaining the dispatched attempt', async () => fixture(async f => {
+  for (const phase of ['validate', 'accept']) for (const rejects of [false, true]) {
+    const inputKey = (++counter).toString(16).padStart(64, '0');
+    const before = f.repo.curate.generation();
+    const result = await f.execution().run(f.job({ inputKey, [phase]: () => {
+      if (phase === 'accept') f.repo.curate.bump();
+      return rejects ? Promise.reject(new Error('private adapter detail')) : Promise.resolve('answer');
+    } }));
+    assert.deepEqual(result, { state: 'failed', reason: 'adapter-error', phase });
+    assert.deepEqual(f.repo.curate.aiAttempts.status('stack', inputKey), { attempts: 1, state: 'failed' });
+    assert.equal(f.repo.curate.generation(), before, 'synchronous acceptance writes roll back');
+  }
+  assert.equal(f.counts().requests, 4);
+  assert.equal(f.counts().accepted, 0, 'async validation never reaches acceptance');
+}));

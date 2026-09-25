@@ -10,6 +10,8 @@ All notable changes to Pictaria Server are documented here. This project follows
 - Shared execution groundwork for the optional Stack Referee and Photo Referee
   remembers up to two request attempts per exact input across restart, rechecks
   role controls before submission, and accepts current results atomically.
+  Asynchronous validation/acceptance callbacks report an integration error,
+  separate from an invalid model answer, without refunding dispatched work.
   Both preview workers remain unavailable while provider safeguards, churn
   budgets and scheduling are integrated. Enrichment schema 19 / persistent-state
   contract 24 uses the standard pre-migration recovery point. See

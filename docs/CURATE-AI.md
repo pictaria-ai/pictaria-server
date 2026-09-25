@@ -147,6 +147,11 @@ asynchronous writes inside the acceptance transaction. One `submit` callback
 must make exactly one provider invocation; validation retries belong to a new
 admitted invocation rather than an internal retry loop. Preparation failures
 return without a paid attempt and must not be automatically looped by an adapter.
+An asynchronous validation/acceptance callback is reported as `adapter-error`,
+not a bad model answer. The already-dispatched request remains charged. Handle
+this as an integration fault before admitting more work; it is not evidence of
+a provider outage. Rejecting an asynchronous acceptance callback cannot cancel
+its own later side effects, so acceptance adapters must stay synchronous.
 
 Enrichment schema version 19 / persistent-state contract 24 adds the ledger.
 The normal upgrade recovery point is taken first. Existing settings and
