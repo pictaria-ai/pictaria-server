@@ -106,9 +106,10 @@ remain intact.
 
 ## Automatic searches and stable views
 
-Only opening/paging a **Curate Preview** view admits automatic searches, for
-unresolved time candidates represented on the pages requested. Opening the lab,
-released Curate, or starting the server does not admit this work. Small locally
+The server processes pending time candidates in the background whenever Stacks
+is enabled and Immich is configured. Startup resumes the backlog; arrivals from
+Enrich are picked up without a browser. Opening Curate, filtering and **Load more**
+only display work and adjust priority; they are not processing triggers. Small locally
 resolved comparisons and compatible exact renditions need no extra lookup.
 Larger ThumbHash-supported compositions also need verification: admit a photo
 with at least three nonconflicting neighbors when at least one of those pairs
@@ -124,8 +125,8 @@ recovery against a core. This deliberately favors preserving useful recovery
 evidence over the smallest possible request count. For example, a
 landscape/solo/couple candidate already resolved by people categories needs zero
 searches. A resolved two-photo couple in a larger candidate need not be queried when only
-the solo photos are uncertain. Filtering to just that resolved couple does not
-admit searches for the hidden solo group. Outside-rank counts still exclude the
+the solo photos are uncertain. Filtering to just that resolved couple does not display a check on its card; the
+hidden solo group still progresses in the background. Outside-rank counts still exclude the
 **entire original time candidate**, including members not queried.
 
 For each admitted candidate, the scheduler collects all **required** reference
@@ -136,55 +137,102 @@ still invalidate or resolve a candidate between requests.
 - One shared lane with the lab, at least **2 seconds** between new requests,
   with a **30-new-request rolling-minute cap** on automatic work. Requests stay
   sequential. A successful search taking at least two seconds adds a pause equal
-  to its duration (capped at 30 seconds) after completion. Failures retain the
-  longer cooldown and explicit retry requirement. No extra AI/provider calls.
-- The opened comparison gets the next search turn, followed by currently visible
-  cards, then other admitted groups. An in-flight request finishes normally.
+  to its duration (capped at 30 seconds) after completion. Service-wide failures
+  retain the longer cooldown; a failed reference gets one retry within its pass.
+  No extra AI/provider calls.
+- The next five comparisons in the current saved view order get priority,
+  followed by visible cards, then other admitted groups. The open comparison
+  gets no special priority; a shared candidate can still serve upcoming cards.
+  An in-flight request finishes normally.
   The browser reports at most 50 visible group IDs plus the open comparison;
   the server validates all against the saved view. Attention expires after 12
-  seconds without renewal, while broader view demand retains its 60-second limit.
-  Prioritization does not bypass admission/capacity, source or membership checks.
+  seconds without renewal; view attention records are retired after 60 seconds
+  idle. Neither expiry stops background processing. A prioritized candidate can
+  take an untouched waiting slot; partial and in-flight passes are retained.
+  Groups without a failed reference take precedence over groups retrying a failure.
+  Prioritization does not bypass source or membership checks.
   Cached evidence can be consumed during network pacing without spending a
   request slot. The reference set and 50-result window are unchanged.
 - Each request asks for one reference's first 51 image results, removes the
   reference and keeps at most **50**. No pagination to find a desired match.
   Timeout **15 seconds**, response limit **2 MiB**, failure cooldown at least
-  **30 seconds**. Permission/API/index failures leave manual Curate available.
-- At most **32 candidate cohorts** retained in the automatic scheduler, each at
-  most 40 photos. Active views retain their evidence, including completed matrices
-  across explicit Refresh. Entries expire after **10 minutes without active view
-  demand or progress**, rather than ten minutes from admission. No retained entry
-  is evicted merely to start more work. At capacity, other cohorts wait until
-  space expires; this is shown on their cards. Requests are sequential, and one
-  candidate can still wait behind active work or slow searches. Partial coverage is never published as a
-  completed grouping result.
-- The shared search cache holds at most **40 references for 10 minutes**. The
-  automatic cache retains only candidate-member positions and result-window
-  counts (returned, limit, outside), not unrelated photos
-  or response bodies. It is memory-only; restart begins a fresh bounded pass.
-- Preview polling renews demand. After **60 seconds** without visible-page
-  activity, demand stops. Expired/replaced views, stacking off, connection changes,
-  changed candidate membership/material/human constraints, and shutdown cancel
-  or discard in-flight work. Known source/connection revisions are checked before
-  and after I/O; unseen remote changes cannot be guaranteed absent.
-- Failures pause automatic work without repeated retry. An explicit new view
-  (Refresh, a filter change or post-action refresh) allows another attempt after
-  the shared cooldown. Automatic idle view replacement does not clear this pause.
-  A busy lab search merely delays the preview.
+  **30 seconds** for authentication, rate limits, disabled search, timeouts and
+  other service failures. A missing embedding or unavailable reference (HTTP
+  400/404/422, except disabled search) keeps normal two-second pacing for other
+  photos. Permission/API/index failures leave manual Curate available.
+- At most **32 incomplete candidate passes** in memory, each at most 40 photos.
+  Completing a pass frees its slot so the entire backlog can advance without
+  pagination. Partial coverage is never published as a completed result.
+- Finished outcomes persist in `curate_rank_evidence`: a complete candidate-member
+  matrix, or a compact safe problem code for an incomplete check. This is in the
+  Enrich database. Scope hashes include exact membership, material evidence,
+  human constraints and algorithm version; the connection fingerprint must also
+  match. No credentials, unrelated result IDs or response bodies are stored.
+  The grouping worker reads one matrix at a time from its coherent SQLite snapshot.
+  Finished outcomes have no inactivity TTL: completed checks stay checked and
+  incomplete checks stay settled through restarts and Refresh.
+- Finished results also retain their established groups and original source-input
+  fingerprints. Human decisions **subtract photos**, preserving untouched neighbours
+  and their checked/incomplete state, including across restart. Never reinterpret
+  original outside-rank counts against a reduced pending cohort. Undo can restore
+  members while the result remains cached; fully decided candidates may be pruned.
+  Existing completed records acquire this metadata lazily without new searches.
+  New arrivals, changed source evidence/availability or human constraints invalidate
+  affected connected candidates. A small member index lives beside the bounded
+  outcome store; it is not a repair queue or permanent history.
+- Storage is bounded to **50,000 outcomes**, **256 KiB per outcome**, and **64 MiB
+  of serialized evidence** (database/index overhead is additional). Obsolete
+  scopes are pruned in batches of at most 128. At capacity, preserve existing
+  evidence and pause new publication rather than evicting stable results and
+  continually rechecking them. If retained group metadata also reaches capacity,
+  show a limited status warning that decisions may require recalculation.
+- The separate shared search cache still holds **40 references for 10 minutes**
+  in memory. Partial passes exist only in the **32 active scopes** and are not
+  checkpointed. An interrupted in-flight check can start over after restart.
+  Finished outcomes are invalidated by known photo/people evidence, new arrivals or
+  human constraint changes, a changed algorithm, or a different Immich connection.
+  Stacks off and shutdown cancel in-flight work; browser inactivity does not.
+  Unseen changes to Immich's search index are not detected by these fingerprints.
+- A failed reference gets **one retry during the current pass**, using normal
+  shared pacing/cooldown. Other unqueried photos and healthy groups get a turn
+  first. If it fails again, finish the candidate as **not fully checked** and
+  release its slot. This applies to all search failures, including missing
+  embeddings, unavailable references and service errors. There is no long-term
+  retry schedule, parked partial-pass store, or manual retry/reset workflow.
+- An incomplete outcome discards partial search rows. It supplies no ranking
+  evidence to the grouping algorithm and is not counted as a successful check.
+  The grouping based on available time/people/ThumbHash evidence remains usable;
+  human decisions are available throughout. A failed search is never interpreted
+  as empty successful results, dissimilarity, or a reason to split photos.
+- **Refresh** reloads the view. Opening the page, changing filters, loading more,
+  automatic updates and restarts do not re-arm finished checks. A busy lab search
+  delays background work. No AI/provider calls or Immich processing jobs are added.
+- Status exposes safe predefined reasons and separate counts for pending,
+  successfully checked and finished-incomplete candidates. Only pending work
+  contributes to the remaining count. Upstream error bodies, private identifiers
+  and credentials are not forwarded. Unknown HTTP 400s remain generic reference
+  failures; only the known diagnostic is classified as a missing embedding.
+
+Stacks are an aid to choosing good photos, not an end in themselves. A usable
+comparison with limited evidence is preferable to an indefinite repair workflow.
+Immich may produce an embedding later, but its [reference search handler](https://github.com/immich-app/immich/blob/v3.2.0/server/src/services/search.service.ts)
+does not schedule that work when a search fails. Pictaria does not wait for or
+manage its completion.
 
 Cards show **Waiting for similarity check**, **Checking nearby photos · N of M**,
 or **Updated grouping ready**. Counts cover the required references for the
 original time candidate, which can appear as several cards. Locally resolved
 cards do not display another group's pending check. Pending groupings remain
-provisional; failed searches are explicitly paused. Successful searches that
+provisional; a failed pass finishes with **Similarity not fully checked**. Successful searches that
 leave membership uncertain say **Check complete · similarity uncertain**, retain
 the provisional grouping, and do not automatically retry or fragment it. An
 unconfigured or unavailable search service also leaves time groups provisional.
-Photo cards and the open comparison also show a small status indicator: muted
-spinner for queued work, blue spinner while checking, green check for completed
-supported work or ready updates, and amber for paused, limited or inconclusive
-checks. Locally resolved cards say no search is needed; unconfigured checks are
-not shown as completed. Text/accessible labels accompany color and animation;
+Photo cards show a muted spinner for queued work, a blue spinner while checking,
+an amber **!** for incomplete or unavailable checks, and a muted **i** for
+successfully completed but inconclusive checks. Neither status blocks curation. Completed
+supported work is quiet on cards. The open comparison retains the complete
+status and explanation, including when no search was needed; unconfigured checks
+are not shown as completed. Text/accessible labels accompany color and animation;
 reduced-motion preferences disable spinning. Updated views with pending checks
 keep a pending indicator, rather than claiming completion.
 
@@ -192,20 +240,25 @@ keep a pending indicator, rather than claiming completion.
 aggregate measurements since service start: search attempts/completions, cache
 hits, failures, last/average completed-search duration, completed automatic
 cohorts and average admission-to-completion time (including queueing, pauses and
-inactivity). Search measurements include the shared lab lane; direct lab-cache
+retry delays). Search measurements include the shared lab lane; direct lab-cache
 reads do not increment `cacheHits`. No photo IDs or responses are included.
 These are diagnostic counters, not persistent performance history or a new UI.
 
-The page summarizes checks for its own requested groups and highlights cards whose
-grouping changed. Checks that finish without changing grouping, or in an unrelated
-view, do not by themselves request a replacement view. The single **Refresh**
+The page shows global background progress beside the stack/single-photo counts
+in a reserved status row, plus an activity spinner beside Refresh. After work
+finishes, the header stays quiet even when some checks finished incomplete.
+An affected card and its comparison’s Why explanation retain the status and
+reason, and make clear that human choices are available. There is no repair action
+or next-retry time. Cards still show their own status and highlight changed grouping.
+Checks that finish without changing grouping, or in an unrelated view, do not by
+themselves request a replacement view. The single **Refresh**
 button highlights waiting updates, including changed photo information.
 
 Background evidence changes only the next grouping snapshot. The grid adopts
 that snapshot automatically when browsing pauses, preserving loaded pages and a
 surviving scroll anchor. Open comparisons/lightboxes, selected batches and pending
 operations keep their current view fixed. A failed automatic update requires
-explicit Refresh and does not silently retry failed searches. Polling reads at
+explicit Refresh; this does not stop the independent background scheduler. Polling reads at
 most 50 cards near the visible cards or open comparison, every four seconds.
 A newly enlarged group can make an older smaller comparison unsafe to save; the
 existing membership checks require a refresh in that case. Human decisions,
@@ -252,9 +305,21 @@ and decision contract, not create a permanent second Curate pipeline.
 | `candidate-3` | 2026-09-21 | Owner scene/couple counterexample: repeated contrast between reciprocal subgroups can override hash support and provisional unknown joins. Preserve bounded result-window counts; verify larger hash-only groups so contrary evidence can arrive. Keep 50 results, pacing, complete-pass publication, and the landscape recovery rule. | PIC-382 / PIC-380 |
 | `candidate-3` scheduling / status follow-up | 2026-09-22 | Two-second healthy pacing, 30 automatic requests/minute, slow-response backoff, open/visible priority, immediate cached reuse and aggregate diagnostics. Visual queued/checking/done/attention markers; grouping rules, reference selection and result depth unchanged. | PIC-382 |
 | `candidate-3` review UX follow-up | 2026-09-22 | Automatically adopt complete snapshots at idle boundaries; freeze open comparisons and selections, preserve browsing position, and retain explicit Refresh for recovery. Remove manual stack-management controls; existing saved separations remain respected. No membership-rule or search-threshold change. | PIC-384 |
+| `candidate-3` background processing | 2026-09-23 | Process all pending candidates without browser demand; persist complete evidence, drain bounded active slots and retry failures with backoff. Compact global progress, Pending label and direct stack opening. Membership rules and search limits are unchanged. | PIC-385 |
+| `candidate-3` bounded checks | 2026-09-23 | One retry during a pass, then settle an incomplete check as usable for human curation. Preserve only finished outcomes, with distinct incomplete/inconclusive indicators. Supersedes the draft deferred-recovery queue. No grouping or search-limit change. | PIC-387 |
 
 When membership rules, thresholds or interpretation of signals change, increment
 the implementation identifier and add a row describing the behavioral change and
 its evidence. Preserve earlier entries. Documentation clarifications or layout-only
 changes do not require an algorithm-version change. Before making this the default
 Curate page, update the main user guide and remove superseded staging descriptions.
+
+## Referee handoff (planned)
+
+Similarity checks settle first, followed by the optional AI Stack Referee. Work
+still pending waits; a finished-incomplete check does not permanently block the
+enabled Keeper Referee. It may recommend keepers from the retained group with a
+clear not-fully-checked label. Provider/configuration safeguards, request budgets,
+response validation and human authority still apply. Failed check output never
+becomes a valid partition. This is the September 24 contract for PIC-370/PIC-116;
+this candidate implementation does not yet make either AI call.

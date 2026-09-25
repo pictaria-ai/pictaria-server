@@ -1,7 +1,7 @@
 import { reviewConfig } from '../enrich/reviewBuckets.mjs';
 import { Worker } from 'node:worker_threads';
 import { groupPhotos } from './grouping.mjs';
-import { candidateGroups } from './candidate.mjs';
+import { settledCandidateGroups, rememberSettledGroups } from './settled-groups.mjs';
 import { CurateRefinement } from './refinement.mjs';
 import { CurateError } from './contracts.mjs';
 import { CurateMetadataRefresher } from './metadata.mjs';
@@ -56,7 +56,7 @@ export class CurateService {
       },
     });
     const stacks = this.config.curateBurstGrouping !== false;
-    const ranks = this.refinement?.snapshot() ?? {};
+    this.refinement?.settingsChanged();
     const evidenceRevision = this.refinement?.revision ?? 0;
     if (this.current?.generation === this.store.generation() && this.current.stacks === stacks &&
         this.current.evidenceRevision === evidenceRevision) return this.current;
@@ -65,13 +65,13 @@ export class CurateService {
       // test-only SQLite cannot be shared with a read-only worker
       result = {
         generation: this.store.generation(),
-        ...(this.candidateEnabled ? candidateGroups(this.store.candidateRows(), { stacks, separations: this.store.separations(), ranks })
+        ...(this.candidateEnabled ? settledCandidateGroups(this.store, { stacks, connection: this.refinement?.connection })
           : groupPhotos(this.store.pending(), { stacks, separations: this.store.separations() })),
       };
     } else
       result = await new Promise((resolve, reject) => {
         const worker = new Worker(new URL('./worker.mjs', import.meta.url), {
-          workerData: { path: this.repo.databasePath, stacks, candidate: this.candidateEnabled, ranks },
+          workerData: { path: this.repo.databasePath, stacks, candidate: this.candidateEnabled, rankConnection: this.refinement?.connection },
           // Server/test-runner flags (including --input-type) need not be valid worker flags.
           execArgv: [],
         });
@@ -88,6 +88,8 @@ export class CurateService {
         });
       });
     this.abort.signal.throwIfAborted();
+    if (this.refinement) result.retentionLimited = await rememberSettledGroups(this.store, this.refinement.saved, result, this.refinement.now());
+    this.abort.signal.throwIfAborted();
     // No await between complete replacement and publication. A concurrent
     // source change remains queued in curate_dirty for the next rebuild.
     const byId = new Map(),
@@ -102,8 +104,8 @@ export class CurateService {
     this.metrics.rebuildMs = performance.now() - start;
     return this.current;
   }
-  async openView({ kind = 'all', search = '', sort = 'oldest', section = 'pending', category = 'all', retryChecks = true, replacesViewId = null } = {}) {
-    if (typeof retryChecks !== 'boolean' || !['pending', 'decided'].includes(section) || typeof category !== 'string' ||
+  async openView({ kind = 'all', search = '', sort = 'oldest', section = 'pending', category = 'all', replacesViewId = null } = {}) {
+    if (!['pending', 'decided'].includes(section) || typeof category !== 'string' ||
         !['all', ...this.categories().map(b => b.id)].includes(category) ||
         !['all', 'stacks', 'singles'].includes(kind) || !['oldest', 'newest'].includes(sort) ||
         typeof search !== 'string' || search.length > 200)
@@ -153,7 +155,6 @@ export class CurateService {
     // Capacity failure is explicit; no page silently drops part of a stack.
     const lease = await this.store.createView(section === 'decided' ? { ...current, method: 'decided' } : current, groups, { replacesViewId, sort, section, category });
     this.metadata.wake();
-    if (retryChecks) this.refinement?.retry();
     return this.page(lease.id);
   }
   categories() {
@@ -183,11 +184,12 @@ export class CurateService {
     }
     if (view.section !== 'decided') this.refinement?.demand(viewId, groups);
     if (view.section !== 'decided') this.refinement?.attention(viewId, visible, comparison);
-    const refinement = view.section === 'decided' ? null : this.refinement?.status(viewId, groups) ?? null;
+    const refinement = this.refinement?.status(viewId, view.section === 'decided' ? [] : groups) ?? null;
     return {
       viewId,
       expiresAt: view.expiresAt,
       total: view.total,
+      counts: view.counts ?? null,
       sort: view.sort ?? 'oldest',
       section: view.section ?? 'pending', category: view.category ?? 'all', categories: this.categories(),
       immichUrl: this.config.immichPublicUrl || null,
@@ -201,7 +203,7 @@ export class CurateService {
         Boolean(this.repo.db.prepare('SELECT 1 FROM curate_dirty LIMIT 1').get()),
       groups: groups.map((g) => ({ id: g.id, memberCount: g.ids.length, route: g.route,
           similarity: view.section === 'decided' ? null : this.refinement?.groupStatus(g) ?? null,
-          photos: this.store.covers(g.ids.slice(0, 1)) })),
+          photos: this.store.covers(g.ids.slice(0, 3)) })),
       nextOffset: offset + limit < view.total ? offset + limit : null,
     };
   }
@@ -328,21 +330,23 @@ export class CurateService {
     if (input.kind !== 'undo') await this.refresh();
     return this.repo.decisions.apply(input, (ids, reviewState, singlesOnly) => this.assertDecisionScope(ids, reviewState, singlesOnly));
   }
+  async backgroundTick() {
+    if (this.backgroundWork || this.closed) return;
+    this.backgroundWork = (async () => {
+      this.metadata.settingsChanged();
+      if (!this.refinement?.enabled() && !this.metadata.demanded()) return;
+      await this.refresh();
+      this.metadata.wake();
+      await this.refinement?.tick();
+    })();
+    try { await this.backgroundWork; this.backgroundError = null; }
+    catch { this.backgroundError = 'Curate checks paused. Background processing will retry.'; }
+    finally { this.backgroundWork = null; }
+  }
   start() {
     if (this.timer || this.closed) return;
-    this.timer = setInterval(() => {
-      this.metadata.settingsChanged();
-      void this.refinement?.tick().catch(() => {});
-      if (!this.metadata.demanded()) return;
-      void this.refresh()
-        .then(() => {
-          this.backgroundError = null;
-          this.metadata.wake();
-        })
-        .catch(() => {
-          this.backgroundError = 'Curate refresh failed; the previous view is still available.';
-        });
-    }, 1000);
+    this.timer = setInterval(() => { void this.backgroundTick(); }, 1000);
+    void this.backgroundTick();
     this.timer.unref();
   }
   settingsChanged() {
@@ -365,5 +369,6 @@ export class CurateService {
     await this.metadata.close();
     if (this.worker) await this.worker.terminate();
     await this.building?.catch(() => {});
+    await this.backgroundWork?.catch(() => {});
   }
 }

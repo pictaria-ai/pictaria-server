@@ -5,7 +5,7 @@ import { join } from 'node:path';
 import { Repository } from '../../src/enrich/repository.mjs';
 import { bootServer } from './harness.mjs';
 
-export async function curatePreviewFixture({ stackSize = 52, singles = 52, metadataReady = false } = {}) {
+export async function curatePreviewFixture({ stackSize = 52, singles = 52, metadataReady = false, stacking = true, prepare = () => {} } = {}) {
   const dir = mkdtempSync(join(tmpdir(), 'curate-preview-'));
   const repo = new Repository(join(dir, 'enrichment.sqlite'));
   repo.initSchema();
@@ -37,6 +37,7 @@ export async function curatePreviewFixture({ stackSize = 52, singles = 52, metad
   repo.setManualFrameTags({ assetIds: [contextId], addTags: ['frame/eligible'], removeTags: [], action: 'approve' });
   photoTags.get(contextId).add('frame/eligible');
   tags.set('frame/eligible', 'frame/eligible');
+  await prepare({ repo, id, assets, contextId, similarityResponses, detailResponses });
   // Seed the same facts that detail requests return, so unrelated interaction
   // tests do not race an initial source change. Refresh still runs normally.
   // Metadata/concurrency tests retain the default unobserved source projection.
@@ -110,6 +111,7 @@ export async function curatePreviewFixture({ stackSize = 52, singles = 52, metad
         IMMICH_PUBLIC_URL: base,
         IMMICH_API_KEY: 'synthetic',
         CURATE_REFEREE_ENABLED: 'false',
+        CURATE_BURST_GROUPING: String(stacking),
       },
     });
   } catch (error) {

@@ -4,19 +4,26 @@ PIC-369's first human-only flow is available at **`/curate-preview.html`** on th
 implementation branch. It uses the normal password gate, library, persistent
 grouping and decision service. **Choices are real:** saving a decision updates
 local human tags and queues their synchronization to Immich. Use a test instance
-for initial review. Merely opening the page starts bounded read-only metadata
-refresh and selective, paced Immich similarity searches, not AI requests or human decisions.
+for initial review. The server runs bounded read-only metadata refresh and selective, paced Immich
+similarity searches in the background with Stacks enabled and Immich configured.
+No browser is required, including for new arrivals from Enrich. This processing
+makes no AI requests or human decisions.
 
 PIC-382 adds [candidate stacking algorithm 3](CURATE-ALGORITHM.md): wider time
 candidates, contextual people signals, positive ThumbHash and reciprocal search
 ranks. Repeated searches that strongly favor two separate subgroups can now
 override a misleading ThumbHash match. The linked document owns exact rules,
-bounds and version history. Open
-**Why?** beside the similarity status for a concise explanation. It appears on
-hover, keyboard focus or tap without moving the photos.
+bounds and version history. Open **Why?** or the small similarity-status icon beside
+the comparison checkbox controls for a concise explanation. It appears on
+hover, keyboard focus or tap without moving the photos. One expanded explanation
+combines check limitations, plain-language grouping reasons and useful specifics,
+without a nested Technical details dropdown or duplicate raw wording. Recorded
+reasons without a plain-language translation remain visible. A small muted footer
+identifies the algorithm version for troubleshooting.
+The stack lightbox exposes the same explanation through **Why?**.
 
 The current `/curate.html` remains the default during this staging step. The
-preview now includes **To curate** and **Decided**; **More → Production Curate**
+preview now includes **Pending** and **Decided**; **More → Production Curate**
 keeps the released page accessible during testing. This temporary entry
 point allows human-flow review before production AI applicability, rollout and
 runtime acceptance are complete; it is not a second permanent Curate product.
@@ -29,24 +36,59 @@ in this preview, its proposed partitions are never saved.
 
 ## Review flow
 
-- **To curate** shows all pending photos by default. All, Stacks and Singles
+The header has three stable rows: Pending/Decided with activity, Refresh and More;
+All/Stacks/Singles on the left with date order, category and Search on the right;
+then selection on the left with shown counts and active background progress
+aligned together on the right. The header checkbox appears in Singles and Decided;
+All still allows checking individual single-photo cards. Hiding Pending-only
+filters or the selection checkbox does not move shared controls or the photo grid.
+The page reserves scrollbar space to keep controls aligned between long and short views.
+On narrow screens, **Filters** reveals date order, category and Search controls.
+Counts and progress each keep their own line, and the selection slot remains
+reserved in All and Stacks. Desktop keeps filters visible. The remembered sort is not changed by collapsing them.
+
+While Enrich is running, a red notice to the left of the header spinner says
+stacks may change as photos are added. It follows the live run state through
+the existing status updates, without needing Refresh or an additional poll.
+The notice stays on the lower of two reserved lines, with temporary update text
+above it, so neither message shifts the other. On narrow screens, these lines
+sit below the header controls and use the shorter **Enrich running — stacks may
+change.** wording, readable without a hover tooltip.
+
+Search updates after a short typing pause and keeps focus and cursor position
+while loading results. Text entered during an active request becomes the next
+search, with only the latest draft submitted. A failed request leaves that draft
+editable; **Refresh** searches it again. Background regrouping waits while a
+search draft has not been applied.
+
+- **Pending** shows all pending photos by default. All, Stacks and Singles
   filter the same view. **All categories** can narrow it to the existing Enrich
   review categories (Candidates, Should Review and Unlikely, or customized labels).
   A mixed stack belongs to its highest-priority member category, as in production;
   filtering or matching one member in search always retains the **whole** stack.
-- **Decided** shows individual photos with earlier human choices, with search
-  and date order. Open a photo or use its card actions to change that choice.
+- **Decided** shows individual photos with earlier human choices (including Fav), with search
+  and date order. The lightbox labels the saved **Current** outcome separately from
+  stack **Draft** choices; Yes is never filled by default. The saved decision button
+  has a subtle tint on the card and in the lightbox; Decided photos have no duplicate
+  outcome label over the image. Open a photo or use its card actions to change that choice.
   A newer concurrent decision invalidates the old action scope; it cannot be
-  silently overwritten. This view does not request stack similarity searches.
-- Cards show a cover, available caption, date and stack size. Filenames are omitted.
-  **Yes / Skip / Fav / No** are direct actions for single photos: Yes selects a
-  photo, Skip marks it reviewed without selecting it, Fav selects it as a favorite,
+  silently overwritten. Background checks continue for pending photos while you browse Decided.
+- Cards show a cover, up to three member thumbnails, available caption, capture date/time and stack size. Filenames are omitted.
+  Captions are limited to one line with an ellipsis so decision buttons stay
+  aligned. Hover for the full caption, or open the lightbox to read it.
+  Waiting/checking progress temporarily replaces the capture date on its existing
+  line. The date returns when checking stops, including incomplete or inconclusive
+  outcomes; those details remain on the status icon and in the comparison.
+  Long progress text is shortened with an ellipsis rather than enlarging the card.
+  **Yes / Skip / Fav / No** are direct actions for single photos: Yes keeps a
+  photo, Skip marks it reviewed without keeping it, Fav keeps it as a favorite,
   and No marks it Never show. None of these deletes the photo. Click the image for
-  large inspection; a stack opens its comparison first. The shared Settings gear
+  large inspection; a stack opens its comparison directly, without a separate
+  Compare button. The shared Settings gear
   opens the Curate section, without a second settings button on the page.
-- **Select single photos** selects the singles currently loaded, excluding stacks.
-  In Singles and Decided it reads **Select shown photos**; Stacks hides it.
-  Loading more does not add photos to the selection. Selected singles expose the same
+- **Check shown photos** checks the currently loaded photos in Singles or Decided.
+  All and Stacks hide this header control; All retains each single-photo checkbox.
+  Loading more does not check additional photos. The fixed bottom action bar does not move the grid. Checked singles expose the same
   **Yes / Skip / Fav / No** actions in one undoable operation
   (up to 1,000 photos). The server verifies these are still single photos at both
   operation creation and save; a regrouped photo requires a refresh.
@@ -59,43 +101,84 @@ in this preview, its proposed partitions are never saved.
   appear automatically when browsing pauses, preserving date order and your place.
   Open comparisons and bulk selections keep their current view.
 - Open a stack and use **Yes / Skip / Fav / No** beneath each photo. Click an
-  image to enlarge it. These choices remain a draft until **Save choices**; the
+  image to enlarge it. These choices remain a draft until **Save** or **Save & next**; the
   footer counts each outcome separately. Unmarked photos default to Skip, which
-  is neither deletion nor Never show. Saves with no Yes or Fav choices are neutral.
-- Stack checkboxes select photos for batch actions independently of their outcome.
-  **Select all** checks all actionable photos; it does not mark them Yes. When any
-  photos are checked, the same four choices appear beside the selection count.
-  Applying one changes only those photos; **Clear selection** clears the checkboxes
-  without undoing any draft choices. Nearby reference photos cannot be selected.
+  is neither deletion nor Never show.
+  Selected choices use the same subtle fills as Decided: teal for Yes, gray for
+  Skip, gold for Fav and red for No, in both the comparison and its lightbox.
+- Stack checkboxes check photos for batch actions independently of their outcome.
+  **Check all** checks all actionable photos; it does not mark them Yes. When any
+  photos are checked, the same four choices appear beside the checked count.
+  Applying one changes only those photos; **Clear checks** clears the checkboxes
+  without undoing any draft choices. Nearby reference photos cannot be checked.
+- **Save** returns to the grid. **Save & next** opens the next pending
+  comparison after this item's capture-time position, in the current filters and
+  date order. It opens a fresh view after the save, so the next comparison uses
+  the latest grouping, and loads more pages when needed. It does not wrap to
+  earlier items. An accepted save remains saved if opening the next item fails;
+  Refresh and Undo remain available. Undo after continuation refreshes the grid.
+  **Save & next** remains the primary button for every combination of outcomes,
+  including Skip-all. The compact header reads **Compare stack · N photos**;
+  the check-status icon sits beside the checkbox controls.
+- In a comparison, focus a photo using **Left/Right** or **1–9**, then use
+  **Y / S / F / N** to mark its draft outcome. **Enter** on the focused card
+  saves the comparison and continues **after at least one explicit draft choice**
+  (including Skip). Initial focus or checking boxes alone does not enable this
+  shortcut. The Save buttons still allow an intentional Skip-all. Enter on a
+  button or image retains its normal action. Modified/repeated keys, inputs, reference photos and uncertain
+  actions cannot invoke these shortcuts.
 - Comparisons with more than ten photos open in a compact grid; **Compact grid**
-  can be turned off for larger images.
+  can be turned off for larger images. Equal-height image areas keep decision
+  buttons aligned across different aspect ratios; photos are resized without cropping.
 - The lightbox follows the production layout: the photo fills the available
   space beside a narrow panel with caption, tags, capture date, enrichment score,
   producing model/profile when available, and an Immich link. On narrow screens
   the information panel scrolls below the photo.
+- The lightbox stays open while moving between single photos, including after a
+  decision or Undo. It keeps the previous image visible until the next image is
+  ready, briefly disabling decisions during the handoff. Adjacent images are
+  preloaded with a bounded five-image cache; a loading label appears when needed.
+  Closing the viewer cancels the pending transition. Failed previews show an
+  explicit unavailable message rather than leaving the previous photo under new details.
 - For **single photos**, buttons and production keyboard shortcuts save immediately:
   **Y/A** Yes, **S/V** Skip, **F** Fav, **N/R** No.
-  In To curate, an accepted decision advances to the next loaded card (loading the next page
+  In Pending, an accepted decision advances to the next loaded card (loading the next page
   when necessary); reaching a stack opens its complete comparison. Arrow keys
   browse without deciding. **Z** undoes the last accepted action, and **Escape**
   closes the viewer. Decided edits stay on the same photo for inspection. Modified/repeated keystrokes and typing in fields do not
   trigger decisions. A lost response holds the current photo and offers exact retry.
 - In a **stack lightbox**, the same four buttons and **Y / S / F / N** keys change
-  the draft choice; arrows browse members. **K** also toggles Yes/Skip for existing
-  keyboard users. Escape or Back to comparison returns to that draft. No shortcut
-  saves an individual stack member; use **Save choices** for the whole comparison.
+  the draft choice. Keyboard marks advance to the next actionable photo; marking
+  the last returns to the comparison without saving. Mouse buttons stay on the
+  current photo. Arrows browse, and **K** toggles Yes/Skip and advances. Escape
+  or Back to comparison returns to the draft. Save the complete comparison explicitly.
 - Already-kept nearby photos are bounded reference context. They have no decision
   controls and are excluded from every outcome payload. Singles expose
   these references as sidebar thumbnails, with a return button to the pending photo.
 - Stacks are a comparison aid. Choose any number of keepers without editing the
   stack first. There are no Remove from stack, Split into singles or Stack
-  corrections controls. The grey **Why?** beside the similarity status is a
-  read-only overlay, available on hover, focus or tap. Escape dismisses the overlay
+  corrections controls. The status icon opens a read-only explanation overlay,
+  available on hover, focus or tap. Escape dismisses the overlay
   before closing the comparison.
   Saved separations from earlier preview builds remain respected; removing these
   controls does not erase their data or change existing human decisions.
+- The last-save receipt and **Undo last save (Z)** are available inside the
+  comparison, including after Save & next opens another stack. This undoes the
+  previous saved decision, not an unsaved draft; Undo returns to the grid after
+  stack continuation. The compact footer keeps the outcome count, Undo and Save
+  actions together on wide screens; on narrow screens the Save buttons share a
+  second row, and the receipt text is available to assistive technology.
 - Immediate Undo is conditional on no newer human decision on any affected photo.
   The last action remains undoable until its server deadline (30 minutes).
+  After saving, the lightbox shows **Saved — press Z to undo** over the bottom
+  of the photo for five seconds. This reminder does not move the layout, appears
+  only after an accepted save (not a stack draft), and does not shorten the Undo
+  window when it disappears. Another save starts a fresh reminder.
+  The main page's last-action bar can be dismissed with **×** on its right edge.
+  Dismissing it does not cancel synchronization or Undo; **Z** remains available
+  on the grid as well as in the lightbox and comparison. Keyboard shortcuts are
+  ignored while editing a field or while another action is pending. The next saved
+  action shows the bar again.
   The visible Undo affordance does not survive a page reload; saved decisions and
   corrections do. Undo feedback says **Undid choices** and separately reports
   whether the restored tags have synchronized. Older decisions remain accessible
@@ -103,14 +186,33 @@ in this preview, its proposed partitions are never saved.
 - Save acceptance and Immich synchronization are separate. A failed sync can be
   retried without repeating the human decision or invoking AI.
 
-Cards have a small status circle: a muted spinner while queued, a blue spinner
-while checking, a green check when ready, and an amber attention marker when
-paused, limited, unavailable or still uncertain. Text labels explain each state;
-reduced-motion preferences stop the animation. Comparisons resolved locally say
-that no similarity search is needed. The open comparison and stack lightbox put the status near the top. Pending,
-inconclusive or incomplete checks explain that manual choices are still possible.
-If an updated grouping becomes available, the notice explains that the current
-comparison stays fixed and closing it lets the grid update.
+**Load more** only displays additional results; it is no longer needed to get
+those photos checked. The count distinguishes stacks and single photos. A small
+spinner beside **Refresh** indicates background activity across the pending queue;
+**Checking stacks · N remaining** appears beside the count without shifting the photo grid.
+This is the overall pending-check queue, including photos outside the current
+page or filters and while browsing Decided. It includes queued and in-progress
+checks; finished incomplete checks leave the remaining count. Each check covers a nearby
+group that may form several stacks, so it is not a count of final stack cards.
+Paused work has an attention indicator. Completed checks are quiet on cards; the
+comparison still exposes their status and explanation.
+
+Cards and comparisons use three simple presentations:
+
+- **Working:** a spinner labeled **Checking similarity**, with a queued label or
+  progress count where available. Reduced-motion preferences stop the animation.
+- **Ready:** no extra icon. Ordinary completion does not certify a perfect stack.
+  **Why?** remains available in the comparison, including when no search was needed.
+- **Limited evidence:** one muted **i** labeled **Grouped with limited evidence**.
+  This covers incomplete, unavailable, inconclusive and processing-limited checks.
+  Hover explains the specific cause; comparisons expose the same explanation through
+  **Why?**, available on hover, keyboard focus or tap. Successful but inconclusive
+  searches remain distinguishable from failed searches in the explanation.
+
+The open comparison keeps the small indicator or **Why?** at the right of its
+checkbox controls. The stack lightbox uses the same labels and reasons. Manual
+choices remain available in every status. Per-stack limitations do not use an
+amber warning; the header retains that treatment for overall paused work.
 
 Searches stay sequential but can start two seconds apart, up to 30 new automatic
 requests per minute. Slow responses add breathing room. The open comparison gets
@@ -128,27 +230,46 @@ affected cards; the grid adopts the result when browsing pauses. A single
 Checks that leave grouping unchanged do not request a new view. Results are applied as a complete time-candidate
 pass, never one search at a time. Missing targets and successful empty results
 remain unknown unless repeated subgroup evidence resolves the relationship.
-**Check complete · similarity uncertain** keeps the compatible
-time grouping provisional. Failed or unavailable searches do not fragment it.
-Completed evidence stays available while the
-view is active, so repeated Refresh does not restart checks on a ten-minute timer.
-After inactivity or a server restart, this bounded memory cache can be empty and
-a fresh pass may be needed. Changes to photos, people evidence or human corrections
-also require renewed checks for the affected candidate.
+Successful searches with inconclusive results keep the compatible time grouping
+provisional, labeled **Grouped with limited evidence**. Failed or unavailable
+searches do not fragment it.
+Completed evidence is saved, so inactivity and server restarts do not repeat
+unchanged checks. Finished incomplete checks retain their safe reason and
+established grouping; interrupted in-flight work can repeat. Changes to photos,
+people evidence or human corrections also require renewed checks for the affected
+candidate.
 
 Background updates appear automatically after a short browsing pause, at most
 once every five seconds. Open comparisons/lightboxes, selected batches, open
 menus, edited fields and pending action receipts prevent automatic replacement.
-Closing a comparison allows updates to appear; its membership and keeper draft
+Closing a comparison allows updates to appear. The open comparison does not
+show a routine close-to-refresh notice; its Why explanation remains available,
+and real save-conflict guards remain. Its membership and keeper draft
 never change underneath the user. Automatic updates retain the number of loaded
 pages where possible and anchor the scroll position to a surviving card. A failed
 update stops automatic replacement and asks for **Refresh**, disabling decisions
-until the view is reconciled. Automatic view replacement does **not** retry failed
-similarity searches; explicit Refresh still permits retry after the shared cooldown.
+until the view is reconciled. A failed similarity search gets one retry within the current pass. If it fails
+again, that candidate finishes with limited evidence and leaves the pending
+count. Its existing grouping remains usable, and human decisions work normally.
+There is no long-term repair queue or Retry now control. **Refresh** reloads the
+view; it does not restart finished checks.
+
+Limited evidence does not ask the user to repair a stack. The header shows active
+progress or paused work; once checks finish, it omits aggregate incomplete counts
+and the idle warning icon. Per-stack explanations remain available.
+
+These outcomes survive restart without keeping partial search rows or retry
+deadlines. Source/connection changes may invalidate the outcome normally. Incomplete passes never supply partial ranking evidence
+for regrouping.
 
 Accepted pending decisions remove only their cards from the displayed snapshot
 and Undo restores them there; this preserves navigation order while working
-through singles. Other cards do not regroup during an open comparison or viewer.
+through singles. Finished checks also preserve untouched neighbouring groups
+when decisions remove photos from their larger time cohort, across restart and
+Refresh. New arrivals and material evidence/constraint changes can invalidate
+that cached work. The next five comparisons in saved view order, then visible
+cards, get search priority without cancelling an in-flight request or recording
+permanent viewed state. Other cards do not regroup during an open comparison or viewer.
 Decided edits and Undo after changing views reload a fresh view. Photo-information
 refresh status is separate from AI status, and failed metadata refresh can be
 requested again from the open comparison. Unknown metadata is not claimed complete.
@@ -159,6 +280,22 @@ and explains that turning stacks off allows individual review. It never saves a
 page-sized subset as though it were the whole stack. Known thumbnail failures
 block Save until the previews can be retried.
 
+### Planned referee indicators
+
+The optional referees will add two independent indicators when integrated:
+**AI checked** for a successfully checked current grouping, and a gold **★**
+for Keeper Referee recommendations, with stars on the recommended photos and
+a recommendation count in the hover text. Either indicator can appear without
+the other; a keeper star does not imply that the Stack Referee ran.
+
+These badges must describe the current membership and applicable inputs. Changed
+photos or invalidated results must not retain a successful AI badge. A successful
+Stack Referee check can replace the limited-evidence icon when it resolves the
+grouping uncertainty; earlier evidence remains in **Why?**. Queued/running AI work
+uses a spinner naming the step. Unavailable AI results leave manual curation
+available with a quiet explanation rather than a permanent spinner. This is the
+agreed presentation plan only: this preview does not yet display AI referee badges
+or run these referees.
 ## Implementation boundaries
 
 - `public/curate/client.js` owns serialized view/comparison opens, tab ownership
@@ -191,8 +328,15 @@ block Save until the previews can be retried.
   The action is saved atomically with the separation; exact retries must preserve
   both the partition and its action. Existing records remain readable without
   fabricated history. An additive index supports the active-correction list.
+- The current preview uses enrichment schema **18** / persistent-state contract
+  **22**. Schema 16 added completed search evidence. The current result format
+  also records terminal incomplete outcomes in that same bounded store. Draft
+  retry checkpoints from the earlier unreleased preview are discarded; there is
+  no separate retry table or persisted partial-pass state. Schema 18 adds the
+  bounded-result member index used to preserve settled groupings after decisions;
+  prior completed records are captured lazily without repeating searches.
 - Startup creates the normal pre-migration recovery checkpoint. Downgrading to a
-  binary using contract 17 or earlier requires restoring the **complete** matching
+  binary using an older contract requires restoring the **complete** matching
   pre-upgrade checkpoint (including state metadata and databases); changing only
   the application image is blocked by the downgrade guard. See
   [upgrade and recovery](UPGRADING.md). The date-sort and combined-UI follow-ups add no further
@@ -207,7 +351,8 @@ legacy separation persistence/reset at the API layer, duplicated tabs, keyboard 
 390-pixel viewport. Viewer keyboard selection, compact grids, single-photo
 controls and failed-open recovery are also covered. Automatic-update tests cover
 open comparisons, bulk selections, pagination/scroll preservation, a failed
-replacement without retry loops, and explicit retry of paused similarity work.
+replacement without retry loops, and bounded similarity retries that settle
+incomplete groupings without blocking human choices.
 Date-order coverage includes pagination, duplicate stacks spanning distant dates,
 missing/equal dates, filters/search, browser preference, failed replacement,
 background arrivals, decisions/Undo and persisted view order after restart.
@@ -228,3 +373,11 @@ selection; it never applies a bulk keeper choice to stacks.
 Full production mixed-load/incremental-memory gates, 30k repeated browser workflow
 acceptance, operational migration/cutover and owner visual review remain required
 before v1.3 release. Local fixture/browser tests do not establish those gates.
+
+### Keeper-advice follow-up (PIC-116)
+
+This iteration remains human-only. When keeper advice is integrated, show the
+recommendation distinctly and initialize only untouched drafts. Never overwrite
+a human choice. Applicability follows the recorded check/policy state, including
+the approved provider image-limit exception for clearly labeled unchecked-size
+suggestions; it must not become a blanket requirement for a green check.

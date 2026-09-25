@@ -6,7 +6,17 @@ import { curatePreviewFixture } from './curatePreviewFixture.mjs';
 
 test('Curate preview date order is global and remembered across automatic updates', { timeout: 60000 }, async (t) => {
   if (!findChrome()) return t.skip('Chrome required');
-  const fixture = await curatePreviewFixture({ stackSize: 3, singles: 52 });
+  const fixture = await curatePreviewFixture({ stackSize: 3, singles: 52, metadataReady: true,
+    prepare({ repo, assets, id }) {
+      // Sorting must not race an unrelated unconfirmed -> supported route change.
+      // A locally resolved small stack needs no similarity searches.
+      for (let i = 1; i <= 3; i++) {
+        const thumbhash = Buffer.alloc(21, 0).toString('base64');
+        repo.updateAssetVisuals(id(i), { thumbhash });
+        assets.find(a => a.id === id(i)).thumbhash = thumbhash;
+      }
+    },
+  });
   const browser = await launchChrome(),
     page = await browser.newPage();
   t.after(async () => {
@@ -151,9 +161,9 @@ test(
     );
     for (const id of ['select-all', 'select-none'])
       assert.equal(await page.evaluate(`document.getElementById('${id}').hidden`), true);
-    assert.equal(await page.evaluate('document.querySelector("#apply").textContent'), 'Save choices');
+    assert.equal(await page.evaluate('document.querySelector("#apply").textContent'), 'Save');
     assert.equal(await page.evaluate('document.querySelector("#apply").classList.contains("primary")'), false);
-    await page.waitFor('document.querySelector("#photo-view").open');
+    await page.waitFor('document.querySelector("#photo-view").open && document.querySelector("#photo-loading").hidden');
     await click('[data-photo-action=approve]');
     await page.waitFor('!document.querySelector("#comparison").open && !document.querySelector("#refresh").disabled');
     assert.ok(fixture.repo.loadAssetTagsFor([fixture.id(1001)])[fixture.id(1001)].includes('frame/eligible'));
@@ -282,11 +292,12 @@ test(
       await page.send('Input.dispatchKeyEvent', { type: 'keyUp', key: ' ', code: 'Space', windowsVirtualKeyCode: 32 });
       assert.equal(await page.evaluate('document.querySelector("[data-keeper]").getAttribute("aria-pressed")'), 'true');
       await click('#photos [data-view]');
-      await wait('document.querySelector("#photo-view").open');
+      await wait('document.querySelector("#photo-view").open && !document.querySelector("#photo-keep").disabled');
       await page.evaluate('document.querySelector("#photo-keep").focus()');
       await page.send('Input.dispatchKeyEvent', { type: 'keyDown', key: 'k', code: 'KeyK' });
+      await wait(`!document.querySelector('#photo-keep').disabled && document.querySelector('#photo-large').src.includes('${fixture.id(2)}')`);
       assert.equal(await page.evaluate('document.querySelector("#photo-keep").getAttribute("aria-pressed")'), 'false');
-      await click('#photo-next');
+      // K already advanced to the next actionable photo.
       await click('#photo-keep');
       assert.equal(
         await page.evaluate('document.querySelectorAll("#photos [data-keeper][aria-pressed=true]").length'),
