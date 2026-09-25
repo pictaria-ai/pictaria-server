@@ -164,12 +164,19 @@ including a preserved consumed attempt.
 
 The September 25 policy replaces the earlier prototype cohort budget with a
 per-photo allowance. `CurateAiLimits`, supplied to the **one shared** executor,
-charges each participating photo at most three times per referee in a rolling
+charges each actionable photo at most three times per referee in a rolling
 30 minutes. Retries count, including timeouts whose upstream outcome is unknown.
 The separate limit of two invocations per unchanged role/input still applies.
-Read-only context photos count too. Each Photo Referee batch charges its own
-submitted photos, not every photo in other batches. Model/backend changes do
-not create a fresh allowance for the same photos.
+Already-kept read-only context does not consume that allowance: reusing the
+same references must not deny advice to unrelated stacks. Each Photo Referee
+batch charges only its actionable members, not references or other batches.
+Model/backend changes do not create a fresh allowance for the same photos.
+`photoIds` lists **all** submitted photos; `contextPhotoIds` identifies a unique
+subset of at most eight already-kept references. At least one actionable photo
+must remain, and the total envelope still includes context (at most 30 images
+and the separate provider/byte limits). The authoritative role adapter supplies
+and validates this distinction; it is not a client-supplied exemption. Context
+remains part of the exact-input identity and read-only in the result contract.
 
 Exact attempt, photo charges and provider ownership are admitted in one SQLite
 transaction immediately before dispatch. Checking admission during preparation
@@ -198,8 +205,11 @@ or correction. Never call it on refresh, restart, a preference toggle or a
 per-stack retry. It neither refunds allowances nor enqueues settled inputs.
 
 Only the exclusive server owner may call `recoverInterrupted(attempts)` before
-starting either role. It keeps all charges and pauses interrupted connections;
-opening another repository does not steal live work. `pruneObsolete()` accepts
+starting either role. It keeps all charges. An interrupted ordinary request
+enters the normal 30-second cooldown and gets at most one recovery request;
+an interrupted recovery request stays paused. Repeating startup neither moves
+that deadline nor grants another recovery. Opening another repository does not
+steal live work. `pruneObsolete()` accepts
 up to 200 input identities that the lifecycle owner has established are no
 longer current/queued or referenced by comparisons, Undo or advice. It waits
 out the 30-minute window, never removes a running attempt, and deletes expired
@@ -216,6 +226,17 @@ Both preview roles remain unavailable. PIC-118 still owns shared Enrich/Curate
 arbitration and wiring provider protection to Enrich. Production startup recovery,
 settling/coalescing and authoritative cleanup selection must be composed there
 before enabling roles; this patch does not change released Enrich behavior.
+The enablement work must also expose paused status with an explicit connection
+verification/recovery action. There is no general AI connection-test control in
+Settings today (the existing connectivity check is for Immich), so do not assume
+that path is already wired. A new successful, authorized Enrich request on the
+same pinned connection may verify recovery from a transient/interrupted pause;
+an older in-flight success must not clear a newer failure. Authentication and
+configuration pauses need explicit correction/verification. Do not schedule
+hourly probes, create work solely to test connectivity, refund exhausted inputs
+or revisit settled limited comparisons. Shared scheduling must make those
+recovery entry points available without allowing ordinary queued work to bypass
+the pause.
 
 ## Remaining integration
 

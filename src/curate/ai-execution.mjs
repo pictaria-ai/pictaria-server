@@ -60,7 +60,10 @@ export class CurateAiExecution {
   }
 
   async run(job) {
-    job = Object.freeze({ ...job, ...(job.photoIds ? { photoIds: Object.freeze([...job.photoIds]) } : {}) });
+    job = Object.freeze({ ...job,
+      ...(job.photoIds ? { photoIds: Object.freeze([...job.photoIds]) } : {}),
+      ...(job.contextPhotoIds ? { contextPhotoIds: Object.freeze([...job.contextPhotoIds]) } : {}),
+    });
     for (const name of ['prepare', 'submit', 'validate', 'accept', 'isCurrent'])
       if (typeof job?.[name] !== 'function') throw new TypeError(`Missing Curate AI ${name} callback.`);
     if (this.#busy) return { state: 'busy' };

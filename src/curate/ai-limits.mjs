@@ -52,16 +52,23 @@ CREATE TABLE IF NOT EXISTS curate_ai_skipped_inputs (
 `;
 
 function photoKeys(job) {
+  const context = job.contextPhotoIds ?? [];
   if (!['stack', 'keeper'].includes(job.role) || !validKey(job.inputKey) || !validKey(job.backendKey) ||
       !Array.isArray(job.photoIds) || job.photoIds.length < 1 || job.photoIds.length > 30 ||
       job.photoIds.some(id => typeof id !== 'string' || !id || id.length > 256) ||
-      new Set(job.photoIds).size !== job.photoIds.length)
+      new Set(job.photoIds).size !== job.photoIds.length ||
+      !Array.isArray(context) || context.length > 8 || context.length >= job.photoIds.length ||
+      new Set(context).size !== context.length || context.some(id => !job.photoIds.includes(id)))
     throw new TypeError('Invalid bounded AI request identity.');
-  return job.photoIds.map(digest);
+  // photoIds covers the entire request envelope. The authoritative role adapter
+  // identifies already-kept read-only context; only actionable members consume
+  // the churn allowance. References still count toward image/byte limits and
+  // the exact-input digest, and must never be supplied as client exemptions.
+  return job.photoIds.filter(id => !context.includes(id)).map(digest);
 }
 
 // Durable admission accounting, not a timer or repair queue. All three writes
-// (exact attempt, participating photos and provider ownership) commit together.
+// (exact attempt, actionable photos and provider ownership) commit together.
 export class CurateAiLimits {
   constructor(repo, { now = Date.now } = {}) { this.repo = repo; this.now = now; }
 
@@ -150,12 +157,17 @@ export class CurateAiLimits {
   }
 
   // Only the server owner calls this, alongside attempt recovery. Opening a
-  // repository does not recover anything. A crash cannot grant another probe.
+  // repository does not recover anything. An interrupted ordinary request gets
+  // the normal single recovery opportunity; an interrupted recovery stays
+  // paused. Repeated startup cannot reset the delay or grant another probe.
   recoverInterrupted(attempts) {
     if (attempts.repo !== this.repo) throw new TypeError('AI recovery must share one repository.');
     return this.repo.transaction(() => {
-      this.repo.db.prepare(`UPDATE curate_ai_backends SET state='paused',reason='interrupted',retry_at=NULL,
-        token=NULL,recovering=0,updated_ms=? WHERE token IS NOT NULL`).run(this.now());
+      const now = this.now();
+      this.repo.db.prepare(`UPDATE curate_ai_backends SET
+        state=CASE WHEN recovering=1 THEN 'paused' ELSE 'cooldown' END,
+        reason='interrupted',retry_at=CASE WHEN recovering=1 THEN NULL ELSE ? END,
+        token=NULL,recovering=0,updated_ms=? WHERE token IS NOT NULL`).run(now + AI_RECOVERY_DELAY_MS, now);
       return attempts.recoverInterrupted();
     });
   }

@@ -108,14 +108,21 @@ test('per-photo cap follows overlapping photos through splits/merges, independen
   assert.equal((await next.run(f.job(8, ['b', 'e']))).state, 'succeeded', 'new changed input can use expired allowance');
 }));
 
-test('retries and shared read-only context are charged; disjoint batches only charge their own photos', async () => fixture(async f => {
+test('shared kept context does not exhaust distinct stacks; retries still charge actionable photos', async () => fixture(async f => {
   const e = f.execution();
-  const invalid = { role: 'keeper', validate: () => { throw Error('bad answer'); } };
-  await e.run(f.job(1, ['pending-a', 'kept-context'], invalid));
-  await e.run(f.job(1, ['pending-a', 'kept-context'], invalid));
-  assert.equal((await e.run(f.job(2, ['pending-b', 'kept-context'], { role: 'keeper' }))).state, 'succeeded');
-  assert.equal((await e.run(f.job(3, ['pending-c', 'kept-context'], { role: 'keeper' }))).state, 'photo-limit');
-  for (let n = 4; n < 7; n++) assert.equal((await e.run(f.job(n, [`batch-${n}`], { role: 'keeper' }))).state, 'succeeded');
+  const contextPhotoIds = ['kept-a', 'kept-b'], options = { role: 'keeper', contextPhotoIds };
+  for (let n = 1; n <= 5; n++) {
+    assert.equal((await e.run(f.job(n, [`stack-${n}-a`, `stack-${n}-b`, ...contextPhotoIds], options))).state, 'succeeded');
+    f.tick(60_000);
+  }
+  assert.equal(f.repo.db.prepare('SELECT COUNT(*) n FROM curate_ai_photo_charges').get().n, 10);
+  const invalid = { ...options, validate: () => { throw Error('bad answer'); } };
+  const retry = f.job(6, ['stack-1-a', 'stack-1-b', ...contextPhotoIds], invalid);
+  await e.run(retry); await e.run(retry);
+  assert.equal((await e.run(f.job(7, retry.photoIds, options))).state, 'photo-limit');
+  assert.equal((await e.run(f.job(8, ['new-a', 'new-b', ...contextPhotoIds], options))).state, 'succeeded');
+  const freshOwner = f.open();
+  assert.equal((await f.execution(freshOwner).run(f.job(9, ['stack-1-a', 'new-c', ...contextPhotoIds], options))).state, 'photo-limit');
 }));
 
 test('preparation checkpoints never charge; disabled or stale preparation spends nothing', async () => fixture(async f => {
@@ -138,19 +145,57 @@ test('atomic admission rolls back all ledgers on database failure', async () => 
   assert.equal(f.limits.providerStatus(backendKey).state, 'ready');
 }));
 
-test('recovery has one owner; restart conservatively pauses interrupted dispatch, with no refund', async () => fixture(async f => {
+test('interrupted ordinary dispatch gets one recovery opportunity, without refund or restart reset', async () => fixture(async f => {
   const ticket = f.limits.start(f.job(), f.attempts);
   const other = f.open();
   assert.equal(other.limits.providerStatus(backendKey).state, 'busy', 'repository open never steals request');
   assert.equal(other.limits.start(f.job(2), other.attempts).state, 'provider-busy');
   assert.equal(other.limits.recoverInterrupted(other.attempts), 1);
   assert.equal(other.attempts.status('stack', key(1)).attempts, 1);
-  assert.deepEqual(other.limits.providerStatus(backendKey), { state: 'paused', reason: 'interrupted' });
+  const recovery = other.limits.providerStatus(backendKey);
+  assert.deepEqual(recovery, { state: 'cooldown', reason: 'interrupted', retryAt: f.time() + 30_000 });
   assert.equal(f.limits.finish(ticket), false);
   assert.equal(f.attempts.finish(ticket, 'succeeded'), false);
-  assert.equal(other.limits.connectionVerified(backendKey), true);
+  f.tick(10_000);
+  assert.equal(other.limits.recoverInterrupted(other.attempts), 0);
+  assert.deepEqual(other.limits.providerStatus(backendKey), recovery);
+  assert.equal((await f.execution(other).run(f.job())).state, 'provider-cooldown');
+  f.tick(20_000);
   assert.equal((await f.execution(other).run(f.job())).state, 'succeeded');
   assert.equal(other.attempts.status('stack', key(1)).attempts, 2);
+}));
+
+test('a crash during recovery leaves the connection paused even after another restart and six hours', async () => fixture(async f => {
+  const first = f.limits.start(f.job(), f.attempts);
+  f.limits.recoverInterrupted(f.attempts);
+  f.tick(30_000);
+  const recovery = f.limits.start(f.job(), f.attempts);
+  assert.equal(recovery.state, 'started');
+  const owner = f.open();
+  assert.equal(owner.limits.recoverInterrupted(owner.attempts), 1);
+  assert.deepEqual(owner.limits.providerStatus(backendKey), { state: 'paused', reason: 'interrupted' });
+  assert.equal(owner.attempts.status('stack', key(1)).attempts, 2);
+  f.tick(6 * 60 * 60_000);
+  assert.equal(owner.limits.recoverInterrupted(owner.attempts), 0);
+  assert.equal((await f.execution(owner).run(f.job(2, ['new']))).state, 'provider-paused');
+  assert.equal(f.limits.finish(first), false);
+  assert.equal(f.limits.finish(recovery), false);
+  assert.equal(owner.limits.connectionVerified(backendKey), true);
+  assert.equal((await f.execution(owner).run(f.job())).state, 'exhausted', 'explicit verification does not refund work');
+  assert.equal((await f.execution(owner).run(f.job(2, ['new']))).state, 'succeeded');
+}));
+
+test('context exemptions are a bounded subset and cannot change during preparation', async () => fixture(async f => {
+  const e = f.execution();
+  for (const [ids, context] of [
+    [['a', 'b'], ['a', 'b']], [['a', 'b'], ['absent']], [['a', 'b'], ['b', 'b']],
+    [Array.from({ length: 10 }, (_, i) => `p${i}`), Array.from({ length: 9 }, (_, i) => `p${i}`)],
+    [Array.from({ length: 31 }, (_, i) => `p${i}`), ['p0']],
+  ]) await assert.rejects(e.run(f.job(1, ids, { contextPhotoIds: context })), /identity/);
+  const contextPhotoIds = ['kept'];
+  assert.equal((await e.run(f.job(1, ['pending', 'kept'], { contextPhotoIds,
+    prepare: async checkpoint => { contextPhotoIds.push('pending'); checkpoint(); } }))).state, 'succeeded');
+  assert.equal(f.repo.db.prepare('SELECT COUNT(*) n FROM curate_ai_photo_charges').get().n, 1);
 }));
 
 test('interrupted recovery and cancellation do not grant another recovery attempt', async () => fixture(async f => {

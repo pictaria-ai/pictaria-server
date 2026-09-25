@@ -206,10 +206,13 @@ are an intermediate aid; incomplete advice is acceptable and remains usable.
 - Keep one active Curate call and fair Enrich/Curate turns, independent role
   gates, at most two dispatched attempts per exact role/input and 30-second
   settling. Coalesce overlapping changes to the latest queued replacement.
-- Each participating photo has an allowance of three automatic comparisons per
-  role in a rolling 30 minutes, including retries and read-only context. Charge
-  only the photos actually included in each call. Disjoint Photo Referee batches
-  have separate participants; shared context consumes an allowance in each call.
+- Each actionable photo has an allowance of three automatic comparisons per
+  role in a rolling 30 minutes, including retries. Shared already-kept read-only
+  context is exempt from that churn allowance; it still counts toward the eight
+  context-photo cap and total request image/byte limits. Charge only actionable
+  members actually submitted in each call. Disjoint Photo Referee batches have
+  separate participants. This review clarification avoids shared references
+  exhausting advice for unrelated stacks.
   Changes in membership, model or backend do not reset the photo allowance.
 - A limit settles that input without further automatic advice. Expiry, refresh,
   restart and toggles never resurrect it. Newly changed eligible inputs may be
@@ -219,7 +222,12 @@ are an intermediate aid; incomplete advice is acceptable and remains usable.
   least 30 seconds (longer when Retry-After requires it), then admits one recovery
   request. Another shared failure pauses until explicit connection recovery.
   Dispatched requests, including timeouts, remain charged. A bad answer is an
-  input failure, not evidence of a service-wide outage.
+  input failure, not evidence of a service-wide outage. An interrupted ordinary
+  request gets that same one bounded recovery; an interrupted recovery pauses.
+  Repeated startup cannot extend or reset it. Before activation, expose pause
+  status and a deliberate verification/recovery action; a new successful
+  authorized Enrich request on the same pinned connection may resolve a
+  transient/interrupted pause. No hourly probes or repair-on-expiry queue.
 - Keep one shared executor. Only the exclusive server owner may recover
   interrupted work. Retire obsolete inactive records after current/queued
   work, comparison/Undo/advice references and the budget window no longer need
