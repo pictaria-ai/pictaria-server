@@ -76,7 +76,7 @@ test('one lane across references; abort stops work and does not cache a late res
   controller.abort();
   assert.equal(calls[0].signal.aborted, true);
   release({ assets: { items: [item('b')] } });
-  await assert.rejects(running, /interrupted or timed out/);
+  await assert.rejects(running, { code: 'similarity_timeout' });
   assert.equal(calls.length, 1); assert.equal(search.cache.size, 0);
 });
 
@@ -168,7 +168,7 @@ test('real HTTP adapter enforces response byte limit and whole-exchange deadline
 });
 
 test('upstream errors give actionable messages without forwarding private diagnostics', async t => {
-  for (const [status, expected] of [[400, /Smart Search/], [401, /asset.read/], [429, /Immich is busy/], [500, /Could not load/]]) await t.test(String(status), async t => {
+  for (const [status, expected] of [[400, /Smart Search/], [401, /asset.read/], [429, /Immich was busy/], [500, /Could not load/]]) await t.test(String(status), async t => {
     const { search, calls } = setup(t, () => { throw new ImmichApiError('private-photo-and-secret', status); });
     await assert.rejects(search.search('a'), error => { assert.match(error.message, expected); assert.doesNotMatch(error.message, /private-photo|secret/); return true; });
     assert.equal(calls.length, 1);
@@ -264,4 +264,56 @@ test('oversized rank groups are rejected without sampling; expired views and shu
   assert.equal(calls.length, 1); assert.equal(search.owner, null);
   curate.lab.views.clear();
   assert.throws(() => curate.lab.ranks.plan(body), { code: 'lab_expired' });
+});
+
+test('confirmed missing embeddings use safe diagnostics without delaying unrelated searches', async t => {
+  const s = setup(t, (_args, n) => {
+    if (n === 1) throw new ImmichApiError('HTTP 400: Asset private-id has no embedding; token=private-secret', 400);
+    return { assets: { items: [item('a')] } };
+  });
+  await assert.rejects(s.search.search('a'), e => {
+    assert.equal(e.code, 'similarity_embedding_missing');
+    assert.doesNotMatch(e.message, /private-id|private-secret/); return true;
+  });
+  assert.equal(s.search.cache.size, 0);
+  s.advance(limits.minIntervalMs);
+  assert.deepEqual((await s.search.search('b')).ids, ['a']);
+  assert.equal(s.calls.length, 2);
+});
+
+test('unavailable reference responses keep normal pacing for other photos', async t => {
+  for (const [status, message] of [
+    [400, 'Not found or no asset.read access'],
+    [400, 'Other validation failure'],
+    [404, 'Asset private has no embedding'],
+    [422, 'private diagnostic'],
+  ]) await t.test(`${status} ${message}`, async t => {
+    const s = setup(t, (_args, n) => {
+      if (n === 1) throw new ImmichApiError(message, status);
+      return { assets: { items: [item('a')] } };
+    });
+    await assert.rejects(s.search.search('a'), { code: 'similarity_reference_unavailable' });
+    assert.equal(s.search.cache.size, 0);
+    s.advance(limits.minIntervalMs - 1);
+    await assert.rejects(s.search.search('b'), { code: 'similarity_cooldown' });
+    s.advance(1);
+    assert.deepEqual((await s.search.search('b')).ids, ['a']);
+    assert.equal(s.calls.length, 2);
+  });
+});
+
+test('global failures retain their classification and shared cooldown', async t => {
+  for (const [status, message, code] of [
+    [400, 'Smart search is not enabled', 'similarity_search_disabled'],
+    [401, 'private diagnostic', 'similarity_access_denied'],
+    [403, 'private diagnostic', 'similarity_access_denied'],
+    [429, 'private diagnostic', 'similarity_rate_limited'],
+    [500, 'private diagnostic', 'similarity_unavailable'],
+  ]) await t.test(code + status, async t => {
+    const s = setup(t, () => { throw new ImmichApiError(message, status); });
+    await assert.rejects(s.search.search('a'), { code });
+    s.advance(limits.minIntervalMs);
+    await assert.rejects(s.search.search('b'), { code: 'similarity_cooldown' });
+    assert.equal(s.calls.length, 1); assert.equal(s.search.cache.size, 0);
+  });
 });

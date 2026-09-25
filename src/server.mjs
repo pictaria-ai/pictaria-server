@@ -185,7 +185,7 @@ const immich = new ImmichClient({
 });
 const tagWrites = new TagWriteCoordinator();
 const review = new ReviewService({ repo, immich, taxonomy, config, tagWrites, log: (message) => console.log(`[Pictaria] ${message}`) });
-const curate = new CurateService({ repo, config, immich, candidateOptions: { enabled: true } });
+const curate = new CurateService({ repo, config, immich, review, candidateOptions: { enabled: true } });
 const captionWriteback = new CaptionWritebackService({ repo, immich, config, log: (message) => console.log(`[Pictaria] ${message}`) });
 const aiTagSync = new AiTagSyncService({ repo, immich, review, tagWrites, config, log: message => console.log(`[Pictaria] ${message}`) });
 const enrichRunner = new EnrichJobRunner({ repo, immich, taxonomy, config, profiles, onTagsQueued: () => aiTagSync.wake() });
@@ -309,7 +309,7 @@ lifecycle.register('backup', 3000, (timeoutMs) => awaitDrain(backupDrain, timeou
 lifecycle.register('thumbhash-backfill', 3000, (timeoutMs) => awaitDrain(thumbhashBackfill, timeoutMs));
 
 const features = [
-  createCurateRoutes({ curate, review }),
+  createCurateRoutes({ curate, review, enrichRunner }),
   createActivityRoutes({ activityHistory }),
   createEnrichRoutes({ review, aiTagSync, enrichRunner, taxonomy, profiles, repo, requireImmich, config, immich, captionWriteback, referee, activityLog }),
   createAlbumsRoutes({ immich, store: albumStore, config, requireImmich, enrichRepo: repo }),

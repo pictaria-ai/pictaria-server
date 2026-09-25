@@ -129,11 +129,11 @@ test('oversized groups stay whole without eagerly fetching unbounded detail page
   assert.equal(calls, 1);
 });
 test('action copy distinguishes reviewed remainder, multiple keepers and Never show', () => {
-  assert.equal(decisionSummary({ a: 'approve', b: 'favorite', c: 'reviewed' }), 'Keep 2, mark 1 reviewed');
-  assert.equal(decisionSummary({ a: 'reviewed', b: 'reviewed' }), 'Mark all 2 reviewed');
-  assert.equal(decisionSummary({ a: 'approve', b: 'reject' }), 'Keep 1, never show 1');
-  assert.equal(decisionSummary({ a: 'approve' }), 'Keep');
-  assert.equal(decisionSummary({ a: 'reviewed' }), 'Mark reviewed');
-  assert.equal(decisionSummary({ a: 'favorite' }), 'Keep as favorite');
-  assert.equal(decisionSummary({ a: 'reject' }), 'Never show');
+  assert.equal(decisionSummary({ a: 'approve', b: 'favorite', c: 'reviewed' }), '1 Yes · 1 Skip · 1 Fav');
+  assert.equal(decisionSummary({ a: 'reviewed', b: 'reviewed' }), '2 Skip');
+  assert.equal(decisionSummary({ a: 'approve', b: 'reject' }), '1 Yes · 1 No');
+  assert.equal(decisionSummary({ a: 'approve' }), '1 Yes');
+  assert.equal(decisionSummary({ a: 'reviewed' }), '1 Skip');
+  assert.equal(decisionSummary({ a: 'favorite' }), '1 Fav');
+  assert.equal(decisionSummary({ a: 'reject' }), '1 No');
 });

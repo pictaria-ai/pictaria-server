@@ -1,0 +1,94 @@
+import { node } from './photos.js';
+import { plainReasons } from './explanation-copy.js';
+
+// An overlay inside the active dialog: hover, focus or tap never reflows photos.
+export function explanation(comparison, prefix, status = null) {
+  const title = comparison.ids?.length === 1 ? 'Why this photo?' : 'Why this stack?';
+  const wrap = node('span', undefined, 'why-tooltip');
+  const trigger = node('button', 'Why?', 'why-trigger');
+  trigger.type = 'button';
+  trigger.setAttribute('aria-label', title);
+  trigger.setAttribute('aria-describedby', prefix);
+  const panel = node('div', undefined, 'why-content');
+  panel.id = prefix;
+  panel.setAttribute('role', 'tooltip');
+  panel.hidden = true;
+  if (status) {
+    if (status.indicator) {
+      const indicator = status.indicator;
+      indicator.removeAttribute('role');
+      indicator.removeAttribute('aria-label');
+      indicator.removeAttribute('title');
+      indicator.setAttribute('aria-hidden', 'true');
+      trigger.replaceChildren(indicator);
+      trigger.classList.add('status-trigger');
+    }
+    trigger.setAttribute('aria-label', `${status.title || 'Stack comparison'}. ${title}`);
+    panel.append(node('strong', status.title || 'Stack comparison', 'why-status'));
+    if (status.detail) panel.append(node('p', status.detail));
+  }
+  panel.append(node('strong', title));
+  const reasons = node('ul');
+  reasons.id = `${prefix}s`;
+  reasons.append(...plainReasons(comparison).map((reason) => node('li', reason)));
+  panel.append(reasons);
+  const algorithm = node(
+    'p',
+    /^candidate-\d+$/.test(comparison.algorithm)
+      ? `Candidate algorithm ${comparison.algorithm.split('-')[1]} · no AI stack check`
+      : 'Grouping from this saved view',
+    'p-muted why-algorithm',
+  );
+  panel.append(algorithm);
+  let pinned = false;
+  wrap.dismiss = () => {
+    panel.hidden = true;
+    pinned = false;
+  };
+  const show = () => {
+    panel.hidden = false;
+    const rect = trigger.getBoundingClientRect(),
+      width = panel.offsetWidth,
+      height = panel.offsetHeight;
+    panel.style.left = `${Math.max(12, Math.min(rect.left, innerWidth - width - 12))}px`;
+    panel.style.top = `${Math.max(12, rect.bottom + height > innerHeight - 12 ? rect.top - height : rect.bottom)}px`;
+  };
+  wrap.addEventListener('pointerenter', (event) => {
+    if (event.pointerType === 'mouse') show();
+  });
+  wrap.addEventListener('pointerleave', () => {
+    if (!pinned && !wrap.contains(document.activeElement)) wrap.dismiss();
+  });
+  trigger.addEventListener('focus', show);
+  wrap.addEventListener('focusout', (event) => {
+    if (!wrap.contains(event.relatedTarget)) wrap.dismiss();
+  });
+  trigger.onclick = () => {
+    if (pinned) wrap.dismiss();
+    else {
+      pinned = true;
+      show();
+    }
+  };
+  wrap.append(trigger, panel);
+  return wrap;
+}
+function dismissAll(event) {
+  for (const tooltip of document.querySelectorAll('.why-tooltip')) {
+    if (event?.target instanceof Node && tooltip.contains(event.target)) continue;
+    tooltip.dismiss();
+  }
+}
+document.addEventListener('pointerdown', dismissAll);
+document.addEventListener('scroll', dismissAll, true);
+window.addEventListener('resize', dismissAll);
+document.addEventListener(
+  'keydown',
+  (event) => {
+    if (event.key !== 'Escape' || !document.querySelector('.why-content:not([hidden])')) return;
+    dismissAll();
+    event.preventDefault();
+    event.stopImmediatePropagation();
+  },
+  true,
+);

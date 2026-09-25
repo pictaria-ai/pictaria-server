@@ -6,13 +6,14 @@ import { tmpdir } from 'node:os';
 import { Repository } from '../../src/enrich/repository.mjs';
 import { CurateService } from '../../src/curate/service.mjs';
 import { CurateSimilaritySearch } from '../../src/curate/similarity.mjs';
+import { ImmichApiError } from '../../src/immich.mjs';
 import { REFINEMENT_LIMITS } from '../../src/curate/refinement.mjs';
 import { observedRanks, searchItems } from './fixtures/rankContrast.mjs';
 
-async function setup(t, { n = 3, respond, hashes = false } = {}) {
+async function setup(t, { n = 3, respond, hashes = false, canonical = false } = {}) {
   const dir = mkdtempSync(join(tmpdir(), 'curate-candidate-'));
   const repo = new Repository(join(dir, 'enrichment.sqlite')); repo.initSchema();
-  const ids = Array.from({ length: n }, (_, i) => `p${i}`), calls = [];
+  const ids = Array.from({ length: n }, (_, i) => canonical ? `00000000-0000-4000-8000-${String(i).padStart(12, '0')}` : `p${i}`), calls = [];
   let now = Date.now();
   for (const [i, id] of ids.entries()) {
     repo.upsertAsset({ id, fileCreatedAt: new Date(1767225600000 + i * 1000).toISOString(),
@@ -33,17 +34,17 @@ async function setup(t, { n = 3, respond, hashes = false } = {}) {
   return { repo, curate, config, immich, ids, calls, refine: curate.refinement, advance: ms => { now += ms; } };
 }
 
-function enrichCategories(repo, categories) {
+function enrichCategories(repo, categories, ids = categories.map((_, i) => `p${i}`)) {
   const schema = { properties: { has_people: { type: 'boolean' },
     people_count: { type: 'string', enum: ['none', 'one', 'couple', 'group', 'unknown'] } } };
   repo.saveRunConfiguration({ id: 'a'.repeat(64), inferenceId: 'b'.repeat(64),
     snapshot: { formatVersion: 1, inference: { contractVersion: 1, jsonSchema: schema } } });
-  for (const [i, category] of categories.entries()) repo.recordProcessingRun({ assetId: `p${i}`,
+  for (const [i, category] of categories.entries()) repo.recordProcessingRun({ assetId: ids[i],
     provider: 'test', model: 'test', promptVersion: 'v1', taxonomyVersion: 'v1', status: 'succeeded',
     configurationId: 'a'.repeat(64), normalizedOutput: { has_people: category !== 'none', people_count: category } });
 }
 
-test('strong people conflicts need no searches; resolved visible cards do not admit other work', async t => {
+test('strong people conflicts need no searches; filtered views do not restrict background work', async t => {
   const separated = await setup(t);
   enrichCategories(separated.repo, ['none', 'one', 'group']);
   const singles = await separated.curate.openView();
@@ -63,17 +64,18 @@ test('strong people conflicts need no searches; resolved visible cards do not ad
   const couple = await s.curate.openView({ search: 'couple' });
   assert.deepEqual(couple.groups.map(g => g.memberCount), [2]);
   assert.equal(couple.groups[0].similarity, null);
-  assert.equal(couple.refinement.pending, 0);
-  await s.refine.tick(); assert.equal(s.calls.length, 0);
+  assert.equal(couple.refinement.pending, 4);
+  await s.refine.tick(); assert.equal(s.calls.length, 1);
+  s.advance(5000);
 
   const all = await s.curate.openView();
-  assert.equal(all.refinement.pending, 4);
+  assert.equal(all.refinement.pending, 3);
   assert.equal(all.groups.find(g => g.memberCount === 2).similarity, null);
   for (let i = 0; i < 4; i++) { await s.refine.tick(); s.advance(5000); }
   assert.deepEqual(s.calls.map(c => c.body.queryAssetId), ['p0','p1','p2','p5']);
-  const entry = [...s.refine.entries.values()][0];
+  const entry = Object.values(s.refine.snapshot())[0];
   assert.equal(entry.rows.p0.p5, 1, 'unqueried couple remains inside the original time cohort');
-  assert.equal(entry.complete, true);
+  assert.equal(s.refine.entries.size, 0);
   const refreshed = await s.curate.openView();
   assert.deepEqual(refreshed.groups.map(g => g.memberCount), [4,2]);
   assert.equal(refreshed.refinement.pending, 0);
@@ -127,9 +129,9 @@ test('completed rank contrast separates hash-matched compositions, preserving th
   s.advance(5000); await s.refine.tick(); assert.equal(s.calls.length, 6);
 });
 
-test('no searches on rebuild/startup; visible preview demand admits only paced, cached requests', async t => {
+test('background work starts without a view and preserves paced requests and open comparisons', async t => {
   const { curate, refine, calls, advance } = await setup(t);
-  await refine.tick(); assert.equal(calls.length, 0);
+  await curate.backgroundTick(); assert.equal(calls.length, 1);
   const view = await curate.openView();
   await refine.tick(); assert.equal(calls.length, 1);
   await refine.tick(); assert.equal(calls.length, 1);
@@ -150,7 +152,7 @@ test('no searches on rebuild/startup; visible preview demand admits only paced, 
   assert.equal(curate.repo.db.prepare('SELECT count(*) n FROM decision_operations').get().n, 0);
 });
 
-test('open comparisons take the next turn, then visible groups, without interrupting in-flight work', async t => {
+test('upcoming groups follow the current view order, then visible cards, without interrupting work', async t => {
   let release;
   const s = await setup(t, { n: 2, respond: (args, n) => n === 1
     ? new Promise(resolve => { release = resolve; }) : { assets: { items: [] } } });
@@ -159,24 +161,19 @@ test('open comparisons take the next turn, then visible groups, without interrup
     s.repo.upsertAsset({ id, fileCreatedAt: new Date(1767225600000 + group * 600_000 + i * 1000).toISOString() });
     s.repo.reviewListAdd([id], 'test');
   }
-  const view = await s.curate.openView();
+  const view = await s.curate.openView({ sort: 'newest' });
   const first = s.refine.tick();
-  s.curate.comparison(view.viewId, view.groups[2].id);
-  await s.refine.tick();
-  assert.equal(s.calls.length, 1);
+  s.curate.comparison(view.viewId, view.groups[0].id);
+  await s.refine.tick(); assert.equal(s.calls.length, 1);
   assert.equal(s.calls[0].signal.aborted, false);
   release({ assets: { items: [] } }); await first;
-  s.advance(1999); await s.refine.tick(); assert.equal(s.calls.length, 1);
-  s.advance(1); await s.refine.tick();
-  assert.equal(s.calls[1].body.queryAssetId, 'extra-2-0');
-  // Closing the comparison clears its priority; only the middle card is visible.
-  s.curate.page(view.viewId, 0, 50, { visibleGroupIds: [view.groups[1].id], comparisonGroupId: null });
   s.advance(2000); await s.refine.tick();
-  assert.equal(s.calls[2].body.queryAssetId, 'extra-1-0');
-  // Lost/hidden-page attention expires even if the broader view is still leased.
+  assert.equal(s.calls[1].body.queryAssetId, 'extra-1-0', 'prepare the next comparison, not the opened newest group');
+  s.curate.page(view.viewId, 0, 50, { visibleGroupIds: [view.groups[0].id], comparisonGroupId: null });
+  s.advance(2000); await s.refine.tick();
+  assert.equal(s.calls[2].body.queryAssetId, 'extra-2-0', 'visible work gets priority once the comparison closes');
   s.advance(12_000); await s.refine.tick();
-  assert.equal(s.calls[3].body.queryAssetId, 'p1');
-  assert.deepEqual(s.curate.store.viewGroups(view.viewId, 0, 50).map(g => g.ids.length), [2,2,2]);
+  assert.equal(s.calls[3].body.queryAssetId, 'p1', 'attention expires without a permanent viewed flag');
 });
 
 test('attention is bounded to groups in the saved view before any demand changes', async t => {
@@ -235,10 +232,10 @@ test('background additions never enlarge an already inspected comparison silentl
   await assert.rejects(curate.issueDecision(comparison.id), /membership changed/);
 });
 
-test('stacking off, replaced/idle views, connection changes and closing stop automatic work', async t => {
+test('idle/released views keep progressing; stacking off and connection changes cancel partial work', async t => {
   const { curate, refine, calls, advance, config, immich } = await setup(t);
   const view = await curate.openView();
-  advance(REFINEMENT_LIMITS.activeMs); await refine.tick(); assert.equal(calls.length, 0);
+  advance(REFINEMENT_LIMITS.activeMs); await refine.tick(); assert.equal(calls.length, 1);
   curate.page(view.viewId); await refine.tick(); assert.equal(calls.length, 1);
   config.curateBurstGrouping = false; curate.settingsChanged();
   advance(5000); await refine.tick(); assert.equal(calls.length, 1); assert.equal(refine.entries.size, 0);
@@ -247,7 +244,7 @@ test('stacking off, replaced/idle views, connection changes and closing stop aut
   immich.apiKey = 'changed'; curate.settingsChanged();
   assert.equal(refine.entries.size, 0); assert.equal(refine.views.size, 0);
   curate.page(replacement.viewId); await refine.tick(); assert.equal(calls.length, 2);
-  curate.store.releaseLease(replacement.viewId); advance(5000); await refine.tick(); assert.equal(calls.length, 2);
+  curate.store.releaseLease(replacement.viewId); advance(5000); await refine.tick(); assert.equal(calls.length, 3);
 });
 
 test('thirty new searches per minute and 40 per cohort; known local similarity skips network', async t => {
@@ -268,12 +265,18 @@ test('thirty new searches per minute and 40 per cohort; known local similarity s
   assert.equal(large.groups[0].memberCount, 41); assert.equal(oversized.calls.length, 0);
 });
 
-test('failure pauses without automatic retries; explicit Refresh retries after lane cooldown', async t => {
-  const { curate, refine, calls, advance } = await setup(t, { respond: () => { throw Error('private upstream detail'); } });
-  const view = await curate.openView(); await refine.tick();
-  assert.equal(refine.status().state, 'paused'); assert.doesNotMatch(JSON.stringify(curate.page(view.viewId)), /private upstream/);
-  advance(35000); await refine.tick(); assert.equal(calls.length, 1);
-  await curate.openView({ replacesViewId: view.viewId }); await refine.tick(); assert.equal(calls.length, 2);
+test('a failed pass finishes incomplete instead of staying in the checking queue', async t => {
+  const s = await setup(t, { n: 2, respond: () => { throw Error('private upstream detail'); } });
+  const view = await s.curate.openView();
+  for (let i = 0; i < 3; i++) { await s.refine.tick(); s.advance(30_000); }
+  const status = s.refine.status();
+  assert.equal(status.state, 'idle'); assert.equal(status.remainingGroups, 0);
+  assert.equal(status.checkedGroups, 0); assert.equal(status.incompleteGroups, 1);
+  assert.equal(s.curate.page(view.viewId).groups[0].similarity.state, 'incomplete');
+  assert.match(status.problem, /Could not load/);
+  assert.doesNotMatch(JSON.stringify(s.curate.page(view.viewId)), /private upstream/);
+  assert.equal(s.refine.entries.size, 0);
+  assert.equal(s.calls.length, 3);
 });
 
 test('changed cohort after I/O discards result; no unrelated IDs in retained matrix', async t => {
@@ -289,18 +292,19 @@ test('changed cohort after I/O discards result; no unrelated IDs in retained mat
   assert.equal(s.curate.page(view.viewId).groups[0].memberCount, 3);
 });
 
-test('inactive completed ranks expire and source changes invalidate whole cohorts', async t => {
+test('inactive completed ranks persist and source changes invalidate whole cohorts', async t => {
   const s = await setup(t);
   const view = await s.curate.openView();
   for (let i = 0; i < 3; i++) { await s.refine.tick(); s.advance(5000); }
   const oldRevision = s.refine.revision;
-  s.advance(REFINEMENT_LIMITS.cacheMs); s.refine.snapshot();
-  assert.equal(s.refine.entries.size, 0); assert.ok(s.refine.revision > oldRevision);
+  s.advance(24 * 60 * 60_000); s.refine.snapshot();
+  assert.equal(s.refine.entries.size, 0); assert.equal(s.refine.revision, oldRevision);
+  assert.equal(s.refine.saved.records.size, 1);
   await s.curate.refresh();
-  s.curate.page(view.viewId); await s.refine.tick();
+  await s.refine.tick(); assert.equal(s.calls.length, 3);
   s.repo.upsertAsset({ id: 'p1', fileCreatedAt: '2026-01-01T00:00:01Z', checksum: 'changed' });
   await s.curate.refresh(); s.advance(5000); await s.refine.tick();
-  assert.equal(s.refine.entries.size, 1, 'active view re-admits the revised candidate');
+  assert.equal(s.refine.entries.size, 1, 'background processing admits the revised candidate');
   assert.ok([...s.refine.entries.values()].every(e => s.refine.valid(e)));
 });
 
@@ -350,7 +354,7 @@ test('finished checks that change no grouping and work in another view do not ad
   const view = await s.curate.openView();
   const other = await s.curate.openView({ search: 'alone' });
   assert.equal(other.groups.length, 1);
-  assert.equal(other.refinement.pending, 0);
+  assert.equal(other.refinement.pending, 3);
   for (let i = 0; i < 3; i++) { await s.refine.tick(); s.advance(5000); }
   const checked = s.curate.page(view.viewId);
   assert.equal(checked.groups[0].similarity.state, 'checked');
@@ -362,27 +366,25 @@ test('finished checks that change no grouping and work in another view do not ad
   assert.equal(s.curate.page(other.viewId).updatesAvailable, false);
 });
 
-test('failed partial pass stays unpublished and resumes on explicit retry', async t => {
+test('one transient failure retries within the pass and publishes only the complete matrix', async t => {
   const s = await setup(t, { n: 3, hashes: true, respond: (args, n) => {
     if (n === 2) throw Error('synthetic failure');
     return { assets: { items: ['p0', 'p1', 'p2'].map(id => ({ id, type: 'IMAGE' })) } };
   } });
-  let view = await s.curate.openView();
-  await s.refine.tick(); s.advance(5000); await s.refine.tick();
-  assert.equal(s.curate.page(view.viewId).groups[0].similarity.state, 'paused');
-  assert.equal(s.curate.page(view.viewId).groups[0].memberCount, 3);
+  const view = await s.curate.openView();
+  await s.refine.tick(); s.advance(2000); await s.refine.tick();
   assert.equal(s.curate.current.groups[0].route, 'candidate-unconfirmed');
   assert.deepEqual(s.refine.snapshot(), {});
-  assert.equal(s.refine.revision, 0);
-  s.advance(35_000); await s.refine.tick(); assert.equal(s.calls.length, 2);
-  view = await s.curate.openView({ replacesViewId: view.viewId });
-  await s.refine.tick(); s.advance(5000); await s.refine.tick();
+  s.advance(30_000); await s.refine.tick();
+  assert.deepEqual(s.refine.snapshot(), {}, 'healthy rows remain unpublished until retry succeeds');
+  s.advance(2000); await s.refine.tick();
   assert.equal(s.refine.revision, 1);
   assert.equal(s.curate.page(view.viewId).refinement.ready, 1);
+  assert.equal(s.refine.status().incompleteGroups, 0);
   assert.equal(s.calls.length, 4);
 });
 
-test('a finished merge prompts only its view; capacity limits are visible without exceeding the bound', async t => {
+test('a finished merge prompts only its view; excess candidates wait without exceeding the active bound', async t => {
   const s = await setup(t, { hashes: true });
   s.repo.upsertAsset({ id: 'alone', fileCreatedAt: '2026-02-01', originalPath: '/alone.jpg' });
   s.repo.reviewListAdd(['alone'], 'test');
@@ -399,8 +401,8 @@ test('a finished merge prompts only its view; capacity limits are visible withou
   const full = await many.curate.openView();
   assert.equal(many.refine.entries.size, REFINEMENT_LIMITS.cohorts);
   assert.equal(full.refinement.totalGroups, 33);
-  assert.equal(full.refinement.limited, true);
-  assert.equal(full.groups.at(-1).similarity.state, 'limited');
+  assert.equal(full.refinement.limited, false);
+  assert.equal(full.groups.at(-1).similarity.state, 'waiting');
 });
 
 test('leases decode candidate singles across restart and old projections are upgraded lazily', async t => {
@@ -436,7 +438,7 @@ test('known image edits invalidate shared cached searches; people-only refresh r
   assert.ok([...s.refine.active()].every(id => s.refine.entries.has(id)));
 });
 
-test('the shared lane waits for lab ownership and aborts an idle in-flight preview request', async t => {
+test('the shared lane waits for lab ownership and continues after browser attention expires', async t => {
   let release;
   const s = await setup(t, { respond: () => new Promise(resolve => { release = resolve; }) });
   await s.curate.openView();
@@ -445,9 +447,9 @@ test('the shared lane waits for lab ownership and aborts an idle in-flight previ
   s.curate.similarity.release(owner);
   const work = s.refine.tick(); assert.equal(s.calls.length, 1);
   s.advance(REFINEMENT_LIMITS.activeMs); await s.refine.tick();
-  assert.equal(s.calls[0].signal.aborted, true);
+  assert.equal(s.calls[0].signal.aborted, false);
   release({ assets: { items: [] } }); await work;
-  assert.ok([...s.refine.entries.values()].every(e => Object.keys(e.rows).length === 0));
+  assert.equal([...s.refine.entries.values()][0].rows.p0 !== undefined, true);
 });
 
 test('a post-change view cannot reuse a background rebuild captured before the change', async t => {
@@ -468,4 +470,353 @@ test('a post-change view cannot reuse a background rebuild captured before the c
   const afterChange = s.curate.openView(); release(); await background;
   const view = await afterChange;
   assert.equal(view.groups.reduce((n, g) => n + g.memberCount, 0), 4);
+});
+
+test('background processing drains more than 32 scopes without views or Load more', async t => {
+  const s = await setup(t, { n: 2 });
+  for (let n = 1; n < 60; n++) for (let i = 0; i < 2; i++) {
+    const id = `backlog-${n}-${i}`;
+    s.repo.upsertAsset({ id, fileCreatedAt: new Date(1767225600000 + n * 600_000 + i * 1000).toISOString() });
+    s.repo.reviewListAdd([id], 'test');
+  }
+  for (let i = 0; i < 120; i++) {
+    await s.curate.backgroundTick(); s.advance(2000);
+    assert.ok(s.refine.entries.size <= 32);
+  }
+  assert.equal(s.refine.views.size, 0);
+  assert.equal(s.calls.length, 120);
+  assert.equal(s.refine.saved.records.size, 60);
+  assert.equal(s.refine.status().remainingGroups, 0);
+  assert.equal(s.refine.entries.size, 0);
+  // Later Enrich arrivals are picked up with the same server loop.
+  for (const [i,id] of ['arrival-a','arrival-b'].entries()) {
+    s.repo.upsertAsset({ id, fileCreatedAt: new Date(1767305600000 + i * 1000).toISOString() });
+    s.repo.reviewListAdd([id], 'enrich');
+  }
+  for (let i = 0; i < 2; i++) { await s.curate.backgroundTick(); s.advance(2000); }
+  assert.equal(s.calls.length, 122);
+  assert.equal(s.refine.status().checkedGroups, 61);
+});
+
+test('server start refreshes metadata and checks without opening a browser', async t => {
+  const s = await setup(t, { n: 2 });
+  const reads = [];
+  s.immich.getAsset = async id => { reads.push(id); return { id, people: [] }; };
+  s.curate.metadata.automatic = true;
+  CurateService.prototype.start.call(s.curate);
+  const deadline = Date.now() + 6000;
+  while (!s.calls.length) {
+    assert.ok(Date.now() < deadline, 'startup did not start checks');
+    await new Promise(r => setTimeout(r, 20));
+  }
+  assert.deepEqual(reads.sort(), s.ids);
+  assert.equal(s.refine.views.size, 0);
+  assert.equal(s.curate.repo.db.prepare("SELECT count(*) n FROM curate_leases").get().n, 0);
+});
+
+test('completed evidence survives service and database restart, while changed connections cannot reuse it', async t => {
+  const s = await setup(t);
+  for (let i = 0; i < 3; i++) { await s.curate.backgroundTick(); s.advance(2000); }
+  const grouping = s.curate.current.groups.map(g => g.id);
+  await s.curate.close();
+  const repo = new Repository(s.repo.databasePath); repo.initSchema();
+  const next = new CurateService({ repo, config: s.config, immich: s.immich,
+    metadataOptions: { automatic: false }, candidateOptions: { enabled: true } });
+  next.start = () => {};
+  t.after(async () => { await next.close(); repo.close(); });
+  await next.backgroundTick();
+  assert.deepEqual(next.current.groups.map(g => g.id), grouping);
+  assert.equal(s.calls.length, 3, 'restart does not request another completed matrix');
+  assert.equal(next.refinement.status().checkedGroups, 1);
+  s.immich.apiKey = 'new-connection'; next.settingsChanged();
+  assert.equal(next.refinement.saved.records.size, 0);
+  await next.backgroundTick();
+  assert.equal(s.calls.length, 4);
+  assert.equal(repo.db.prepare('SELECT count(*) n FROM decision_operations').get().n, 0);
+});
+
+test('failed groups yield the next turn to healthy work while global failures retain cooldown', async t => {
+  for (const status of [400, 401, 403, 429, 500]) await t.test(String(status), async t => {
+    const s = await setup(t, { n: 4, respond: args => {
+      if (args.body.queryAssetId.startsWith('p')) throw new ImmichApiError('Not found or no asset.read access', status);
+      return { assets: { items: [] } };
+    } });
+    for (let i = 0; i < 2; i++) {
+      const id = `healthy-${i}`;
+      s.repo.upsertAsset({ id, fileCreatedAt: new Date(1767226200000 + i * 1000).toISOString() });
+      s.repo.reviewListAdd([id], 'test');
+    }
+    await s.curate.backgroundTick();
+    const delay = status === 400 ? 2000 : 30_000;
+    s.advance(delay - 1); await s.curate.backgroundTick(); assert.equal(s.calls.length, 1);
+    s.advance(1); await s.curate.backgroundTick();
+    assert.equal(s.calls[1].body.queryAssetId, 'healthy-0');
+    s.advance(2000); await s.curate.backgroundTick();
+    assert.equal(s.refine.status().checkedGroups, 1);
+  });
+});
+
+test('a full evidence cache pauses publication without repeating completed searches', async t => {
+  const s = await setup(t);
+  const limits = s.refine.saved.limits;
+  s.refine.saved.limits = { ...limits, bytes: 1 };
+  for (let i = 0; i < 3; i++) { await s.curate.backgroundTick(); s.advance(2000); }
+  assert.equal(s.refine.status().state, 'limited');
+  assert.equal(s.refine.saved.records.size, 0);
+  for (let i = 0; i < 5; i++) { await s.curate.backgroundTick(); s.advance(60_000); }
+  assert.equal(s.calls.length, 3);
+  assert.equal(s.curate.current.groups[0].route, 'candidate-unconfirmed');
+  s.refine.saved.limits = limits;
+  await s.curate.backgroundTick();
+  assert.equal(s.refine.status().state, 'idle');
+  assert.equal(s.refine.saved.records.size, 1);
+  assert.equal(s.calls.length, 3);
+});
+
+test('turning Stacks off cancels an in-flight background request and does not publish its result', async t => {
+  let release;
+  const s = await setup(t, { respond: () => new Promise(resolve => { release = resolve; }) });
+  const work = s.refine.tick();
+  assert.equal(s.calls.length, 1);
+  s.config.curateBurstGrouping = false; s.curate.settingsChanged();
+  assert.equal(s.calls[0].signal.aborted, true);
+  release({ assets: { items: s.ids.map(id => ({ id, type: 'IMAGE' })) } });
+  await work;
+  assert.equal(s.refine.saved.records.size, 0);
+  assert.equal(s.refine.entries.size, 0);
+  await s.curate.backgroundTick(); assert.equal(s.calls.length, 1);
+});
+
+test('all search failure types stop after one retry and keep fallback grouping across restart and Refresh', async t => {
+  for (const [status, message] of [[400, 'Asset private has no embedding'], [404, 'private not found'],
+    [401, 'private access'], [429, 'private busy'], [500, 'private error']]) await t.test(String(status), async t => {
+    const s = await setup(t, { n: 3, respond: args => {
+      if (args.body.queryAssetId === 'p0') throw new ImmichApiError(message, status);
+      return { assets: { items: [{ id: 'p1', type: 'IMAGE' }] } };
+    } });
+    const before = await s.curate.openView();
+    for (let i = 0; i < 4; i++) { await s.curate.backgroundTick(); s.advance(30_000); }
+    assert.deepEqual(s.calls.map(c => c.body.queryAssetId), ['p0','p1','p2','p0']);
+    const result = s.refine.status();
+    assert.equal(result.state, 'idle'); assert.equal(result.pending, 0);
+    assert.equal(result.incompleteGroups, 1); assert.equal(result.checkedGroups, 0);
+    assert.equal(result.remainingGroups, 0); assert.equal(s.refine.entries.size, 0);
+    assert.deepEqual(s.refine.snapshot(), {});
+    assert.deepEqual(s.curate.current.groups.map(g => g.id), before.groups.map(g => g.id));
+    assert.doesNotMatch(JSON.stringify(s.repo.db.prepare('SELECT * FROM curate_rank_evidence').all()), /private|"rows"|"coverage"/);
+    const now = s.refine.now;
+    await s.curate.close();
+    const repo = new Repository(s.repo.databasePath); repo.initSchema();
+    const next = new CurateService({ repo, config: s.config, immich: s.immich,
+      metadataOptions: { automatic: false }, candidateOptions: { enabled: true, now } });
+    next.start = () => {};
+    next.similarity = new CurateSimilaritySearch({ curate: next, now });
+    t.after(async () => { await next.close(); repo.close(); });
+    s.advance(7 * 24 * 60 * 60_000); await next.backgroundTick();
+    const view = await next.openView({ retryChecks: true }); // Older clients cannot restart a finished check.
+    await next.backgroundTick();
+    assert.equal(s.calls.length, 4);
+    assert.equal(view.groups[0].similarity.state, 'incomplete');
+    assert.equal(next.refinement.status().state, 'idle');
+    assert.equal(next.refinement.status().incompleteGroups, 1);
+    assert.equal(repo.db.prepare('SELECT count(*) n FROM decision_operations').get().n, 0);
+  });
+});
+
+test('more than 32 failing groups settle without blocking the healthy backlog', async t => {
+  for (const message of ['Asset private has no embedding', 'Not found or no asset.read access']) await t.test(message, async t => {
+    const s = await setup(t, { n: 0, respond: args => {
+      if (+args.body.queryAssetId.split('-')[1] < 40) throw new ImmichApiError(message, 400);
+      return { assets: { items: [] } };
+    } });
+    for (let n = 0; n < 60; n++) for (let i = 0; i < 2; i++) {
+      const id = `backlog-${n}-${i}`;
+      s.repo.upsertAsset({ id, fileCreatedAt: new Date(1767225600000 + n * 600_000 + i * 1000).toISOString() });
+      s.repo.reviewListAdd([id], 'test');
+    }
+    for (let i = 0; i < 170; i++) {
+      await s.curate.backgroundTick(); s.advance(2000);
+      assert.ok(s.refine.entries.size <= 32);
+    }
+    assert.equal(s.calls.length, 160);
+    const status = s.refine.status();
+    assert.equal(status.checkedGroups, 20); assert.equal(status.incompleteGroups, 40);
+    assert.equal(status.remainingGroups, 0); assert.equal(status.state, 'idle');
+    assert.equal(s.refine.entries.size, 0); assert.equal(s.refine.saved.records.size, 60);
+  });
+});
+
+test('finished incomplete outcomes invalidate with source or connection changes', async t => {
+  for (const mode of ['source', 'connection']) await t.test(mode, async t => {
+    let fail = true;
+    const s = await setup(t, { n: 2, respond: () => {
+      if (fail) throw new ImmichApiError('Asset private has no embedding', 400);
+      return { assets: { items: [] } };
+    } });
+    for (let i = 0; i < 3; i++) { await s.curate.backgroundTick(); s.advance(2000); }
+    assert.equal(s.refine.status().incompleteGroups, 1);
+    fail = false;
+    if (mode === 'source') s.repo.updateAssetVisuals('p0', { thumbhash: Buffer.alloc(21, 12).toString('base64') });
+    else { s.immich.apiKey = 'replacement'; s.curate.settingsChanged(); }
+    for (let i = 0; i < 2; i++) { await s.curate.backgroundTick(); s.advance(2000); }
+    assert.equal(s.calls.length, 5);
+    assert.equal(s.refine.status().incompleteGroups, 0);
+    assert.equal(s.refine.status().checkedGroups, 1);
+  });
+});
+
+test('a full result store does not repeat failed searches or discard the finished outcome', async t => {
+  const s = await setup(t, { n: 2, respond: () => { throw new ImmichApiError('Asset private has no embedding', 400); } });
+  const limits = s.refine.saved.limits;
+  s.refine.saved.limits = { ...limits, bytes: 1 };
+  for (let i = 0; i < 6; i++) { await s.curate.backgroundTick(); s.advance(2000); }
+  assert.equal(s.calls.length, 3);
+  assert.equal(s.refine.status().state, 'limited');
+  s.refine.saved.limits = limits;
+  await s.curate.backgroundTick();
+  assert.equal(s.refine.status().state, 'idle');
+  assert.equal(s.refine.status().incompleteGroups, 1);
+  assert.equal(s.calls.length, 3);
+});
+
+test('a failed in-flight retry cannot settle an obsolete source scope', async t => {
+  let reject;
+  const s = await setup(t, { n: 2, respond: (_args, n) => {
+    if (n < 3) throw new ImmichApiError('Asset private has no embedding', 400);
+    return new Promise((_resolve, fail) => { reject = fail; });
+  } });
+  for (let i = 0; i < 2; i++) { await s.curate.backgroundTick(); s.advance(2000); }
+  const work = s.curate.backgroundTick();
+  while (!reject) await new Promise(resolve => setImmediate(resolve));
+  s.repo.updateAssetVisuals('p0', { thumbhash: Buffer.alloc(21, 12).toString('base64') });
+  reject(new ImmichApiError('Asset private has no embedding', 400));
+  await work;
+  assert.equal(s.refine.saved.records.size, 0);
+  assert.equal(s.refine.status().incompleteGroups, 0);
+});
+
+async function decideGroup(curate, groupId) {
+  const view = await curate.openView();
+  const group = groupId ? view.groups.find(g => g.id === groupId) : view.groups[0];
+  const comparison = curate.comparison(view.viewId, group.id);
+  const { expiresAt, ...issued } = await curate.issueDecision(comparison.id);
+  return curate.applyDecision({ ...issued, outcomes: Object.fromEntries(comparison.ids.map(id => [id, 'approve'])) });
+}
+async function restartCandidate(t, s) {
+  await s.curate.close();
+  const repo = new Repository(s.repo.databasePath); repo.initSchema();
+  const next = new CurateService({ repo, config: s.config, immich: s.immich,
+    metadataOptions: { automatic: false }, candidateOptions: { enabled: true } });
+  next.start = () => {};
+  t.after(async () => { await next.close(); repo.close(); });
+  await next.refresh();
+  return next;
+}
+
+for (const legacy of [false, true]) test(`deciding a sibling preserves completed groups through restart and Undo (legacy=${legacy})`, async t => {
+  const s = await setup(t, { n: 6, canonical: true });
+  enrichCategories(s.repo, ['one','one','one','couple','couple','couple'], s.ids);
+  for (let i = 0; i < 6; i++) { await s.curate.backgroundTick(); s.advance(2000); }
+  const original = s.curate.current.groups.map(g => ({ id: g.id, ids: g.ids }));
+  assert.deepEqual(original.map(g => g.ids.length), [3,3]);
+  assert.equal(s.calls.length, 6);
+  if (legacy) {
+    s.repo.db.exec("UPDATE curate_rank_evidence SET json=json_remove(json,'$.settled'), bytes=length(CAST(json_remove(json,'$.settled') AS BLOB)); DELETE FROM curate_rank_members;");
+  }
+  const next = await restartCandidate(t, s);
+  const receipt = await decideGroup(next, original[0].id);
+  await next.backgroundTick();
+  assert.deepEqual(next.current.groups.map(g => ({ id: g.id, ids: g.ids })), original.slice(1));
+  assert.equal(next.refinement.groupStatus(next.current.groups[0]).state, 'checked');
+  assert.equal(next.refinement.status().remainingGroups, 0);
+  assert.equal(s.calls.length, 6, 'no warmed in-memory search cache is needed');
+  const again = await restartCandidate(t, { ...s, curate: next });
+  await again.backgroundTick(); assert.equal(s.calls.length, 6);
+  assert.deepEqual(again.current.groups.map(g => g.id), original.slice(1).map(g => g.id));
+  const { expiresAt, ...undo } = receipt.undo;
+  await again.applyDecision(undo); await again.backgroundTick();
+  assert.deepEqual(again.current.groups.map(g => ({ id: g.id, ids: g.ids })), original);
+  assert.equal(s.calls.length, 6, 'Undo restores members without repeating the composition check');
+});
+
+test('finished incomplete candidates survive sibling decisions without publishing partial ranks', async t => {
+  const s = await setup(t, { n: 6, canonical: true, respond: args => {
+    if (args.body.queryAssetId.endsWith('000000000000')) throw new ImmichApiError('Asset p0 has no embedding', 400);
+    return { assets: { items: s.ids.map(id => ({ id, type: 'IMAGE' })) } };
+  } });
+  enrichCategories(s.repo, ['one','one','one','couple','couple','couple'], s.ids);
+  for (let i = 0; i < 8; i++) { await s.curate.backgroundTick(); s.advance(2000); }
+  const group = s.curate.current.groups[1].id;
+  const next = await restartCandidate(t, s);
+  await decideGroup(next, group); await next.backgroundTick();
+  assert.equal(s.calls.length, 7);
+  assert.equal(next.refinement.status().incompleteGroups, 1);
+  assert.equal(next.refinement.status().remainingGroups, 0);
+  assert.equal(next.refinement.groupStatus(next.current.groups[0]).state, 'incomplete');
+  assert.deepEqual(next.refinement.snapshot(), {});
+  assert.doesNotMatch(next.repo.db.prepare('SELECT json FROM curate_rank_evidence').get().json, /"rows"|"coverage"/);
+});
+
+test('decisions preserve original time boundaries; a new arrival invalidates the connected candidates', async t => {
+  const s = await setup(t, { n: 6, canonical: true, respond: args => ({ assets: { items:
+    (s.ids.indexOf(args.body.queryAssetId) >= 4 ? [...s.ids.slice(4), ...s.ids.slice(0,4)] : s.ids)
+      .map(id => ({ id, type: 'IMAGE' })) } }) });
+  for (let i = 0; i < 6; i++) s.repo.upsertAsset({ id: s.ids[i], fileCreatedAt: new Date(1767225600000 + i * 60_000).toISOString() });
+  for (let i = 0; i < 6; i++) { await s.curate.backgroundTick(); s.advance(2000); }
+  assert.deepEqual(s.curate.current.groups.map(g => g.ids.length), [4,2]);
+  const next = await restartCandidate(t, s);
+  next.repo.recordDecision({ assetIds: s.ids.slice(0,2), action: 'approve', addTags: ['frame/eligible'], removeTags: [] });
+  await next.backgroundTick();
+  assert.deepEqual(next.current.groups.map(g => g.ids), [s.ids.slice(2,4),s.ids.slice(4)]);
+  assert.equal(s.calls.length, 6);
+  next.repo.upsertAsset({ id: 'new', fileCreatedAt: new Date(1767225600000 + 150_000).toISOString() });
+  next.repo.reviewListAdd(['new'], 'test');
+  await next.backgroundTick();
+  assert.equal(s.calls.length, 7, 'changed membership starts new bounded work');
+  assert.ok(next.refinement.status().remainingGroups > 0);
+});
+
+test('retained neighbours invalidate for changed source evidence and explicit human separation', async t => {
+  for (const change of ['source', 'separation', 'removal']) await t.test(change, async t => {
+    const s = await setup(t, { n: 6, canonical: true });
+    enrichCategories(s.repo, ['one','one','one','couple','couple','couple'], s.ids);
+    for (let i = 0; i < 6; i++) { await s.curate.backgroundTick(); s.advance(2000); }
+    await decideGroup(s.curate);
+    const next = await restartCandidate(t, s), before = next.current.scopes[0].id;
+    if (change === 'source') next.repo.updateAssetVisuals(s.ids[3], { thumbhash: Buffer.alloc(21, 10).toString('base64') });
+    else if (change === 'removal') next.repo.db.prepare('DELETE FROM review_list WHERE asset_id=?').run(s.ids[3]);
+    else {
+      const view = await next.openView(), comparison = next.comparison(view.viewId, view.groups[0].id);
+      next.store.separate(comparison.id, [[s.ids[3]], s.ids.slice(4)]);
+    }
+    await next.backgroundTick();
+    assert.ok(!next.current.scopes.some(scope => scope.id === before));
+    assert.equal(s.calls.length, 7, 'material changes permit new bounded checking');
+  });
+});
+
+test('retention capacity is visible without repeating completed searches', async t => {
+  const s = await setup(t, { n: 2 });
+  s.refine.saved.limits = { ...s.refine.saved.limits, bytes: 500 };
+  for (let i = 0; i < 2; i++) { await s.curate.backgroundTick(); s.advance(2000); }
+  assert.equal(s.refine.saved.records.size, 1);
+  assert.equal(s.refine.status().state, 'limited');
+  assert.match(s.refine.status().problem, /recalculated after decisions/);
+  await s.curate.backgroundTick(); assert.equal(s.calls.length, 2);
+});
+
+test('next-comparison priority crosses pagination in the filtered saved order', async t => {
+  const s = await setup(t, { n: 0 });
+  for (let group = 0; group < 56; group++) for (let photo = 0; photo < 2; photo++) {
+    const id = `page-${group}-${photo}`;
+    s.repo.upsertAsset({ id, originalPath: group === 5 ? '/hidden.jpg' : '/visible.jpg',
+      fileCreatedAt: new Date(1767225600000 + group * 600_000 + photo * 1000).toISOString() });
+    s.repo.reviewListAdd([id], 'test');
+  }
+  const view = await s.curate.openView({ sort: 'newest', search: 'visible' });
+  assert.equal(view.total, 55); assert.equal(view.groups.length, 50);
+  s.curate.comparison(view.viewId, view.groups.at(-1).id); // group 6; group 5 is filtered out.
+  await s.refine.tick();
+  assert.equal(s.calls[0].body.queryAssetId, 'page-4-0');
+  assert.equal(s.refine.entries.size, 32, 'off-page priority uses the bounded active queue');
 });
