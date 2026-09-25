@@ -66,7 +66,7 @@ export class RankComparison {
       const plan = await request('lab/ranks/plan', this.body());
       if (this.disposed || generation !== this.generation) return;
       this.plan = plan; this.scope = plan.scope;
-      this.estimate.textContent = `${plan.newSearches} new searches · ${plan.cached} cached${plan.remaining ? ` · ${plan.remaining} left for later` : ''}. Paced 5 seconds apart.`;
+      this.estimate.textContent = `${plan.newSearches} new searches · ${plan.cached} cached${plan.remaining ? ` · ${plan.remaining} left for later` : ''}. At least 2 seconds apart; slower if Immich is busy.`;
       this.button.textContent = this.rows.size ? 'Check remaining references' : 'Check selected group';
       this.button.disabled = plan.newSearches + plan.cached === 0;
     } catch (error) {

@@ -3,7 +3,7 @@ import { CurateError } from '../curate/contracts.mjs';
 
 // Production foundation for PIC-368/369. The existing /api/review/assets UI
 // contract is intentionally unchanged until complete keeper-set actions land.
-export function createCurateRoutes({ curate, review = null }) {
+export function createCurateRoutes({ curate, review = null, enrichRunner = null }) {
   return async (request, response, url) => {
     if (!url.pathname.startsWith('/api/review/curate/')) return false;
     response.setHeader('Cache-Control', 'no-store');
@@ -63,15 +63,22 @@ export function createCurateRoutes({ curate, review = null }) {
               kind: url.searchParams.get('kind') ?? 'all',
               search: url.searchParams.get('q') ?? '',
               sort: url.searchParams.get('sort') ?? 'oldest',
+              section: url.searchParams.get('section') ?? 'pending', category: url.searchParams.get('category') ?? 'all',
             });
+      } else if (request.method === 'POST' && path === 'groups/status') {
+        const body = await readObject(request, { maxBytes: 12 * 1024 });
+        result = curate.page(body.viewId, body.offset ?? 0, body.limit ?? 50, body);
       } else if (request.method === 'POST' && path === 'groups') {
         const body = await readObject(request, { maxBytes: 4096 });
         result = await curate.openView({
           kind: body.kind,
           search: body.search,
-          sort: body.sort,
+          sort: body.sort, section: body.section, category: body.category,
           replacesViewId: body.replacesViewId,
         });
+      } else if (request.method === 'POST' && path === 'selection') {
+        const body = await readObject(request, { maxBytes: 140 * 1024 });
+        result = await curate.selection(body.viewId, body.groupIds);
       } else if (request.method === 'POST' && path === 'comparisons') {
         const body = await readObject(request, { maxBytes: 4096 });
         await curate.refresh();
@@ -120,6 +127,10 @@ export function createCurateRoutes({ curate, review = null }) {
         curate.store.releaseLease(body.id);
         result = { ok: true };
       } else return false;
+      // Read the live runner state on both initial loads and status polls; it
+      // is not part of the saved grouping snapshot and needs no separate poll.
+      if (path === 'groups' || path === 'groups/status')
+        result = { ...result, enrichRunning: enrichRunner?.isRunning() ?? false };
       sendJson(response, 200, result);
       return true;
     } catch (error) {

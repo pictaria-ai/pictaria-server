@@ -102,7 +102,7 @@ test('schema-14 corrections retain their original partitions without inventing a
     repo.db.exec('DROP TABLE curate_separation_actions; PRAGMA user_version=14');
     const migrated = new Repository(path);
     try {
-      assert.deepEqual(migrated.initSchema().applied,[15]);
+      assert.deepEqual(migrated.initSchema().applied,[15,16,17,18]);
       assert.equal(migrated.curate.corrections().corrections[0].action, null);
       assert.deepEqual(migrated.curate.separate(c.id,[['a'],['b']]),receipt);
       assert.deepEqual(migrated.curate.separations()[0].partitions,[['a'],['b']]);
@@ -516,7 +516,7 @@ test('migration from schema 12 queues only review rows; corrections/evidence/vie
     db.close();
     const migrated = new Repository(legacy);
     try {
-      assert.deepEqual(migrated.initSchema().applied, [13, 14, 15]);
+      assert.deepEqual(migrated.initSchema().applied, [13, 14, 15, 16, 17, 18]);
       assert.equal(migrated.db.prepare('SELECT COUNT(*) n FROM curate_dirty').get().n, 2);
       await migrated.curate.flush();
       assert.equal(migrated.curate.photo('a').recognizedCount, null);
@@ -587,13 +587,28 @@ test('equal capture dates and unknown dates have deterministic order in both dir
     assert.deepEqual(ids(await service.openView({sort: 'newest'})), ['b', 'a', 'y', 'z']);
   }));
 
+test('grid previews are bounded and include favorite status without loading tags or evidence', async () =>
+  fixture(async ({ repo, service, add }) => {
+    for (let i=0;i<12;i++) add(`p${i}`,i);
+    const view=await service.openView();
+    assert.equal(view.groups[0].memberCount,12);
+    assert.equal(view.groups[0].photos.length,3);
+    assert.ok(view.groups[0].photos.every(photo => !('tags' in photo) && !('evidence' in photo)));
+    repo.setManualFrameTags({assetIds:['p0'],addTags:['frame/eligible','frame/favorite'],removeTags:[],action:'favorite'});
+    const decided=await service.openView({section:'decided'});
+    const photo=decided.groups[0].photos[0];
+    assert.equal(photo.state,'approved');
+    assert.equal(photo.favorite,true);
+  }));
+
 test('foundation HTTP routes return complete groups and reject malformed or stale actions', async () =>
   fixture(async ({ repo, service, add }) => {
     const { createServer } = await import('node:http');
     const { createCurateRoutes } = await import('../../src/routes/curate.mjs');
     add('a');
     add('b', 1);
-    const route = createCurateRoutes({ curate: service });
+    let enrichRunning = false;
+    const route = createCurateRoutes({ curate: service, enrichRunner: { isRunning: () => enrichRunning } });
     const server = createServer(async (req, res) => {
       try {
         if (!(await route(req, res, new URL(req.url, 'http://local')))) res.writeHead(404).end();
@@ -616,8 +631,15 @@ test('foundation HTTP routes return complete groups and reject malformed or stal
       assert.equal((await (await fetch(base + 'groups?sort=newest')).json()).sort, 'newest');
       assert.equal((await (await post('groups', {sort: 'newest'})).json()).sort, 'newest');
       const v = await (await fetch(base + 'groups')).json();
+      assert.equal(v.enrichRunning, false);
+      enrichRunning = true;
+      assert.equal((await (await post('groups/status', { viewId: v.viewId, visibleGroupIds: [] })).json()).enrichRunning, true);
+      assert.equal((await (await post('groups', {})).json()).enrichRunning, true);
+      assert.equal((await (await fetch(base + 'groups?viewId=' + v.viewId)).json()).enrichRunning, true);
+      enrichRunning = false;
+      assert.equal((await (await post('groups/status', { viewId: v.viewId, visibleGroupIds: [] })).json()).enrichRunning, false);
       assert.equal(v.groups[0].memberCount, 2);
-      assert.equal(v.groups[0].photos.length, 1);
+      assert.equal(v.groups[0].photos.length, 2);
       assert.ok(v.groups[0].photos.every(p => !Object.hasOwn(p, 'evidence')));
       assert.equal((await post('comparisons', null)).status, 400);
       const c = await (await post('comparisons', { viewId: v.viewId, groupId: v.groups[0].id })).json();
@@ -1264,4 +1286,123 @@ test("waiting for a predecessor cannot expose another tab's still-building targe
       targetRelease.resolve();
       await Promise.allSettled([first, retry, other]);
     }
+  }));
+
+
+test('review category and search retain complete stacks; decided views have stable individual scope', async () =>
+  fixture(async ({ repo, service, add }) => {
+    add('00000000-0000-0000-0000-000000000001', 0, { originalPath: '/photos/match.jpg' });
+    add('00000000-0000-0000-0000-000000000002', 1);
+    add('00000000-0000-0000-0000-000000000003', 900);
+    service.review = {
+      taxonomy: {},
+      reviewRows: () => [
+        { assetId: '00000000-0000-0000-0000-000000000001', bucket: 'unlikely' },
+        { assetId: '00000000-0000-0000-0000-000000000002', bucket: 'candidates' },
+        { assetId: '00000000-0000-0000-0000-000000000003', bucket: 'should_review' },
+      ],
+    };
+    const candidates = await service.openView({ category: 'candidates', search: 'match' });
+    assert.equal(candidates.total, 1);
+    assert.equal(candidates.groups[0].memberCount, 2);
+    assert.equal((await service.openView({ category: 'unlikely' })).total, 0);
+    assert.equal(
+      (await service.openView({ category: 'should_review' })).groups[0].photos[0].id,
+      '00000000-0000-0000-0000-000000000003',
+    );
+    await assert.rejects(service.selection(candidates.viewId, [candidates.groups[0].id]), /only.*single/);
+    repo.setManualFrameTags({
+      assetIds: ['00000000-0000-0000-0000-000000000001'],
+      addTags: ['frame/eligible'],
+      removeTags: [],
+      action: 'approve',
+    });
+    const decided = await service.openView({ section: 'decided' });
+    assert.equal(decided.total, 1);
+    assert.equal(decided.groups[0].photos[0].state, 'approved');
+    const c = service.comparison(decided.viewId, decided.groups[0].id);
+    const { expiresAt, ...op } = await service.issueDecision(c.id);
+    assert.equal(op.snapshot.reviewState, 'decided');
+    const receipt = await service.applyDecision({
+      ...op,
+      outcomes: { '00000000-0000-0000-0000-000000000001': 'reject' },
+    });
+    assert.equal(receipt.assetCount, 1);
+    assert.deepEqual(
+      await service.applyDecision({ ...op, outcomes: { '00000000-0000-0000-0000-000000000001': 'reject' } }),
+      receipt,
+    );
+    await service.applyDecision({
+      operationId: receipt.undo.operationId,
+      kind: 'undo',
+      targetOperationId: receipt.operationId,
+    });
+    assert.ok(
+      repo
+        .loadAssetTagsFor(['00000000-0000-0000-0000-000000000001'])
+        ['00000000-0000-0000-0000-000000000001'].includes('frame/eligible'),
+    );
+    assert.ok(
+      !repo
+        .loadAssetTagsFor(['00000000-0000-0000-0000-000000000001'])
+        ['00000000-0000-0000-0000-000000000001'].includes('frame/never-show'),
+    );
+    await assert.rejects(service.issueDecision(c.id), /changed/);
+    await assert.rejects(service.openView({ section: 'invalid' }), /Invalid/);
+  }));
+
+test('bulk singles cannot act on new stack membership; decided snapshots reject concurrent changes', async () =>
+  fixture(async ({ repo, service, add }) => {
+    add('00000000-0000-0000-0000-000000000001', 0);
+    add('00000000-0000-0000-0000-000000000002', 900);
+    const view = await service.openView();
+    const c = await service.selection(
+      view.viewId,
+      view.groups.map((g) => g.id),
+    );
+    const { expiresAt, ...op } = await service.issueDecision(c.id);
+    add('00000000-0000-0000-0000-000000000002', 1);
+    await assert.rejects(
+      service.selection(
+        view.viewId,
+        view.groups.map((g) => g.id),
+      ),
+      /now in a stack/,
+    );
+    // Previously issued bulk operation must also reject a new stack, even when
+    // all new members were individually selected earlier.
+    await assert.rejects(
+      service.applyDecision({
+        ...op,
+        outcomes: {
+          '00000000-0000-0000-0000-000000000001': 'approve',
+          '00000000-0000-0000-0000-000000000002': 'approve',
+        },
+      }),
+      /changed/,
+    );
+    repo.setManualFrameTags({
+      assetIds: ['00000000-0000-0000-0000-000000000001'],
+      addTags: ['frame/eligible'],
+      removeTags: [],
+      action: 'approve',
+    });
+    const decided = await service.openView({ section: 'decided' });
+    const dc = service.comparison(decided.viewId, decided.groups[0].id);
+    const { expiresAt: until, ...dop } = await service.issueDecision(dc.id);
+    repo.setManualFrameTags({
+      assetIds: ['00000000-0000-0000-0000-000000000001'],
+      addTags: ['frame/favorite'],
+      removeTags: [],
+      action: 'favorite',
+    });
+    await assert.rejects(
+      service.applyDecision({ ...dop, outcomes: { '00000000-0000-0000-0000-000000000001': 'reject' } }),
+      /changed/,
+    );
+    assert.ok(
+      repo
+        .loadAssetTagsFor(['00000000-0000-0000-0000-000000000001'])
+        ['00000000-0000-0000-0000-000000000001'].includes('frame/favorite'),
+    );
   }));

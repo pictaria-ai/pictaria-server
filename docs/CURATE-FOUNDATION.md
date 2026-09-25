@@ -10,6 +10,13 @@ before AI integration and default-page cutover. It is not linked from the main n
 
 ## Grouping and evidence
 
+**Preview update:** PIC-382 now wires [candidate algorithm 3](CURATE-ALGORITHM.md)
+into the server's Curate Preview service. That versioned document defines the
+active preview policy. The `standard-1` rules below describe the retained initial
+foundation implementation and its baseline tests, not the new preview defaults.
+This staging choice adds no alternate user mode or permanent second pipeline.
+
+
 A stack represents plausible alternatives, rather than simply a shared moment.
 Standard grouping works without Enrich or an AI provider. Capture-time candidates
 use a 15-second gap and a 180-second total span, at most 32 recent candidates,
@@ -62,6 +69,7 @@ queue, and their projection can resume after interruption.
 | `curate_observations` | Extra Immich evidence for review-listed photos only: recognition, orientation, edit state and availability flags. Identity, dimensions and visual descriptors stay in `assets`. Absent fields do not erase observed recognition. At most 4 KiB and 100 recognized IDs, with omissions explicit. Removing a review row removes its extra observations. |
 | `curate_photos` | Compact indexed projection plus cold bounded evidence. The worker reads only grouping columns, not prompts, captions or full normalized Enrich results. |
 | `curate_metadata` / control | One durable refresh row per review photo, indexed due work, last observation result, claim cooldown and connection-wide retry state. No responses, credentials or provider prompts. Removing a review member removes its refresh row. |
+| `curate_rank_evidence` | Completed candidate-member rank matrices, keyed by exact input scope and Immich connection fingerprint. Bounded durable cache; see [automatic checks](CURATE-ALGORITHM.md#automatic-searches-and-stable-views). |
 | `curate_dirty` | Transactional change tracking across assets, successful enrichment, tags, membership, overrides and observations. Asset updates queue work only when a grouping source column changes; an unchanged discovery sync does not re-project the collection. Unchanged projections do not increment the grouping generation. |
 | `curate_separations` / members | Durable active human constraints, conditional reset and 30-minute correction Undo. Neither writes photo decisions or Immich tags. |
 | `curate_leases` / view snapshots / view groups / view replacements | Server-issued 30-minute scopes, at most 200 views and 200 comparisons, with one current comparison per view. Identical ordered memberships share immutable indexed snapshots; single-photo IDs are stored once per snapshot. The shared 5 MiB bound counts every retained snapshot, lease and replacement record. Closing/expiring the last owner removes its snapshot. Capacity refuses new scopes instead of evicting another view. |
@@ -80,8 +88,8 @@ Metadata refresh is a separate Immich-read lane, not the AI job queue:
 - At most 500 photos per batch, two concurrent reads, a 30-second request deadline
   and a 1 MiB response ceiling. Each result is applied in a short transaction,
   with a yield before the next request. Unknown optional fields do not cause a loop.
-- Pending review photos are due initially, then after 24 hours while a live view
-  exists. Observed image/detail changes can request an earlier read, with a durable
+- Pending review photos are due initially, then after 24 hours while Stacks is enabled and Immich configured.
+  The candidate service runs this lane without browser demand. Observed image/detail changes can request an earlier read, with a durable
   30-second per-photo minimum. Enrich output and human decisions alone do not.
   Reopening a page preserves these timestamps; restart preserves claims and retries.
 - Already-decided history is not scanned for refresh. Opening a comparison can
@@ -94,7 +102,7 @@ Metadata refresh is a separate Immich-read lane, not the AI job queue:
 - Applying a response checks the current connection, review membership, claim and
   source-image/detail fingerprint. A late response cannot overwrite a newer local
   observation or restore removed membership. Human decisions are never rewritten.
-- Stacks off, no connection, or no live view stops new work. Stacks/connection
+- Stacks off or no connection stops new background work. Stacks/connection
   changes and shutdown cancel in-flight reads. Enrich and AI-provider settings do
   not control this lane. A changed Immich connection resets its read/backoff state;
   prior evidence remains explicitly last-observed until replaced.

@@ -7,6 +7,130 @@ All notable changes to Pictaria Server are documented here. This project follows
 
 ### Development
 
+- Curate Preview places All/Stacks/Singles on the left and date, category and
+  Search filters on the right, with Search last. Shown counts and active progress
+  share the right side of the status row; the header checkbox appears in Singles
+  and Decided. Finished incomplete checks keep their per-stack explanations
+  without leaving an aggregate warning in the header. Search stays focused and
+  editable while results load; typing during a slow request applies the latest
+  text next, and failed requests preserve the search draft.
+  A red notice beside the header spinner warns while Enrich is running that
+  stacks may change as photos arrive. It keeps a fixed lower line when update
+  text appears above it, with shorter fully visible wording on phones. Reserved
+  scrollbar space prevents sideways movement between long and short views.
+  Card check progress temporarily replaces
+  the capture date on the same line, then restores it without resizing cards.
+  The lightbox briefly shows **Saved — press Z to undo** after saving, without
+  shortening the existing Undo window. The last-action bar has a dismiss button;
+  dismissing it leaves Undo available and the next saved action shows it again.
+  **Z** also undoes the last save from the grid, except while editing a field.
+  Stack status is simplified to a working spinner, quiet readiness, or a muted
+  **i** labeled **Grouped with limited evidence**. Hover and **Why?** retain the
+  specific reason, including whether searches failed or finished inconclusively.
+  Normal comparisons keep **Why?** without a completion checkmark.
+  Explanations show useful details together without a nested dropdown or duplicate
+  raw wording; the algorithm version remains in a small muted footer.
+
+- Curate Preview settles failed similarity checks after one retry instead of
+  keeping a long-term repair queue. Incomplete groupings remain ready for human
+  curation, and healthy stacks continue processing. Finished outcomes survive
+  restart; partial-pass checkpoints and retry deadlines are removed. Refresh
+  reloads the view without restarting checks. Failed and inconclusive checks use
+  the same muted information indicator, with distinct explanations. Saving one stack now
+  preserves its checked/incomplete neighbours across restart. Upcoming comparisons
+  and visible cards get priority; open comparisons no longer prompt users to
+  close them for routine grouping updates. Enrich schema 18 /
+  persistent-state contract 22 retains the normal pre-migration snapshot and
+  discards retry checkpoints from the earlier unreleased preview.
+
+- Curate Preview now distinguishes saved outcomes (including Fav) from drafts
+  and checked batches. Stack keyboard choices advance without saving; **Save &
+  next** continues with the latest grouping in the chosen date order. Undo is
+  available inside the next stack; Enter cannot save an untouched comparison.
+  Stack cards gain member previews and capture times, completed status is quieter, and Why
+  uses plain-language explanations. Mobile filters collapse, bulk actions stay
+  fixed below the grid, and comparisons retain the full uncropped images.
+  Decided cards subtly shade the current decision button instead of putting a
+  duplicate label over the photo; the lightbox uses the same shading.
+  Selected stack draft buttons use those same subtle fills for all four choices,
+  both beneath comparison photos and in the lightbox.
+  Stack comparisons combine the title and photo count, omit the instruction
+  paragraph, and place the check-status icon beside the checkbox controls.
+  They align decision buttons beneath equal-height uncropped photo
+  areas, and keep counts, Undo and Save actions in a slimmer footer.
+  Single-photo navigation and decisions retain the lightbox through loading,
+  preload adjacent images, and swap photos only when ready, avoiding the white
+  comparison-window flash. Open in Immich is compact and vertically centered;
+  the stack action now reads **Save** alongside **Save & next**.
+  **Save & next** stays the primary action regardless of the chosen outcomes.
+  Card captions stay on one line with an ellipsis, keeping decision buttons
+  aligned; single-photo checkboxes have even padding. Background progress shows
+  how many checks remain across all pending photos, including outside the view.
+  The page header uses stable view, filter and results rows: Refresh and More
+  sit beside Pending/Decided, shared controls stay anchored when optional
+  filters disappear, and the selection slot remains reserved in Stacks.
+
+- Curate checks now run in the background with Stacks enabled, including after
+  server startup and new Enrich arrivals. Opening the page or Load more is no
+  longer required. Complete checks survive restarts; active slots turn over to
+  process the whole backlog, and failed searches retry with bounded backoff.
+  Existing pacing and grouping rules are unchanged. A spinner beside Refresh
+  and short inline progress show activity without moving the grid. Counts
+  distinguish stacks and single photos, **Pending** replaces To curate, and
+  clicking a stack opens it without a separate Compare button.
+  Enrich schema **16** / persistent-state contract **19** adds the bounded
+  completed-evidence cache, with the normal complete recovery snapshot before
+  migration. See [Curate algorithm](docs/CURATE-ALGORITHM.md).
+
+- Curate Preview combines **Pending / Decided**, category and date filters,
+  compact card actions, and explicit bulk selection of single photos. Clicking
+  a photo opens a production-style full-screen lightbox with tags and details
+  beside it. Singles regain keyboard decisions, automatic advance and Undo;
+  **Yes / Skip / Fav / No** appear under photos and in their lightboxes. Stack
+  choices remain drafts until Save choices; independent checkboxes expose the
+  same four actions for a batch. The footer counts every outcome. Long filenames
+  are omitted, and the grey Why? explanation overlays photos on hover, focus or
+  tap. The shared Settings gear opens the current feature’s settings; stacking
+  wording now describes similar photos rather than just the same moment.
+  Already-kept references remain read-only, and uncertain responses retain exact
+  safe retry.
+  Stacks are now just a comparison aid: Remove from stack, Split into singles and
+  Stack corrections controls are removed; existing saved corrections remain intact.
+  Background updates appear at idle boundaries while open comparisons and selected
+  batches stay fixed. Loaded pages and scroll position are preserved. One Refresh
+  button handles manual updates/recovery independently of background processing.
+  Open comparisons clearly show unfinished checks; the More menu is aligned.
+  This iteration remains at `/curate-preview.html`; AI referee integration and
+  the default-page cutover are still pending. [Review flow](docs/CURATE-PREVIEW.md).
+
+- Curate Preview now tries a versioned candidate stacking algorithm: wider time
+  candidates, contextual people evidence, positive ThumbHash and reciprocal
+  Immich search ranks. Selective background searches are paced and cached; new
+  results appear automatically when idle, preserving open comparisons and selections.
+  Cards show waiting/checking progress and highlight ready updates. Search results
+  are applied only after all required references have been checked; completed
+  evidence stays saved for unchanged pending candidates, preventing timed cache expiry
+  from repeatedly splitting and rejoining an unchanged stack.
+  Compatible uncertain photos stay together provisionally while
+  searches are pending, unavailable or missing results. Enrich Group separates
+  from None/One (Group vs Couple remains ambiguous). Searches skip references
+  that cannot resolve uncertainty or support core recovery; rank counts use the original
+  time group. Completed inconclusive checks are explicitly labeled uncertain.
+  Candidate 3 uses repeated rank contrast between internally close subgroups to
+  separate different compositions despite similar ThumbHashes. Larger hash-only
+  groups get bounded verification searches; isolated missing results, failed
+  checks and partial passes cannot trigger the contrast rule. Search size stays
+  at 50; comparisons remain fixed throughout the open comparison.
+  Healthy searches now start two seconds apart (up to 30 automatic requests per
+  minute), with extra delay on slow responses. Open comparisons and visible
+  cards take priority; cached evidence avoids network waits. Small queued/checking
+  spinners and amber attention markers make progress visible
+  without relying on color alone. Diagnostic counters expose request/latency and
+  queue-completion measurements; grouping rules and search coverage are unchanged.
+  Comparisons include **Why this stack?**, and unconfirmed time groups are labeled.
+  Exact rules, bounds and change history live in [the algorithm guide](docs/CURATE-ALGORITHM.md).
+  The released Curate page and AI keeper recommendations are unchanged.
+
 - The stacking lab now compares directional Immich search ranks from multiple
   reference photos, with request estimates, progress, cancellation and explicit
   partial coverage. Each pass makes at most eight new paced searches; the matrix
@@ -49,15 +173,15 @@ All notable changes to Pictaria Server are documented here. This project follows
   Stack membership, keeper choices and photo order inside comparisons are unchanged.
 - Added an opt-in human-only Curate comparison preview at `/curate-preview.html`:
   stable complete stacks, multiple keeper selection, explicit reviewed remainder,
-  persistent Remove from stack / Split into singles corrections, reset, conditional
-  Undo and saved-versus-synced feedback. Interrupted actions can be retried safely
+  conditional Undo and saved-versus-synced feedback. Earlier saved manual stack
+  separations remain respected; their editing controls have since been removed. Interrupted actions can be retried safely
   after a reload. This is an implementation preview, not the v1.3 default-page or
   AI cutover. Photos toggle Keep directly; large comparisons default to a compact
   grid, and the large viewer supports Keep (K), Favorite and Never show. Singles
   have simpler controls; zero-keeper saves are neutral; Undo and conflict messages
-  explain the current state. Correction history identifies the removed photo or
-  split action. Enrichment schema 15 / persistent-state contract 18 adds this
-  action history and requires checkpoint restoration for rollback. See
+  explain the current state. Enrichment schema 15 / persistent-state contract 18
+  retains earlier correction action history and requires checkpoint restoration
+  for rollback. See
   [preview scope and testing](docs/CURATE-PREVIEW.md).
 - Added coherent Curate keeper/remainder operations, exact retry receipts,
   conditional Undo and synchronization status. The existing Keep best and Undo
