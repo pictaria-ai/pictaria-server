@@ -6,7 +6,7 @@ import { join } from 'node:path';
 import { Repository } from '../../src/enrich/repository.mjs';
 import { ProviderRequestError } from '../../src/enrich/providers.mjs';
 import { CurateAiExecution } from '../../src/curate/ai-execution.mjs';
-import { CurateAiLimits, aiBackendKey, AI_WINDOW_MS } from '../../src/curate/ai-limits.mjs';
+import { CurateAiLimits, aiBackendKey, AI_WINDOW_MS, AI_RECOVERY_COOLDOWN_MS } from '../../src/curate/ai-limits.mjs';
 
 const key = n => n.toString(16).padStart(64, '0');
 const backendKey = key(100);
@@ -57,18 +57,58 @@ test('auth failure pauses all untouched inputs and roles before preparation, acr
   assert.equal((await next.run(f.job(103, ['other'], { backendKey: key(200) }))).state, 'succeeded');
 }));
 
-test('one bounded recovery honors Retry-After; its failure pauses without further probes', async () => fixture(async f => {
+test('failed recovery cools down across restart; new work can recover without reviving exhausted inputs', async () => fixture(async f => {
   let calls = 0;
   const failed = f.job(1, ['a'], { submit: async () => { calls++; throw new ProviderRequestError('PRIVATE', { status: 429, retryAfterMs: 60_000 }); } });
   assert.equal((await f.execution().run(failed)).reason, 'provider-unavailable');
   const owner = f.open(), e = f.execution(owner);
   f.tick(30_000); assert.equal((await e.run(failed)).state, 'provider-cooldown');
   f.tick(30_000); assert.equal((await e.run(failed)).reason, 'provider-unavailable');
-  f.tick(AI_WINDOW_MS * 10);
-  assert.equal((await e.run(f.job(2, ['new']))).state, 'provider-paused');
+  const retryAt = f.time() + AI_RECOVERY_COOLDOWN_MS;
+  const restarted = f.open(), next = f.execution(restarted);
+  restarted.limits.recoverInterrupted(restarted.attempts);
+  assert.deepEqual(restarted.limits.providerStatus(backendKey), { state: 'cooldown', reason: 'unavailable', retryAt });
+  f.tick(AI_RECOVERY_COOLDOWN_MS - 1);
+  assert.equal((await next.run(f.job(2, ['new']))).state, 'provider-cooldown');
   assert.equal((await e.run(failed)).state, 'exhausted');
   assert.equal(calls, 2);
   assert.equal(owner.repo.db.prepare('SELECT COUNT(*) n FROM curate_ai_photo_charges').get().n, 2);
+  f.tick(1);
+  for (let i = 0; i < 20; i++) assert.equal(restarted.limits.providerStatus(backendKey).state, 'recovery-ready');
+  assert.equal(f.counts().requests, 0, 'expiry and status reads do not dispatch work');
+  assert.equal((await next.run(failed)).state, 'exhausted');
+  assert.equal((await next.run(f.job(2, ['new']))).state, 'succeeded');
+  assert.equal(restarted.limits.providerStatus(backendKey).state, 'ready');
+}));
+
+test('continued temporary failures permit at most one real request per cooldown and respect longer provider delays', async () => fixture(async f => {
+  let attempts = 0;
+  const fail = delay => {
+    const ticket = f.limits.startProvider(backendKey); assert.equal(ticket.state, 'started'); attempts++;
+    f.limits.finish(ticket, new ProviderRequestError('PRIVATE', { status: 503, retryAfterMs: delay }));
+  };
+  fail(null); f.tick(30_000);
+  for (const delay of [2 * AI_RECOVERY_COOLDOWN_MS, null, null]) {
+    fail(delay);
+    const wait = Math.max(AI_RECOVERY_COOLDOWN_MS, delay ?? 0);
+    assert.equal(f.limits.providerStatus(backendKey).retryAt, f.time() + wait);
+    f.tick(wait - 1);
+    for (let n = 0; n < 20; n++) assert.equal(f.limits.startProvider(backendKey).state, 'provider-cooldown');
+    f.tick(1);
+  }
+  assert.equal(attempts, 4);
+}));
+
+test('older unavailable pauses use their recorded failure time across restarts without a new migration', async () => fixture(async f => {
+  f.repo.db.prepare("INSERT INTO curate_ai_backends VALUES(?,'paused','unavailable',NULL,NULL,0,?)").run(backendKey, f.time());
+  f.tick(60_000);
+  const reopened = f.open(); reopened.limits.recoverInterrupted(reopened.attempts);
+  assert.equal(reopened.limits.providerStatus(backendKey).retryAt, f.time() - 60_000 + AI_RECOVERY_COOLDOWN_MS);
+  f.tick(AI_RECOVERY_COOLDOWN_MS - 60_000);
+  assert.equal(reopened.limits.providerStatus(backendKey).state, 'recovery-ready');
+  const ticket = reopened.limits.startProvider(backendKey);
+  reopened.limits.finish(ticket, new ProviderRequestError('PRIVATE', { timeout: true }));
+  assert.equal(reopened.limits.providerStatus(backendKey).retryAt, f.time() + AI_RECOVERY_COOLDOWN_MS);
 }));
 
 test('successful recovery reopens provider, but retains spent attempts', async () => fixture(async f => {

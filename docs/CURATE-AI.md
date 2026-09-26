@@ -262,17 +262,24 @@ that different credentials use independent hardware: PIC-118 must arbitrate the
 actual shared resource separately. Neither secrets nor URLs are saved.
 The first authentication failure pauses the connection. A temporary failure
 waits at least 30 seconds, respecting a longer Retry-After, then allows **one**
-recovery request. If that request fails with another shared error, the connection
-stays paused. A successful response, even one with invalid answer content,
-proves connectivity and releases the guard; invalid answers retain their input
-attempt charge. Unknown transport faults pause as configuration/integration
-failures instead of walking the rest of the queue.
+recovery request. If that request also fails temporarily, stop the current run
+and cool down for **15 minutes**, respecting a longer Retry-After. The next
+ordinary eligible request may check recovery; another temporary failure renews
+that longer cooldown. Only a successful response returns to normal throughput.
+Expiry itself does not dispatch work, restart a stopped Enrich run, refund an
+input attempt or revisit a settled comparison. A successful response, even one
+with invalid answer content, proves connectivity and releases the guard;
+invalid answers retain their input attempt charge. Unknown transport faults
+pause as configuration/integration failures instead of walking the rest of the
+queue.
 
 `providerStatus()` exposes only ready/busy/cooldown/recovery-ready/paused and a
-fixed reason. Enrich and the legacy referee surface pauses; Settings → AI
-Providers shows the selected Enrich and Curate connections, plus other configured
-providers available to per-run Enrich choices, with **Verify connection**. Verification is one scheduled request using a synthetic PNG and
-small JSON answer, with the saved provider's inference timeout. It may incur a
+fixed reason. Unconfigured Settings targets show a neutral **Not configured**
+state, separate from runtime failure pauses. Enrich and the legacy referee
+surface pauses; Settings → AI Providers shows the selected Enrich and Curate
+connections, plus other configured providers available to per-run Enrich
+choices, with **Verify connection**. Verification is one scheduled request using
+a synthetic PNG and small JSON answer, with the saved provider's inference timeout. It may incur a
 provider charge, uses no library photos, and checks basic vision/structured
 output connectivity, not multi-image quality or the full Enrich/Curate contract.
 Settings must be saved first. Queued verification cancels if those saved inputs
@@ -281,11 +288,15 @@ cannot bypass an active owner or an unexpired cooldown. Page/status reads and
 settings saves never send test requests.
 
 Verification owns a fresh provider token, so an old success cannot clear a newer
-failure. It can explicitly cross a terminal pause; another shared failure keeps
-the connection paused. Explicit verification must pass its small response contract to clear a pause;
-a rejected or malformed test shows a configuration/format warning and stays
-paused. Ordinary malformed photo/stack answers still do not pause the provider. The former blind
-`connectionVerified()` reset hook is removed. Verification neither refunds
+failure. It can explicitly cross a terminal pause. A temporary failure while
+verifying an authentication, configuration or interrupted-recovery pause leaves
+that original pause in place; it cannot silently enable automatic work. A
+temporary verification failure on a connection without such a pause starts the
+15-minute cooldown. Explicit verification must pass its small response contract
+to clear a pause; a rejected or malformed test shows a configuration/format
+warning and stays paused. Ordinary malformed photo/stack answers still do not
+pause the provider. The former blind `connectionVerified()` reset hook is
+removed. Verification neither refunds
 allowances nor enqueues settled inputs. A stopped Enrich job stays queued and
 must be run again. Newly eligible legacy work uses its normal polling/backoff;
 there is no special repair queue.
@@ -322,9 +333,15 @@ For Enrich 429/503 responses, the existing cancelable same-photo wait now follow
 the shared cooldown (at least 30 seconds, honoring a longer Retry-After) and
 permits just one recovery request. Other shared transport failures stop the run;
 the next eligible real request after cooldown can be the one recovery attempt.
-If recovery fails, queued work cannot probe again until explicit verification or
-a corrected connection. An Enrich request admitted after cooldown can verify
-recovery normally. New ordinary Enrich runs do **not** bypass terminal pauses.
+If recovery fails temporarily, the run stops without waiting out the new
+15-minute (or longer provider-requested) cooldown. A run whose first request is
+already the recovery request likewise stops on that failure. After cooldown,
+the next manual run, daily scheduled run or eligible referee request can check
+recovery normally. A stopped daily run is not automatically restarted that day.
+New ordinary Enrich runs do **not** bypass authentication, configuration or
+interrupted-recovery pauses. Earlier preview records marked paused/unavailable
+use their recorded failure time plus 15 minutes, so upgrading/restarting does
+not renew the delay; no schema migration is needed.
 Untouched photos receive no failed processing record; dispatched infrastructure
 failures do not consume their content-failure allowance. Independent connections
 remain eligible. The standalone Enrich CLI retains its existing retry policy;

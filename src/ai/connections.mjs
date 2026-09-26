@@ -6,12 +6,11 @@ import { createProvider, enrichmentProviderConfiguration, ProviderRequestError }
 
 export function connectionMessage(status) {
   if (status.state === 'busy') return 'AI request in progress.';
-  if (status.state === 'cooldown') return 'AI connection is cooling down before one recovery attempt.';
-  if (status.state === 'recovery-ready') return 'AI connection is ready for one recovery attempt.';
+  if (status.state === 'cooldown') return 'AI connection is cooling down. Eligible work can try again afterward.';
+  if (status.state === 'recovery-ready') return 'The next eligible AI request can check whether the connection has recovered.';
   if (status.state === 'paused') return {
     auth: 'AI connection paused: check the API key, then verify the connection in Settings → AI Providers.',
     configuration: 'AI connection paused: check the provider and model settings, then verify the connection in Settings → AI Providers.',
-    unavailable: 'AI connection paused after repeated failures. Verify it in Settings → AI Providers when the provider is available.',
     interrupted: 'AI recovery was interrupted. Verify the connection in Settings → AI Providers to resume.',
   }[status.reason];
   return 'Ready for AI requests.';
@@ -91,8 +90,8 @@ export class AiConnections {
           message: connectionMessage(status), verifying: this.verification?.target === target,
           canVerify: !this.closed && !this.stopped() && !this.verification && !['busy', 'cooldown'].includes(status.state) };
       } catch {
-        return { target, state: 'paused', reason: 'configuration', canVerify: false,
-          message: 'Complete the provider and model settings before verifying this connection.' };
+        return { target, state: 'not-configured', reason: 'configuration', canVerify: false,
+          message: 'Not configured. Complete the provider and model settings before verifying this connection.' };
       }
     });
   }

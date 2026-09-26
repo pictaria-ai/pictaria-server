@@ -328,8 +328,10 @@ protected state, not merely an unsafe access path.
 
 The server holds an auxiliary `<Enrich database path>.server-owner.sqlite` lock
 for its lifetime. It is not backup state and is not included in Pictaria backup
-archives. Do not delete or replace it while a server is running: another server
-could then claim a different lock file. It releases automatically when the
+archives. Do not delete or replace it or its companion
+`<Enrich database path>.server-owner.sqlite-journal` while a server is running:
+another server could then claim a different lock file, or the active SQLite
+transaction could be disrupted. The lock releases automatically when the
 process exits or crashes. Restore procedures must still stop the server before
 replacing application files. A second server cannot use the same canonical
 Enrich database path, even on another HTTP port; normal readers and backups are

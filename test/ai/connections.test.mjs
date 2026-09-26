@@ -8,11 +8,12 @@ import { setImmediate as turn } from 'node:timers/promises';
 import { Repository } from '../../src/enrich/repository.mjs';
 import { RefereeService } from '../../src/enrich/refereeService.mjs';
 import { EnrichJobRunner } from '../../src/enrich/jobRunner.mjs';
+import { EnrichScheduler } from '../../src/enrich/scheduler.mjs';
 import { analyzeWithValidationRetry } from '../../src/enrich/runner.mjs';
 import { AiRequestScheduler } from '../../src/ai/scheduler.mjs';
 import { AiConnections } from '../../src/ai/connections.mjs';
 import { CurateAiExecution } from '../../src/curate/ai-execution.mjs';
-import { aiBackendKey } from '../../src/curate/ai-limits.mjs';
+import { aiBackendKey, AI_RECOVERY_COOLDOWN_MS } from '../../src/curate/ai-limits.mjs';
 import { ProviderRequestError } from '../../src/enrich/providers.mjs';
 import { loadV1Taxonomy, sampleOutput } from '../enrich/helpers.mjs';
 
@@ -34,8 +35,8 @@ async function fixture(work) {
     enrichEnabled: true, curateBurstGrouping: true, curateStackRefereeEnabled: true, curateKeeperRefereeEnabled: true,
     providers: { local_lmstudio: { ...providerOptions, fetchImpl: async () => answer(sampleOutput()) } } };
   const connections = new AiConnections({ limits, scheduler, getConfig: () => config });
-  const runner = () => new EnrichJobRunner({ repo, immich, taxonomy, config, aiScheduler: scheduler, aiConnections: connections });
-  try { await work({ repo, limits, scheduler, config, connections, runner, tick: ms => { now += ms; } }); }
+  const runner = (overrides = {}) => new EnrichJobRunner({ repo, immich, taxonomy, config, aiScheduler: scheduler, aiConnections: connections, ...overrides });
+  try { await work({ repo, limits, scheduler, config, connections, runner, tick: ms => { now += ms; }, time: () => now }); }
   finally { await connections.stop(20); await scheduler.stop(20); repo.close(); rmSync(dir, { recursive: true, force: true }); }
 }
 function executor(f) { return new CurateAiExecution({ attempts: f.repo.curate.aiAttempts, limits: f.limits,
@@ -65,7 +66,7 @@ test('first authentication failure stops Enrich, preserves the queue and blocks 
   assert.deepEqual(await f.connections.run(independent, async () => ({ ok: true })), { ok: true });
 }));
 
-test('Enrich overload retry honors the full delay, spends one recovery, and then stays paused', async () => fixture(async f => {
+test('Enrich overload waits once, then stops for a longer cooldown without waiting or probing again', async () => fixture(async f => {
   let calls = 0, waited = 0;
   f.config.providers.local_lmstudio.fetchImpl = async () => { calls++; return rejected(429, '65'); };
   const p = f.connections.provider('enrich'), session = f.scheduler.session(p, 'enrich');
@@ -76,10 +77,44 @@ test('Enrich overload retry honors the full delay, spends one recovery, and then
     }), { status: 429 });
   } finally { session.close(); }
   assert.equal(calls, 2); assert.equal(waited, 65_000);
-  assert.deepEqual(f.connections.status(p), { state: 'paused', reason: 'unavailable' });
-  f.tick(3_600_000);
-  await assert.rejects(f.connections.run(p, () => assert.fail('no hourly probe')), { code: 'ai_connection_paused' });
+  assert.deepEqual(f.connections.status(p), { state: 'cooldown', reason: 'unavailable', retryAt: f.time() + AI_RECOVERY_COOLDOWN_MS });
+  await assert.rejects(f.connections.run(p, () => assert.fail('cooldown request')), { code: 'ai_connection_paused' });
+  f.tick(AI_RECOVERY_COOLDOWN_MS);
+  for (let i = 0; i < 20; i++) assert.equal(f.connections.describe()[0].state, 'recovery-ready');
   assert.equal(calls, 2);
+  f.config.providers.local_lmstudio.fetchImpl = async () => { calls++; return answer(sampleOutput()); };
+  const runner = f.runner(); runner.start({ assetIds: ['new'] }); await runner.runPromise;
+  assert.equal(runner.status().error, null); assert.equal(calls, 3);
+  assert.equal(f.connections.status(p).state, 'ready');
+}));
+
+test('a failed scheduled recovery stops once; only the next daily run resumes healthy Enrich', async () => fixture(async f => {
+  let calls = 0;
+  f.config.providers.local_lmstudio.fetchImpl = async () => { calls++; return rejected(503); };
+  const p = f.connections.provider('enrich');
+  await assert.rejects(f.connections.run(p, () => p.analyzeImage({ data: Buffer.from('test'), mimeType: 'image/jpeg' },
+    { systemPrompt: 'system', userPrompt: 'user', jsonSchema: {} })), { status: 503 });
+  f.tick(30_000);
+  f.config.enrichSchedule = { enabled: true, time: '00:00', timeZone: 'UTC', photoBudget: 4 };
+  const runner = f.runner({ immich: { ...immich,
+    listImageAssets: async () => Array.from({ length: 4 }, (_, i) => ({ id: `daily-${i}`, originalPath: `${i}.jpg` })) } });
+  const daily = new EnrichScheduler({ runner, repo: f.repo, config: f.config, log: () => {} });
+  const today = new Date();
+  assert.equal(daily.tick(today), true); await runner.runPromise;
+  assert.match(runner.status().error, /cooling down/);
+  assert.equal(calls, 2, 'a run starting as recovery must not wait fifteen minutes and retry');
+  assert.equal(f.repo.db.prepare('SELECT COUNT(*) n FROM processing_runs').get().n, 1);
+  f.config.providers.local_lmstudio.fetchImpl = async () => { calls++; return answer(sampleOutput()); };
+  f.tick(AI_RECOVERY_COOLDOWN_MS);
+  assert.equal(daily.tick(today), false, 'cooldown expiry does not restart today’s stopped run');
+  assert.equal(calls, 2);
+  f.tick(24 * 60 * 60_000);
+  assert.equal(daily.tick(new Date(today.getTime() + 24 * 60 * 60_000)), true); await runner.runPromise;
+  assert.equal(runner.status().error, null);
+  assert.equal(runner.status().counters.succeeded, 4);
+  assert.equal(calls, 6);
+  assert.equal(f.connections.status(p).state, 'ready');
+  daily.stop();
 }));
 
 test('verification is one scheduled synthetic-image call, shared across roles, and never refunds attempts', async () => fixture(async f => {
@@ -117,14 +152,36 @@ test('queued verification is cancelled on saved model changes and cannot bypass 
   gate.resolve(); await held; session.close();
 }));
 
-test('a failed verification stays paused and refresh/status reads never send a request', async () => fixture(async f => {
+test('a temporary verification failure cools down and status reads never send a request', async () => fixture(async f => {
   let calls = 0;
   f.config.providers.local_lmstudio.fetchImpl = async () => { calls++; return rejected(503); };
   const result = await f.connections.verify('curate');
-  assert.equal(result.verified, false); assert.match(result.message, /paused/);
-  f.tick(1_000_000);
-  for (let i = 0; i < 20; i++) assert.equal(f.connections.describe()[0].state, 'paused');
+  assert.equal(result.verified, false); assert.match(result.message, /cooling down/);
+  f.tick(AI_RECOVERY_COOLDOWN_MS - 1);
+  assert.equal(f.connections.describe()[0].state, 'cooldown');
+  f.tick(1);
+  for (let i = 0; i < 20; i++) assert.equal(f.connections.describe()[0].state, 'recovery-ready');
   assert.equal(calls, 1);
+}));
+
+test('a temporary verification failure cannot automatically reopen an authentication or configuration pause', async () => fixture(async f => {
+  const p = f.connections.provider('enrich'), key = aiBackendKey(p);
+  f.config.providers.local_lmstudio.fetchImpl = async () => rejected(503);
+  for (const [status, reason] of [[401, 'auth'], [404, 'configuration']]) {
+    f.limits.finish(f.limits.startProvider(key, { verification: true }), new ProviderRequestError('rejected', { status }));
+    assert.equal((await f.connections.verify('enrich')).verified, false);
+    f.tick(24 * 60 * 60_000);
+    assert.deepEqual(f.connections.status(p), { state: 'paused', reason });
+    await assert.rejects(f.connections.run(p, () => assert.fail('unverified connection')), { code: 'ai_connection_paused' });
+  }
+}));
+
+test('missing saved provider settings have a neutral unconfigured status', async () => fixture(async f => {
+  f.config.providers.local_lmstudio.modelName = '';
+  for (const row of f.connections.describe()) {
+    assert.equal(row.state, 'not-configured'); assert.equal(row.canVerify, false);
+    assert.match(row.message, /^Not configured\./);
+  }
 }));
 
 test('ordinary content rejections and malformed model answers do not pause the shared connection', async () => fixture(async f => {
@@ -162,7 +219,7 @@ test('a recovered stale completion cannot clear a newer failure', async () => fi
   const recovery = f.limits.startProvider(key);
   f.limits.finish(recovery, new ProviderRequestError('unavailable', { status: 503 }));
   assert.equal(f.limits.finish(old), false);
-  assert.deepEqual(f.limits.providerStatus(key), { state: 'paused', reason: 'unavailable' });
+  assert.deepEqual(f.limits.providerStatus(key), { state: 'cooldown', reason: 'unavailable', retryAt: f.time() + AI_RECOVERY_COOLDOWN_MS });
 }));
 
 test('a nondefault per-run provider has its own saved verification target', async () => fixture(async f => {

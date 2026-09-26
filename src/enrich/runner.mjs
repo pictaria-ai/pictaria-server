@@ -137,6 +137,7 @@ export async function analyzeWithValidationRetry(provider, image, {
   let overloadRetryCount = 0;
   for (let attemptIndex = 0; attemptIndex < prompts.length; attemptIndex += 1) {
     while (true) {
+      let recoveringConnection = false;
       try {
         const analyze = async () => {
           const submit = () => provider.analyzeImage(image, {
@@ -145,6 +146,10 @@ export async function analyzeWithValidationRetry(provider, image, {
             jsonSchema,
             signal,
           });
+          // Read inside the scheduled turn, directly before synchronous
+          // admission. A failed recovery must stop this run, not wait out the
+          // longer cooldown or consume another photo as a provider probe.
+          recoveringConnection = aiConnections?.status(provider).state === 'recovery-ready';
           const result = await (aiConnections ? aiConnections.run(provider, submit) : submit());
           // A completed provider response proves a persistent 429/503 wave has
           // ended even if local schema validation later rejects its content.
@@ -160,7 +165,8 @@ export async function analyzeWithValidationRetry(provider, image, {
         return await (aiSession ? aiSession.run(request) : request());
       } catch (error) {
         if (isRetryableProviderOverload(error) && overloadRetryCount < overloadRetryLimit
-            && (!aiConnections || aiConnections.status(provider).state === 'cooldown')) {
+            && (!aiConnections || (!recoveringConnection && overloadRetryCount < 1
+              && aiConnections.status(provider).state === 'cooldown'))) {
           const retryIndex = overloadRetryCount;
           overloadRetryCount += 1;
           const delay = aiConnections

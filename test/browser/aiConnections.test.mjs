@@ -5,7 +5,7 @@ import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { Repository } from '../../src/enrich/repository.mjs';
-import { aiBackendKey } from '../../src/curate/ai-limits.mjs';
+import { aiBackendKey, AI_RECOVERY_COOLDOWN_MS } from '../../src/curate/ai-limits.mjs';
 import { ProviderRequestError } from '../../src/enrich/providers.mjs';
 import { bootServer, findChrome, launchChrome } from './harness.mjs';
 
@@ -72,4 +72,19 @@ test('Settings verifies a paused saved AI connection through authenticated sched
   server = await bootServer(dir, { env });
   assert.equal((await getStatus()).connections[0].retryAt, first.retryAt);
   assert.equal(requests.length, 1, 'restarts do not initiate test requests');
+  await server.stop(); server = null;
+  repo = new Repository(join(dir, 'enrichment.sqlite')); repo.initSchema();
+  repo.curate.aiLimits.now = () => first.retryAt;
+  const recovery = repo.curate.aiLimits.startProvider(key);
+  assert.equal(recovery.state, 'started');
+  repo.curate.aiLimits.finish(recovery, new ProviderRequestError('synthetic temporary failure', { status: 503 }));
+  repo.close(); repo = null;
+  for (let i = 0; i < 2; i++) {
+    server = await bootServer(dir, { env });
+    const status = (await getStatus()).connections[0];
+    assert.equal(status.state, 'cooldown'); assert.equal(status.reason, 'unavailable');
+    assert.equal(status.retryAt, first.retryAt + AI_RECOVERY_COOLDOWN_MS);
+    assert.equal(requests.length, 1, 'long cooldown survives startup without dispatch');
+    await server.stop(); server = null;
+  }
 });

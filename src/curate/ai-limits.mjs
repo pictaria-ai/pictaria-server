@@ -4,6 +4,7 @@ import { enrichmentProviderConfiguration, ProviderRequestError } from '../enrich
 export const AI_WINDOW_MS = 30 * 60_000;
 export const AI_PHOTO_LIMIT = 3;
 export const AI_RECOVERY_DELAY_MS = 30_000;
+export const AI_RECOVERY_COOLDOWN_MS = 15 * 60_000;
 const digest = value => createHash('sha256').update(value).digest('hex');
 const validKey = key => typeof key === 'string' && /^[a-f0-9]{64}$/.test(key);
 
@@ -74,11 +75,15 @@ export class CurateAiLimits {
 
   providerStatus(backendKey) {
     if (!validKey(backendKey)) throw new TypeError('Invalid AI backend identity.');
-    const row = this.repo.db.prepare('SELECT state,reason,retry_at,token FROM curate_ai_backends WHERE backend_key=?').get(backendKey);
+    const row = this.repo.db.prepare('SELECT state,reason,retry_at,token,updated_ms FROM curate_ai_backends WHERE backend_key=?').get(backendKey);
     if (!row) return { state: 'ready', reason: null };
     if (row.token) return { state: 'busy', reason: null };
-    if (row.state === 'cooldown') return { state: this.now() < row.retry_at ? 'cooldown' : 'recovery-ready',
-      reason: row.reason, retryAt: row.retry_at };
+    // Earlier previews made repeated temporary failures terminal. Interpret
+    // those rows using the original failure time, never a fresh restart delay.
+    if (row.state === 'cooldown' || (row.state === 'paused' && row.reason === 'unavailable')) {
+      const retryAt = row.retry_at ?? row.updated_ms + AI_RECOVERY_COOLDOWN_MS;
+      return { state: this.now() < retryAt ? 'cooldown' : 'recovery-ready', reason: row.reason, retryAt };
+    }
     return { state: row.state, reason: row.reason };
   }
 
@@ -147,7 +152,7 @@ export class CurateAiLimits {
   // an already admitted call, including timeouts and interrupted recovery.
   finish(ticket, error = null) {
     return this.repo.transaction(() => {
-      const row = this.repo.db.prepare('SELECT recovering FROM curate_ai_backends WHERE backend_key=? AND token=?')
+      const row = this.repo.db.prepare('SELECT state,reason,recovering FROM curate_ai_backends WHERE backend_key=? AND token=?')
         .get(ticket.backendKey, ticket.token);
       if (!row) return false;
       let state = 'ready', reason = null, retryAt = null;
@@ -158,11 +163,14 @@ export class CurateAiLimits {
         else if (error.cancelled) {
           if (row.recovering) { state = 'paused'; reason = 'interrupted'; }
         } else if (error.infrastructure) {
-          reason = 'unavailable';
-          state = row.recovering ? 'paused' : 'cooldown';
-          if (state === 'cooldown') {
-            retryAt = this.now() + Math.max(AI_RECOVERY_DELAY_MS, error.retryAfterMs ?? 0);
-            if (!Number.isSafeInteger(retryAt)) { state = 'paused'; retryAt = null; }
+          // A failed explicit verification cannot turn an unresolved auth,
+          // configuration or interrupted-recovery pause into automatic work.
+          if (row.state === 'paused' && row.reason !== 'unavailable') {
+            state = 'paused'; reason = row.reason;
+          } else {
+            reason = 'unavailable'; state = 'cooldown';
+            retryAt = this.now() + Math.max(row.recovering ? AI_RECOVERY_COOLDOWN_MS : AI_RECOVERY_DELAY_MS, error.retryAfterMs ?? 0);
+            if (!Number.isSafeInteger(retryAt)) { state = 'paused'; reason = 'configuration'; retryAt = null; }
           }
         }
       } else if (error) {

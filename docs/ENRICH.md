@@ -671,15 +671,22 @@ in the standard SQLite backup and restore.
   `Retry-After`. For 429/503, Enrich waits and retries the same photo once;
   Cancel interrupts the wait. Other shared failures stop the run and retain its
   queued job. A later eligible request can use the single recovery opportunity.
-  A second shared failure leaves the connection paused. Pictaria does not test
-  every remaining photo against a broken provider.
+  A second temporary failure stops the run and starts a **15-minute cooldown**,
+  honoring a longer provider-requested delay. A run starting as the recovery
+  request also stops immediately if that recovery fails. After cooldown, the
+  next manual or daily scheduled run can check recovery; another failure renews
+  the longer cooldown. Expiry does not restart a stopped run or send a test
+  request. Pictaria does not test every remaining photo against a broken provider.
 
   Settings → AI Providers shows the pause reason and **Verify connection**.
   Save corrected settings first. Verification sends one synthetic image, uses
   the saved model/timeout and may incur a provider charge; no library photo is
   used. Once verified, run the stopped Enrich job again. Verification does not
   refund Curate attempts or revisit settled comparisons. Refreshing, restarting
-  and toggling features do not clear pauses. Independent connections can keep
+  and toggling features do not clear authentication/configuration pauses or
+  shorten cooldowns. A failed verification cannot turn an existing credentials
+  or configuration pause into automatic recovery. Unconfigured connections
+  show **Not configured**. Independent connections can keep
   working, and manual curation remains available.
 
   Actual transport failures record as **infrastructure failures**, which do not
