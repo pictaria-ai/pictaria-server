@@ -98,6 +98,9 @@ export class CurateRefinement {
     view.next = comparison ? this.curate.store.nextViewGroups(viewId, comparison.id, 5).map(g => g.ids[0]) : [];
     view.attentionAt = this.now();
   }
+  isFocused(ids) {
+    return [...this.views.values()].some(view => view.attentionAt + REFINEMENT_LIMITS.attentionMs > this.now() && ids.includes(view.focus));
+  }
   priorities() {
     const priorities = new Map();
     for (const [id, view] of this.views) {

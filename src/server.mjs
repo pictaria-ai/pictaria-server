@@ -23,6 +23,8 @@ import { CaptionWritebackService } from './enrich/captionWriteback.mjs';
 import { RefereeService } from './enrich/refereeService.mjs';
 import { AiRequestScheduler } from './ai/scheduler.mjs';
 import { CurateAiExecution } from './curate/ai-execution.mjs';
+import { CurateAiLifecycle } from './curate/ai-lifecycle.mjs';
+import { createCurateAiProvider } from './curate/ai-config.mjs';
 import { CURATE_AI_AVAILABILITY } from './curate/ai-policy.mjs';
 import { EnrichJobRunner } from './enrich/jobRunner.mjs';
 import { EnrichScheduler } from './enrich/scheduler.mjs';
@@ -208,6 +210,8 @@ const aiConnections = new AiConnections({ limits: repo.curate.aiLimits, schedule
 curate.ai = new CurateAiExecution({ attempts: repo.curate.aiAttempts, limits: repo.curate.aiLimits,
   getConfig: () => config, availability: CURATE_AI_AVAILABILITY,
   stopped: () => lifecycle.stopped, scheduler: aiScheduler });
+curate.aiLifecycle = new CurateAiLifecycle({ curate, execution: curate.ai,
+  resolveProvider: () => createCurateAiProvider(config), availability: CURATE_AI_AVAILABILITY });
 const enrichRunner = new EnrichJobRunner({ repo, immich, taxonomy, config, profiles, aiScheduler, aiConnections, onTagsQueued: () => aiTagSync.wake() });
 const enrichScheduler = new EnrichScheduler({ runner: enrichRunner, repo, config });
 const referee = new RefereeService({ repo, immich, review, enrichRunner, config, aiScheduler, aiConnections, log: (message) => console.log(`[Pictaria] ${message}`) });

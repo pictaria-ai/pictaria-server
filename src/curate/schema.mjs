@@ -1,4 +1,5 @@
 import { AI_LIMIT_SCHEMA } from './ai-limits.mjs';
+import { AI_INPUT_SCHEMA } from './ai-inputs.mjs';
 import { RANK_SCHEMA } from './rank-store.mjs';
 import { METADATA_SCHEMA } from './metadata.mjs';
 import { AI_ATTEMPT_SCHEMA } from './ai-attempts.mjs';
@@ -37,6 +38,7 @@ ${METADATA_SCHEMA}
 ${RANK_SCHEMA}
 ${AI_ATTEMPT_SCHEMA}
 ${AI_LIMIT_SCHEMA}
+${AI_INPUT_SCHEMA}
 -- Discard non-authoritative checkpoints from the earlier unreleased preview.
 DROP TABLE IF EXISTS curate_rank_retries;
 CREATE TABLE IF NOT EXISTS curate_separations (

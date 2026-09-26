@@ -289,9 +289,23 @@ AI inference run is not required. On older Immich, metadata reads require
 `asset.statistics` as well as the existing asset/tag read permissions to
 check completeness. See [Immich compatibility](IMMICH-COMPATIBILITY.md).
 
-## Curate development preview (PIC-385 / PIC-387)
+## Curate AI lifecycle preview (PIC-346)
 
-This development build advances the Enrich database to **schema 17** and the
+This development build uses Enrich schema **21** / persistent-state contract
+**26**. It adds compact input references so cleanup can distinguish obsolete AI
+accounting from current work, comparisons, Undo and advice. Existing attempt and
+per-photo limits remain intact. Both new referee roles remain unavailable until
+their request/advice workers are connected; upgrading sends no new AI requests.
+
+Startup creates the usual complete pre-migration recovery snapshot. To return
+to an older state contract, restore that full snapshot and its matching build;
+do not simply switch the container image against the migrated data directory.
+See [Curate AI lifecycle](CURATE-AI.md#changing-inputs-and-protected-cleanup-pic-346)
+for the settling, applicability and retention rules.
+
+## Earlier Curate development preview (PIC-385 / PIC-387)
+
+This earlier development build advanced the Enrich database to **schema 17** and the
 persistent-state contract to **21**. Startup creates the standard complete
 pre-migration recovery snapshot. The bounded stack-check store retains completed
 matrices and compact terminal incomplete outcomes. Draft retry checkpoints from

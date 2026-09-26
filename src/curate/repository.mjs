@@ -334,7 +334,7 @@ export class CurateRepository {
       }),
     );
   }
-  pendingScopeChanges(ids) {
+  pendingScopeChanges(ids, radiusMs = 15000) {
     // Check only related dirty candidates through source indexes. An unrelated
     // import cannot invalidate this scope merely by bumping a global counter.
     for (const id of ids) {
@@ -351,8 +351,8 @@ export class CurateRepository {
         p.time !== null &&
         has(
           'julianday(a.file_created_at) BETWEEN ? AND ?',
-          (p.time - 15001) / 86400000 + 2440587.5,
-          (p.time + 15001) / 86400000 + 2440587.5,
+          (p.time - radiusMs - 1) / 86400000 + 2440587.5,
+          (p.time + radiusMs + 1) / 86400000 + 2440587.5,
         )
       )
         return true;

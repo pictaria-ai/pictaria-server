@@ -334,10 +334,15 @@ export class CurateService {
     if (this.backgroundWork || this.closed) return;
     this.backgroundWork = (async () => {
       this.metadata.settingsChanged();
-      if (!this.refinement?.enabled() && !this.metadata.demanded()) return;
+      if (!this.refinement?.enabled() && !this.metadata.demanded() && !this.aiLifecycle?.pending.size && !this.aiLifecycle?.active) return;
       await this.refresh();
       this.metadata.wake();
       await this.refinement?.tick();
+      this.aiLifecycle?.tick();
+      if (Date.now() >= (this.nextAiMaintenance ?? 0)) {
+        this.aiLifecycle?.maintain();
+        this.nextAiMaintenance = Date.now() + 60_000;
+      }
     })();
     try { await this.backgroundWork; this.backgroundError = null; }
     catch { this.backgroundError = 'Curate checks paused. Background processing will retry.'; }
@@ -353,6 +358,7 @@ export class CurateService {
     this.metadata.settingsChanged();
     this.similarity.settingsChanged();
     this.refinement?.settingsChanged();
+    this.aiLifecycle?.settingsChanged();
   }
   requestMetadataRefresh(ids) {
     this.store.metadata.request(ids, this.metadata.now(), { force: true });
@@ -362,6 +368,7 @@ export class CurateService {
   async close() {
     clearInterval(this.timer);
     this.closed = true;
+    this.aiLifecycle?.close();
     this.abort.abort();
     await this.similarity.close();
     await this.refinement?.close();
