@@ -80,7 +80,10 @@ photo metadata or model response is included in public scheduling status.
 
 Curate has at most one active scheduling turn across both roles/backends.
 Among ready Curate sessions, at most two preferred comparisons can precede
-the oldest waiting session. Role workers own discovery and selection of upcoming
+the oldest waiting session. The lifecycle applies the same bound when choosing
+from its ready queue, before handing one job to the shared scheduler; otherwise
+the scheduler would see only one Curate choice. Running work is not preempted.
+Role workers own discovery and selection of upcoming
 comparisons; the shared lifecycle below handles settling, coalescing and open
 comparison attention. It uses a 30-second settling delay and current-input validation,
 without inspecting the remaining Enrich queue to predict future stack members.
@@ -386,12 +389,25 @@ both availability flags remain false.
   the authoritative full membership, material/human signatures, separations and
   already-kept context itself. Context remains read-only, at most eight images
   within the 30-image request envelope. Unsupported/dense inputs remain manual.
+  More than 256 pending neighbors in the applicability window (member capture
+  range plus three minutes either side), or more than 256 exact/duplicate
+  neighbors in the basic grouper, returns `input-limit` with `dense-neighborhood`
+  or `dense-duplicates` and the limit. This is distinct from `stale`: role workers
+  must treat it as manual-only for those inputs, not repeatedly offer it as a
+  changed-input retry. It queues no request and spends no attempt. The bounded
+  neighborhood is unchanged; no aggregate fingerprint or repair queue is added.
 - An unchanged offer keeps its original 30-second settling deadline. Changed
   inputs replace overlapping queued work and supersede an old active answer.
   There are at most 32 waiting requests and one active Curate request. Separate
   current children after a split and disjoint batches of the same scope may
   coexist; shared context does not tie unrelated stacks together. There is no
   lineage history, persistent work queue or prediction from the Enrich queue.
+- Among settled, runnable jobs across both roles, upcoming comparisons get
+  priority for at most two turns before the oldest ready job. Unready or focused
+  jobs do not block others. Re-offering unchanged work can update its priority
+  without restarting settling. Revisions inherit their predecessor's priority
+  unless the caller explicitly supplies a new value; each revision still waits
+  its own settling period. Omitting priority preserves it; `false` removes it.
 - Future adapters rediscover current candidates after changes. Stale queued
   inputs are dropped; the lifecycle does not manufacture their replacements.
   The background tick never waits for inference. Recent open-comparison
@@ -437,6 +453,10 @@ shared context, queued/preparing/in-flight changes, human decisions and missing
 assets, open comparisons, provider changes, bounded retries/churn, protected
 cleanup, restart, upgrade and complete backup/restore. Live role-worker and
 provider acceptance remains PIC-370/PIC-116 work.
+The production candidate-grouping configuration is also covered through real
+deterministic search completion, rebuild, uncertain/all scope selection, open
+comparison attention, scheduler/executor dispatch and stale-answer rejection.
+Its Immich and AI responses are synthetic; this is not live-provider validation.
 
 ## Remaining integration
 

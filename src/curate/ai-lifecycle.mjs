@@ -12,7 +12,7 @@ export class CurateAiLifecycle {
     this.curate = curate; this.execution = execution; this.resolveProvider = resolveProvider;
     this.availability = availability; this.now = now;
     this.inputs = new CurateAiInputs(curate, { now });
-    this.pending = new Map(); this.active = null; this.closed = false;
+    this.pending = new Map(); this.active = null; this.closed = false; this.priorityTurns = 0;
   }
 
   enabled(role) { return !this.closed && !this.curate.closed && curateAiRoleEnabled(this.curate.config, role, this.availability); }
@@ -23,24 +23,37 @@ export class CurateAiLifecycle {
       if (typeof plan[name] !== 'function') throw new TypeError(`Missing Curate AI ${name} adapter.`);
     await this.curate.refresh();
     if (!this.enabled(plan.role)) return { state: 'disabled' };
-    const snapshot = this.inputs.capture(plan);
-    if (!snapshot) return { state: 'stale' };
+    const captured = this.inputs.capture(plan);
+    if (captured.state !== 'captured') return captured;
+    const { snapshot } = captured;
     const key = snapshot.inputKey;
-    if (this.active?.snapshot.inputKey === key) return { state: 'active' };
-    if (this.pending.has(key)) return { state: 'queued' };
+    const existing = this.active?.snapshot.inputKey === key ? this.active : this.pending.get(key);
+    if (existing) {
+      // Attention may change without changing the input or its settling clock.
+      if (typeof plan.priority === 'boolean') existing.plan.priority = plan.priority;
+      return { state: existing === this.active ? 'active' : 'queued' };
+    }
     // Independent batches of the SAME scope coexist. Revisions replace all
     // overlapping old scope work. Read-only shared context never couples jobs.
     const replaces = old => old.role === snapshot.role && overlaps(old.ids, snapshot.ids) &&
       (old.groupId !== snapshot.groupId || old.scopeMaterial !== snapshot.scopeMaterial || old.contract !== snapshot.contract ||
         overlaps(old.actionable, snapshot.actionable));
-    for (const [id, job] of this.pending) if (replaces(job.snapshot)) this.pending.delete(id);
-    if (this.active && replaces(this.active.snapshot)) this.active.superseded = true;
+    let inheritedPriority = false;
+    for (const [id, job] of this.pending) if (replaces(job.snapshot)) {
+      inheritedPriority ||= job.plan.priority === true;
+      this.pending.delete(id);
+    }
+    if (this.active && replaces(this.active.snapshot)) {
+      inheritedPriority ||= this.active.plan.priority === true;
+      this.active.superseded = true;
+    }
     const state = this.curate.store.aiAttempts.eligibility(plan.role, key);
     if (!['eligible', 'busy'].includes(state)) return { state };
     if (this.curate.store.prepare('SELECT 1 FROM curate_ai_skipped_inputs WHERE role=? AND input_key=?').get(plan.role, key))
       return { state: 'photo-limit' };
     if (this.pending.size >= MAX_AI_PENDING) return { state: 'queue-full' };
-    this.pending.set(key, { snapshot, plan: { ...plan }, readyAt: this.now() + AI_SETTLE_MS, superseded: false });
+    const priority = typeof plan.priority === 'boolean' ? plan.priority : inheritedPriority;
+    this.pending.set(key, { snapshot, plan: { ...plan, priority }, readyAt: this.now() + AI_SETTLE_MS, superseded: false });
     this.execution.scheduler?.refresh();
     return { state: 'queued' };
   }
@@ -61,8 +74,13 @@ export class CurateAiLifecycle {
     for (const [key, job] of this.pending) if (!this.enabled(job.snapshot.role) || !this.inputs.current(job.snapshot)) this.pending.delete(key);
     this.execution.scheduler?.refresh();
     if (this.closed || this.active) return;
-    const job = [...this.pending.values()].find(j => j.readyAt <= this.now() && this.runnable(j));
+    const ready = [...this.pending.values()].filter(j => j.readyAt <= this.now() && this.runnable(j));
+    // Only one job reaches the shared scheduler at a time, so Curate fairness
+    // must also apply here: two preferred turns, then the oldest ready job.
+    const preferred = this.priorityTurns < 2 && ready.find(j => j.plan.priority === true);
+    const job = preferred || ready[0];
     if (!job) return;
+    this.priorityTurns = preferred ? this.priorityTurns + 1 : 0;
     this.pending.delete(job.snapshot.inputKey);
     this.active = job;
     job.work = this.run(job).finally(() => { if (this.active === job) this.active = null; });

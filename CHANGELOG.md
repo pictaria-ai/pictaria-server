@@ -12,6 +12,10 @@ All notable changes to Pictaria Server are documented here. This project follows
   before submission/acceptance, and protected cleanup of obsolete accounting
   references. Human decisions invalidate old answers; a settings toggle alone
   does not discard applicable work already submitted or reset its allowance.
+  Upcoming comparisons receive bounded priority without starving older work;
+  repeated offers preserve settling time and revisions preserve priority unless
+  explicitly changed. Dense input limits are distinguished from stale inputs
+  so future workers can leave those comparisons manual without a retry loop.
   Enrichment schema 21 / persistent-state contract 26 adds compact input
   references and a pre-upgrade recovery snapshot. Both roles remain unavailable
   until their request/advice adapters are connected; this adds no paid calls.

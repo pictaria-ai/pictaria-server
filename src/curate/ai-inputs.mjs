@@ -15,6 +15,8 @@ CREATE INDEX IF NOT EXISTS idx_curate_ai_input_age ON curate_ai_inputs(recorded_
 `;
 
 const same = (a, b) => a.length === b.length && a.every((id, i) => id === b[i]);
+const MAX_NEIGHBORS = 256;
+const limited = reason => ({ state: 'input-limit', reason, limit: MAX_NEIGHBORS });
 
 export class CurateAiInputs {
   constructor(curate, { now = Date.now } = {}) {
@@ -28,7 +30,7 @@ export class CurateAiInputs {
     if (!['stack', 'keeper'].includes(role) || typeof contract !== 'string' || !contract || contract.length > 100)
       throw new TypeError('Invalid Curate AI input contract.');
     const group = this.curate.current?.byId.get(groupId);
-    if (!group || group.ids.length < 2 || group.ids.length > CANDIDATE_LIMITS.photos) return null;
+    if (!group || group.ids.length < 2 || group.ids.length > CANDIDATE_LIMITS.photos) return { state: 'stale' };
     const actionable = photoIds ?? group.ids;
     if (!Array.isArray(actionable) || !actionable.length || actionable.length > 30 ||
         new Set(actionable).size !== actionable.length || actionable.some(id => !group.ids.includes(id)) ||
@@ -39,40 +41,41 @@ export class CurateAiInputs {
     // Capture only from a fully rebuilt projection. Later checks below are
     // scope-specific, so unrelated imports need not discard a paid result.
     if (this.curate.current.generation !== this.store.generation() ||
-        this.store.prepare('SELECT 1 FROM curate_dirty LIMIT 1').get()) return null;
-    const material = this.material(snapshot);
-    if (!material) return null;
+        this.store.prepare('SELECT 1 FROM curate_dirty LIMIT 1').get()) return { state: 'stale' };
+    const result = this.material(snapshot);
+    if (result.state !== 'current') return result;
+    const { material } = result;
     snapshot.scopeMaterial = material.scope;
     snapshot.material = fingerprint(material);
     snapshot.inputKey = fingerprint(snapshot);
-    return snapshot;
+    return { state: 'captured', snapshot };
   }
 
   material(snapshot) {
     const ids = [...snapshot.ids, ...snapshot.contextIds];
     this.store.flushIds(ids);
     const group = this.curate.current?.byMember.get(snapshot.ids[0]);
-    if (!this.curate.current) return null;
+    if (!this.curate.current) return { state: 'stale' };
     // Stacks-off changes the presentation into singles, not the photo inputs
     // of an already submitted request. Keep useful paid work through that
     // toggle while still checking all source/human evidence below.
     if (this.curate.current.stacks !== false &&
-        (!group || group.id !== snapshot.groupId || !same(group.ids, snapshot.ids))) return null;
+        (!group || group.id !== snapshot.groupId || !same(group.ids, snapshot.ids))) return { state: 'stale' };
     const photos = ids.map(id => this.store.photo(id));
     if (photos.some((p, i) => !p || p.availability === 'unavailable' ||
-      p.state !== (i < snapshot.ids.length ? 'undecided' : 'approved'))) return null;
-    if (ids.some(id => this.store.separatedFrom(id, ids))) return null;
+      p.state !== (i < snapshot.ids.length ? 'undecided' : 'approved'))) return { state: 'stale' };
+    if (ids.some(id => this.store.separatedFrom(id, ids))) return { state: 'stale' };
     // Candidate composition uses a wider window than the old 15-second engine.
     // Include new/changed nearby sources even before a rebuild has consumed them.
-    if (this.store.pendingScopeChanges(ids, CANDIDATE_LIMITS.spanMs)) return null;
+    if (this.store.pendingScopeChanges(ids, CANDIDATE_LIMITS.spanMs)) return { state: 'stale' };
     const times = photos.slice(0, snapshot.ids.length).map(p => p.time).filter(t => t !== null);
     let neighbors = [];
     if (times.length) {
       neighbors = this.store.prepare(`SELECT asset_id,material_key FROM curate_photos
-        WHERE state='undecided' AND captured_ms BETWEEN ? AND ? ORDER BY captured_ms,asset_id LIMIT 257`)
-        .all(Math.min(...times) - CANDIDATE_LIMITS.spanMs, Math.max(...times) + CANDIDATE_LIMITS.spanMs);
+        WHERE state='undecided' AND captured_ms BETWEEN ? AND ? ORDER BY captured_ms,asset_id LIMIT ?`)
+        .all(Math.min(...times) - CANDIDATE_LIMITS.spanMs, Math.max(...times) + CANDIDATE_LIMITS.spanMs, MAX_NEIGHBORS + 1);
       // Do not silently sample a dense neighborhood. Manual review stays usable.
-      if (neighbors.length > 256) return null;
+      if (neighbors.length > MAX_NEIGHBORS) return limited('dense-neighborhood');
     }
     // The basic grouper also recognizes exact/duplicate candidates outside the
     // time window. Source indexes avoid a whole-library scan at checkpoints.
@@ -82,18 +85,20 @@ export class CurateAiInputs {
       [['checksum', members.map(p => p.checksum)], ['duplicate_id', members.map(p => p.duplicateId)]])
       for (const value of new Set(values.filter(Boolean))) {
         const rows = this.store.prepare(`SELECT p.asset_id,p.material_key FROM assets a JOIN curate_photos p ON p.asset_id=a.asset_id
-          WHERE a.${column}=? AND p.state='undecided' ORDER BY p.asset_id LIMIT 257`).all(value);
+          WHERE a.${column}=? AND p.state='undecided' ORDER BY p.asset_id LIMIT ?`).all(value, MAX_NEIGHBORS + 1);
         for (const row of rows) exact.set(row.asset_id, row.material_key);
-        if (exact.size > 256) return null;
+        if (exact.size > MAX_NEIGHBORS) return limited('dense-duplicates');
       }
     const signatures = photos.map(p => [p.id, p.materialKey, p.availability, this.store.separationKey(p.id)]);
-    return { scope: fingerprint({ photos: signatures.slice(0, snapshot.ids.length), neighbors,
-      exact: [...exact].sort(([a], [b]) => a.localeCompare(b)) }), context: fingerprint(signatures.slice(snapshot.ids.length)) };
+    return { state: 'current', material: {
+      scope: fingerprint({ photos: signatures.slice(0, snapshot.ids.length), neighbors,
+        exact: [...exact].sort(([a], [b]) => a.localeCompare(b)) }), context: fingerprint(signatures.slice(snapshot.ids.length)),
+    } };
   }
 
   current(snapshot) {
-    const material = this.material(snapshot);
-    return material !== null && fingerprint(material) === snapshot.material;
+    const result = this.material(snapshot);
+    return result.state === 'current' && fingerprint(result.material) === snapshot.material;
   }
 
   record(snapshot) {

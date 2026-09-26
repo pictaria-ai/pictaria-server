@@ -15,7 +15,7 @@ import { fingerprint } from '../../src/curate/contracts.mjs';
 
 const deferred = () => Promise.withResolvers();
 const availability = { stack: true, keeper: true };
-async function fixture(work) {
+async function fixture(work, { candidate = false, immich = null } = {}) {
   const dir = mkdtempSync(join(tmpdir(), 'pictaria-ai-lifecycle-'));
   const path = join(dir, 'enrichment.sqlite');
   const repo = new Repository(path); repo.initSchema();
@@ -23,7 +23,10 @@ async function fixture(work) {
   repo.curate.aiLimits.now = () => now;
   const config = { curateBurstGrouping: true, curateStackRefereeEnabled: true, curateKeeperRefereeEnabled: true,
     enrichEnabled: false, defaultProvider: 'local_ollama', providers: { local_ollama: { baseUrl: 'http://127.0.0.1:11434', modelName: 'synthetic' } } };
-  const curate = new CurateService({ repo, config });
+  const curate = new CurateService({ repo, config, immich, metadataOptions: { automatic: false },
+    candidateOptions: { enabled: candidate, now: () => now } });
+  curate.start = () => {}; // Tests own ticks and time, including real refinement.
+  curate.similarity.now = () => now;
   const scheduler = new AiRequestScheduler();
   const execution = new CurateAiExecution({ attempts: repo.curate.aiAttempts, limits: repo.curate.aiLimits,
     getConfig: () => config, availability, scheduler, stopped: () => curate.closed });
@@ -289,3 +292,122 @@ test('Stacks-off rebuild does not discard an applicable already submitted answer
   assert.equal((await f.run()).state, 'succeeded'); assert.equal(f.accepted.length, 1);
   assert.equal((await f.lifecycle.offer(f.plan())).state, 'disabled');
 }));
+
+test('ready next-up jobs overtake arrivals, but both roles share the two-turn fairness bound', async () => fixture(async f => {
+  for (let i = 0; i < 6; i++) { f.add(`a${i}`, i * 400); f.add(`b${i}`, i * 400 + 1); }
+  await f.curate.refresh();
+  for (let i = 0; i < 6; i++) await f.lifecycle.offer(f.plan(`a${i}`, {
+    priority: i >= 2, role: i % 2 ? 'keeper' : 'stack',
+  }));
+  f.advance(AI_SETTLE_MS);
+  for (let i = 0; i < 6; i++) assert.equal((await f.run()).state, 'succeeded');
+  assert.deepEqual(f.calls.map(c => c.input.ids[0]), ['a2', 'a3', 'a0', 'a4', 'a5', 'a1']);
+}));
+
+test('unchanged re-offers update or preserve priority without restarting settling; explicit false demotes', async () => fixture(async f => {
+  for (let i = 0; i < 3; i++) { f.add(`a${i}`, i * 400); f.add(`b${i}`, i * 400 + 1); }
+  await f.curate.refresh();
+  for (let i = 0; i < 3; i++) await f.lifecycle.offer(f.plan(`a${i}`));
+  f.advance(AI_SETTLE_MS - 1);
+  await f.lifecycle.offer(f.plan('a1', { priority: true }));
+  await f.lifecycle.offer(f.plan('a1', { priority: false }));
+  await f.lifecycle.offer(f.plan('a2', { priority: true }));
+  await f.lifecycle.offer(f.plan('a2'));
+  assert.equal(await f.run(), undefined);
+  f.advance(1);
+  for (let i = 0; i < 3; i++) assert.equal((await f.run()).state, 'succeeded');
+  assert.deepEqual(f.calls.map(c => c.input.ids[0]), ['a2', 'a0', 'a1']);
+}));
+
+test('a replaced next-up stack retains priority but must finish its new settling period', async () => fixture(async f => {
+  for (let i = 0; i < 3; i++) { f.add(`a${i}`, i * 400); f.add(`b${i}`, i * 400 + 1); }
+  await f.curate.refresh();
+  for (let i = 0; i < 3; i++) await f.lifecycle.offer(f.plan(`a${i}`, { priority: i === 0 }));
+  f.advance(10_000); f.add('c0', 2); await f.curate.refresh();
+  await f.lifecycle.offer(f.plan('a0'));
+  f.advance(20_000);
+  assert.equal((await f.run()).state, 'succeeded', 'unready priority work must not block older ready work');
+  assert.equal(f.calls[0].input.ids[0], 'a1');
+  f.advance(10_000);
+  assert.equal((await f.run()).state, 'succeeded');
+  assert.deepEqual(f.calls[1].input.ids, ['a0', 'b0', 'c0']);
+  assert.equal((await f.run()).state, 'succeeded');
+  assert.equal(f.calls[2].input.ids[0], 'a2');
+}));
+
+test('focused priority work yields to other ready work, then remains eligible on return', async () => fixture(async f => {
+  for (let i = 0; i < 2; i++) { f.add(`a${i}`, i * 400); f.add(`b${i}`, i * 400 + 1); }
+  await f.curate.refresh();
+  let focused = true;
+  f.curate.refinement = { isFocused: ids => focused && ids.includes('a1'), groupStatus: () => null,
+    close: async () => {}, settingsChanged: () => {}, revision: 0 };
+  await f.lifecycle.offer(f.plan('a0'));
+  await f.lifecycle.offer(f.plan('a1', { priority: true }));
+  f.advance(AI_SETTLE_MS); assert.equal((await f.run()).state, 'succeeded');
+  assert.equal(f.calls[0].input.ids[0], 'a0'); assert.equal(await f.run(), undefined);
+  focused = false; assert.equal((await f.run()).state, 'succeeded');
+  assert.equal(f.calls[1].input.ids[0], 'a1');
+}));
+
+test('dense neighborhoods return an input limit, not stale or queued work, without spending attempts', async () => fixture(async f => {
+  f.add('a'); f.add('b', 1);
+  for (let i = 0; i < 254; i++) f.add(`neighbor${i}`, 20 + i / 2);
+  await f.curate.refresh();
+  assert.deepEqual(f.curate.current.byMember.get('a').ids, ['a', 'b']);
+  assert.equal((await f.lifecycle.offer(f.plan())).state, 'queued', 'exactly 256 neighbors are supported');
+  f.add('extra', 170); await f.curate.refresh(); f.advance(AI_SETTLE_MS);
+  assert.equal(await f.run(), undefined, 'new density invalidates an older queued snapshot');
+  assert.equal(f.lifecycle.pending.size, 0);
+  for (let i = 0; i < 2; i++) assert.deepEqual(await f.lifecycle.offer(f.plan()), {
+    state: 'input-limit', reason: 'dense-neighborhood', limit: 256,
+  });
+  assert.equal(f.lifecycle.pending.size, 0); assert.equal(f.calls.length, 0);
+  assert.equal(f.repo.db.prepare('SELECT COUNT(*) n FROM curate_ai_attempts').get().n, 0);
+  assert.equal(f.repo.db.prepare('SELECT COUNT(*) n FROM curate_ai_inputs').get().n, 0);
+  assert.equal((await f.lifecycle.offer(f.plan('missing'))).state, 'stale');
+}));
+
+test('production candidate grouping gates AI on real search completion, scope, focus and current inputs', async () => {
+  const searchCalls = [];
+  await fixture(async f => {
+    // A 30-second gap belongs together in candidate grouping, not the basic grouper.
+    f.add('a'); f.add('b', 30); await f.curate.refresh();
+    const group = () => f.curate.current.byMember.get('a');
+    assert.deepEqual(group().ids, ['a', 'b']);
+    assert.equal(f.curate.refinement.groupStatus(group()).state, 'waiting');
+    await f.lifecycle.offer(f.plan()); f.advance(AI_SETTLE_MS);
+    assert.equal(await f.run(), undefined);
+    await f.curate.refinement.tick();
+    assert.equal(f.curate.refinement.groupStatus(group()).state, 'checking');
+    assert.equal(await f.run(), undefined);
+    f.advance(5000); await f.curate.refinement.tick();
+    assert.deepEqual(searchCalls, ['a', 'b']);
+    assert.equal(f.curate.refinement.groupStatus(group()).state, 'checked');
+    assert.equal(group().route, 'candidate-supported');
+    assert.equal(await f.run(), undefined, 'old uncertain-group offer is stale after the rebuild');
+    assert.equal(f.lifecycle.pending.size, 0);
+    await f.lifecycle.offer(f.plan()); f.advance(AI_SETTLE_MS);
+    assert.equal(await f.run(), undefined, 'uncertain-only policy excludes this now-supported stack');
+    f.config.curateStackRefereeScope = 'all';
+    const view = await f.curate.openView();
+    f.curate.comparison(view.viewId, group().id);
+    assert.equal(f.curate.refinement.isFocused(['a', 'b']), true);
+    assert.equal(await f.run(), undefined);
+    f.curate.page(view.viewId, 0, 50, { visibleGroupIds: [group().id], comparisonGroupId: null });
+    assert.equal(f.curate.refinement.isFocused(['a', 'b']), false);
+    assert.equal((await f.run()).state, 'succeeded');
+    assert.equal(f.accepted.length, 1);
+    await f.lifecycle.offer(f.plan('a', { role: 'keeper', submit: async () => {
+      f.add('b', 31);
+      return { valid: true };
+    } }));
+    f.advance(AI_SETTLE_MS);
+    assert.equal((await f.run()).state, 'stale');
+    assert.equal(f.accepted.length, 1, 'a late answer cannot apply to changed production inputs');
+  }, { candidate: true, immich: {
+    baseUrl: 'http://synthetic', apiKey: 'synthetic', async requestJson(path, { body }) {
+      assert.equal(path, '/search/smart'); searchCalls.push(body.queryAssetId);
+      return { assets: { items: ['a', 'b'].map(id => ({ id, type: 'IMAGE' })) } };
+    },
+  } });
+});
