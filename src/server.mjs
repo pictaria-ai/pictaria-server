@@ -1,3 +1,5 @@
+import { acquireServerOwner } from './ai/owner.mjs';
+import { AiConnections } from './ai/connections.mjs';
 import { timingSafeEqual } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import http from 'node:http';
@@ -68,6 +70,10 @@ let resolveClientAddress;
 let browserAuthority;
 let persistentStateGuard;
 let serverVersion;
+let serverOwner;
+// Keep a strong reference through shutdown. No other owner may recover a
+// request while a bounded drain still has an abandoned writer in this process.
+process.once('exit', () => serverOwner?.close());
 try {
   validateServerAuthConfig(config);
   browserAuthority = createBrowserAuthorityPolicy(config.browserAllowedHosts);
@@ -79,6 +85,7 @@ try {
     legacySettingsMarkerPath: config.persistentState.legacySettingsMarkerPath,
     targets: backupTargets(config),
   });
+  serverOwner = acquireServerOwner(config.databasePath);
   persistentStateGuard.preflight();
   const upgrade = await preparePersistentStateUpgrade({
     guard: persistentStateGuard,
@@ -176,6 +183,7 @@ const repo = new Repository(config.databasePath);
 repo.initSchema();
 // Reconcile only at process startup, never when another reader opens the DB.
 repo.timings.interrupt();
+repo.curate.aiLimits.recoverInterrupted(repo.curate.aiAttempts);
 repo.setHistoryRetention({ runs: config.enrichHistoryRuns, logs: config.enrichHistoryLogs });
 const profiles = new EnrichmentProfiles({ repo, config });
 profiles.initialize();
@@ -193,14 +201,16 @@ const curate = new CurateService({ repo, config, immich, review, candidateOption
 const captionWriteback = new CaptionWritebackService({ repo, immich, config, log: (message) => console.log(`[Pictaria] ${message}`) });
 const aiTagSync = new AiTagSyncService({ repo, immich, review, tagWrites, config, log: message => console.log(`[Pictaria] ${message}`) });
 const aiScheduler = new AiRequestScheduler();
+const aiConnections = new AiConnections({ limits: repo.curate.aiLimits, scheduler: aiScheduler,
+  getConfig: () => config, stopped: () => lifecycle.stopped });
 // One shared executor for both forthcoming roles. Availability remains false;
 // role adapters and the durable recovery/retention lifecycle precede activation.
 curate.ai = new CurateAiExecution({ attempts: repo.curate.aiAttempts, limits: repo.curate.aiLimits,
   getConfig: () => config, availability: CURATE_AI_AVAILABILITY,
   stopped: () => lifecycle.stopped, scheduler: aiScheduler });
-const enrichRunner = new EnrichJobRunner({ repo, immich, taxonomy, config, profiles, aiScheduler, onTagsQueued: () => aiTagSync.wake() });
+const enrichRunner = new EnrichJobRunner({ repo, immich, taxonomy, config, profiles, aiScheduler, aiConnections, onTagsQueued: () => aiTagSync.wake() });
 const enrichScheduler = new EnrichScheduler({ runner: enrichRunner, repo, config });
-const referee = new RefereeService({ repo, immich, review, enrichRunner, config, aiScheduler, log: (message) => console.log(`[Pictaria] ${message}`) });
+const referee = new RefereeService({ repo, immich, review, enrichRunner, config, aiScheduler, aiConnections, log: (message) => console.log(`[Pictaria] ${message}`) });
 const albumStore = new SmartAlbumStore(config.albums.dataFile, { installationSecret });
 const albumScheduler = new SmartAlbumScheduler({ immich, store: albumStore, config: config.albums, enrichRepo: repo });
 const frameHub = createFrameHub();
@@ -306,6 +316,7 @@ lifecycle.register('review-sync', 3000, (timeoutMs) => review.stopSyncWorker(tim
 lifecycle.register('ai-tag-sync', 3000, timeoutMs => aiTagSync.stop(timeoutMs));
 lifecycle.register('caption-writeback', 3000, (timeoutMs) => captionWriteback.stop(timeoutMs));
 lifecycle.register('enrich-runner', 3000, (timeoutMs) => enrichRunner.stop(timeoutMs));
+lifecycle.register('ai-connections', 3000, timeoutMs => aiConnections.stop(timeoutMs));
 lifecycle.register('ai-scheduler', 3000, timeoutMs => aiScheduler.stop(timeoutMs));
 lifecycle.register('enrich-scheduler', 3000, () => enrichScheduler.stop());
 lifecycle.register('insights-collector', 3000, (timeoutMs) => insightsCollector.stop(timeoutMs));
@@ -329,7 +340,7 @@ const features = [
   createVoiceRoutes({ immich, config, review, requireImmich, voiceMetrics, activityLog }),
   createAmbientRoutes({ config }),
   createInsightsRoutes({ collector: insightsCollector, repo: insightsRepo, immich, config, settingsStore, requireImmich }),
-  createSettingsRoutes({ settingsStore, profiles }),
+  createSettingsRoutes({ settingsStore, profiles, aiConnections }),
   createSupportRoutes({ config }),
   createBackupRoutes({ config, backupState }),
 ];
@@ -479,6 +490,7 @@ function shutdown(reason, exitCode) {
     }
     clearTimeout(forceExit);
     handOffBackupLock();
+    // Retain the owner lock through process exit, including any abandoned writer.
     process.exit(failed ? 1 : exitCode);
   })();
 }

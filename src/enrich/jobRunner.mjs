@@ -1,3 +1,4 @@
+import { connectionMessage } from '../ai/connections.mjs';
 import { awaitDrain } from '../lifecycle.mjs';
 import { runBatch, loadPrompts, emptyCounters } from './runner.mjs';
 import { createProvider } from './providers.mjs';
@@ -11,7 +12,7 @@ import { configuredSecrets, sanitizeDiagnostic } from '../diagnostics.mjs';
 const LOG_TAIL_LIMIT = 500;
 
 export class EnrichJobRunner {
-  constructor({ repo, immich, taxonomy, config, profiles = null, onTagsQueued = () => {}, aiScheduler = null }) {
+  constructor({ repo, immich, taxonomy, config, profiles = null, onTagsQueued = () => {}, aiScheduler = null, aiConnections = null }) {
     this.repo = repo;
     this.immich = immich;
     this.taxonomy = taxonomy;
@@ -19,6 +20,8 @@ export class EnrichJobRunner {
     this.profiles = profiles;
     this.onTagsQueued = onTagsQueued;
     this.aiScheduler = aiScheduler;
+    this.aiConnections = aiConnections;
+    this.activeProvider = null;
     this.aiSession = null;
     this.state = idleState();
     this.runPromise = null;
@@ -34,8 +37,17 @@ export class EnrichJobRunner {
   }
 
   status() {
+    let aiConnection = null;
+    if (this.aiConnections) {
+      try {
+        aiConnection = this.aiConnections.status(this.state.running ? this.activeProvider : this.#resolveProvider(this.state.provider).provider);
+        aiConnection.message = connectionMessage(aiConnection);
+      } catch { aiConnection = { state: 'not-configured', reason: 'configuration',
+        message: 'Not configured. Complete the saved AI provider and model settings.' }; }
+    }
     return {
       ...this.state,
+      aiConnection,
       scheduling: this.aiSession?.status() ?? { state: 'idle', reason: null },
       activeProfile: this.profiles?.list().find(p => p.isActive) ?? null,
       log: [...this.state.log],
@@ -480,6 +492,7 @@ export class EnrichJobRunner {
 
   async #run(execution, assetIds, lifecycle) {
     const { provider, configuration } = execution;
+    this.activeProvider = provider;
     let listed = 0;
     let aiSession;
     try {
@@ -493,6 +506,7 @@ export class EnrichJobRunner {
         repo: this.repo,
         provider,
         aiSession,
+        aiConnections: this.aiConnections,
         configuration,
         timingRunId: lifecycle.timingRunId,
         taxonomy: configuration.taxonomy,

@@ -96,15 +96,13 @@ running inference. A settings change rechecks queued role controls but does not
 move a pinned request to another resource. Shutdown cancels queued work and
 boundedly drains active work without preemption for fairness. Scheduling queues
 are deliberately in memory; durable attempts and provider protection remain
-separate. Restart does not authorize resetting or recovering their ledgers.
+separate. Restart does not reset their ledgers; recovery requires exclusive server ownership as described below.
 
-This slice connects **request arbitration**, not the remaining activation
-lifecycle. The composed preview executor uses its durable limits and verifies
-its scheduling turn before preparing/dispatching, but availability remains
-false. Sharing durable provider pauses with Enrich, explicit connection
-verification/status, exclusive-owner startup recovery, authoritative retention
-selection and settling/coalescing remain prerequisites before activating new
-roles. Existing Enrich and legacy referee error policies are unchanged here.
+The server also shares durable provider protection with Enrich and the legacy
+referee, with explicit verification in Settings → AI Providers. It recovers
+interrupted work only after exclusive database ownership. Availability of both
+preview roles remains false: authoritative retention selection,
+settling/coalescing and role adapters still precede activation.
 
 ## Settings and scope (PIC-345)
 
@@ -264,23 +262,53 @@ that different credentials use independent hardware: PIC-118 must arbitrate the
 actual shared resource separately. Neither secrets nor URLs are saved.
 The first authentication failure pauses the connection. A temporary failure
 waits at least 30 seconds, respecting a longer Retry-After, then allows **one**
-recovery request. If that request fails with another shared error, the connection
-stays paused. A successful response, even one with invalid answer content,
-proves connectivity and releases the guard; invalid answers retain their input
-attempt charge. Unknown transport faults pause as configuration/integration
-failures instead of walking the rest of the queue.
+recovery request. If that request also fails temporarily, stop the current run
+and cool down for **15 minutes**, respecting a longer Retry-After. The next
+ordinary eligible request may check recovery; another temporary failure renews
+that longer cooldown. Only a successful response returns to normal throughput.
+Expiry itself does not dispatch work, restart a stopped Enrich run, refund an
+input attempt or revisit a settled comparison. A successful response, even one
+with invalid answer content, proves connectivity and releases the guard;
+invalid answers retain their input attempt charge. Unknown transport faults
+pause as configuration/integration failures instead of walking the rest of the
+queue.
 
 `providerStatus()` exposes only ready/busy/cooldown/recovery-ready/paused and a
-fixed reason. These are integration facts, not new UI labels in this patch.
-`connectionVerified()` is reserved for a deliberate successful connection test
-or correction. Never call it on refresh, restart, a preference toggle or a
-per-stack retry. It neither refunds allowances nor enqueues settled inputs.
+fixed reason. Unconfigured Settings targets and Enrich show a neutral **Not configured**
+state, separate from runtime failure pauses. Cooldown messages show the deadline
+in the browser's local timezone. Enrich and the legacy referee surface pauses
+and explain when the next eligible request can check recovery. Settings → AI Providers shows the selected Enrich and Curate
+connections, plus other configured providers available to per-run Enrich
+choices, with **Verify connection**. Verification is one scheduled request using
+a synthetic PNG and small JSON answer, with the saved provider's inference timeout. It may incur a
+provider charge, uses no library photos, and checks basic vision/structured
+output connectivity, not multi-image quality or the full Enrich/Curate contract.
+Settings must be saved first. Queued verification cancels if those saved inputs
+change. Only one verification can wait/run at once; it shares scheduling and
+cannot bypass an active owner or an unexpired cooldown. Page/status reads and
+settings saves never send test requests.
+
+Verification owns a fresh provider token, so an old success cannot clear a newer
+failure. It can explicitly cross a terminal pause. A temporary failure or
+interruption while verifying an authentication, configuration or legacy interrupted pause leaves
+that original pause in place; it cannot silently enable automatic work. A
+temporary verification failure on a connection without such a pause starts the
+15-minute cooldown. Explicit verification must pass its small response contract
+to clear a pause; a rejected or malformed test shows a configuration/format
+warning and stays paused. Ordinary malformed photo/stack answers still do not
+pause the provider. The former blind `connectionVerified()` reset hook is
+removed. Verification neither refunds
+allowances nor enqueues settled inputs. A stopped Enrich job stays queued and
+must be run again. Newly eligible legacy work uses its normal polling/backoff;
+there is no special repair queue.
 
 Only the exclusive server owner may call `recoverInterrupted(attempts)` before
 starting either role. It keeps all charges. An interrupted ordinary request
 enters the normal 30-second cooldown and gets at most one recovery request;
-an interrupted recovery request stays paused. Repeating startup neither moves
-that deadline nor grants another recovery. Opening another repository does not
+an interrupted recovery request enters the 15-minute cooldown. Cancellation and
+graceful shutdown during recovery use the same longer cooldown. An interrupted
+verification of an authentication/configuration pause retains its original reason.
+Repeating startup neither moves that deadline nor refunds attempts. Opening another repository does not
 steal live work. `pruneObsolete()` accepts
 up to 200 input identities that the lifecycle owner has established are no
 longer current/queued or referenced by comparisons, Undo or advice. It waits
@@ -293,34 +321,69 @@ Schema 20 / persistent-state contract 25 adds these compact tables. Upgrade,
 restart, backup and restore preserve charges, pauses and settled limited inputs.
 Use the pre-migration recovery point for rollback to an older schema.
 
-The layer is tested through the executor but **not connected to live workers**.
-Both preview roles remain unavailable. Request arbitration is now connected under PIC-118;
-sharing durable provider protection with Enrich remains an activation prerequisite. Production startup recovery,
-settling/coalescing and authoritative cleanup selection must be composed there
-before enabling roles; the limits layer does not yet change released Enrich error behavior.
-The enablement work must also expose paused status with an explicit connection
-verification/recovery action. There is no general AI connection-test control in
-Settings today (the existing connectivity check is for Immich), so do not assume
-that path is already wired. A new successful, authorized Enrich request on the
-same pinned connection may verify recovery from a transient/interrupted pause;
-an older in-flight success must not clear a newer failure. Authentication and
-configuration pauses need explicit correction/verification. Do not schedule
-hourly probes, create work solely to test connectivity, refund exhausted inputs
-or revisit settled limited comparisons. Shared scheduling must make those
-recovery entry points available without allowing ordinary queued work to bypass
-the pause.
+### Live connection protection and startup
+
+`AiConnections` connects the same durable provider row to server-managed Enrich
+and the legacy referee. Ownership starts immediately before each provider call,
+after scheduling, and ends before local answer validation. The first shared
+failure stops further affected work. Authentication (401/403), unsupported
+endpoint/model routing (404/405), and unknown adapter/configuration failures
+pause immediately. Ordinary request-specific 400 rejections and malformed model
+answers do not globally pause the connection. Model-answer parsing reports a
+fixed diagnostic without raw response fragments.
+
+For Enrich 429/503 responses, the existing cancelable same-photo wait follows
+the shared cooldown and permits just one recovery request when the wait is at
+most five minutes. A longer Retry-After ends the run immediately and retains its
+queue item; the connection still honors the full provider deadline. Other shared transport failures stop the run;
+the next eligible real request after cooldown can be the one recovery attempt.
+If recovery fails temporarily, the run stops without waiting out the new
+15-minute (or longer provider-requested) cooldown. A run whose first request is
+already the recovery request likewise stops on that failure. After cooldown,
+the next manual run, daily scheduled run or eligible referee request can check
+recovery normally. A stopped daily run is not automatically restarted that day.
+New ordinary Enrich runs do **not** bypass authentication or configuration pauses.
+Legacy terminal paused/interrupted rows also require explicit verification:
+earlier code discarded their original reason, which could have been an auth or
+configuration pause being verified. New interruptions preserve that reason.
+Earlier preview records marked paused/unavailable
+use their recorded failure time plus 15 minutes, so upgrading/restarting does
+not renew the delay; no schema migration is needed.
+Untouched photos receive no failed processing record; dispatched infrastructure
+failures do not consume their content-failure allowance. Independent connections
+remain eligible. The standalone Enrich CLI retains its existing retry policy;
+these shared protections belong to the single server runtime.
+
+Before pre-migration backup or opening/recovering application state, the server
+claims a separate SQLite lifetime lock next to the canonical Enrich database:
+`<database-path>.server-owner.sqlite`. A second server using that path fails
+startup, even with a different HTTP port. Normal repository readers and backups
+still work. The lock is held until process exit, including bounded shutdown when
+an old request has not drained. OS/SQLite locking releases it after a crash;
+there is no PID file, timer lease or stale-file deletion. The file contains no
+application state, is excluded from Pictaria backups, and must not be removed
+while a server is running. It needs the same reliable filesystem locking as the
+application database. This is single-server ownership, not multi-node support. Older builds do not
+take this lock; stop them before upgrading or reusing their data directory.
+
+After ownership and schema initialization, startup reconciles interrupted
+provider and exact-input markers once, without refunding charges. Opening the
+repository from a read-only helper does not recover live work. No schema or
+persistent-state version changes are needed for this integration: the protection
+tables already shipped as schema 20 / contract 25. Both new referee roles remain
+unavailable. Protected retention selection, settling/coalescing and role-specific
+applicability still need integration before activation.
 
 ## Remaining integration
 
 - **PIC-345 / PIC-372:** connect availability to the actual workers and complete
   the cutover and live migration acceptance. This settings slice does not replay
   decided history or establish eligibility for historical referee results.
-- **PIC-346:** connect provider pauses, the per-photo limits above,
-  settling/coalescing, current-input construction, protected cleanup references and the
+- **PIC-346:** finish settling/coalescing, current-input construction, protected cleanup references and the
   authoritative applicability adapter before enabling either role. Provider-internal
   validation retries must also be accounted for; the legacy safeguards above are not that new lifecycle.
-- **PIC-118:** request arbitration is implemented as described above. Complete
-  shared provider-pause/recovery integration alongside PIC-346 before activation.
+- **PIC-118:** request arbitration and shared provider-pause/recovery integration
+  are implemented as described above; validate with the new role workers at activation.
 - **PIC-370 / PIC-116:** validated whole-stack composition checks, then keeper
   suggestions using the accepted production quality criteria and multiple
   keepers. Human choices always win. Finished incomplete checks may leave

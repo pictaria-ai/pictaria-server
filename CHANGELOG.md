@@ -7,6 +7,23 @@ All notable changes to Pictaria Server are documented here. This project follows
 
 ### Development
 
+- Connected shared AI failure protection to server-managed Enrich and the
+  existing Curate referee. Shared failures stop repeated queue-wide requests;
+  temporary failures get one initial delayed recovery attempt, then a
+  15-minute cooldown (or longer Retry-After) between eligible real requests.
+  Temporary overload or interrupted recovery no longer disables future scheduled
+  Enrich runs; cooldown expiry never restarts a stopped run or sends a probe.
+  Provider waits longer than five minutes end the current run and retain its queue,
+  while honoring the full deadline. Settings and Enrich display that deadline in
+  the browser's local timezone and use a neutral Not configured label.
+  The existing Curate referee status also explains when the next eligible
+  request can check recovery after a cooldown.
+  Settings → AI Providers shows connection status and
+  offers an explicit synthetic-image verification call. Startup recovers
+  interrupted work only after claiming
+  exclusive database ownership, without resetting spent attempts. Both new
+  referees remain unavailable pending the remaining lifecycle/worker integration.
+
 - Added shared AI scheduling groundwork: up to ten Enrich calls or five
   minutes, then one waiting Curate call. Active requests finish before switching,
   retry waits release the service, and independent services can run concurrently.
@@ -21,10 +38,14 @@ All notable changes to Pictaria Server are documented here. This project follows
 
 - Curate AI groundwork now persists a three-comparison per-actionable-photo/referee allowance,
   settles limited inputs without a repair loop, and pauses a failing provider
-  with at most one delayed recovery request. Shared read-only reference photos
-  do not consume unrelated stacks' allowances, but still count toward request
+  with a delayed recovery request and longer cooldowns after repeated temporary
+  failures. Shared read-only reference photos do not consume unrelated stacks'
+  allowances, but still count toward request
   size limits. An interrupted ordinary request gets its one recovery opportunity;
-  an interrupted recovery remains paused. Dispatched attempts remain charged.
+  an interrupted recovery enters the longer cooldown. Interrupted verification
+  preserves an existing authentication/configuration pause. Older terminal
+  interrupted records still require verification because their prior reason was
+  not retained. Dispatched attempts remain charged.
   Schema 20 / persistent-state contract 25 preserve this state across restart
   and restore. Preview referees remain unavailable pending scheduler/worker wiring.
 
