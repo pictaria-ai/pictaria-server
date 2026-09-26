@@ -80,9 +80,9 @@ photo metadata or model response is included in public scheduling status.
 
 Curate has at most one active scheduling turn across both roles/backends.
 Among ready Curate sessions, at most two preferred comparisons can precede
-the oldest waiting session. Future role workers still own selection of upcoming
-comparisons, open-comparison stability and settled/latest-input coalescing.
-For v1.3, keep the planned 30-second settling delay and current-input validation,
+the oldest waiting session. Role workers own discovery and selection of upcoming
+comparisons; the shared lifecycle below handles settling, coalescing and open
+comparison attention. It uses a 30-second settling delay and current-input validation,
 without inspecting the remaining Enrich queue to predict future stack members.
 Longer Enrich turns may reduce repeated judgments when related photos arrive
 together, but do not prove a stack is complete. Some repeated work is an accepted
@@ -101,8 +101,8 @@ separate. Restart does not reset their ledgers; recovery requires exclusive serv
 The server also shares durable provider protection with Enrich and the legacy
 referee, with explicit verification in Settings → AI Providers. It recovers
 interrupted work only after exclusive database ownership. Availability of both
-preview roles remains false: authoritative retention selection,
-settling/coalescing and role adapters still precede activation.
+preview roles remains false: the role adapters and their activation acceptance
+still precede real requests.
 
 ## Settings and scope (PIC-345)
 
@@ -371,17 +371,81 @@ provider and exact-input markers once, without refunding charges. Opening the
 repository from a read-only helper does not recover live work. No schema or
 persistent-state version changes are needed for this integration: the protection
 tables already shipped as schema 20 / contract 25. Both new referee roles remain
-unavailable. Protected retention selection, settling/coalescing and role-specific
-applicability still need integration before activation.
+unavailable. The shared changing-input integration is described below; role-specific
+request/advice applicability still needs integration before activation.
+
+## Changing inputs and protected cleanup (PIC-346)
+
+The server composes `CurateAiLifecycle` with its existing service, executor and
+shared scheduler. This is infrastructure for the upcoming role workers, not an
+active source of AI requests. No worker discovers/offers real groups yet, and
+both availability flags remain false.
+
+- A role adapter offers a current group and versioned prompt/schema contract,
+  optionally selecting an actionable Photo Referee batch. The lifecycle derives
+  the authoritative full membership, material/human signatures, separations and
+  already-kept context itself. Context remains read-only, at most eight images
+  within the 30-image request envelope. Unsupported/dense inputs remain manual.
+- An unchanged offer keeps its original 30-second settling deadline. Changed
+  inputs replace overlapping queued work and supersede an old active answer.
+  There are at most 32 waiting requests and one active Curate request. Separate
+  current children after a split and disjoint batches of the same scope may
+  coexist; shared context does not tie unrelated stacks together. There is no
+  lineage history, persistent work queue or prediction from the Enrich queue.
+- Future adapters rediscover current candidates after changes. Stale queued
+  inputs are dropped; the lifecycle does not manufacture their replacements.
+  The background tick never waits for inference. Recent open-comparison
+  attention defers new work, and closing or letting that attention expire allows
+  it again. Deterministic checks must finish first. The Stack Referee's current
+  uncertain/all policy is rechecked before submission.
+- Before each preparation checkpoint and dispatch, and inside the acceptance
+  transaction, compare current scope, availability, material inputs, human
+  decisions and separations. Related dirty sources and bounded nearby projection
+  changes also invalidate old input before the next grouping rebuild. Unrelated
+  imports do not invalidate a paid answer. An applicable submitted answer can
+  still be accepted after its role is disabled; dependent work needs fresh gates.
+- Resolve the saved provider/model at scheduler admission. Changing the connection
+  while queued requires a new turn, without spending an attempt; the admitted
+  model stays pinned through preparation/submission. Changing Settings alone
+  does not invalidate valid advice or reset an input's attempt count.
+- One failed submitted/invalid-answer attempt can wait 30 seconds for its one
+  remaining attempt, still subject to provider and photo limits. A finished or
+  limited input cannot be revived by refresh, restart, toggle or window expiry.
+  Authentication/configuration failures stop that offered work. Ordinary queued
+  work may wait through a transient provider cooldown; expiry does not recreate
+  removed work or create a probe. Adapters must submit exactly once through the
+  executor, not wrap calls in Enrich's validation-retry helper.
+
+Schema **21** / persistent-state contract **26** adds `curate_ai_inputs`: a compact
+membership/signature reference saved atomically with a charged attempt or a
+limited-input settlement. It contains no photos, prompts, credentials or answers.
+Only admitted/settled work gets a durable reference; queuing revisions does not
+create a history. Startup takes the usual complete pre-migration snapshot.
+
+Once a minute the service examines at most 20 aged references, yielding the
+remaining candidates to later passes after a four-millisecond target. A cursor
+prevents protected rows from starving others. Cleanup keeps current inputs,
+running/queued work, unexpired comparisons/decision operations, outstanding Undo
+or sync, and usable advice. It nominates only demonstrably obsolete inputs to
+the existing ledger cleanup after the 30-minute window. During a rebuild,
+unprojected source changes or Stacks-off, it retains records conservatively.
+Older records without authoritative references are retained. Cleanup never
+offers work or resets a current exhausted/limited comparison.
+
+Synthetic coverage exercises settling and overlapping replacements, batches and
+shared context, queued/preparing/in-flight changes, human decisions and missing
+assets, open comparisons, provider changes, bounded retries/churn, protected
+cleanup, restart, upgrade and complete backup/restore. Live role-worker and
+provider acceptance remains PIC-370/PIC-116 work.
 
 ## Remaining integration
 
 - **PIC-345 / PIC-372:** connect availability to the actual workers and complete
   the cutover and live migration acceptance. This settings slice does not replay
   decided history or establish eligibility for historical referee results.
-- **PIC-346:** finish settling/coalescing, current-input construction, protected cleanup references and the
-  authoritative applicability adapter before enabling either role. Provider-internal
-  validation retries must also be accounted for; the legacy safeguards above are not that new lifecycle.
+- **PIC-346:** connect the shared lifecycle to each real request/advice adapter and
+  verify its applicability and one-call accounting before enabling either role.
+  The shared machinery above does not replace role-specific acceptance testing.
 - **PIC-118:** request arbitration and shared provider-pause/recovery integration
   are implemented as described above; validate with the new role workers at activation.
 - **PIC-370 / PIC-116:** validated whole-stack composition checks, then keeper

@@ -58,6 +58,7 @@ export class CurateAiExecution {
     // All admission/applicability callbacks are synchronous. A Promise cannot
     // accidentally authorize work using a stale answer.
     if (job.isCurrent() !== true) return 'stale';
+    if (job.canStart && job.canStart() !== true) return 'waiting';
     const limit = this.limits?.eligibility(job);
     // An Enrich call may own this provider right now. Join the scheduler's
     // queue, then require full admission once the turn is actually ours.
@@ -68,6 +69,12 @@ export class CurateAiExecution {
   }
 
   async run(job) {
+    if (this.stopped()) return { state: 'stopped' };
+    if (!curateAiRoleEnabled(this.getConfig(), job.role, this.availability)) return { state: 'disabled' };
+    if (job.resolveProvider) {
+      const provider = job.resolveProvider();
+      job = { ...job, provider, backendKey: aiBackendKey(provider) };
+    }
     if (!this.scheduler) return this.#execute(job);
     if (this.#queued || this.#busy) return { state: 'busy' };
     if (this.stopped()) return { state: 'stopped' };
@@ -84,7 +91,7 @@ export class CurateAiExecution {
     if (eligible !== 'eligible') return { state: eligible };
     const reason = this.#reason(job, false);
     if (reason) {
-      if (reason === 'photo-limit') this.limits.settleLimited(job);
+      if (reason === 'photo-limit') this.#settleLimited(job);
       return { state: reason };
     }
     this.#queued = true;
@@ -93,10 +100,19 @@ export class CurateAiExecution {
       session = this.scheduler.session(job.provider, 'curate', {
         priority: job.priority === true,
         eligible: () => !this.stopped() && curateAiRoleEnabled(this.getConfig(), job.role, this.availability)
-          && job.isCurrent() === true,
+          && job.isCurrent() === true && (!job.canStart || job.canStart() === true),
       });
       this.#turn = session;
-      return await session.run(() => this.#execute(job));
+      return await session.run(() => {
+        // Resolve the saved model when this turn actually begins. A different
+        // connection needs a fresh scheduler turn; no preparation has started.
+        if (job.resolveProvider) {
+          const provider = job.resolveProvider();
+          if (aiBackendKey(provider) !== job.backendKey) return { state: 'provider-changed' };
+          job = Object.freeze({ ...job, provider });
+        }
+        return this.#execute(job);
+      });
     } catch (error) {
       if (error instanceof AiSchedulingCancelled) return { state: this.scheduler.stopped ? 'stopped' : this.#reason(job, false) ?? 'stopped' };
       throw error;
@@ -119,7 +135,7 @@ export class CurateAiExecution {
     if (eligible !== 'eligible') return { state: eligible };
     const reason = this.#reason(job);
     if (reason) {
-      if (reason === 'photo-limit') this.limits.settleLimited(job);
+      if (reason === 'photo-limit') this.#settleLimited(job);
       return { state: reason };
     }
     this.#busy = true;
@@ -130,12 +146,16 @@ export class CurateAiExecution {
     };
     try {
       // Adapters must checkpoint between downloads and before any fallback.
-      const prepared = await job.prepare(checkpoint);
+      const prepared = await job.prepare(checkpoint, job.provider);
       checkpoint();
       phase = 'submit';
-      ticket = this.limits ? this.limits.start(job, this.attempts) : this.attempts.start(job.role, job.inputKey);
+      ticket = this.attempts.repo.transaction(() => {
+        const ticket = this.limits ? this.limits.start(job, this.attempts) : this.attempts.start(job.role, job.inputKey);
+        if (ticket.state === 'started' || ticket.state === 'photo-limit') synchronous(job.recordInput?.());
+        return ticket;
+      });
       if (ticket.state !== 'started') return { state: ticket.state };
-      const response = await job.submit(prepared);
+      const response = await job.submit(prepared, job.provider);
       this.limits?.finish(ticket);
       // Turning a role off after dispatch does not discard useful paid work.
       // Changed photos/human decisions still invalidate it. No dependent job
@@ -156,7 +176,7 @@ export class CurateAiExecution {
       });
       return { state: 'succeeded', attempts: ticket.attempts };
     } catch (error) {
-      if (error instanceof AdmissionStopped && error.reason === 'photo-limit') this.limits.settleLimited(job);
+      if (error instanceof AdmissionStopped && error.reason === 'photo-limit') this.#settleLimited(job);
       if (ticket?.state === 'started' && phase === 'submit') this.limits?.finish(ticket, error);
       if (ticket?.state === 'started') this.attempts.finish(ticket, error instanceof AdmissionStopped && error.reason === 'stale' ? 'stale' : 'failed');
       // No raw errors, request objects, keys, photo metadata or responses escape
@@ -166,5 +186,12 @@ export class CurateAiExecution {
     } finally {
       this.#busy = false;
     }
+  }
+
+  #settleLimited(job) {
+    this.attempts.repo.transaction(() => {
+      this.limits.settleLimited(job);
+      synchronous(job.recordInput?.());
+    });
   }
 }

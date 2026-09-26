@@ -7,6 +7,15 @@ All notable changes to Pictaria Server are documented here. This project follows
 
 ### Development
 
+- Added the shared changing-input lifecycle for the forthcoming Stack and Photo
+  Referees: 30-second settling, latest overlapping work, authoritative checks
+  before submission/acceptance, and protected cleanup of obsolete accounting
+  references. Human decisions invalidate old answers; a settings toggle alone
+  does not discard applicable work already submitted or reset its allowance.
+  Enrichment schema 21 / persistent-state contract 26 adds compact input
+  references and a pre-upgrade recovery snapshot. Both roles remain unavailable
+  until their request/advice adapters are connected; this adds no paid calls.
+
 - Connected shared AI failure protection to server-managed Enrich and the
   existing Curate referee. Shared failures stop repeated queue-wide requests;
   temporary failures get one initial delayed recovery attempt, then a
