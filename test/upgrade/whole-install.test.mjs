@@ -47,7 +47,7 @@ test('a complete legacy installation upgrades, restarts, backs up, and restores 
     const sourceConfig = fixtureConfig(sourceRoot);
 
     const first = await openInstallation(sourceConfig, 'initialize');
-    assert.deepEqual(first.enrichmentMigration.applied, [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20]);
+    assert.deepEqual(first.enrichmentMigration.applied, [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21]);
     await assertRepresentativeState(first, sourceConfig);
 
     const migratedDefault = first.profiles.activeProfile();
@@ -147,7 +147,7 @@ test('contract 10 upgrade snapshots queue pins before clearing them and retains 
     writeFileSync(config.persistentState.inventoryPath, JSON.stringify(inventory));
 
     const upgraded = await openInstallation(config, 'verify');
-    assert.equal(upgraded.inventory.upgrade.stateVersion, 25);
+    assert.equal(upgraded.inventory.upgrade.stateVersion, 26);
     assert.deepEqual(semanticSnapshot(upgraded), before);
     assert.equal(upgraded.profiles.activeProfile().id, travel.id);
     assert.equal(upgraded.enrichment.db.prepare('SELECT COUNT(*) AS n FROM enrich_queue WHERE profile_revision_id IS NOT NULL').get().n, 0);
@@ -214,7 +214,7 @@ test('contract 14 upgrade snapshots schema 11 before tag sync and does not backf
     const inventory = JSON.parse(readFileSync(config.persistentState.inventoryPath, 'utf8'));
     inventory.upgrade.stateVersion = 14; writeFileSync(config.persistentState.inventoryPath, JSON.stringify(inventory));
     const upgraded = await openInstallation(config, 'verify');
-    assert.deepEqual(upgraded.enrichmentMigration.applied, [12, 13, 14, 15, 16, 17, 18, 19, 20]);
+    assert.deepEqual(upgraded.enrichmentMigration.applied, [12, 13, 14, 15, 16, 17, 18, 19, 20, 21]);
     assert.equal(upgraded.enrichment.aiTagSync.status().pending, 0);
     const snapshotDir = join(config.backup.dir, upgraded.inventory.upgrade.recoveryPoint.snapshotName);
     const snapshot = new DatabaseSync(join(snapshotDir, 'enrichment.sqlite'), { readOnly: true });
@@ -222,7 +222,7 @@ test('contract 14 upgrade snapshots schema 11 before tag sync and does not backf
       assert.equal(getUserVersion(snapshot), 11);
       assert.equal(snapshot.prepare("SELECT name FROM sqlite_master WHERE name='ai_tag_sync'").get(), undefined);
     } finally { snapshot.close(); }
-    assert.equal(upgraded.inventory.upgrade.stateVersion, 25);
+    assert.equal(upgraded.inventory.upgrade.stateVersion, 26);
     closeInstallation(upgraded);
   } finally { rmSync(workspace, { recursive: true, force: true }); }
 });
@@ -241,7 +241,7 @@ test('contract 13 upgrade snapshots version 6 settings and history before adopti
     const inventory = JSON.parse(readFileSync(config.persistentState.inventoryPath, 'utf8'));
     inventory.upgrade.stateVersion = 13; writeFileSync(config.persistentState.inventoryPath, JSON.stringify(inventory));
     const upgraded = await openInstallation(config, 'verify');
-    assert.equal(upgraded.inventory.upgrade.stateVersion, 25);
+    assert.equal(upgraded.inventory.upgrade.stateVersion, 26);
     assert.equal(JSON.parse(readFileSync(config.settingsPath, 'utf8')).version, 8);
     assert.equal(config.enrichHistoryRuns, 100); assert.equal(config.enrichHistoryLogs, 100);
     const snapshotDir = join(config.backup.dir, upgraded.inventory.upgrade.recoveryPoint.snapshotName);
@@ -268,7 +268,7 @@ test('contract 12 upgrade saves schema-10 history before introducing discovery',
     const inventory = JSON.parse(readFileSync(config.persistentState.inventoryPath, 'utf8'));
     inventory.upgrade.stateVersion = 12; writeFileSync(config.persistentState.inventoryPath, JSON.stringify(inventory));
     const upgraded = await openInstallation(config, 'verify');
-    assert.deepEqual(upgraded.enrichmentMigration.applied, [11, 12, 13, 14, 15, 16, 17, 18, 19, 20]);
+    assert.deepEqual(upgraded.enrichmentMigration.applied, [11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21]);
     assert.equal(upgraded.enrichment.listJobRuns()[0].title, 'Before discovery');
     assert.equal(upgraded.enrichment.db.prepare('SELECT COUNT(*) n FROM enrich_inventory').get().n, 0);
     const snapshotPath = join(config.backup.dir, upgraded.inventory.upgrade.recoveryPoint.snapshotName, 'enrichment.sqlite');
@@ -295,7 +295,7 @@ test('contract 11 upgrade saves a schema-9 recovery point before introducing tim
     const inventory = JSON.parse(readFileSync(config.persistentState.inventoryPath, 'utf8'));
     inventory.upgrade.stateVersion = 11; writeFileSync(config.persistentState.inventoryPath, JSON.stringify(inventory));
     const upgraded = await openInstallation(config, 'verify');
-    assert.deepEqual(upgraded.enrichmentMigration.applied, [10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20]);
+    assert.deepEqual(upgraded.enrichmentMigration.applied, [10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21]);
     assert.equal(upgraded.enrichment.listJobRuns()[0].timingRunId, null);
     const snapshotDir = join(config.backup.dir, upgraded.inventory.upgrade.recoveryPoint.snapshotName);
     closeInstallation(upgraded);
@@ -392,6 +392,7 @@ function semanticSnapshot(installation) {
     curateAiCharges: installation.enrichment.db.prepare('SELECT * FROM curate_ai_photo_charges ORDER BY role,photo_key,token').all(),
     curateAiBackends: installation.enrichment.db.prepare('SELECT * FROM curate_ai_backends ORDER BY backend_key').all(),
     curateAiSkipped: installation.enrichment.db.prepare('SELECT * FROM curate_ai_skipped_inputs ORDER BY role,input_key').all(),
+    curateAiInputs: installation.enrichment.db.prepare('SELECT * FROM curate_ai_inputs ORDER BY role,input_key').all(),
     aiTagSync: installation.enrichment.db.prepare('SELECT * FROM ai_tag_sync ORDER BY asset_id').all(),
     aiTagSyncState: installation.enrichment.aiTagSync.status(),
     assetCount: installation.enrichment.db.prepare('SELECT COUNT(*) AS n FROM assets').get().n,
@@ -492,6 +493,45 @@ function restoreSnapshot(snapshotDir, restoredConfig) {
   }
 }
 
+test('contract 25 snapshots before adding AI input references and retains them through backup/restore', async () => {
+  const workspace = mkdtempSync(join(tmpdir(), 'pictaria-ai-input-upgrade-'));
+  try {
+    const root = join(workspace, 'source'); materializeLegacyInstallation(root);
+    const config = fixtureConfig(root), installed = await openInstallation(config, 'initialize');
+    const attempts = installed.enrichment.curate.aiAttempts;
+    attempts.finish(attempts.start('stack', 'a'.repeat(64)), 'failed');
+    const before = semanticSnapshot(installed);
+    installed.enrichment.db.exec('DROP TABLE curate_ai_inputs; PRAGMA user_version=20;');
+    closeInstallation(installed);
+    const inventory = JSON.parse(readFileSync(config.persistentState.inventoryPath, 'utf8'));
+    inventory.upgrade.stateVersion = 25;
+    writeFileSync(config.persistentState.inventoryPath, JSON.stringify(inventory));
+    const upgraded = await openInstallation(config, 'verify');
+    assert.deepEqual(upgraded.enrichmentMigration.applied, [21]);
+    assert.deepEqual(semanticSnapshot(upgraded), before);
+    assert.equal(upgraded.inventory.upgrade.stateVersion, 26);
+    const recovery = join(config.backup.dir, upgraded.inventory.upgrade.recoveryPoint.snapshotName);
+    const prior = new DatabaseSync(join(recovery, 'enrichment.sqlite'), { readOnly: true });
+    try {
+      assert.equal(getUserVersion(prior), 20);
+      assert.equal(prior.prepare("SELECT name FROM sqlite_master WHERE name='curate_ai_inputs'").get(), undefined);
+      assert.equal(prior.prepare('SELECT attempts FROM curate_ai_attempts').get().attempts, 1);
+    } finally { prior.close(); }
+    upgraded.enrichment.db.prepare('INSERT INTO curate_ai_inputs VALUES(?,?,?,?)')
+      .run('stack', 'a'.repeat(64), JSON.stringify({ids:['synthetic-a','synthetic-b']}), 1);
+    const expected = semanticSnapshot(upgraded);
+    const backup = await runBackup(config);
+    closeInstallation(upgraded);
+    const restoredConfig = fixtureConfig(join(workspace, 'restored'));
+    restoreSnapshot(backup.dir, restoredConfig);
+    const restored = await openInstallation(restoredConfig, 'verify');
+    assert.deepEqual(semanticSnapshot(restored), expected); closeInstallation(restored);
+    const rollbackConfig = fixtureConfig(join(workspace, 'rollback'));
+    restoreSnapshot(recovery, rollbackConfig);
+    assert.equal(JSON.parse(readFileSync(rollbackConfig.persistentState.inventoryPath, 'utf8')).upgrade.stateVersion, 25);
+  } finally { rmSync(workspace, { recursive: true, force: true }); }
+});
+
 test('contract 24 retains charged attempts and snapshots before adding AI provider/photo limits', async () => {
   const workspace = mkdtempSync(join(tmpdir(), 'pictaria-ai-limit-upgrade-'));
   try {
@@ -507,10 +547,10 @@ test('contract 24 retains charged attempts and snapshots before adding AI provid
     inventory.upgrade.stateVersion = 24;
     writeFileSync(config.persistentState.inventoryPath, JSON.stringify(inventory));
     const upgraded = await openInstallation(config, 'verify');
-    assert.deepEqual(upgraded.enrichmentMigration.applied, [20]);
+    assert.deepEqual(upgraded.enrichmentMigration.applied, [20, 21]);
     assert.deepEqual(semanticSnapshot(upgraded), before);
     assert.deepEqual(upgraded.enrichment.curate.aiAttempts.status('stack', 'a'.repeat(64)), { attempts: 1, state: 'failed' });
-    assert.equal(upgraded.inventory.upgrade.stateVersion, 25);
+    assert.equal(upgraded.inventory.upgrade.stateVersion, 26);
     const snapshotDir = join(config.backup.dir, upgraded.inventory.upgrade.recoveryPoint.snapshotName);
     const prior = new DatabaseSync(join(snapshotDir, 'enrichment.sqlite'), { readOnly: true });
     try {
@@ -538,10 +578,10 @@ test('contract 23 snapshots the prior schema before adding the AI attempt ledger
     writeFileSync(config.persistentState.inventoryPath, JSON.stringify(inventory));
     const settings = readFileSync(config.settingsPath, 'utf8');
     const upgraded = await openInstallation(config, 'verify');
-    assert.deepEqual(upgraded.enrichmentMigration.applied, [19, 20]);
+    assert.deepEqual(upgraded.enrichmentMigration.applied, [19, 20, 21]);
     assert.deepEqual(semanticSnapshot(upgraded), before);
     assert.equal(readFileSync(config.settingsPath, 'utf8'), settings);
-    assert.equal(upgraded.inventory.upgrade.stateVersion, 25);
+    assert.equal(upgraded.inventory.upgrade.stateVersion, 26);
     const snapshotDir = join(config.backup.dir, upgraded.inventory.upgrade.recoveryPoint.snapshotName);
     const prior = new DatabaseSync(join(snapshotDir, 'enrichment.sqlite'), { readOnly: true });
     try {
@@ -572,7 +612,7 @@ for (const priorContract of [19, 20, 21]) test(`contract ${priorContract} upgrad
     const inventory = JSON.parse(readFileSync(config.persistentState.inventoryPath, 'utf8'));
     inventory.upgrade.stateVersion = priorContract; writeFileSync(config.persistentState.inventoryPath, JSON.stringify(inventory));
     const upgraded = await openInstallation(config, 'verify');
-    assert.deepEqual(upgraded.enrichmentMigration.applied, priorSchema === 16 ? [17, 18, 19, 20] : [18, 19, 20]);
+    assert.deepEqual(upgraded.enrichmentMigration.applied, priorSchema === 16 ? [17, 18, 19, 20, 21] : [18, 19, 20, 21]);
     assert.deepEqual(semanticSnapshot(upgraded), before);
     assert.equal(upgraded.enrichment.db.prepare("SELECT name FROM sqlite_master WHERE name='curate_rank_retries'").get(), undefined);
     const snapshotDir = join(config.backup.dir, upgraded.inventory.upgrade.recoveryPoint.snapshotName);
@@ -581,7 +621,7 @@ for (const priorContract of [19, 20, 21]) test(`contract ${priorContract} upgrad
       assert.equal(getUserVersion(snapshot), priorSchema);
       assert.equal(Boolean(snapshot.prepare("SELECT name FROM sqlite_master WHERE name='curate_rank_retries'").get()), priorContract === 20);
     } finally { snapshot.close(); }
-    assert.equal(upgraded.inventory.upgrade.stateVersion, 25);
+    assert.equal(upgraded.inventory.upgrade.stateVersion, 26);
     assert.equal(upgraded.enrichment.db.prepare('SELECT count(*) n FROM curate_rank_members').get().n, 0);
     assert.equal(upgraded.enrichment.db.prepare("SELECT json FROM curate_rank_evidence WHERE scope_id='legacy'").get().json,
       '{"rows":{},"coverage":{}}');
