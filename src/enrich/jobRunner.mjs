@@ -42,7 +42,8 @@ export class EnrichJobRunner {
       try {
         aiConnection = this.aiConnections.status(this.state.running ? this.activeProvider : this.#resolveProvider(this.state.provider).provider);
         aiConnection.message = connectionMessage(aiConnection);
-      } catch { aiConnection = { state: 'paused', reason: 'configuration', message: 'Check the saved AI provider settings.' }; }
+      } catch { aiConnection = { state: 'not-configured', reason: 'configuration',
+        message: 'Not configured. Complete the saved AI provider and model settings.' }; }
     }
     return {
       ...this.state,

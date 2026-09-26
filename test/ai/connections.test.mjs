@@ -9,7 +9,7 @@ import { Repository } from '../../src/enrich/repository.mjs';
 import { RefereeService } from '../../src/enrich/refereeService.mjs';
 import { EnrichJobRunner } from '../../src/enrich/jobRunner.mjs';
 import { EnrichScheduler } from '../../src/enrich/scheduler.mjs';
-import { analyzeWithValidationRetry } from '../../src/enrich/runner.mjs';
+import { analyzeWithValidationRetry, PROVIDER_RETRY_AFTER_CAP_MS } from '../../src/enrich/runner.mjs';
 import { AiRequestScheduler } from '../../src/ai/scheduler.mjs';
 import { AiConnections } from '../../src/ai/connections.mjs';
 import { CurateAiExecution } from '../../src/curate/ai-execution.mjs';
@@ -117,6 +117,77 @@ test('a failed scheduled recovery stops once; only the next daily run resumes he
   daily.stop();
 }));
 
+test('shared Enrich only waits in-run through five minutes, preserving longer provider deadlines', async () => {
+  for (const delay of [PROVIDER_RETRY_AFTER_CAP_MS, PROVIDER_RETRY_AFTER_CAP_MS + 1000, 24 * 60 * 60_000]) {
+    await fixture(async f => {
+      let calls = 0, waited = 0;
+      f.config.providers.local_lmstudio.fetchImpl = async () => ++calls === 1 ? rejected(429, String(delay / 1000)) : answer(sampleOutput());
+      const p = f.connections.provider('enrich'), session = f.scheduler.session(p, 'enrich');
+      const retryAt = f.time() + delay;
+      try {
+        const result = analyzeWithValidationRetry(p, { data: Buffer.from('test'), mimeType: 'image/jpeg' }, {
+          taxonomy, systemPrompt: 'system', userPrompt: 'user', jsonSchema: {}, aiSession: session, aiConnections: f.connections,
+          retrySleep: async ms => { waited += ms; f.tick(ms); },
+        });
+        if (delay <= PROVIDER_RETRY_AFTER_CAP_MS) {
+          await result; assert.equal(calls, 2); assert.equal(waited, delay);
+          assert.equal(f.connections.status(p).state, 'ready');
+        } else {
+          await assert.rejects(result, { status: 429 });
+          assert.equal(calls, 1); assert.equal(waited, 0);
+          assert.deepEqual(f.connections.status(p), { state: 'cooldown', reason: 'unavailable', retryAt });
+        }
+      } finally { session.close(); }
+    });
+  }
+});
+
+test('a day-long provider wait stops Enrich promptly, retains its queue and blocks requests until the full deadline', { timeout: 5000 }, async () => fixture(async f => {
+  const day = 24 * 60 * 60_000;
+  let calls = 0, finished = 0;
+  f.config.providers.local_lmstudio.fetchImpl = async () => { calls++; return rejected(429, String(day / 1000)); };
+  const runner = f.runner();
+  runner.start({ assetIds: ['first', 'untouched'], onFinished: () => { finished++; } }); await runner.runPromise;
+  assert.equal(runner.isRunning(), false); assert.match(runner.status().error, /cooling down/);
+  assert.equal(calls, 1); assert.equal(finished, 0);
+  assert.equal(f.repo.db.prepare('SELECT COUNT(*) n FROM processing_runs').get().n, 1);
+  assert.equal(f.repo.db.prepare('SELECT status FROM processing_runs').get().status, 'failed_infra');
+  f.tick(day - 1);
+  const blocked = f.runner(); blocked.start({ assetIds: ['first', 'untouched'] }); await blocked.runPromise;
+  assert.equal(calls, 1); assert.equal(blocked.status().liveCounters.failed, 0);
+  f.tick(1);
+  f.config.providers.local_lmstudio.fetchImpl = async () => { calls++; return answer(sampleOutput()); };
+  const resumed = f.runner(); resumed.start({ assetIds: ['first', 'untouched'], onFinished: () => { finished++; } }); await resumed.runPromise;
+  assert.equal(resumed.status().error, null); assert.equal(resumed.status().counters.succeeded, 2);
+  assert.equal(calls, 3); assert.equal(finished, 1);
+}));
+
+test('Cancel and graceful shutdown during Enrich recovery allow later work after the longer cooldown', { timeout: 5000 }, async () => {
+  for (const action of ['cancel', 'stop']) await fixture(async f => {
+    const p = f.connections.provider('enrich'), key = aiBackendKey(p);
+    f.limits.finish(f.limits.startProvider(key), new ProviderRequestError('temporary', { status: 503 }));
+    f.tick(30_000);
+    const started = Promise.withResolvers(); let calls = 0, finished = 0;
+    f.config.providers.local_lmstudio.fetchImpl = async (_url, { signal }) => {
+      calls++;
+      return new Promise((_resolve, reject) => {
+        signal.addEventListener('abort', () => reject(signal.reason), { once: true });
+        started.resolve();
+      });
+    };
+    const runner = f.runner(); runner.start({ assetIds: ['first', 'untouched'], onFinished: () => { finished++; } });
+    await started.promise; await runner[action](); await runner.runPromise;
+    assert.equal(runner.isRunning(), false); assert.equal(calls, 1); assert.equal(finished, 0);
+    assert.deepEqual(f.connections.status(p), { state: 'cooldown', reason: 'interrupted', retryAt: f.time() + AI_RECOVERY_COOLDOWN_MS });
+    f.tick(AI_RECOVERY_COOLDOWN_MS - 1);
+    await assert.rejects(f.connections.run(p, () => assert.fail('early recovery')), { code: 'ai_connection_paused' });
+    f.tick(1);
+    f.config.providers.local_lmstudio.fetchImpl = async () => { calls++; return answer(sampleOutput()); };
+    const next = f.runner(); next.start({ assetIds: ['first', 'untouched'] }); await next.runPromise;
+    assert.equal(next.status().error, null); assert.equal(calls, 3);
+  });
+});
+
 test('verification is one scheduled synthetic-image call, shared across roles, and never refunds attempts', async () => fixture(async f => {
   const p = f.connections.provider('enrich');
   const ticket = f.limits.start(job(p), f.repo.curate.aiAttempts);
@@ -182,6 +253,8 @@ test('missing saved provider settings have a neutral unconfigured status', async
     assert.equal(row.state, 'not-configured'); assert.equal(row.canVerify, false);
     assert.match(row.message, /^Not configured\./);
   }
+  assert.equal(f.runner().status().aiConnection.state, 'not-configured');
+  assert.match(f.runner().status().aiConnection.message, /^Not configured\./);
 }));
 
 test('ordinary content rejections and malformed model answers do not pause the shared connection', async () => fixture(async f => {

@@ -668,8 +668,10 @@ in the standard SQLite backup and restore.
   (401/403) or unavailable endpoint/model routing (404/405) pauses immediately.
   Temporary rate limits, network failures, timeouts and server errors allow
   at most one recovery request after at least 30 seconds, honoring a longer
-  `Retry-After`. For 429/503, Enrich waits and retries the same photo once;
-  Cancel interrupts the wait. Other shared failures stop the run and retain its
+  `Retry-After`. For 429/503, Enrich waits and retries the same photo once if the
+  wait is at most five minutes. A longer provider wait ends the run immediately,
+  keeps the queued job and honors the full deadline before another run can make
+  a request. Cancel interrupts the wait. Other shared failures stop the run and retain its
   queued job. A later eligible request can use the single recovery opportunity.
   A second temporary failure stops the run and starts a **15-minute cooldown**,
   honoring a longer provider-requested delay. A run starting as the recovery
@@ -677,16 +679,22 @@ in the standard SQLite backup and restore.
   next manual or daily scheduled run can check recovery; another failure renews
   the longer cooldown. Expiry does not restart a stopped run or send a test
   request. Pictaria does not test every remaining photo against a broken provider.
+  Cancelling a recovery request, shutting down or restarting during recovery
+  also starts the 15-minute cooldown, without refunding dispatched attempts.
 
   Settings → AI Providers shows the pause reason and **Verify connection**.
+  Cooldown messages in Settings and Enrich include the end time in your browser's
+  local timezone.
   Save corrected settings first. Verification sends one synthetic image, uses
   the saved model/timeout and may incur a provider charge; no library photo is
   used. Once verified, run the stopped Enrich job again. Verification does not
   refund Curate attempts or revisit settled comparisons. Refreshing, restarting
   and toggling features do not clear authentication/configuration pauses or
-  shorten cooldowns. A failed verification cannot turn an existing credentials
-  or configuration pause into automatic recovery. Unconfigured connections
-  show **Not configured**. Independent connections can keep
+  shorten cooldowns. A failed or interrupted verification cannot turn an existing credentials
+  or configuration pause into automatic recovery; interruption preserves the original reason.
+  Older preview records already marked paused/interrupted still need verification
+  because their original reason was not retained. Unconfigured connections
+  show **Not configured** in both Settings and Enrich. Independent connections can keep
   working, and manual curation remains available.
 
   Actual transport failures record as **infrastructure failures**, which do not

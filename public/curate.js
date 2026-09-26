@@ -971,7 +971,7 @@ async function loadRefereeStrip() {
       dot = 'warn';
       parts.push(st.aiConnection.state === 'paused'
         ? 'AI connection paused — verify it in Settings → AI Providers'
-        : 'AI connection waiting for one recovery attempt');
+        : aiConnectionMessage(st.aiConnection));
     } else if (st.lastError) {
       dot = 'bad';
       parts.push(`retrying after an error: ${st.lastError}`);

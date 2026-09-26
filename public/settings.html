@@ -736,6 +736,7 @@
     </details>
   </main>
 
+  <script src="/ai-connection-status.js"></script>
   <script src="/enrich-profiles.js"></script>
   <script>
     const toggle = document.getElementById('lightModeToggle');
@@ -1263,7 +1264,7 @@
           button.dataset.target = target; button.textContent = 'Verify connection';
           copy.append(label, status); item.append(copy, button); container.append(item);
         }
-        el(`ai-connection-${target}`).textContent = [ENRICH_PROVIDER_NAMES[row.provider] ?? row.provider, row.model, row.message].filter(Boolean).join(' · ');
+        el(`ai-connection-${target}`).textContent = [ENRICH_PROVIDER_NAMES[row.provider] ?? row.provider, row.model, aiConnectionMessage(row)].filter(Boolean).join(' · ');
         el(`verify-ai-${target}`).disabled = verifyingAi || !row.canVerify;
       }
       for (const item of [...container.children]) if (!current.has(item.dataset.target)) item.remove();

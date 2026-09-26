@@ -11,9 +11,12 @@ All notable changes to Pictaria Server are documented here. This project follows
   existing Curate referee. Shared failures stop repeated queue-wide requests;
   temporary failures get one initial delayed recovery attempt, then a
   15-minute cooldown (or longer Retry-After) between eligible real requests.
-  Temporary overload no longer disables future scheduled Enrich runs; cooldown
-  expiry never restarts a stopped run or sends a probe. Settings → AI
-  Providers now shows connection status, a neutral Not configured label, and
+  Temporary overload or interrupted recovery no longer disables future scheduled
+  Enrich runs; cooldown expiry never restarts a stopped run or sends a probe.
+  Provider waits longer than five minutes end the current run and retain its queue,
+  while honoring the full deadline. Settings and Enrich display that deadline in
+  the browser's local timezone and use a neutral Not configured label.
+  Settings → AI Providers shows connection status and
   offers an explicit synthetic-image verification call. Startup recovers
   interrupted work only after claiming
   exclusive database ownership, without resetting spent attempts. Both new
@@ -37,7 +40,10 @@ All notable changes to Pictaria Server are documented here. This project follows
   failures. Shared read-only reference photos do not consume unrelated stacks'
   allowances, but still count toward request
   size limits. An interrupted ordinary request gets its one recovery opportunity;
-  an interrupted recovery remains paused. Dispatched attempts remain charged.
+  an interrupted recovery enters the longer cooldown. Interrupted verification
+  preserves an existing authentication/configuration pause. Older terminal
+  interrupted records still require verification because their prior reason was
+  not retained. Dispatched attempts remain charged.
   Schema 20 / persistent-state contract 25 preserve this state across restart
   and restore. Preview referees remain unavailable pending scheduler/worker wiring.
 

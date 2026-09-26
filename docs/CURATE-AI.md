@@ -274,8 +274,9 @@ pause as configuration/integration failures instead of walking the rest of the
 queue.
 
 `providerStatus()` exposes only ready/busy/cooldown/recovery-ready/paused and a
-fixed reason. Unconfigured Settings targets show a neutral **Not configured**
-state, separate from runtime failure pauses. Enrich and the legacy referee
+fixed reason. Unconfigured Settings targets and Enrich show a neutral **Not configured**
+state, separate from runtime failure pauses. Cooldown messages show the deadline
+in the browser's local timezone. Enrich and the legacy referee
 surface pauses; Settings → AI Providers shows the selected Enrich and Curate
 connections, plus other configured providers available to per-run Enrich
 choices, with **Verify connection**. Verification is one scheduled request using
@@ -288,8 +289,8 @@ cannot bypass an active owner or an unexpired cooldown. Page/status reads and
 settings saves never send test requests.
 
 Verification owns a fresh provider token, so an old success cannot clear a newer
-failure. It can explicitly cross a terminal pause. A temporary failure while
-verifying an authentication, configuration or interrupted-recovery pause leaves
+failure. It can explicitly cross a terminal pause. A temporary failure or
+interruption while verifying an authentication, configuration or legacy interrupted pause leaves
 that original pause in place; it cannot silently enable automatic work. A
 temporary verification failure on a connection without such a pause starts the
 15-minute cooldown. Explicit verification must pass its small response contract
@@ -304,8 +305,10 @@ there is no special repair queue.
 Only the exclusive server owner may call `recoverInterrupted(attempts)` before
 starting either role. It keeps all charges. An interrupted ordinary request
 enters the normal 30-second cooldown and gets at most one recovery request;
-an interrupted recovery request stays paused. Repeating startup neither moves
-that deadline nor grants another recovery. Opening another repository does not
+an interrupted recovery request enters the 15-minute cooldown. Cancellation and
+graceful shutdown during recovery use the same longer cooldown. An interrupted
+verification of an authentication/configuration pause retains its original reason.
+Repeating startup neither moves that deadline nor refunds attempts. Opening another repository does not
 steal live work. `pruneObsolete()` accepts
 up to 200 input identities that the lifecycle owner has established are no
 longer current/queued or referenced by comparisons, Undo or advice. It waits
@@ -329,17 +332,21 @@ pause immediately. Ordinary request-specific 400 rejections and malformed model
 answers do not globally pause the connection. Model-answer parsing reports a
 fixed diagnostic without raw response fragments.
 
-For Enrich 429/503 responses, the existing cancelable same-photo wait now follows
-the shared cooldown (at least 30 seconds, honoring a longer Retry-After) and
-permits just one recovery request. Other shared transport failures stop the run;
+For Enrich 429/503 responses, the existing cancelable same-photo wait follows
+the shared cooldown and permits just one recovery request when the wait is at
+most five minutes. A longer Retry-After ends the run immediately and retains its
+queue item; the connection still honors the full provider deadline. Other shared transport failures stop the run;
 the next eligible real request after cooldown can be the one recovery attempt.
 If recovery fails temporarily, the run stops without waiting out the new
 15-minute (or longer provider-requested) cooldown. A run whose first request is
 already the recovery request likewise stops on that failure. After cooldown,
 the next manual run, daily scheduled run or eligible referee request can check
 recovery normally. A stopped daily run is not automatically restarted that day.
-New ordinary Enrich runs do **not** bypass authentication, configuration or
-interrupted-recovery pauses. Earlier preview records marked paused/unavailable
+New ordinary Enrich runs do **not** bypass authentication or configuration pauses.
+Legacy terminal paused/interrupted rows also require explicit verification:
+earlier code discarded their original reason, which could have been an auth or
+configuration pause being verified. New interruptions preserve that reason.
+Earlier preview records marked paused/unavailable
 use their recorded failure time plus 15 minutes, so upgrading/restarting does
 not renew the delay; no schema migration is needed.
 Untouched photos receive no failed processing record; dispatched infrastructure

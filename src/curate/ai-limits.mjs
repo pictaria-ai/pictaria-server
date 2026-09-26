@@ -161,10 +161,15 @@ export class CurateAiLimits {
         else if ([404, 405].includes(error.status)) { state = 'paused'; reason = 'configuration'; }
         else if (error.invalidResponse) { /* Answer failure, not an outage. */ }
         else if (error.cancelled) {
-          if (row.recovering) { state = 'paused'; reason = 'interrupted'; }
+          if (row.state === 'paused' && row.reason !== 'unavailable') {
+            state = 'paused'; reason = row.reason;
+          } else if (row.recovering) {
+            state = 'cooldown'; reason = 'interrupted';
+            retryAt = this.now() + AI_RECOVERY_COOLDOWN_MS;
+          }
         } else if (error.infrastructure) {
           // A failed explicit verification cannot turn an unresolved auth,
-          // configuration or interrupted-recovery pause into automatic work.
+          // configuration or legacy interrupted pause into automatic work.
           if (row.state === 'paused' && row.reason !== 'unavailable') {
             state = 'paused'; reason = row.reason;
           } else {
@@ -186,16 +191,20 @@ export class CurateAiLimits {
 
   // Only the server owner calls this, alongside attempt recovery. Opening a
   // repository does not recover anything. An interrupted ordinary request gets
-  // the normal single recovery opportunity; an interrupted recovery stays
-  // paused. Repeated startup cannot reset the delay or grant another probe.
+  // the normal single recovery opportunity; an interrupted recovery gets the
+  // longer cooldown. A verification of a terminal pause keeps its original
+  // reason. Repeated startup cannot move an already recovered deadline.
   recoverInterrupted(attempts) {
     if (attempts.repo !== this.repo) throw new TypeError('AI recovery must share one repository.');
     return this.repo.transaction(() => {
       const now = this.now();
       this.repo.db.prepare(`UPDATE curate_ai_backends SET
-        state=CASE WHEN recovering=1 THEN 'paused' ELSE 'cooldown' END,
-        reason='interrupted',retry_at=CASE WHEN recovering=1 THEN NULL ELSE ? END,
-        token=NULL,recovering=0,updated_ms=? WHERE token IS NOT NULL`).run(now + AI_RECOVERY_DELAY_MS, now);
+        state=CASE WHEN state='paused' AND reason!='unavailable' THEN 'paused' ELSE 'cooldown' END,
+        reason=CASE WHEN state='paused' AND reason!='unavailable' THEN reason ELSE 'interrupted' END,
+        retry_at=CASE WHEN state='paused' AND reason!='unavailable' THEN retry_at
+          WHEN recovering=1 THEN ? ELSE ? END,
+        token=NULL,recovering=0,updated_ms=? WHERE token IS NOT NULL`)
+        .run(now + AI_RECOVERY_COOLDOWN_MS, now + AI_RECOVERY_DELAY_MS, now);
       return attempts.recoverInterrupted();
     });
   }

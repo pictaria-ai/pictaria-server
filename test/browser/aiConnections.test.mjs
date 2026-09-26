@@ -77,14 +77,41 @@ test('Settings verifies a paused saved AI connection through authenticated sched
   repo.curate.aiLimits.now = () => first.retryAt;
   const recovery = repo.curate.aiLimits.startProvider(key);
   assert.equal(recovery.state, 'started');
-  repo.curate.aiLimits.finish(recovery, new ProviderRequestError('synthetic temporary failure', { status: 503 }));
+  // Leave the recovery in flight: real server startup must apply the longer
+  // interruption cooldown rather than turning it into a terminal pause.
   repo.close(); repo = null;
+  let recoveryDeadline;
   for (let i = 0; i < 2; i++) {
+    const before = Date.now();
     server = await bootServer(dir, { env });
     const status = (await getStatus()).connections[0];
-    assert.equal(status.state, 'cooldown'); assert.equal(status.reason, 'unavailable');
-    assert.equal(status.retryAt, first.retryAt + AI_RECOVERY_COOLDOWN_MS);
+    assert.equal(status.state, 'cooldown'); assert.equal(status.reason, 'interrupted');
+    if (i === 0) {
+      assert.ok(status.retryAt >= before + AI_RECOVERY_COOLDOWN_MS && status.retryAt <= Date.now() + AI_RECOVERY_COOLDOWN_MS);
+      recoveryDeadline = status.retryAt;
+    } else assert.equal(status.retryAt, recoveryDeadline);
     assert.equal(requests.length, 1, 'long cooldown survives startup without dispatch');
-    await server.stop(); server = null;
+    if (i === 0) { await server.stop(); server = null; }
   }
+  await page.send('Emulation.setTimezoneOverride', { timezoneId: 'Pacific/Honolulu' });
+  await page.navigate(`${server.base}/settings.html#sec-providers`);
+  await page.waitFor('document.querySelector("#ai-connection-enrich")?.textContent.includes("cooling down until")');
+  const localDeadline = await page.evaluate(`new Date(${recoveryDeadline}).toLocaleString(undefined,{dateStyle:'medium',timeStyle:'short'})`);
+  assert.ok((await page.evaluate('document.querySelector("#ai-connection-enrich").textContent')).includes(localDeadline));
+  assert.equal(await page.evaluate('document.querySelector("#verify-ai-enrich").disabled'), true);
+  assert.equal(await page.evaluate('document.documentElement.scrollWidth <= innerWidth'), true, 'cooldown fits phone');
+  await page.evaluate('document.querySelector("#ai-connection-enrich").scrollIntoView({block:"center"})');
+  if (process.env.PICTARIA_TEST_SCREENSHOTS) {
+    const { data } = await page.send('Page.captureScreenshot', { format: 'png' });
+    writeFileSync(join(process.env.PICTARIA_TEST_SCREENSHOTS, 'ai-connection-cooldown-phone.png'), Buffer.from(data, 'base64'));
+  }
+  await page.navigate(`${server.base}/enrich.html`);
+  await page.waitFor('!document.querySelector("#aiConnectionNote").hidden');
+  assert.ok((await page.evaluate('document.querySelector("#aiConnectionNote").textContent')).includes(localDeadline));
+  assert.equal(requests.length, 1, 'displaying a cooldown does not bypass it');
+  await server.stop(); server = null;
+  server = await bootServer(dir, { env: { ...env, LMSTUDIO_MODEL: '' } });
+  await page.navigate(`${server.base}/enrich.html`);
+  await page.waitFor('!document.querySelector("#aiConnectionNote").hidden && document.querySelector("#aiConnectionNote").textContent.includes("Not configured")');
+  assert.doesNotMatch(await page.evaluate('document.querySelector("#aiConnectionNote").textContent'), /paused|failed/i);
 });

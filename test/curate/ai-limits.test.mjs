@@ -205,7 +205,7 @@ test('interrupted ordinary dispatch gets one recovery opportunity, without refun
   assert.equal(other.attempts.status('stack', key(1)).attempts, 2);
 }));
 
-test('a crash during recovery leaves the connection paused even after another restart and six hours', async () => fixture(async f => {
+test('a crash during recovery cools down without refunding work or moving the deadline on restart', async () => fixture(async f => {
   const first = f.limits.start(f.job(), f.attempts);
   f.limits.recoverInterrupted(f.attempts);
   f.tick(30_000);
@@ -213,15 +213,17 @@ test('a crash during recovery leaves the connection paused even after another re
   assert.equal(recovery.state, 'started');
   const owner = f.open();
   assert.equal(owner.limits.recoverInterrupted(owner.attempts), 1);
-  assert.deepEqual(owner.limits.providerStatus(backendKey), { state: 'paused', reason: 'interrupted' });
+  const expected = { state: 'cooldown', reason: 'interrupted', retryAt: f.time() + AI_RECOVERY_COOLDOWN_MS };
+  assert.deepEqual(owner.limits.providerStatus(backendKey), expected);
   assert.equal(owner.attempts.status('stack', key(1)).attempts, 2);
-  f.tick(6 * 60 * 60_000);
+  f.tick(AI_RECOVERY_COOLDOWN_MS - 1);
   assert.equal(owner.limits.recoverInterrupted(owner.attempts), 0);
-  assert.equal((await f.execution(owner).run(f.job(2, ['new']))).state, 'provider-paused');
+  assert.deepEqual(owner.limits.providerStatus(backendKey), expected);
+  assert.equal((await f.execution(owner).run(f.job(2, ['new']))).state, 'provider-cooldown');
   assert.equal(f.limits.finish(first), false);
   assert.equal(f.limits.finish(recovery), false);
-  assert.equal(owner.limits.finish(owner.limits.startProvider(backendKey, { verification: true })), true);
-  assert.equal((await f.execution(owner).run(f.job())).state, 'exhausted', 'explicit verification does not refund work');
+  f.tick(1);
+  assert.equal((await f.execution(owner).run(f.job())).state, 'exhausted', 'recovery never refunds work');
   assert.equal((await f.execution(owner).run(f.job(2, ['new']))).state, 'succeeded');
 }));
 
@@ -238,14 +240,47 @@ test('context exemptions are a bounded subset and cannot change during preparati
   assert.equal(f.repo.db.prepare('SELECT COUNT(*) n FROM curate_ai_photo_charges').get().n, 1);
 }));
 
-test('interrupted recovery and cancellation do not grant another recovery attempt', async () => fixture(async f => {
+test('cancelled recovery cools down and retains the exhausted input and photo charges', async () => fixture(async f => {
   await f.execution().run(f.job(1, ['a'], { submit: async () => { throw unavailable(); } }));
   f.tick(30_000);
   const ticket = f.limits.start(f.job(1, ['a']), f.attempts);
   assert.equal(f.limits.startProvider(backendKey, { verification: true }).state, 'provider-busy', 'connection check cannot release active owner');
   f.limits.finish(ticket, new ProviderRequestError('cancelled', { cancelled: true }));
   f.attempts.finish(ticket, 'failed');
-  assert.equal(f.limits.providerStatus(backendKey).state, 'paused');
+  assert.deepEqual(f.limits.providerStatus(backendKey), { state: 'cooldown', reason: 'interrupted', retryAt: f.time() + AI_RECOVERY_COOLDOWN_MS });
+  assert.equal(f.attempts.status('stack', key(1)).attempts, 2);
+  assert.equal(f.repo.db.prepare('SELECT COUNT(*) n FROM curate_ai_photo_charges').get().n, 2);
+  assert.equal((await f.execution().run(f.job(2, ['new']))).state, 'provider-cooldown');
+  f.tick(AI_RECOVERY_COOLDOWN_MS);
+  assert.equal((await f.execution().run(f.job(1, ['a']))).state, 'exhausted');
+  assert.equal((await f.execution().run(f.job(2, ['new']))).state, 'succeeded');
+}));
+
+test('cancelled or crashed verification preserves the original authentication/configuration pause', async () => fixture(async f => {
+  for (const [status, reason] of [[401, 'auth'], [404, 'configuration']]) {
+    for (const interruption of ['cancel', 'crash']) {
+      f.limits.finish(f.limits.startProvider(backendKey, { verification: true }), new ProviderRequestError('rejected', { status }));
+      const ticket = f.limits.startProvider(backendKey, { verification: true });
+      assert.equal(ticket.state, 'started');
+      if (interruption === 'cancel') f.limits.finish(ticket, new ProviderRequestError('cancelled', { cancelled: true }));
+      else f.limits.recoverInterrupted(f.attempts);
+      f.tick(24 * 60 * 60_000);
+      const restarted = f.open(); restarted.limits.recoverInterrupted(restarted.attempts);
+      assert.deepEqual(restarted.limits.providerStatus(backendKey), { state: 'paused', reason });
+      assert.equal(restarted.limits.startProvider(backendKey).state, 'provider-paused');
+      assert.equal(restarted.limits.finish(restarted.limits.startProvider(backendKey, { verification: true })), true);
+      assert.equal(restarted.limits.providerStatus(backendKey).state, 'ready');
+    }
+  }
+}));
+
+test('legacy terminal interrupted rows require verification because their original pause reason was lost', async () => fixture(async f => {
+  f.repo.db.prepare("INSERT INTO curate_ai_backends VALUES(?,'paused','interrupted',NULL,NULL,0,?)").run(backendKey, f.time());
+  f.tick(24 * 60 * 60_000);
+  f.limits.recoverInterrupted(f.attempts);
+  assert.deepEqual(f.limits.providerStatus(backendKey), { state: 'paused', reason: 'interrupted' });
+  f.limits.finish(f.limits.startProvider(backendKey, { verification: true }));
+  assert.equal(f.limits.providerStatus(backendKey).state, 'ready');
 }));
 
 test('cleanup keeps current/comparison-referenced inputs and pauses, retires only nominated old inactive records', async () => fixture(async f => {

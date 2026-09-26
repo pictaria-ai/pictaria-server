@@ -172,6 +172,9 @@ export async function analyzeWithValidationRetry(provider, image, {
           const delay = aiConnections
             ? Math.max(0, aiConnections.status(provider).retryAt - aiConnections.limits.now())
             : overloadRetryDelay(error, retryIndex);
+          // Keep the full provider deadline, but do not occupy this Enrich run
+          // for a long quota wait. Its queue item remains for a later run.
+          if (aiConnections && delay > PROVIDER_RETRY_AFTER_CAP_MS) throw error;
           log(`${error.status} — retrying in ${formatRetryDelay(delay)} (${overloadRetryCount}/${overloadRetryLimit})`);
           if (!await waitForRetry(delay, { shouldStop, sleep: retrySleep })) {
             throw new RetryWaitCancelledError();
