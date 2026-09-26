@@ -179,6 +179,12 @@ test('input cleanup preserves current, queued, comparison, Undo, sync and valid 
   assert.equal(f.lifecycle.inputs.prune(new Set([old.inputKey])), 0);
   const compare = f.repo.curate.lease('comparison', { ids: ['a', 'b'] }, f.now());
   assert.equal(f.lifecycle.maintain(), 0); f.repo.curate.releaseLease(compare.id);
+  const operation = f.repo.curate.lease('operation', {kind:'decision',mode:'manual',snapshot:{ids:['a','b']}}, f.now());
+  assert.equal(f.lifecycle.maintain(), 0); f.repo.curate.releaseLease(operation.id);
+  f.repo.db.prepare("INSERT INTO curate_separations VALUES('correction',1,1,?,?)").run(f.now(), f.now()+1000);
+  f.repo.db.prepare("INSERT INTO curate_separation_members VALUES('correction','a',0)").run();
+  assert.equal(f.lifecycle.maintain(), 0); f.advance(1001);
+  f.repo.db.prepare("DELETE FROM curate_separations WHERE id='correction'").run();
   f.repo.db.prepare('INSERT INTO decision_operations VALUES(?,?,?,?,?,?)')
     .run('op', 'hash', JSON.stringify({undo:{expiresAt:f.now()+1000}}), '[]', f.now(), f.now());
   f.repo.db.prepare('INSERT INTO decision_operation_members VALUES(?,?,?,?)').run('op', 'a', 1, '{}');

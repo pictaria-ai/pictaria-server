@@ -104,8 +104,10 @@ export class CurateAiInputs {
   protected(snapshot, liveKeys, comparisons) {
     if (liveKeys.has(snapshot.inputKey)) return true;
     const ids = [...snapshot.ids, ...snapshot.contextIds];
-    if (comparisons.some(scope => [...(scope.ids ?? []), ...(scope.contextIds ?? [])].some(id => ids.includes(id)))) return true;
+    if (comparisons.some(scope => [...(scope.ids ?? scope.snapshot?.ids ?? []), ...(scope.contextIds ?? [])].some(id => ids.includes(id)))) return true;
     for (const id of ids) {
+      if (this.store.prepare(`SELECT 1 FROM curate_separation_members m JOIN curate_separations s ON s.id=m.separation_id
+        WHERE m.asset_id=? AND s.undo_until>? LIMIT 1`).get(id, this.now())) return true;
       if (this.store.prepare(`SELECT 1 FROM decision_operation_members m JOIN decision_operations o ON o.id=m.operation_id
         WHERE m.asset_id=? AND (o.settled_at IS NULL OR
           (o.before_json IS NOT NULL AND json_extract(o.receipt_json,'$.undo.expiresAt')>?)) LIMIT 1`).get(id, this.now())) return true;
