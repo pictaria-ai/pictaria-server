@@ -1,5 +1,6 @@
 import { createHash } from 'node:crypto';
 import { AiSchedulingCancelled } from '../ai/scheduler.mjs';
+import { connectionMessage } from '../ai/connections.mjs';
 
 import { awaitDrain } from '../lifecycle.mjs';
 import { MAX_STACK_MEMBERS } from './reviewService.mjs';
@@ -227,8 +228,10 @@ export class RefereeService {
 
   connectionStatus() {
     if (!this.aiConnections) return null;
-    try { return this.aiConnections.status(this.makeProvider()); }
-    catch { return { state: 'paused', reason: 'configuration' }; }
+    let status;
+    try { status = this.aiConnections.status(this.makeProvider()); }
+    catch { status = { state: 'paused', reason: 'configuration' }; }
+    return { ...status, message: connectionMessage(status) };
   }
 
   async tick() {

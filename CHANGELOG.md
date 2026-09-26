@@ -16,6 +16,8 @@ All notable changes to Pictaria Server are documented here. This project follows
   Provider waits longer than five minutes end the current run and retain its queue,
   while honoring the full deadline. Settings and Enrich display that deadline in
   the browser's local timezone and use a neutral Not configured label.
+  The existing Curate referee status also explains when the next eligible
+  request can check recovery after a cooldown.
   Settings → AI Providers shows connection status and
   offers an explicit synthetic-image verification call. Startup recovers
   interrupted work only after claiming

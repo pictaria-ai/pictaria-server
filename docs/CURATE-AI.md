@@ -276,8 +276,8 @@ queue.
 `providerStatus()` exposes only ready/busy/cooldown/recovery-ready/paused and a
 fixed reason. Unconfigured Settings targets and Enrich show a neutral **Not configured**
 state, separate from runtime failure pauses. Cooldown messages show the deadline
-in the browser's local timezone. Enrich and the legacy referee
-surface pauses; Settings → AI Providers shows the selected Enrich and Curate
+in the browser's local timezone. Enrich and the legacy referee surface pauses
+and explain when the next eligible request can check recovery. Settings → AI Providers shows the selected Enrich and Curate
 connections, plus other configured providers available to per-run Enrich
 choices, with **Verify connection**. Verification is one scheduled request using
 a synthetic PNG and small JSON answer, with the saved provider's inference timeout. It may incur a
