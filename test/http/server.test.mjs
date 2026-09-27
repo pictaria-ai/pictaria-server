@@ -59,6 +59,9 @@ const INERT_PROVIDER_ENV = Object.freeze({
   ELEVENLABS_VOICE_ID: '',
   GEOCODING_PROVIDER: '',
   GEOAPIFY_API_KEY: '',
+  ENRICH_EMBEDDINGS_ENABLED: 'false',
+  ENRICH_EMBEDDINGS_MODEL: '',
+  IMMICH_ML_URL: 'http://127.0.0.1:9',
 });
 
 function httpServerChildEnv(parentEnv, overrides = {}) {
@@ -462,6 +465,30 @@ test('HTTP surface with a password set', async (t) => {
     assert.equal(events[1].summary, 'Voice command used: unrecognized');
     assert.equal(events[2].outcome, 'undelivered');
     assert.doesNotMatch(JSON.stringify(events), /PRIVATE VOICE TRANSCRIPT|private-setting-value/);
+  });
+
+  await t.test('image-embedding routes require authentication, validate drafts and never echo them', async () => {
+    const headers = { 'Content-Type': 'application/json', 'X-App-Password': 'test-secret' };
+    const url = `${server.base}/api/enrich/embeddings`;
+    assert.equal((await fetch(url)).status, 401);
+    assert.equal((await fetch(`${url}/test`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' })).status, 401);
+    const status = await (await fetch(`${url}?check=1`, { headers })).json();
+    assert.deepEqual({ enabled: status.enabled, model: status.model, connection: status.connection },
+      { enabled: false, model: 'ViT-B-32__openai', connection: { state: 'off' } });
+    assert.deepEqual(status.coverage, { space: null, vectors: 0, current: 0, otherVectors: 0 });
+    const post = (body, extra = {}) => fetch(`${url}/test`, { method: 'POST', headers: { ...headers, ...extra }, body });
+    for (const body of [JSON.stringify({ url: 1 }), JSON.stringify({ extra: 'x' }), '[]']) {
+      assert.equal((await post(body)).status, 400, body);
+    }
+    assert.equal((await post('{}', { 'Content-Type': 'text/plain' })).status, 415);
+    const invalidModel = await post(JSON.stringify({ model: 'not a model' }));
+    assert.equal(invalidModel.status, 400);
+    assert.equal((await invalidModel.json()).error.code, 'ml_invalid_model');
+    const unreachable = await post(JSON.stringify({ url: 'http://127.0.0.1:9/private-draft-path' }));
+    assert.equal(unreachable.status, 502);
+    const body = await unreachable.json();
+    assert.equal(body.error.code, 'ml_unreachable');
+    assert.doesNotMatch(JSON.stringify(body), /private-draft-path/);
   });
 
   await t.test('unified Activity API and bounded downloads require authentication', async () => {

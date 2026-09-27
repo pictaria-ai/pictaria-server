@@ -16,6 +16,12 @@ export const EMBEDDING_LIMITS = Object.freeze({
   settleMs: 5_000,
   // Consecutive service failures that pause embedding for the rest of a run.
   failureLimit: 3,
+  // Immich restarts its idle machine-learning worker; a first ping after a
+  // quiet period can wait for it to boot.
+  sessionPingTimeoutMs: 60_000,
+  // How long a finishing run waits for abandoned work before returning. An
+  // Immich preview download is not abortable, so never wait for it in full.
+  closeGraceMs: 1_000,
   connectionCacheMs: 60_000,
   testTimeoutMs: 120_000,
 });
@@ -86,7 +92,14 @@ export class EmbeddingService {
       const client = new ImmichMlClient({ baseUrl: target, fetchImpl: this.fetchImpl });
       await client.ping({ signal });
       const started = this.elapsedNow();
-      const vector = await client.embedImage(calibrationImage(), { model: name, signal, timeoutMs: this.limits.testTimeoutMs });
+      let vector;
+      try {
+        vector = await client.embedImage(calibrationImage(), { model: name, signal, timeoutMs: this.limits.testTimeoutMs });
+      } catch (error) {
+        if (error?.code !== 'ml_timeout') throw error;
+        throw new EmbeddingServiceError(`${error.message} A model’s first use downloads it inside this request; try again in a few minutes.`,
+          'ml_timeout');
+      }
       const elapsedMs = Math.round(this.elapsedNow() - started);
       const match = this.repo.embeddings.matchSpace({
         backend: EMBEDDING_BACKEND, model: name, calibrationVersion: CALIBRATION_VERSION, calibration: vector,
@@ -139,7 +152,7 @@ class EmbeddingSession {
 
   async #calibrate() {
     try {
-      await this.client.ping({ signal: this.signal });
+      await this.client.ping({ signal: this.signal, timeoutMs: this.limits.sessionPingTimeoutMs });
       const vector = await this.client.embedImage(calibrationImage(),
         { model: this.model, signal: this.signal, timeoutMs: this.limits.calibrationTimeoutMs });
       const space = this.store.resolveSpace({
@@ -216,8 +229,8 @@ class EmbeddingSession {
     // Anything still pending after that grace is abandoned; its photo is left
     // for backfill. The service may still finish a model download on its own.
     this.controller.abort();
-    await this.inFlight;
-    await this.calibration;
+    const pending = [this.inFlight, this.calibration].filter(Boolean);
+    if (pending.length) await Promise.race([Promise.all(pending), sleep(this.limits.closeGraceMs)]);
     const { embedded, current, busy, waiting, paused, failed } = this.counts;
     const skipped = busy + waiting + paused;
     if (this.client) {

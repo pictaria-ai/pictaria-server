@@ -242,3 +242,31 @@ test('the home-page connection state is cached and reports the failure kind', as
     assert.equal(service.status().connection.state, 'not_immich');
   });
 });
+
+test('closing never waits for an unabortable preview download', async () => {
+  await withService(async ({ repo, service }) => {
+    addAssets(repo, 'a1');
+    const session = service.session();
+    await session.start();
+    let finish;
+    const download = new Promise((resolve) => { finish = resolve; });
+    const pending = session.embed({ assetId: 'a1', loadImage: () => download });
+    const started = Date.now();
+    await session.close({ cancelled: true });
+    assert.ok(Date.now() - started < 900, 'bounded by closeGraceMs');
+    finish(photo('a1'));
+    assert.equal(await pending, 'cancelled', 'a late download is never embedded or stored');
+    assert.equal(repo.db.prepare('SELECT COUNT(*) AS n FROM asset_embeddings').get().n, 0);
+  }, { serviceLimits: { ...limits, closeGraceMs: 200 } });
+});
+
+test('a model download that outlasts Test connection explains itself', async () => {
+  await withService(async ({ ml, service }) => {
+    ml.state.delayMs = 300;
+    await assert.rejects(service.test({}), (error) => {
+      assert.equal(error.code, 'ml_timeout');
+      assert.match(error.message, /first use downloads it inside this request; try again in a few minutes/);
+      return true;
+    });
+  }, { serviceLimits: { ...limits, testTimeoutMs: 100 } });
+});
