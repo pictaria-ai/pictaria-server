@@ -246,6 +246,7 @@ async function executeBatch({
   timingSession,
   aiSession = null,
   aiConnections = null,
+  embeddings = null,
 }) {
   immich = captureClient(immich);
   if (provider) provider = captureClient(provider);
@@ -446,12 +447,14 @@ async function executeBatch({
       let photoErrorKind = null;
       let processingRunId = null;
       let stage = 'download';
+      let embedding = null;
       analyzed += 1;
       counters.analyzed += 1;
       log(`${position} analyzing ${assetId}`);
       const overloadRetryLimit = overloadRetriesSuppressed ? 0 : PROVIDER_OVERLOAD_RETRY_LIMIT;
       try {
         let image;
+        let previewDownloaded = imageSource === 'preview';
         try {
           image = await fetchImage(immich, assetId, imageSource);
         } catch (fetchError) {
@@ -461,6 +464,7 @@ async function executeBatch({
           if (fetchError?.name === 'ResponseTooLargeError' && imageSource === 'original') {
             log(`${position} original for ${assetId} exceeds the download cap; using preview`);
             image = await fetchImage(immich, assetId, 'preview');
+            previewDownloaded = true;
           } else {
             throw fetchError;
           }
@@ -473,6 +477,13 @@ async function executeBatch({
           log('stopping early: cancellation requested after image download');
           stopped = true;
           break;
+        }
+        // The optional embedding runs beside the vision call and never affects
+        // this photo's outcome. Only the Immich preview is embedded (the
+        // rendition Immich's own CLIP uses), so one space never mixes sizes.
+        if (embeddings) {
+          embedding = embeddings.embed(previewDownloaded ? { assetId, image }
+            : { assetId, loadImage: () => fetchImage(immich, assetId, 'preview') });
         }
         stage = 'provider';
         const { normalized, decisions, retryCount } = await analyzeWithValidationRetry(
@@ -601,6 +612,8 @@ async function executeBatch({
       } finally {
         photoTiming?.finish(photoOutcome, photoErrorKind, processingRunId ?? null);
       }
+      // Outside photo timing: provider comparisons exclude the embedding.
+      if (embedding) await embeddings.settle(embedding);
     }
     scanned += assets.length;
 

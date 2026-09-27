@@ -46,6 +46,8 @@ import { PersistentStateGuard } from './persistentState.mjs';
 import { PERSISTENT_STATE_VERSION, preparePersistentStateUpgrade } from './upgradeSafety.mjs';
 import { createBackupRoutes } from './routes/backup.mjs';
 import { createEnrichRoutes } from './routes/enrich.mjs';
+import { createEmbeddingRoutes } from './routes/embeddings.mjs';
+import { EmbeddingService } from './embeddings/service.mjs';
 import { createInsightsRoutes } from './routes/insights.mjs';
 import { createSettingsRoutes } from './routes/settings.mjs';
 import { createSupportRoutes } from './routes/support.mjs';
@@ -212,7 +214,8 @@ curate.ai = new CurateAiExecution({ attempts: repo.curate.aiAttempts, limits: re
   stopped: () => lifecycle.stopped, scheduler: aiScheduler });
 curate.aiLifecycle = new CurateAiLifecycle({ curate, execution: curate.ai,
   resolveProvider: () => createCurateAiProvider(config), availability: CURATE_AI_AVAILABILITY });
-const enrichRunner = new EnrichJobRunner({ repo, immich, taxonomy, config, profiles, aiScheduler, aiConnections, onTagsQueued: () => aiTagSync.wake() });
+const embeddings = new EmbeddingService({ repo, config });
+const enrichRunner = new EnrichJobRunner({ repo, immich, taxonomy, config, profiles, aiScheduler, aiConnections, embeddings, onTagsQueued: () => aiTagSync.wake() });
 const enrichScheduler = new EnrichScheduler({ runner: enrichRunner, repo, config });
 const referee = new RefereeService({ repo, immich, review, enrichRunner, config, aiScheduler, aiConnections, log: (message) => console.log(`[Pictaria] ${message}`) });
 const albumStore = new SmartAlbumStore(config.albums.dataFile, { installationSecret });
@@ -337,6 +340,7 @@ lifecycle.register('thumbhash-backfill', 3000, (timeoutMs) => awaitDrain(thumbha
 const features = [
   createCurateRoutes({ curate, review, enrichRunner }),
   createActivityRoutes({ activityHistory }),
+  createEmbeddingRoutes({ embeddings }),
   createEnrichRoutes({ review, aiTagSync, enrichRunner, taxonomy, profiles, repo, requireImmich, config, immich, captionWriteback, referee, activityLog }),
   createAlbumsRoutes({ immich, store: albumStore, config, requireImmich, enrichRepo: repo }),
   createWakeWordRoutes({ store: wakeWordModels }),

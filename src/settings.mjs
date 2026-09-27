@@ -8,6 +8,7 @@ import { normalizeBaseUrl, normalizeHttpUrl } from './config.mjs';
 import { parseTaxonomySource } from './enrich/taxonomy.mjs';
 import { parseSupporterKey } from './support/supporterKey.mjs';
 import { HISTORY_LIMITS } from './enrich/historyRetention.mjs';
+import { DEFAULT_EMBEDDING_MODEL, normalizeEmbeddingModel, validEmbeddingModel } from './embeddings/models.mjs';
 
 // UI-editable settings, persisted to data/settings.json. Precedence:
 // settings.json override → environment → built-in default. Overrides are
@@ -130,6 +131,37 @@ const ENRICH_FIELDS = {
     read: (config) => config.captionWriteback,
     apply: (config, value) => {
       config.captionWriteback = Boolean(value);
+    },
+  },
+  // Optional image embeddings from Immich's machine-learning service (PIC-381).
+  // The service is unauthenticated, so there is no credential to bind.
+  embeddingsEnabled: {
+    env: 'ENRICH_EMBEDDINGS_ENABLED',
+    label: 'Generate image embeddings',
+    boolean: true,
+    read: (config) => config.enrichEmbeddings?.enabled ?? false,
+    apply: (config, value) => {
+      (config.enrichEmbeddings ??= {}).enabled = Boolean(value);
+    },
+  },
+  embeddingsUrl: {
+    env: 'IMMICH_ML_URL',
+    label: 'Immich machine-learning URL',
+    normalize: normalizeHttpSettingUrl,
+    read: (config) => config.enrichEmbeddings?.url ?? '',
+    apply: (config, value) => {
+      (config.enrichEmbeddings ??= {}).url = normalizeHttpSettingUrl(value);
+    },
+  },
+  embeddingsModel: {
+    env: 'ENRICH_EMBEDDINGS_MODEL',
+    label: 'Embedding model',
+    maxLength: 128,
+    normalize: (value) => value.replace(/^immich-app\//i, ''),
+    validate: validateEmbeddingModelSetting,
+    read: (config) => config.enrichEmbeddings?.model ?? DEFAULT_EMBEDDING_MODEL,
+    apply: (config, value) => {
+      (config.enrichEmbeddings ??= {}).model = normalizeEmbeddingModel(value);
     },
   },
   defaultProvider: {
@@ -578,7 +610,7 @@ const SECTIONS = {
 
 const PROTOTYPE_SPECIAL_KEYS = new Set(['__proto__', 'prototype', 'constructor']);
 
-export const SETTINGS_VERSION = 8;
+export const SETTINGS_VERSION = 9;
 
 // Only credentials whose destination authority can vary belong here. Fixed
 // public APIs (OpenAI, ElevenLabs, Geoapify) do not need a stored binding.
@@ -699,6 +731,8 @@ const SETTINGS_MIGRATIONS = new Map([
   // The effective legacy preference also depends on environment defaults.
   // SettingsStore.load materializes that preference once, at the upgrade boot.
   [7, (state) => ({ ...structuredClone(state), version: 8 })],
+  // Adds the optional image-embedding fields; absent values keep env/defaults.
+  [8, (state) => ({ ...structuredClone(state), version: 9 })],
 ]);
 
 // The persisted contract intentionally excludes labels and help copy: those
@@ -1332,6 +1366,13 @@ function coerce(field, key, raw, store = null) {
   // echoes the corrected value back to the UI — a scheme-less Immich URL
   // must round-trip as http://…, not look accepted as typed.
   return field.normalize ? field.normalize(value) : value;
+}
+
+function validateEmbeddingModelSetting(value) {
+  // Empty restores the default model.
+  if (value && !validEmbeddingModel(normalizeEmbeddingModel(value))) {
+    throw new SettingsError('embeddingsModel must be an Immich model name such as ViT-B-32__openai.');
+  }
 }
 
 function validateDailyTime(value) {
