@@ -1519,10 +1519,10 @@ test('admin UI smoke: gate, Insights lens, Curate, Smart Albums', { timeout: 120
       'Frame voice settings use clear product-specific copy and a portable provider link',
     );
 
-    assert.equal(
-      await page.evaluate('document.querySelectorAll("#fields-enrich details.sub-details").length'),
-      2,
-      'Enrich separates run history from its live Curate review policy',
+    assert.deepEqual(
+      await page.evaluate('[...document.querySelectorAll("#fields-enrich details.sub-details .sub-head")].map((head) => head.textContent)'),
+      ['Image embeddings', 'Run history', 'Live Curate review policy'],
+      'Enrich groups optional embeddings and run history apart from its live Curate review policy',
     );
     assert.deepEqual(
       await page.evaluate(`

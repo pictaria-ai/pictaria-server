@@ -1454,12 +1454,14 @@
         if (response.status === 401) { showLogin(); return; }
         const body = await response.json().catch(() => null);
         if (!response.ok) throw new Error(body?.error?.message ?? 'The connection test failed.');
-        const seconds = (body.elapsedMs / 1000).toFixed(1);
-        note.textContent = `Connected. ${body.model} returned a ${body.dims}-dimension embedding in ${seconds} s.` + ({
+        const took = body.elapsedMs < 1000 ? `${body.elapsedMs} ms` : `${(body.elapsedMs / 1000).toFixed(1)} s`;
+        const unsaved = ['embeddingsUrl', 'embeddingsModel'].some((key) =>
+          fieldValue({ type: 'text' }, el(`f2-enrich-${key}`)) !== cleanState.enrich?.[key]);
+        note.textContent = `Connected. ${body.model} returned a ${body.dims}-dimension embedding in ${took}.` + ({
           reused: ' It matches your stored embeddings.',
           'new-set': ' Its output differs from your stored embeddings for this model, so the next Enrich run starts a new set.',
           'first-set': '',
-        }[body.vectors] ?? '') + ' Save to use these settings.';
+        }[body.vectors] ?? '') + (unsaved ? ' Save to use these settings.' : '');
       } catch (error) {
         note.classList.add('bad');
         note.textContent = error.message;

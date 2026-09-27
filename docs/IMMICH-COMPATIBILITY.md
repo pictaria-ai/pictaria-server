@@ -107,6 +107,33 @@ expected-description field for this asset update. Pictaria therefore reads the
 description at the final safe decision point before writing, but cannot make
 that read and the upstream update atomic.
 
+## Machine-learning service
+
+Optional Enrich image embeddings are the one feature that talks to Immich's
+internal machine-learning container rather than the public API. That service has
+no authentication and no compatibility promise, so Pictaria depends on as little
+of it as possible:
+
+- `GET /ping`, which answers `pong`.
+- `POST /predict` with a multipart `entries` field of
+  `{"clip":{"visual":{"modelName":"<model>"}}}` and an `image` file. The
+  response is `{"clip":"[…]"}`, the vector serialized as a JSON string (a plain
+  array is also accepted).
+
+Immich's own server sends this same request, and it is identical in Immich
+2.7.5, 3.1.0, 3.2.2 and `main` (source-checked September 27, 2026). The
+*vectors* can still change between releases: `main` changes CLIP resizing and
+cropping, so the same model name produces different embeddings. Pictaria
+detects that with a synthetic calibration image and starts a new embedding
+space instead of mixing incompatible vectors; see
+[Image embeddings](ENRICH.md#image-embeddings). A request-shape change in a
+future Immich release shows up as a failed **Test connection** and paused
+embeddings, never as a failed enrichment.
+
+The API key's permissions are not involved: the service never sees it. Pictaria
+reads photo previews through the normal public API with the existing
+`asset.view` permission.
+
 ## Recognition resets and saved person filters
 
 Immich 3.2's normal person migration preserves existing person IDs. Simply
@@ -149,6 +176,9 @@ verify:
 - Insights, Enrich image access, Curate, and Smart Albums;
 - Frame onboarding, Albums mode, Timeline mode, and metadata loading;
 - Frame-to-Server remote and voice commands, including a tag-writing command;
+- when image embeddings are in use, Test connection against that release's
+  machine-learning service and whether its calibration reuses the existing
+  embedding space;
 - restart persistence for settings, Smart Albums, and custom wake phrases; and
 - backup creation after the upgrade.
 

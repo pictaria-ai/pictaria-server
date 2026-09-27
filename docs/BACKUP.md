@@ -9,13 +9,18 @@ live in Immich and are covered by whatever backs Immich up.
 
 | File | Contents | Replaceable? |
 | --- | --- | --- |
-| `enrichment.sqlite` (`DATABASE_PATH`) | decisions, tags, captions, profiles/revisions and active choice, saved run settings, run/timing history, review list, discovery checkpoints, pending AI-tag sync | **No — the crown jewels** |
+| `enrichment.sqlite` (`DATABASE_PATH`) | decisions, tags, captions, profiles/revisions and active choice, saved run settings, run/timing history, review list, discovery checkpoints, pending AI-tag sync, optional image embeddings | **No — the crown jewels** |
 | `settings.json` (`SETTINGS_PATH`) | settings overrides, incl. location groups | No |
 | `smart-albums.json` (`ALBUMS_DATA_FILE`) | album rules and job state | No |
 | `frame.db` (`FRAME_DB_PATH`) | which photos the frame has shown, voice command usage counters | No (small) |
 | `insights.sqlite` (`INSIGHTS_DB_PATH`) | library sweep + snapshot | Yes — recomputed from Immich in minutes |
 | `wake-word-models/` (`WAKE_WORD_MODELS_DIR`) | custom openWakeWord models and their integrity registry | No — unless you retained the originals |
 | `persistent-state.json` | inventory that prevents missing state from being silently recreated | Safety metadata — restore it with the snapshot |
+
+Optional [image embeddings](ENRICH.md#image-embeddings) add about 2–3 KB per
+embedded photo to `enrichment.sqlite` and therefore to each snapshot: roughly
+60–90 MB for 30,000 photos. They could be recomputed, but only slowly, from the
+photos, so they are backed up with the rest of the database.
 
 Pictaria creates the initial versioned `settings.json` during startup, even
 when you have not saved any runtime overrides. The first automatic snapshot

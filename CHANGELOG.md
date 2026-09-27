@@ -7,6 +7,25 @@ All notable changes to Pictaria Server are documented here. This project follows
 
 ### Development
 
+- Added optional image embeddings to Enrich (off by default). Settings →
+  Enrich → Image embeddings points Pictaria at the machine-learning container
+  that comes with Immich (`IMMICH_ML_URL`) and chooses a model, defaulting to
+  Immich's own `ViT-B-32__openai`. Each photo an Enrich run analyzes also has
+  its Immich preview embedded, beside the vision call, and the vector is kept
+  permanently in `enrichment.sqlite`. The step never fails, re-runs or
+  noticeably delays enrichment: one request at a time, a bounded wait, a pause
+  after repeated service failures, and photos left without a vector when the
+  service is busy or still downloading a model. A synthetic calibration image
+  separates embedding spaces, so a changed model or changed Immich
+  preprocessing never mixes incompatible vectors, and edited photos read as out
+  of date. **Test connection** checks unsaved values with a synthetic image.
+  The home page shows the machine-learning connection and Enrich shows
+  coverage. The service has no authentication, and the docs say to publish it
+  only on a trusted network. Enrichment schema 22 / persistent-state contract
+  27 / settings version 9, with the standard pre-upgrade recovery snapshot;
+  upgrading enables nothing and backfills nothing. Nothing consumes the
+  embeddings yet.
+
 - Started the Stack Referee request contract: a grouping-only prompt, explicit
   model/image limits, bounded prepared-image inputs and exhaustive partition
   validation. Synthetic transport and lifecycle tests cover alias mapping,

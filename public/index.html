@@ -117,6 +117,10 @@
         <span id="immichDot" class="p-dot"></span>
         <span id="immichLine">Checking Immich…</span>
       </div>
+      <div id="mlStatus" class="server-line" hidden>
+        <span id="mlDot" class="p-dot"></span>
+        <span id="mlLine">Checking machine learning…</span>
+      </div>
     </section>
 
     <div id="flow" class="p-panel flow" hidden>
@@ -376,6 +380,24 @@
         return;
       }
       await loadFeatureStatus();
+      void loadMachineLearningStatus();
+    }
+
+    // Shown only while Enrich image embeddings are on. The server caches its
+    // ping to Immich's machine-learning service for a minute.
+    async function loadMachineLearningStatus() {
+      let status;
+      try { status = await api('/api/enrich/embeddings?check=1'); } catch { return; }
+      if (!status.enabled) return;
+      const [dot, text] = {
+        connected: ['ok', `Machine learning connected · ${status.model}`],
+        unreachable: ['bad', 'Machine learning unreachable — photos are enriched without embeddings'],
+        not_immich: ['bad', 'Machine-learning URL is not the Immich machine-learning service'],
+        not_configured: ['warn', 'Image embeddings on, but no machine-learning URL is set'],
+      }[status.connection?.state] ?? ['warn', 'Machine-learning status unknown'];
+      el('mlDot').className = `p-dot ${dot}`;
+      el('mlLine').textContent = text;
+      el('mlStatus').hidden = false;
     }
 
     // Hovering a diagram box mirrors the hover effect onto its feature card.
