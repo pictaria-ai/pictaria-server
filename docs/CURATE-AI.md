@@ -379,6 +379,11 @@ request/advice applicability still needs integration before activation.
 
 ## Changing inputs and protected cleanup (PIC-346)
 
+PIC-370's first [Stack Referee request contract](CURATE-STACK-REFEREE.md) now
+implements the grouping-only prompt, explicit capability/image envelope,
+one-call transport boundary and strict partition validation. It is not yet
+connected to real group discovery, partition publication or worker availability.
+
 The server composes `CurateAiLifecycle` with its existing service, executor and
 shared scheduler. This is infrastructure for the upcoming role workers, not an
 active source of AI requests. No worker discovers/offers real groups yet, and

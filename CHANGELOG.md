@@ -7,6 +7,13 @@ All notable changes to Pictaria Server are documented here. This project follows
 
 ### Development
 
+- Started the Stack Referee request contract: a grouping-only prompt, explicit
+  model/image limits, bounded prepared-image inputs and exhaustive partition
+  validation. Synthetic transport and lifecycle tests cover alias mapping,
+  bounded retries, role-off preparation and human changes during inference.
+  No worker is activated, no background calls are added and current stacks are
+  unchanged. See [Stack Referee implementation](docs/CURATE-STACK-REFEREE.md).
+
 - Added the shared changing-input lifecycle for the forthcoming Stack and Photo
   Referees: 30-second settling, latest overlapping work, authoritative checks
   before submission/acceptance, and protected cleanup of obsolete accounting
