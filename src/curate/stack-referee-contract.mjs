@@ -1,17 +1,19 @@
 import { createHash } from 'node:crypto';
-import { CurateError, fingerprint, validateAdvice, validatePartition } from './contracts.mjs';
+import { CURATE_AI_MAX_IMAGES, CurateError, fingerprint, validateAdvice, validatePartition } from './contracts.mjs';
 import { enrichmentProviderConfiguration } from '../enrich/providers.mjs';
 
-export const STACK_REFEREE_CONTRACT = 'curate_stack_check_v1';
-export const STACK_REFEREE_ENVELOPE = Object.freeze({ images: 30, imageBytes: 2 * 1024 * 1024, totalBytes: 24 * 1024 * 1024 });
+export const STACK_REFEREE_CONTRACT = 'curate_stack_check_v2';
+export const STACK_REFEREE_ENVELOPE = Object.freeze({ images: CURATE_AI_MAX_IMAGES, imageBytes: 2 * 1024 * 1024, totalBytes: 24 * 1024 * 1024 });
 
 // Capability is supplied by server-owned, model-specific evidence. An adapter
 // having analyzeImages(), or accepting a single verification PNG, is not proof
 // that the model can compare a stack. This module never discovers capability
 // with a paid request or invents a default image limit.
 export function stackRefereeSupport(provider, capability, memberCount) {
-  if (!Number.isSafeInteger(memberCount) || memberCount < 2 || memberCount > STACK_REFEREE_ENVELOPE.images)
+  if (!Number.isSafeInteger(memberCount) || memberCount < 2)
     return { state: 'input-limit' };
+  if (memberCount > CURATE_AI_MAX_IMAGES)
+    return { state: 'input-limit', reason: 'too-many-images', limit: CURATE_AI_MAX_IMAGES };
   if (!provider || typeof provider.analyzeImages !== 'function') return { state: 'unsupported-provider' };
   if (!capability || capability.provider !== provider.providerName || capability.model !== provider.modelName ||
       capability.comparative !== true || !Number.isSafeInteger(capability.maxImages) || capability.maxImages < 2)
@@ -35,7 +37,8 @@ function requestPrompt(aliases) {
       + 'Do not split alternatives merely because one is blurry, poorly lit, or has closed eyes; judging their quality comes later. '
       + 'Return one partition covering every input ID exactly once across all groups, including singletons. '
       + 'Never return competing groupings containing the same IDs. Check for missing or repeated IDs before answering. '
-      + 'Give a short, visible reason for each group. Do not return keepers, rankings, or decisions.',
+      + 'Give a short reason for each group describing what is visible; do not refer to photos by their IDs in reasons. '
+      + 'Use IDs only in the ids arrays. Do not return keepers, rankings, or decisions.',
     jsonSchema: {
       type: 'object', additionalProperties: false, required: ['groups'], properties: {
         groups: { type: 'array', minItems: 1, maxItems: aliases.length, items: {

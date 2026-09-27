@@ -11,6 +11,9 @@ All notable changes to Pictaria Server are documented here. This project follows
   model/image limits, bounded prepared-image inputs and exhaustive partition
   validation. Synthetic transport and lifecycle tests cover alias mapping,
   bounded retries, role-off preparation and human changes during inference.
+  Oversized logical comparisons return explicit limits before preparation
+  instead of throwing or looking stale; full human comparisons remain usable.
+  Explanations are instructed to avoid internal photo IDs.
   No worker is activated, no background calls are added and current stacks are
   unchanged. See [Stack Referee implementation](docs/CURATE-STACK-REFEREE.md).
 

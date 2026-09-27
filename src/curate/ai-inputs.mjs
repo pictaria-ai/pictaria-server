@@ -1,4 +1,4 @@
-import { fingerprint } from './contracts.mjs';
+import { CURATE_AI_MAX_IMAGES, fingerprint } from './contracts.mjs';
 import { AI_WINDOW_MS } from './ai-limits.mjs';
 import { CANDIDATE_LIMITS } from './candidate.mjs';
 
@@ -30,13 +30,19 @@ export class CurateAiInputs {
     if (!['stack', 'keeper'].includes(role) || typeof contract !== 'string' || !contract || contract.length > 100)
       throw new TypeError('Invalid Curate AI input contract.');
     const group = this.curate.current?.byId.get(groupId);
-    if (!group || group.ids.length < 2 || group.ids.length > CANDIDATE_LIMITS.photos) return { state: 'stale' };
+    if (!group || group.ids.length < 2) return { state: 'stale' };
+    // A valid human comparison can exceed the automated envelope. Return a
+    // stable limit before batch validation/preparation, not a programmer error
+    // or stale-input signal that encourages repeated rediscovery. Keeper
+    // batches do not expand the supported total actionable scope either.
+    if (group.ids.length > CURATE_AI_MAX_IMAGES)
+      return { state: 'input-limit', reason: 'too-many-images', limit: CURATE_AI_MAX_IMAGES };
     const actionable = photoIds ?? group.ids;
-    if (!Array.isArray(actionable) || !actionable.length || actionable.length > 30 ||
+    if (!Array.isArray(actionable) || !actionable.length || actionable.length > CURATE_AI_MAX_IMAGES ||
         new Set(actionable).size !== actionable.length || actionable.some(id => !group.ids.includes(id)) ||
         (role === 'stack' && !same(actionable, group.ids)))
       throw new TypeError('Invalid Curate AI actionable batch.');
-    const contextIds = includeContext ? this.store.context(group.ids).ids.slice(0, Math.min(8, 30 - actionable.length)) : [];
+    const contextIds = includeContext ? this.store.context(group.ids).ids.slice(0, Math.min(8, CURATE_AI_MAX_IMAGES - actionable.length)) : [];
     const snapshot = { role, contract, groupId, ids: [...group.ids], actionable: [...actionable], contextIds };
     // Capture only from a fully rebuilt projection. Later checks below are
     // scope-specific, so unrelated imports need not discard a paid result.

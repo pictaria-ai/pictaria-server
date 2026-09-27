@@ -1,5 +1,9 @@
 import { createHash } from 'node:crypto';
 
+// Total actionable scope supported by the initial automated Curate path.
+// Human comparisons may be larger; splitting requests does not raise this cap.
+export const CURATE_AI_MAX_IMAGES = 30;
+
 export function canonicalJson(value) {
   const order = (v) =>
     Array.isArray(v)

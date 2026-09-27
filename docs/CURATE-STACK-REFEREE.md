@@ -35,7 +35,7 @@ human authority. The following agreed behavior remains the integration target:
 
 ## Grouping instructions
 
-The versioned `curate_stack_check_v1` prompt builds on the dedicated grouping
+The versioned `curate_stack_check_v2` prompt builds on the dedicated grouping
 prompt evaluated during the Curate prototype, with an explicit distinction
 between composition and photo quality:
 
@@ -48,7 +48,10 @@ between composition and photo quality:
 - Blur, closed eyes or poor lighting do not by themselves split alternatives;
   choosing the better photo belongs to the later review.
 - Return one exhaustive, disjoint partition, including singles, with a short
-  visible reason per group. No names, keeper selections, ranks or human decisions.
+  visible reason per group. Reasons describe the scene without referring to
+  photo IDs; aliases belong only in membership arrays. No names, keeper
+  selections, ranks or human decisions. Version 2 adds this reason wording;
+  rendering must still treat model text as untrusted.
 
 These are model instructions, not a deterministic guarantee of visual quality.
 The new wording still needs evaluation on the approved real-photo cases after
@@ -62,6 +65,20 @@ and an image limit matching the resolved provider and model. The presence of an
 `analyzeImages` method or a successful single-image connection verification is
 insufficient. Unknown capability cannot submit a request. This slice does not
 implement a capability registry, discovery probe or user override.
+
+The contract and lifecycle share an overall 30-photo automation limit. Larger
+current stacks return `input-limit` / `too-many-images` with `limit: 30`, including
+31–40-photo candidates and larger manual fallback groups. They do not throw a
+batch-validation error or masquerade as stale inputs. The full human comparison
+remains usable; smaller Photo Referee batches do not expand this total scope
+limit. A missing or no-longer-current group still returns `stale`.
+
+Within that envelope, exceeding a confirmed model limit remains
+`unsupported-size`, distinct from unknown capability or the overall scope cap.
+The future worker must check capability and size **before offering work** and
+retain a settled outcome so rediscovery does not repeatedly prepare/download
+unsupported stacks. Only a confirmed model-size limit within the overall
+envelope qualifies for the separate labeled Photo Referee batching exception.
 
 `createStackRefereeRequest` takes already-prepared images inside the lifecycle's
 preparation phase. It enforces 2–30 images, 2 MiB per image and 24 MiB total raw
@@ -105,3 +122,16 @@ deferral and next-five priority should reuse the shared policy and lifecycle.
 Preparation failures and unsupported inputs also need a settled outcome at the
 worker boundary so rediscovery cannot repeatedly prepare the same failing stack.
 No new paid validation or deployment is part of this contract-only slice.
+
+Before activation, verify the following with approved real-photo inputs and
+the actual provider/model paths we intend to support:
+
+- A non-contiguous partition with 20–30 images where the confirmed model limit
+  permits it. Valid membership JSON does not prove correct image-to-alias
+  association. Never exceed a known model limit to satisfy this gate; a smaller
+  test does not close the large-input gate. If positional association proves
+  unreliable, evaluate labels interleaved with individual images.
+- Actual schema acceptance, especially OpenAI strict Responses and
+  OpenRouter/Gemini schema projection, including the reason's `minLength`.
+  Mock transport tests do not establish provider acceptance, and a successful
+  compatibility call does not establish visual grouping quality.
