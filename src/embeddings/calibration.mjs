@@ -18,9 +18,20 @@ const WIDTH = 384, HEIGHT = 256;
 let cached = null;
 
 export function calibrationImage() {
-  cached ??= renderPng();
+  cached ??= encodePng(WIDTH, HEIGHT, calibrationPixels());
   return { data: cached, contentType: 'image/png' };
 }
+
+// Raw RGB rows of the calibration image (bin/ml-probe.mjs derives cropped and
+// squashed variants from these to measure preprocessing sensitivity).
+export function calibrationPixels() {
+  const rgb = Buffer.alloc(WIDTH * HEIGHT * 3);
+  for (let y = 0; y < HEIGHT; y++) {
+    for (let x = 0; x < WIDTH; x++) rgb.set(pixel(x, y), (y * WIDTH + x) * 3);
+  }
+  return rgb;
+}
+export const CALIBRATION_SIZE = Object.freeze({ width: WIDTH, height: HEIGHT });
 
 function pixel(x, y) {
   if ((x - 48) ** 2 + (y - 128) ** 2 <= 40 ** 2) return [220, 30, 30];
@@ -30,16 +41,17 @@ function pixel(x, y) {
   return [Math.round((255 * x) / (WIDTH - 1)), Math.round((255 * y) / (HEIGHT - 1)), 128];
 }
 
-function renderPng() {
-  const stride = WIDTH * 3 + 1;
-  const raw = Buffer.alloc(stride * HEIGHT);
-  for (let y = 0; y < HEIGHT; y++) {
+// Minimal 8-bit RGB PNG encoder (node:zlib only).
+export function encodePng(width, height, rgb) {
+  const stride = width * 3 + 1;
+  const raw = Buffer.alloc(stride * height);
+  for (let y = 0; y < height; y++) {
     // Filter byte 0 (none) starts each scanline.
-    for (let x = 0; x < WIDTH; x++) raw.set(pixel(x, y), y * stride + 1 + x * 3);
+    rgb.copy(raw, y * stride + 1, y * width * 3, (y + 1) * width * 3);
   }
   const header = Buffer.alloc(13);
-  header.writeUInt32BE(WIDTH, 0);
-  header.writeUInt32BE(HEIGHT, 4);
+  header.writeUInt32BE(width, 0);
+  header.writeUInt32BE(height, 4);
   header[8] = 8; // bit depth
   header[9] = 2; // truecolour RGB
   return Buffer.concat([
