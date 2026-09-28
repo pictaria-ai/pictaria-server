@@ -98,6 +98,7 @@
     .save-row .p-btn { flex-shrink: 0; }
     .save-note { font-size: 12px; color: var(--p-muted); flex: 1; min-width: 0; }
     .save-note.bad { color: var(--p-danger); }
+    .save-note.ok { color: var(--p-ok); }
     .caption-wb-status { padding: 0 0 9px; }
     .caption-wb-actions { display: flex; align-items: center; gap: 10px; margin-top: 8px; }
     .caption-wb-actions .p-btn { flex-shrink: 0; }
@@ -1444,7 +1445,7 @@
       const button = el('embeddingsTest');
       const note = el('embeddingsTestNote');
       button.disabled = true;
-      note.classList.remove('bad');
+      note.classList.remove('bad', 'ok');
       note.textContent = 'Testing… A model’s first use can take several minutes while the service downloads it.';
       try {
         const response = await fetch('/api/enrich/embeddings/test', {
@@ -1458,9 +1459,10 @@
         const took = body.elapsedMs < 1000 ? `${body.elapsedMs} ms` : `${(body.elapsedMs / 1000).toFixed(1)} s`;
         const unsaved = ['embeddingsUrl', 'embeddingsModel'].some((key) =>
           fieldValue({ type: 'text' }, el(`f2-enrich-${key}`)) !== cleanState.enrich?.[key]);
-        note.textContent = `Connected. ${body.model} returned a ${body.dims}-dimension embedding in ${took}.` + ({
-          reused: ' It matches your stored embeddings.',
-          'new-set': ' Its output differs from your stored embeddings for this model, so the next Enrich run starts a new set.',
+        note.classList.add('ok');
+        note.textContent = `Connected in ${took}.` + ({
+          reused: ' Matches your stored embeddings.',
+          'new-set': ' The service’s output has changed, so the next Enrich run starts a new set.',
           'first-set': '',
         }[body.vectors] ?? '') + (unsaved ? ' Save to use these settings.' : '');
       } catch (error) {

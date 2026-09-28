@@ -38,14 +38,15 @@ test('image embeddings are configured in Settings → Enrich, tested with draft 
     await page.evaluate(`${input('embeddingsModel')}.closest('details').open = true; ${input('embeddingsUrl')}.value = ${JSON.stringify(ml.url)};`);
     await page.evaluate('document.getElementById("embeddingsTest").click()');
     await page.waitFor('document.getElementById("embeddingsTestNote").textContent.startsWith("Connected")');
-    assert.match(await page.evaluate('document.getElementById("embeddingsTestNote").textContent'),
-      /ViT-B-32__openai returned a 512-dimension embedding/);
+    assert.match(await page.evaluate('document.getElementById("embeddingsTestNote").textContent'), /^Connected in \d+ ms\. Save to use these settings\.$/);
+    assert.equal(await page.evaluate('document.getElementById("embeddingsTestNote").className'), 'save-note ok');
     assert.deepEqual(ml.state.requests.map((request) => request.model), ['ViT-B-32__openai']);
     assert.equal(JSON.parse(readFileSync(join(dir, 'settings.json'), 'utf8')).enrich?.embeddingsUrl, undefined);
 
     // A bad model name is reported without a save.
     await page.evaluate(`${input('embeddingsModel')}.value = 'Unknown__model'; document.getElementById("embeddingsTest").click()`);
     await page.waitFor('document.getElementById("embeddingsTestNote").classList.contains("bad")');
+    assert.equal(await page.evaluate('document.getElementById("embeddingsTestNote").classList.contains("ok")'), false);
     assert.match(await page.evaluate('document.getElementById("embeddingsTestNote").textContent'), /could not process the request/);
 
     await page.evaluate(`${input('embeddingsModel')}.value = 'ViT-B-32__openai'; ${input('embeddingsEnabled')}.click(); document.querySelector('#save-enrich').click()`);
