@@ -259,23 +259,28 @@ The rules have two modes:
   - The middle band needs people agreement or a middle-band ThumbHash.
   - Reciprocal search ranks do not corroborate embeddings, because Immich's
     ranks may come from the same model.
-  - Clearly different embeddings separate a pair on their own. Against
-    reciprocal near search ranks they stay uncertain.
+  - Clearly different embeddings separate a pair on their own. Against the
+    same recognized people (at least one), or reciprocal near search ranks,
+    they stay uncertain. Enrich people categories do not count here: many
+    unrelated photos share "none".
   - A very close ThumbHash with clearly different embeddings, or the reverse,
     stays uncertain, as do very similar embeddings that contradict people
     evidence.
   - With the switch off, the combined rules are exactly the ones above.
 
-The defaults come from a first calibration of `ViT-B-32__openai` on five real
-groups (31 photos), judged by eye. Photos in the same stack mostly scored 0.885
-or more with each other, and unrelated scenes 0.73 or less. Separate stacks of a
-similar scene scored 0.78–0.90, overlapping the same-stack range, so no single
-pair cutoff separates them. Requiring every pair to reach 0.865 matched the
-judged stacks, except that it split off the last two shots of one stack, which
-had changed angle; that split was judged acceptable. Combined evidence uses
-0.865 as its clearly-different ceiling for the same reason: one clearly
-different pair keeps two groups apart. Other models need their own values. If
-Immich's smart search uses the same model,
+The defaults come from a first calibration of `ViT-B-32__openai` on seven real
+groups (54 photos), judged by eye. Photos in the same stack mostly scored 0.885
+or more with each other, and unrelated scenes 0.73 or less. Between about 0.78
+and 0.90 the judgments went both ways: some pairs were separate stacks of a
+similar scene, others parts of one stack, such as the same people framed
+differently. No embedding cutoff decides that zone. Requiring every pair to
+reach 0.865 matched five of the groups (one with an acceptable extra split) but
+broke up stacks in the other two, and lowering it to fix those merged stacks
+elsewhere. Combined evidence uses 0.865 as its clearly-different ceiling,
+because one clearly different pair keeps two groups apart. When both photos
+show the same recognized people, such a pair stays uncertain instead, so it can
+still join. Other models need their own values. If Immich's smart search uses
+the same model,
 these embeddings and its search ranks are not independent evidence. They are
 the same vectors compared directly instead of ranked across the library. The
 copied summary includes the settings, coverage and pairwise similarities, with

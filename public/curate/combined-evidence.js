@@ -87,8 +87,11 @@ function evaluator(photos, settings, rows) {
         : p.far ? 'Clearly different embeddings and ThumbHash' : 'Clearly different embeddings and returned rank contrast';
     } else if (p.conflict || contrast) reason = 'Conflicting evidence needs review';
     else if ((p.near && p.embFar) || (p.embNear && p.far)) reason = 'ThumbHash and embeddings disagree';
-    // Clearly different embeddings separate on their own unless reciprocal
-    // near ranks point the other way.
+    // Clearly different embeddings separate on their own unless the same
+    // recognized people or reciprocal near ranks point the other way. Enrich
+    // people categories are too coarse to count here.
+    else if (p.embFar && s.identities && p.identityDifference === false && p.ai.size > 0)
+      reason = 'Clearly different embeddings, but the same recognized people';
     else if (p.embFar && p.reciprocal) reason = 'Clearly different embeddings conflict with reciprocal ranks';
     else if (p.embFar) { state = 'separate'; reason = 'Clearly different embeddings'; }
     else if (p.near || p.embNear || (p.middle && (p.agreement || p.reciprocal)) || (p.embMiddle && (p.agreement || p.middle))

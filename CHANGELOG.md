@@ -23,8 +23,8 @@ All notable changes to Pictaria Server are documented here. This project follows
   that. The defaults come from a first calibration of `ViT-B-32__openai` on
   real groups: every pair must reach 0.865 in individual filters; combined
   evidence treats ≥ 0.900 as very similar and ≤ 0.865 as clearly different,
-  and clearly different embeddings separate a pair on their own. Production
-  grouping is unchanged.
+  and clearly different embeddings separate a pair on their own unless both
+  photos show the same recognized people. Production grouping is unchanged.
 
 - Added optional image embeddings to Enrich (off by default). Settings →
   Enrich → Image embeddings points Pictaria at the machine-learning container
