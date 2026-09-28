@@ -25,7 +25,67 @@ export const EMBEDDING_LIMITS = Object.freeze({
   closeGraceMs: 1_000,
   connectionCacheMs: 60_000,
   testTimeoutMs: 120_000,
+  // How long Test connection waits for the shared prediction lane.
+  testLaneWaitMs: 15_000,
 });
+
+// Lane priorities: Enrich first, then a person's connection test, then lab passes.
+const PRIORITY = Object.freeze({ enrich: 2, test: 1, lab: 0 });
+
+// Every prediction Pictaria sends to the machine-learning service goes through
+// this one lane: at most one request in flight for the whole server, across
+// Enrich sessions, lab passes and connection tests. Waiters are served by
+// priority, then arrival. A waiter whose signal aborts leaves the queue without
+// sending anything; the lane is released only after the request has settled.
+export class PredictionLane {
+  constructor() {
+    this.running = false;
+    this.waiting = [];
+    this.sequence = 0;
+  }
+
+  async run(work, { priority = 0, signal = null, waitMs = null } = {}) {
+    await this.#acquire(priority, signal, waitMs);
+    try { return await work(); } finally { this.#release(); }
+  }
+
+  get busy() {
+    return this.running;
+  }
+
+  #acquire(priority, signal, waitMs) {
+    signal?.throwIfAborted();
+    if (!this.running) {
+      this.running = true;
+      return Promise.resolve();
+    }
+    return new Promise((resolve, reject) => {
+      let timer = null;
+      const waiter = { priority, order: this.sequence++ };
+      const leave = (error) => {
+        this.waiting = this.waiting.filter((entry) => entry !== waiter);
+        waiter.cleanup();
+        reject(error);
+      };
+      const onAbort = () => leave(signal.reason ?? new DOMException('Aborted', 'AbortError'));
+      waiter.cleanup = () => { signal?.removeEventListener('abort', onAbort); if (timer) clearTimeout(timer); };
+      waiter.resolve = () => { waiter.cleanup(); resolve(); };
+      signal?.addEventListener('abort', onAbort, { once: true });
+      if (waitMs !== null) {
+        timer = setTimeout(() => leave(new EmbeddingServiceError(
+          'The machine-learning service is busy with other embedding work. Try again shortly.', 'ml_busy', { service: false })), waitMs);
+      }
+      this.waiting.push(waiter);
+      this.waiting.sort((a, b) => b.priority - a.priority || a.order - b.order);
+    });
+  }
+
+  #release() {
+    const next = this.waiting.shift();
+    if (next) next.resolve();
+    else this.running = false;
+  }
+}
 
 // Optional Enrich step. Sessions never throw into the enrichment run: every
 // outcome is counted and logged, and a missing vector is left for backfill.
@@ -37,6 +97,7 @@ export class EmbeddingService {
     this.testing = false;
     // Open sessions: 'enrich' (one per Enrich run) and 'lab' (explicit passes).
     this.active = new Set();
+    this.lane = new PredictionLane();
   }
 
   settings() {
@@ -93,10 +154,13 @@ export class EmbeddingService {
     try {
       const client = new ImmichMlClient({ baseUrl: target, fetchImpl: this.fetchImpl });
       await client.ping({ signal });
-      const started = this.elapsedNow();
+      let started = null;
       let vector;
       try {
-        vector = await client.embedImage(calibrationImage(), { model: name, signal, timeoutMs: this.limits.testTimeoutMs });
+        vector = await this.lane.run(() => {
+          started = this.elapsedNow();
+          return client.embedImage(calibrationImage(), { model: name, signal, timeoutMs: this.limits.testTimeoutMs });
+        }, { priority: PRIORITY.test, signal, waitMs: this.limits.testLaneWaitMs });
       } catch (error) {
         if (error?.code !== 'ml_timeout') throw error;
         throw new EmbeddingServiceError(`${error.message} A model’s first use downloads it inside this request; try again in a few minutes.`,
@@ -117,7 +181,15 @@ export class EmbeddingService {
   // model even if Settings change while it is running.
   session({ log = () => {}, signal = null } = {}) {
     const { enabled, url, model } = this.settings();
-    return enabled ? new EmbeddingSession(this, { url, model, log, signal, kind: 'enrich' }) : null;
+    if (!enabled) return null;
+    // Enrich takes the service back from an explicit lab pass: the pass's
+    // current request is aborted and drained before Enrich's first prediction.
+    for (const session of this.active) {
+      if (session.kind === 'lab') {
+        session.preempt('An Enrich run started embedding photos, so this pass stopped to leave the machine-learning service to it. Completed photos are kept.');
+      }
+    }
+    return new EmbeddingSession(this, { url, model, log, signal, kind: 'enrich' });
   }
 
   // An explicit pass a person starts for a few photos (the stacking lab). It
@@ -191,8 +263,9 @@ class EmbeddingSession {
   async #calibrate() {
     try {
       await this.client.ping({ signal: this.signal, timeoutMs: this.limits.sessionPingTimeoutMs });
-      const vector = await this.client.embedImage(calibrationImage(),
-        { model: this.model, signal: this.signal, timeoutMs: this.limits.calibrationTimeoutMs });
+      const vector = await this.service.lane.run(() => this.client.embedImage(calibrationImage(),
+        { model: this.model, signal: this.signal, timeoutMs: this.limits.calibrationTimeoutMs }),
+      { priority: PRIORITY[this.kind], signal: this.signal });
       this.signal.throwIfAborted();
       let space;
       try {
@@ -252,7 +325,8 @@ class EmbeddingSession {
         this.counts.current++;
         return 'current';
       }
-      const vector = await this.client.embedImage(input, { model: this.model, signal });
+      const vector = await this.service.lane.run(() => this.client.embedImage(input, { model: this.model, signal }),
+        { priority: PRIORITY[this.kind], signal });
       // Never write once the photo's window or the run has closed.
       signal.throwIfAborted();
       if (vector.length !== this.space.dims) {
@@ -316,6 +390,13 @@ class EmbeddingSession {
     // Settings and Enrich report the last Enrich run; lab passes report their own.
     if (this.kind === 'enrich') this.service.lastSession = summary;
     this.summary = summary;
+  }
+
+  // Stop for good and abort work in flight (Enrich reclaiming the service from
+  // a lab pass). close() still drains and releases.
+  preempt(message) {
+    this.#stop('preempted', message);
+    this.controller.abort();
   }
 
   #serviceFailure(error) {

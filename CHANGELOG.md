@@ -14,9 +14,14 @@ All notable changes to Pictaria Server are documented here. This project follows
   step. The lab shows the pairwise similarity table and adds an embedding rule
   to both modes: a threshold in individual filters, and very-similar / middle /
   clearly-different bands in combined evidence. Missing embeddings stay
-  unknown, and search ranks do not corroborate embeddings. The thresholds are
-  uncalibrated starting points for PIC-381's evaluation. Production grouping is
-  unchanged.
+  unknown, and search ranks do not corroborate embeddings. Every pass
+  rechecks the service first; with full coverage the button becomes
+  **Recheck service**, and the worklist follows whichever set the check
+  selects. Pictaria sends at most one prediction at a time across Enrich, lab
+  passes and **Test connection**; Enrich goes first and takes the service back
+  from a lab pass. Server shutdown cancels passes, and nothing is written after
+  that. The thresholds are uncalibrated starting points for PIC-381's
+  evaluation. Production grouping is unchanged.
 
 - Added optional image embeddings to Enrich (off by default). Settings →
   Enrich → Image embeddings points Pictaria at the machine-learning container

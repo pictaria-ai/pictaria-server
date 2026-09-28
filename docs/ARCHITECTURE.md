@@ -248,8 +248,12 @@ existing durable sync queue. The multi-keeper comparison UI follows separately.
   outside photo timing, waits at most `settleMs` for it. Anything still running
   then, including a preview download, is aborted, and nothing is stored once a
   photo's window or the run has closed. Sessions never throw into a run. They
-  keep one request in flight, skip photos while the model loads, and pause
-  after repeated service failures or late answers. Database errors stop a
+  skip photos while the model loads and pause after repeated service failures
+  or late answers. A service-wide `PredictionLane` admits one prediction at a
+  time across Enrich sessions, stacking-lab passes (`curate/lab-embeddings.mjs`)
+  and connection tests. It serves them by priority (Enrich, test, lab), then by
+  arrival, and releases only after the request settles. A new Enrich session
+  preempts a lab pass, and Curate shutdown cancels and drains lab passes. Database errors stop a
   session as storage failures in the run and server logs, never as
   machine-learning failures. `embeddings/store.mjs` owns schema 22 /
   persistent-state contract 27: `embedding_spaces` (backend, model, dimensions,

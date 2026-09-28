@@ -10,11 +10,18 @@ const MODEL_DIMS = { 'ViT-B-32__openai': 512, 'ViT-B-16-SigLIP__webli': 768 };
 
 export async function startFakeMl({ dims = null, models = null } = {}) {
   const state = {
-    dims, variant: 0, noise: 0, delayMs: 0, slowAfter: 0, slowMs: 0, status: null, pong: 'pong', raw: null,
+    dims, variant: 0, noise: 0, delayMs: 0, slowAfter: 0, slowMs: 0, inFlight: 0, maxInFlight: 0, status: null, pong: 'pong', raw: null,
     models: models ?? new Set(['ViT-B-32__openai', 'ViT-B-16-SigLIP__webli']),
     requests: [],
   };
   const server = http.createServer(async (request, response) => {
+    const predicting = request.url === '/predict';
+    if (predicting) {
+      state.inFlight++;
+      state.maxInFlight = Math.max(state.maxInFlight, state.inFlight);
+      // Counted until this request's connection ends, whether answered or aborted.
+      response.once('close', () => { state.inFlight--; });
+    }
     const chunks = [];
     for await (const chunk of request) chunks.push(chunk);
     const body = Buffer.concat(chunks);

@@ -210,17 +210,32 @@ those Enrich created, without contacting the service.
 
 **Compute embeddings** is an explicit, bounded pass for the open group:
 
-- It embeds only photos that have no current embedding, at most 60 per pass;
-  **Compute missing embeddings** continues. There are no automatic passes.
-- It checks the service with the synthetic calibration image, then downloads
-  each photo's Immich preview and sends it to the machine-learning service, one
-  photo at a time. On a desktop-class host that is well under a second per
-  photo. No AI provider is called.
+- Every pass first checks the service with the synthetic calibration image.
+  That decides which set of embeddings the photos belong to. The worklist is
+  then rebuilt against that set:
+  - photos with no current embedding there are embedded, at most 60 per pass;
+    **Compute missing embeddings** continues;
+  - if the service's output has changed, a new set starts and every photo is
+    embedded again;
+  - returning to an earlier output reuses its stored embeddings.
+
+  There are no automatic passes.
+- With every photo covered, the button becomes **Recheck service**. The check
+  costs one request, and it is the way to notice a changed service when
+  automatic Enrich embeddings are off. Opening a group never contacts the
+  service.
+- Each photo's Immich preview is downloaded and sent to the machine-learning
+  service one photo at a time. On a desktop-class host that is well under a
+  second per photo. No AI provider is called.
 - It needs the machine-learning URL but not the automatic Enrich switch.
-- It cannot start while an Enrich run is embedding photos, and it stops between
-  photos if one begins. Only one pass runs at a time. The pass has a five-minute
-  overall deadline.
-- **Cancel** or closing the window stops it. Photos already embedded are kept.
+- Pictaria sends at most one prediction at a time, server-wide. Enrich, lab
+  passes and **Test connection** share one queue, with Enrich first.
+- A pass cannot start while an Enrich run is embedding photos. If an Enrich
+  run starts during a pass, the pass stops and its current request is aborted
+  before Enrich's first request is sent. Only one pass runs at a time, with a
+  five-minute overall deadline.
+- **Cancel**, closing the window, or the server shutting down stops a pass.
+  Nothing is written after that, and photos already embedded are kept.
 
 The vectors go to the same permanent table under the same identity rules as the
 Enrich step, so later experiments, Enrich runs and future Curate features reuse

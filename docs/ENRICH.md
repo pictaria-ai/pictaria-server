@@ -1147,8 +1147,12 @@ public API; see [Immich compatibility](IMMICH-COMPATIBILITY.md#machine-learning-
   itself uses for smart search. When the run already downloaded the preview,
   the same bytes are reused; with `thumbnail` or `original` runs, Pictaria
   fetches the preview separately so one set of embeddings never mixes sizes.
-- The request runs beside the vision-model call, one at a time, and only for
-  a photo the run is analyzing; Curate and the AI referee never send one.
+- The request runs beside the vision-model call, only for a photo the run is
+  analyzing. Pictaria sends at most one prediction at a time, server-wide:
+  Enrich, explicit stacking-lab passes and **Test connection** share one queue,
+  with Enrich first. An Enrich run that starts during a lab pass stops the pass
+  and aborts its current request first. Curate grouping and the AI referee
+  never send one.
   Pictaria waits at most five seconds after the photo's enrichment for the
   vector. Anything still running then, including a separate preview download,
   is aborted. No embedding work continues in the background or after a run is

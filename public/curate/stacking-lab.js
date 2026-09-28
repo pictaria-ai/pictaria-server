@@ -52,7 +52,10 @@ function append(value) {
 async function open(group) {
   const token = ++requestId;
   rankPanel?.dispose(); rankPanel = null;
+  // Clear the previous group's embedding evidence so none of it lingers while
+  // the next group loads.
   embeddingPanel?.dispose(); embeddingPanel = null;
+  el('embedding-comparison').replaceChildren(); el('embedding-table').replaceChildren();
   refreshController?.abort();
   rankingController?.abort(); rankingId++; ranking = null;
   el('check-ranking').textContent = 'Check similarity ranking';

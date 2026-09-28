@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
 import { Repository } from '../../src/enrich/repository.mjs';
-import { EMBEDDING_LIMITS, EmbeddingService } from '../../src/embeddings/service.mjs';
+import { EMBEDDING_LIMITS, EmbeddingService, PredictionLane } from '../../src/embeddings/service.mjs';
 import { startFakeMl } from './fakeMl.mjs';
 
 const photo = (id) => ({ data: Buffer.from(`preview-${id}`), contentType: 'image/jpeg' });
@@ -406,4 +406,104 @@ test('no new embedding starts once the run has been cancelled', async () => {
     await session.close({ cancelled: true });
     assert.equal(ml.predictions(), before);
   });
+});
+
+test('the prediction lane serves one request at a time by priority, then arrival, and drops aborted waiters', async () => {
+  const lane = new PredictionLane();
+  const order = [];
+  let finishFirst;
+  const first = lane.run(() => new Promise((resolve) => { finishFirst = () => { order.push('first'); resolve(); }; }), { priority: 0 });
+  const lab = lane.run(async () => { order.push('lab'); }, { priority: 0 });
+  const test = lane.run(async () => { order.push('test'); }, { priority: 1 });
+  const aborted = new AbortController();
+  const dropped = lane.run(async () => { order.push('dropped'); }, { priority: 2, signal: aborted.signal });
+  const enrich = lane.run(async () => { order.push('enrich'); }, { priority: 2 });
+  const impatient = lane.run(async () => { order.push('impatient'); }, { priority: 1, waitMs: 20 });
+  aborted.abort();
+  await assert.rejects(dropped, { name: 'AbortError' });
+  await assert.rejects(impatient, { code: 'ml_busy' });
+  assert.equal(lane.busy, true);
+  finishFirst();
+  await Promise.all([first, lab, test, enrich]);
+  assert.deepEqual(order, ['first', 'enrich', 'test', 'lab']);
+  assert.equal(lane.busy, false);
+  await assert.rejects(lane.run(async () => { throw new Error('work failed'); }), /work failed/);
+  assert.equal(lane.busy, false, 'released after failed work');
+  const early = new AbortController(); early.abort();
+  await assert.rejects(lane.run(async () => order.push('never'), { signal: early.signal }), { name: 'AbortError' });
+  assert.equal(order.includes('never'), false);
+});
+
+test('Enrich starting during a lab photo preempts it: never two predictions in flight', async () => {
+  await withService(async ({ repo, ml, service }) => {
+    addAssets(repo, 'a1', 'a2');
+    const lab = service.labPass();
+    await lab.start({ waitForModel: true });
+    Object.assign(ml.state, { slowAfter: 1, slowMs: 600 });
+    const labPhoto = lab.embed({ assetId: 'a1', image: photo('a1') });
+    await new Promise((resolve) => setTimeout(resolve, 100));
+    assert.equal(ml.state.inFlight, 1);
+    const log = [];
+    const enrich = service.session({ log: (message) => log.push(message) });
+    assert.equal(lab.stopped, 'preempted');
+    assert.equal(await labPhoto, 'cancelled');
+    Object.assign(ml.state, { slowAfter: 0, slowMs: 0 });
+    await enrich.start();
+    assert.ok(enrich.space, 'Enrich calibrated after the lab request drained');
+    assert.equal(await enrich.embed({ assetId: 'a2', image: photo('a2') }), 'embedded');
+    await Promise.all([lab.close(), enrich.close()]);
+    assert.equal(ml.state.maxInFlight, 1);
+    assert.equal(repo.db.prepare("SELECT COUNT(*) AS n FROM asset_embeddings WHERE asset_id='a1'").get().n, 0);
+    assert.match(lab.reason, /An Enrich run started embedding photos/);
+  }, { enabled: true });
+});
+
+test('a connection test waits for an in-flight calibration instead of overlapping it, or reports busy', async () => {
+  await withService(async ({ ml, service }) => {
+    Object.assign(ml.state, { slowAfter: 0, slowMs: 400 });
+    const enrich = service.session();
+    const starting = enrich.start();
+    await new Promise((resolve) => setTimeout(resolve, 100));
+    assert.equal(ml.state.inFlight, 1);
+    const result = await service.test({});
+    assert.equal(result.ok, true);
+    await starting;
+    await enrich.close();
+    assert.equal(ml.state.maxInFlight, 1);
+  }, { serviceLimits: { ...limits, calibrationWaitMs: 2_000 } });
+  await withService(async ({ ml, service }) => {
+    Object.assign(ml.state, { slowAfter: 0, slowMs: 500 });
+    const enrich = service.session();
+    const starting = enrich.start();
+    await new Promise((resolve) => setTimeout(resolve, 100));
+    const before = ml.predictions();
+    await assert.rejects(service.test({}), { code: 'ml_busy' });
+    assert.equal(ml.predictions(), before, 'the test never reached the service');
+    await starting;
+    await enrich.close();
+    assert.equal(ml.state.maxInFlight, 1);
+  }, { serviceLimits: { ...limits, calibrationWaitMs: 2_000, testLaneWaitMs: 50 } });
+});
+
+test('a lab pass cannot start while Enrich holds the service, and its waiting request is dropped when cancelled', async () => {
+  await withService(async ({ repo, ml, service }) => {
+    addAssets(repo, 'a1');
+    const enrich = service.session();
+    await enrich.start();
+    assert.throws(() => service.labPass(), { code: 'ml_busy' });
+    Object.assign(ml.state, { slowAfter: 0, slowMs: 400 });
+    const photoRequest = enrich.embed({ assetId: 'a1', image: photo('a1') });
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    // A second Enrich-priority waiter behind it, cancelled before its turn.
+    const waiter = new AbortController();
+    let ran = false;
+    const queued = service.lane.run(async () => { ran = true; }, { priority: 2, signal: waiter.signal });
+    waiter.abort();
+    await assert.rejects(queued, { name: 'AbortError' });
+    assert.equal(await photoRequest, 'embedded');
+    assert.equal(ran, false, 'the cancelled waiter never ran');
+    assert.equal(ml.predictions(), 2, 'the calibration and the one photo');
+    await enrich.close();
+    assert.equal(ml.state.maxInFlight, 1);
+  }, { enabled: true });
 });

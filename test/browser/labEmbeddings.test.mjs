@@ -46,7 +46,8 @@ test('the lab computes Pictaria embeddings on request and uses them in both expe
   await page.waitFor('document.querySelector("#embedding-comparison").textContent.includes("3 of 3 photos have embeddings")');
   assert.equal(ml.predictions(), 4, 'calibration plus one request per photo');
   assert.equal(fixture.repo.db.prepare('SELECT COUNT(*) AS n FROM asset_embeddings').get().n, 3);
-  assert.equal(await page.evaluate('document.querySelector("#compute-embeddings").disabled'), true);
+  assert.equal(await page.evaluate('document.querySelector("#compute-embeddings").textContent'), 'Recheck service',
+    'full coverage still offers an explicit service check');
   const row = await page.evaluate('[...document.querySelectorAll("#embedding-table tbody tr:first-child td")].map(n => n.textContent)');
   assert.deepEqual(row, ['·', '0.970', '0.600']);
 
@@ -76,8 +77,16 @@ test('the lab computes Pictaria embeddings on request and uses them in both expe
   // Reopening the group shows the stored evidence without another request.
   await click('[data-close="experiment"]');
   await click('.group-card');
-  await page.waitFor('document.querySelector("#embedding-comparison").textContent.includes("3 of 3 photos have embeddings")');
+  await page.waitFor('document.querySelector("#compute-embeddings")?.textContent === "Recheck service" && !document.querySelector("#compute-embeddings").disabled');
+  assert.match(await text('#embedding-comparison'), /3 of 3 photos have embeddings/);
   assert.equal(ml.predictions(), 4);
+  // A changed service under the same model name is found by Recheck service.
+  ml.state.vectorFor = (bytes) => { const v = byBytes.get(bytes.toString('base64')); return v ? [...v.slice(1), v[0]] : null; };
+  ml.state.variant = 1;
+  await click('#compute-embeddings');
+  await page.waitFor('document.querySelector("#embedding-comparison").textContent.includes("Pass complete.")', { timeoutMs: 20000 });
+  assert.equal(ml.predictions(), 8, 'calibration plus all three photos in the new set');
+  assert.equal(fixture.repo.db.prepare('SELECT COUNT(*) AS n FROM embedding_spaces').get().n, 2);
   assert.equal(fixture.repo.db.prepare('SELECT count(*) n FROM decision_operations').get().n, 0);
   assert.equal(fixture.repo.db.prepare('SELECT count(*) n FROM curate_separations').get().n, 0);
 });

@@ -82,10 +82,13 @@ export class EmbeddingComparison {
       this.estimate.textContent = !plan.configured
         ? 'Set the Immich machine-learning URL in Settings → Enrich → Image embeddings to compute embeddings.'
         : `${plan.current} of ${plan.total} photos have embeddings from ${plan.model}${plan.space ? ` (${plan.space.dims} dimensions)` : ''}.`
-          + (plan.missing ? ` ${plan.newEmbeddings} new in the next pass${plan.remaining ? `, ${plan.remaining} left for later` : ''}; about 0.2–1 s each, no AI calls.` : '')
+          + (plan.missing ? ` ${plan.newEmbeddings} new in the next pass${plan.remaining ? `, ${plan.remaining} left for later` : ''}; about 0.2–1 s each, no AI calls.`
+            : ' Recheck service confirms they still match what the machine-learning service returns now (one request).')
           + (plan.busy ? ' An Enrich run is embedding photos now; try again when it finishes.' : '');
-      this.button.textContent = plan.current ? 'Compute missing embeddings' : 'Compute embeddings';
-      this.button.disabled = !plan.configured || !plan.newEmbeddings || plan.busy;
+      // Every pass starts by checking the service, so a changed service is
+      // noticed even when this group looks fully covered.
+      this.button.textContent = !plan.missing ? 'Recheck service' : plan.current ? 'Compute missing embeddings' : 'Compute embeddings';
+      this.button.disabled = !plan.configured || plan.busy;
     } catch (error) {
       if (this.disposed || generation !== this.generation) return;
       this.estimate.textContent = error.message;
@@ -102,6 +105,10 @@ export class EmbeddingComparison {
       await stream({ viewId: this.viewId, groupId: this.groupId, admission: this.plan.admission }, this.controller.signal, event => {
         if (this.disposed) return;
         if (event.type === 'calibrating') this.status.textContent = `Checking ${this.plan.model} on the machine-learning service (a model’s first use downloads it)…`;
+        else if (event.type === 'space') this.status.textContent = (event.replacesEarlier
+          ? `The service now returns different vectors for ${this.plan.model}, so a new set starts. `
+          : event.created ? 'Started a new set of embeddings. ' : '')
+          + (event.newEmbeddings ? `${event.newEmbeddings} photo${event.newEmbeddings === 1 ? '' : 's'} to embed…` : 'Every photo is current.');
         else if (event.type === 'progress') this.status.textContent = `${event.completed} of ${event.total} photos embedded · embedding Photo ${number(event.assetId)}…`;
         else if (event.type === 'done') this.status.textContent = event.message;
       });

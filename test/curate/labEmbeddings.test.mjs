@@ -125,7 +125,8 @@ test('a lab pass embeds only missing photos, stores them permanently and reports
 
   await assert.rejects(lab.run({ ...body, admission: 'stale' }, { signal: new AbortController().signal, emit: async () => {} }), /estimate changed/);
   const events = await collect(lab, { ...body, admission: plan.admission });
-  assert.deepEqual(events.map((e) => e.type), ['start', 'calibrating', 'progress', 'photo', 'progress', 'photo', 'progress', 'photo', 'done']);
+  assert.deepEqual(events.map((e) => e.type), ['start', 'calibrating', 'space', 'progress', 'photo', 'progress', 'photo', 'progress', 'photo', 'done']);
+  assert.deepEqual(events[2], { type: 'space', created: true, replacesEarlier: false, dims: 512, current: 0, newEmbeddings: 3, remaining: 0 });
   assert.deepEqual(events.filter((e) => e.type === 'photo').map((e) => e.outcome), ['embedded', 'embedded', 'embedded']);
   assert.equal(events.at(-1).message, 'Pass complete.');
   assert.deepEqual(downloads, ['preview:a', 'preview:b', 'preview:c']);
@@ -183,4 +184,98 @@ test('cancelling a lab pass stops further requests and keeps completed photos', 
   await new Promise((resolve) => setTimeout(resolve, 500));
   assert.equal(repo.db.prepare('SELECT COUNT(*) AS n FROM asset_embeddings').get().n, 1);
   assert.equal(ml.predictions(), 2, 'calibration and the first photo only');
+});
+
+const count = (repo, table) => repo.db.prepare(`SELECT COUNT(*) AS n FROM ${table}`).get().n;
+
+test('closing Curate cancels a lab pass during calibration: prompt, released, and nothing written later', async (t) => {
+  const { repo, ml, curate, service, lab, body } = await labFixture(t);
+  curate.lab.embeddings = lab;
+  Object.assign(ml.state, { slowAfter: 0, slowMs: 800 });
+  let calibrating;
+  const reached = new Promise((resolve) => { calibrating = resolve; });
+  const running = lab.run({ ...body, admission: lab.plan(body).admission }, { signal: new AbortController().signal,
+    emit: async (event) => { if (event.type === 'calibrating') calibrating(); } });
+  running.catch(() => {});
+  await reached;
+  await new Promise((resolve) => setTimeout(resolve, 50));
+  const started = Date.now();
+  await curate.close();
+  assert.ok(Date.now() - started < 1_500, 'close does not wait for the slow calibration');
+  await assert.rejects(running);
+  assert.equal(service.active.size, 0, 'the pass released its ownership');
+  assert.equal(service.lane.busy, false);
+  await new Promise((resolve) => setTimeout(resolve, 1_000));
+  assert.equal(count(repo, 'embedding_spaces'), 0, 'no space is created after close');
+  assert.equal(count(repo, 'asset_embeddings'), 0);
+  await assert.rejects(lab.run({ ...body, admission: 'x' }, { signal: new AbortController().signal, emit: async () => {} }), /stopping/);
+});
+
+test('closing Curate cancels a lab pass mid-photo: no vector is written after close returns', async (t) => {
+  const { repo, ml, curate, service, lab, body } = await labFixture(t);
+  curate.lab.embeddings = lab;
+  Object.assign(ml.state, { slowAfter: 1, slowMs: 800 });
+  let photoStarted;
+  const reached = new Promise((resolve) => { photoStarted = resolve; });
+  const running = lab.run({ ...body, admission: lab.plan(body).admission }, { signal: new AbortController().signal,
+    emit: async (event) => { if (event.type === 'progress') photoStarted(); } });
+  running.catch(() => {});
+  await reached;
+  await new Promise((resolve) => setTimeout(resolve, 50));
+  await curate.close();
+  assert.equal(service.active.size, 0);
+  await new Promise((resolve) => setTimeout(resolve, 1_000));
+  assert.equal(count(repo, 'embedding_spaces'), 1, 'the calibration finished before close');
+  assert.equal(count(repo, 'asset_embeddings'), 0, 'the delayed photo answer was discarded');
+});
+
+test('recheck at full coverage detects a changed service, rebuilds the worklist, and returns to a stored space', async (t) => {
+  const { repo, ml, lab, body } = await labFixture(t);
+  const pass = async () => {
+    const plan = lab.plan(body);
+    const events = await collect(lab, { ...body, admission: plan.admission });
+    return { plan, events, space: events.find((e) => e.type === 'space'), done: events.at(-1) };
+  };
+  const first = await pass();
+  assert.equal(first.plan.missing, 3);
+  assert.equal(lab.plan(body).current, 3);
+
+  // Full coverage: plans stay free of requests, but the recheck calibrates.
+  const full = lab.plan(body);
+  assert.deepEqual([full.missing, full.newEmbeddings], [0, 0]);
+  let before = ml.predictions();
+  const unchanged = await pass();
+  assert.deepEqual(unchanged.space, { type: 'space', created: false, replacesEarlier: false, dims: 512, current: 3, newEmbeddings: 0, remaining: 0 });
+  assert.match(unchanged.done.message, /Checked: every photo in this group already has a current embedding/);
+  assert.equal(ml.predictions(), before + 1, 'only the calibration');
+
+  // The service's preprocessing changes under the same model name.
+  ml.state.variant = 1;
+  assert.equal(lab.plan(body).current, 3, 'plans alone cannot know; the recheck finds out');
+  const changed = await pass();
+  assert.deepEqual([changed.space.created, changed.space.replacesEarlier, changed.space.newEmbeddings], [true, true, 3]);
+  assert.equal(changed.events.filter((e) => e.type === 'photo').length, 3);
+  const afterChange = lab.plan(body);
+  assert.deepEqual([afterChange.current, afterChange.missing], [3, 0]);
+  assert.equal(count(repo, 'embedding_spaces'), 2);
+
+  // Returning to the earlier output reuses its stored vectors without requests.
+  ml.state.variant = 0;
+  before = ml.predictions();
+  const returned = await pass();
+  assert.deepEqual([returned.space.created, returned.space.current, returned.space.newEmbeddings], [false, 3, 0]);
+  assert.equal(ml.predictions(), before + 1);
+  assert.equal(count(repo, 'embedding_spaces'), 2);
+
+  // Partial coverage into a new space embeds every photo that space lacks,
+  // not just the photos the pre-calibration estimate counted.
+  repo.db.prepare("DELETE FROM asset_embeddings WHERE asset_id='c'").run();
+  const partialPlan = lab.plan(body);
+  assert.deepEqual([partialPlan.current, partialPlan.missing], [2, 1]);
+  ml.state.variant = 2;
+  const partial = await pass();
+  assert.deepEqual([partial.space.created, partial.space.newEmbeddings], [true, 3]);
+  assert.equal(partial.events.filter((e) => e.type === 'photo').length, 3);
+  assert.equal(partial.done.message, 'Pass complete.');
+  assert.equal(lab.plan(body).current, 3);
 });

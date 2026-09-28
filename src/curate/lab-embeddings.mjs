@@ -1,9 +1,10 @@
+import { setTimeout as sleep } from 'node:timers/promises';
 import { CurateError, fingerprint } from './contracts.mjs';
 import { EmbeddingServiceError } from '../embeddings/client.mjs';
 import { EMBEDDING_BACKEND } from '../embeddings/models.mjs';
 import { cosineSimilarity } from '../embeddings/vectors.mjs';
 
-export const LAB_EMBEDDING_LIMITS = Object.freeze({ perPass: 60, passMs: 5 * 60_000 });
+export const LAB_EMBEDDING_LIMITS = Object.freeze({ perPass: 60, passMs: 5 * 60_000, drainMs: 2_000 });
 
 // Explicit, bounded embedding passes for one open lab group (PIC-381 spike).
 // Vectors go to the same permanent store under the same identity rules as the
@@ -12,6 +13,9 @@ export class LabEmbeddings {
   constructor(lab, service) {
     this.lab = lab;
     this.service = service;
+    // Curate shutdown cancels passes; close() waits for them to drain.
+    this.shutdown = new AbortController();
+    this.passes = new Set();
   }
 
   #state({ viewId, groupId } = {}) {
@@ -40,12 +44,15 @@ export class LabEmbeddings {
     };
   }
 
+  // Also the explicit recheck: with every photo covered it still calibrates,
+  // and embeds whatever the resolved space lacks.
   async run(body, { signal, emit }) {
+    if (this.closed) throw new CurateError('The stacking lab is stopping.', 'lab_unavailable', 503);
     const state = this.#state(body);
     if (body.admission !== state.admission) {
       throw new CurateError('The embedding estimate changed. Review the updated estimate and start again.', 'lab_embedding_estimate_changed');
     }
-    const deadline = AbortSignal.any([signal, AbortSignal.timeout(LAB_EMBEDDING_LIMITS.passMs)]);
+    const deadline = AbortSignal.any([signal, this.shutdown.signal, AbortSignal.timeout(LAB_EMBEDDING_LIMITS.passMs)]);
     const messages = [];
     let pass;
     try {
@@ -54,6 +61,9 @@ export class LabEmbeddings {
       if (error instanceof EmbeddingServiceError) throw new CurateError(error.message, 'lab_embeddings_busy', 503);
       throw error;
     }
+    let finish;
+    this.passes.add(new Promise((resolve) => { finish = resolve; }));
+    const drained = [...this.passes].at(-1);
     const immich = this.lab.curate.immich;
     const check = () => {
       deadline.throwIfAborted();
@@ -69,15 +79,24 @@ export class LabEmbeddings {
         await emit({ type: 'done', stopped: true, message: lastReason(pass, messages) });
         return;
       }
+      // Calibration decides which space these photos belong to. Rebuild the
+      // worklist against it: a changed service can need more photos than the
+      // estimate (still bounded per pass), and a returning one fewer.
+      const store = this.service.repo.embeddings;
+      const current = store.vectors(pass.space.id, state.photos.map((p) => p.id));
+      const missing = state.photos.filter((p) => !current.has(p.id)).map((p) => p.id);
+      const batch = missing.slice(0, LAB_EMBEDDING_LIMITS.perPass);
+      await emit({ type: 'space', created: pass.space.created, replacesEarlier: pass.space.replacesEarlier, dims: pass.space.dims,
+        current: current.size, newEmbeddings: batch.length, remaining: missing.length - batch.length });
       let completed = 0;
-      for (const assetId of state.batch) {
+      for (const assetId of batch) {
         check();
         if (this.service.enrichActive()) {
           await emit({ type: 'done', stopped: true,
             message: 'An Enrich run started embedding photos, so this pass stopped to leave the machine-learning service to it. Completed photos are kept.' });
           return;
         }
-        await emit({ type: 'progress', assetId, completed, total: state.batch.length });
+        await emit({ type: 'progress', assetId, completed, total: batch.length });
         const pending = pass.embed({ assetId,
           loadImage: (requestSignal) => immich.getAssetThumbnail(assetId, 'preview', { signal: requestSignal }) });
         const outcome = pending ? await pending : pass.stopped ? 'paused' : 'current';
@@ -90,10 +109,25 @@ export class LabEmbeddings {
       }
       check();
       await emit({ type: 'done', stopped: false,
-        message: state.missing.length > state.batch.length ? 'Pass complete. More photos remain without embeddings.' : 'Pass complete.' });
+        message: !batch.length ? 'Checked: every photo in this group already has a current embedding from this service.'
+          : missing.length > batch.length ? 'Pass complete. More photos remain without embeddings.' : 'Pass complete.' });
     } finally {
       await pass.close({ cancelled: deadline.aborted });
+      this.passes.delete(drained);
+      finish();
     }
+  }
+
+  // Stop admitting passes, cancel running ones (nothing is written after the
+  // signal fires) and wait briefly for them to release the service.
+  async close() {
+    this.closed = true;
+    this.shutdown.abort();
+    const stop = new AbortController();
+    try {
+      await Promise.race([Promise.all([...this.passes]),
+        sleep(LAB_EMBEDDING_LIMITS.drainMs, undefined, { signal: stop.signal }).catch(() => {})]);
+    } finally { stop.abort(); }
   }
 }
 
