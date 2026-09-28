@@ -27,6 +27,13 @@ export const EMBEDDING_LIMITS = Object.freeze({
   testTimeoutMs: 120_000,
 });
 
+// A silent timeout or refusal usually means the address works from a browser
+// but not from Pictaria's own container, e.g. the Immich host's own address.
+export const REACHABILITY_HINT = 'The address must work from Pictaria’s own server or container, not only from your computer. '
+  + 'If Pictaria runs on the same machine as Immich, connect Pictaria to Immich’s Docker network and use the '
+  + 'machine-learning container’s name, such as http://immich_machine_learning:3003.';
+const unreachable = (error) => ['ml_unreachable', 'ml_timeout'].includes(error?.code);
+
 // Optional Enrich step. Sessions never throw into the enrichment run: every
 // outcome is counted and logged, and a missing vector is left for backfill.
 export class EmbeddingService {
@@ -90,7 +97,11 @@ export class EmbeddingService {
     this.testing = true;
     try {
       const client = new ImmichMlClient({ baseUrl: target, fetchImpl: this.fetchImpl });
-      await client.ping({ signal });
+      try { await client.ping({ signal }); }
+      catch (error) {
+        if (!unreachable(error)) throw error;
+        throw new EmbeddingServiceError(`${error.message} ${REACHABILITY_HINT}`, error.code, { service: false });
+      }
       const started = this.elapsedNow();
       let vector;
       try {
@@ -183,7 +194,10 @@ class EmbeddingSession {
         this.log(`image embeddings: started a ${space.dims}-dimension set for ${this.model}`);
       }
     } catch (error) {
-      if (!this.signal.aborted) this.#stop(error?.code ?? 'ml_error', `image embeddings paused for this run: ${safeMessage(error)}`);
+      if (!this.signal.aborted) {
+        this.#stop(error?.code ?? 'ml_error', `image embeddings paused for this run: ${safeMessage(error)}`
+          + (unreachable(error) ? ' Use Settings → Enrich → Test connection; the URL must work from the Pictaria server itself.' : ''));
+      }
     }
   }
 

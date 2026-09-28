@@ -21,7 +21,10 @@ All notable changes to Pictaria Server are documented here. This project follows
   separates embedding spaces, so a changed model or changed Immich
   preprocessing never mixes incompatible vectors. Vectors record the exact
   preview bytes plus the photo's checksum and thumbhash, so edited photos read
-  as out of date and changed previews are re-embedded. **Test connection** checks unsaved values with a synthetic image.
+  as out of date and changed previews are re-embedded. **Test connection** checks unsaved values with a synthetic image and, when
+  the address cannot be reached, explains that it must work from the Pictaria
+  server itself; the docs cover connecting through Immich's Docker network when
+  both run on one machine.
   The home page shows the machine-learning connection and Enrich shows
   coverage. The service has no authentication, and the docs say to publish it
   only on a trusted network. Enrichment schema 22 / persistent-state contract

@@ -1119,27 +1119,73 @@ keeps it permanently in its own database so later features can compare photos
 directly, starting with Curate stacking evaluation. Nothing uses the embeddings
 yet beyond status reporting, and Curate grouping is unchanged.
 
-**Connecting.** Point **Immich machine-learning URL** at the machine-learning
-container that comes with Immich (the service behind Immich's smart search and
-face recognition), then press **Test connection**. The test uses the values in
-the form, before you save, and sends one synthetic image. Two common shapes:
+### Connecting to the machine-learning service
 
-- Pictaria on Immich's Docker network: `http://immich-machine-learning:3003`.
-- Otherwise, publish the container's port on the Immich host and use
-  `http://<immich-host>:3003`:
+Point **Immich machine-learning URL** at the machine-learning container that
+comes with Immich (the service behind Immich's smart search and face
+recognition), then press **Test connection**. The test uses the values in the
+form, before you save, and sends one synthetic image.
 
-  ```yaml
-  # In Immich's docker-compose.yml
-  immich-machine-learning:
-    ports:
-      - "3003:3003"   # no authentication: trusted networks only
-  ```
+The address must work from the **Pictaria server itself**: from inside its
+container when Pictaria runs in Docker. An address that works from your
+computer is not enough.
+
+**Pictaria on the same machine as Immich (recommended).** Connect Pictaria to
+Immich's Docker network and use the machine-learning container's name. Nothing
+needs to be published, not even on a VPN.
+
+1. Find Immich's network. With Immich's standard Compose file it is usually
+   `immich_default`:
+
+   ```bash
+   docker inspect immich_machine_learning --format '{{range $k, $v := .NetworkSettings.Networks}}{{$k}} {{end}}'
+   ```
+2. Attach Pictaria to that network:
+   - **Docker Compose:** add the network to Pictaria's service:
+
+     ```yaml
+     services:
+       pictaria-server:
+         networks: [default, immich]
+     networks:
+       immich:
+         external: true
+         name: immich_default
+     ```
+   - **Unraid:** set the Pictaria template's **Network Type** to Immich's
+     network.
+   - **Quick trial:** `docker network connect immich_default <pictaria-container>`
+     works until the container is recreated.
+3. Use `http://immich_machine_learning:3003` (the container name in Immich's
+   standard Compose file) and press **Test connection**.
+
+On one machine, the host's own LAN or Tailscale address often does not work from
+inside Pictaria's container:
+
+- a firewall rule limiting port 3003 to the VPN interface drops the request;
+- Docker isolates separate container networks from each other;
+- Unraid's custom `br0` networks cannot reach the host at all.
+
+These failures are silent, so **Test connection** reports a timeout rather than
+a refusal.
+
+**Pictaria on a different machine.** Publish the container's port on the Immich
+host and use `http://<immich-host>:3003`:
+
+```yaml
+# In Immich's docker-compose.yml
+immich-machine-learning:
+  ports:
+    - "3003:3003"   # no authentication: trusted networks only
+```
 
 The machine-learning service has **no password**. Publish it only on a network
 you trust (your LAN or a Tailscale tailnet), never to the internet. Pictaria
 sends it photo previews and a synthetic calibration image, and never any
 credential. It is an internal Immich component rather than part of Immich's
 public API; see [Immich compatibility](IMMICH-COMPATIBILITY.md#machine-learning-service).
+
+### How the embedding step works
 
 **What happens for each photo.**
 

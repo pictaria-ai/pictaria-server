@@ -407,3 +407,22 @@ test('no new embedding starts once the run has been cancelled', async () => {
     assert.equal(ml.predictions(), before);
   });
 });
+
+test('an unreachable address explains that it must work from the Pictaria server itself', async () => {
+  await withService(async ({ service }) => {
+    await assert.rejects(service.test({ url: 'http://127.0.0.1:9' }), (error) => {
+      assert.equal(error.code, 'ml_unreachable');
+      assert.match(error.message, /^Could not reach the machine-learning service\. The address must work from Pictaria’s own server or container/);
+      assert.match(error.message, /same machine as Immich, connect Pictaria to Immich’s Docker network.*http:\/\/immich_machine_learning:3003/);
+      return true;
+    });
+    // Other failures keep their own message.
+    await assert.rejects(service.test({ model: 'Unknown__model' }), (error) => !/Docker network/.test(error.message));
+    const log = [];
+    const session = new EmbeddingService({ repo: service.repo, limits,
+      config: { enrichEmbeddings: { enabled: true, url: 'http://127.0.0.1:9', model: 'ViT-B-32__openai' } } }).session({ log: (m) => log.push(m) });
+    await session.start();
+    await session.close();
+    assert.match(log.join('\n'), /Could not reach the machine-learning service\. Use Settings → Enrich → Test connection; the URL must work from the Pictaria server itself\./);
+  });
+});
