@@ -367,6 +367,34 @@ test('dense neighborhoods return an input limit, not stale or queued work, witho
   assert.equal((await f.lifecycle.offer(f.plan('missing'))).state, 'stale');
 }));
 
+for (const count of [30, 31, 40, 45]) test(`${count}-photo candidate retains human comparison and reports the automatic scope limit before preparation`, async () => fixture(async f => {
+  for (let i = 0; i < count; i++) f.add(`p${i}`, i);
+  await f.curate.refresh();
+  const group = f.curate.current.byMember.get('p0');
+  assert.equal(group.ids.length, count, 'exercise the complete candidate, including the over-40 manual fallback');
+  const view = await f.curate.openView();
+  assert.equal(f.curate.comparison(view.viewId, group.id).ids.length, count);
+  let preparations = 0;
+  const plan = f.plan('p0', { prepare: () => { preparations++; assert.fail('must not prepare'); } });
+  if (count === 30) {
+    assert.equal((await f.lifecycle.offer(plan)).state, 'queued');
+    assert.equal(f.lifecycle.pending.size, 1);
+  } else {
+    for (let i = 0; i < 2; i++) assert.deepEqual(await f.lifecycle.offer(plan), {
+      state: 'input-limit', reason: 'too-many-images', limit: 30,
+    });
+    assert.deepEqual(await f.lifecycle.offer({ ...plan, role: 'keeper', photoIds: group.ids.slice(0, 10) }), {
+      state: 'input-limit', reason: 'too-many-images', limit: 30,
+    }, 'smaller keeper batches cannot expand the total automated scope');
+    assert.equal(f.lifecycle.pending.size, 0); f.advance(AI_SETTLE_MS);
+    assert.equal(await f.run(), undefined);
+  }
+  assert.equal(preparations, 0); assert.equal(f.calls.length, 0);
+  assert.equal(f.repo.db.prepare('SELECT COUNT(*) n FROM curate_ai_attempts').get().n, 0);
+  assert.equal(f.repo.db.prepare('SELECT COUNT(*) n FROM curate_ai_inputs').get().n, 0);
+  assert.equal((await f.lifecycle.offer(f.plan('missing'))).state, 'stale');
+}, { candidate: true }));
+
 test('production candidate grouping gates AI on real search completion, scope, focus and current inputs', async () => {
   const searchCalls = [];
   await fixture(async f => {

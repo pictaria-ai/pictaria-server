@@ -379,6 +379,11 @@ request/advice applicability still needs integration before activation.
 
 ## Changing inputs and protected cleanup (PIC-346)
 
+PIC-370's first [Stack Referee request contract](CURATE-STACK-REFEREE.md) now
+implements the grouping-only prompt, explicit capability/image envelope,
+one-call transport boundary and strict partition validation. It is not yet
+connected to real group discovery, partition publication or worker availability.
+
 The server composes `CurateAiLifecycle` with its existing service, executor and
 shared scheduler. This is infrastructure for the upcoming role workers, not an
 active source of AI requests. No worker discovers/offers real groups yet, and
@@ -389,6 +394,10 @@ both availability flags remain false.
   the authoritative full membership, material/human signatures, separations and
   already-kept context itself. Context remains read-only, at most eight images
   within the 30-image request envelope. Unsupported/dense inputs remain manual.
+  A full actionable group above 30 photos returns `input-limit` with
+  `too-many-images` and `limit: 30` for either role, before preparation or batch
+  validation. Smaller Photo Referee batches do not raise this total scope cap;
+  the complete human comparison remains usable. This is not a stale-input retry.
   More than 256 pending neighbors in the applicability window (member capture
   range plus three minutes either side), or more than 256 exact/duplicate
   neighbors in the basic grouper, returns `input-limit` with `dense-neighborhood`
