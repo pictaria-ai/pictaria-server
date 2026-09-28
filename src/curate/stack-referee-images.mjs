@@ -1,8 +1,17 @@
 import { captureClient } from '../enrich/runConfiguration.mjs';
 import { STACK_REFEREE_ENVELOPE } from './stack-referee-contract.mjs';
+import { ImmichApiError } from '../immich.mjs';
+
+// Production network failures are wrapped by ImmichClient with no HTTP status.
+// Do not turn arbitrary adapter/programming errors into automatic retries.
+export function transientStackPreviewFailure(error) {
+  return error?.name === 'TimeoutError' || (error instanceof ImmichApiError &&
+    (error.status === null || [408, 429].includes(error.status) || error.status >= 500));
+}
 
 // Preview only: no originals, silent thumbnail downgrade, conversion process,
-// or second download pass. Oversized/unavailable previews remain manual.
+// or internal retry. The worker owns bounded retries of temporary failures;
+// oversized/unusable previews remain manual.
 export async function stackRefereeImages(immich, ids, checkpoint, signal) {
   const client = captureClient(immich), images = [];
   const deadline = AbortSignal.any([signal, AbortSignal.timeout(30_000)]);

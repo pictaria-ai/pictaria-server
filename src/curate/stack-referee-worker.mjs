@@ -3,8 +3,10 @@ import { setImmediate } from 'node:timers/promises';
 import { enrichmentProviderConfiguration } from '../enrich/providers.mjs';
 import { selectStackReferee } from './ai-policy.mjs';
 import { STACK_REFEREE_CONTRACT, stackRefereeSupport, createStackRefereeRequest } from './stack-referee-contract.mjs';
-import { stackRefereeImages } from './stack-referee-images.mjs';
+import { stackRefereeImages, transientStackPreviewFailure } from './stack-referee-images.mjs';
 import { saveStackCheck } from './stack-referee-results.mjs';
+
+export const STACK_PREVIEW_PAUSE_MS = 3 * 60_000;
 
 // Discovery/adaptation for one role. Capability must be supplied by the server,
 // never inferred from analyzeImages or accepted from a settings/API payload.
@@ -17,6 +19,10 @@ export class StackRefereeWorker {
     this.cursor = 0;
   }
   enabled() { return this.lifecycle.enabled('stack'); }
+  previewsReady() {
+    const until = this.curate.store.prepare("SELECT value FROM curate_meta WHERE key='stack-preview-retry-at'").get()?.value ?? 0;
+    return this.lifecycle.now() >= until;
+  }
   configuration(provider) {
     const capability = this.capability(provider);
     return { capability, key: fingerprint({ provider: enrichmentProviderConfiguration(provider), capability,
@@ -40,19 +46,22 @@ export class StackRefereeWorker {
     const captured = this.capture(group);
     if (captured.state !== 'captured') return { state: 'incomplete', reason: captured.reason ?? captured.state };
     const { snapshot } = captured;
-    if (this.lifecycle.active?.snapshot.inputKey === snapshot.inputKey) return { state: 'checking' };
-    if (this.lifecycle.pending.has(snapshot.inputKey)) return { state: 'waiting' };
     try {
-      const { key } = this.configuration(this.lifecycle.resolveProvider());
+      const provider = this.lifecycle.resolveProvider(), { key, capability } = this.configuration(provider);
+      const support = stackRefereeSupport(provider, capability, snapshot.ids.length);
+      if (support.state !== 'ready') return { state: 'incomplete', reason: support.state };
+      if (this.lifecycle.inputs.preparationFailures(snapshot) >= 2) return { state: 'incomplete', reason: 'preparation-failed' };
       const reason = this.lifecycle.inputs.outcome(snapshot, key);
       if (reason) return { state: 'incomplete', reason };
+      if (this.lifecycle.active?.snapshot.inputKey === snapshot.inputKey) return { state: 'checking' };
       const eligibility = this.curate.store.aiAttempts.eligibility('stack', snapshot.inputKey);
       if (['settled', 'exhausted'].includes(eligibility)) return { state: 'incomplete', reason: 'attempts-finished' };
     } catch { return { state: 'incomplete', reason: 'configuration' }; }
+    if (!this.previewsReady()) return { state: 'waiting', reason: 'preview-cooldown' };
     return { state: 'waiting' };
   }
   async discover() {
-    if (!this.enabled() || !this.curate.current) return;
+    if (!this.enabled() || !this.curate.current || !this.previewsReady()) return;
     const groups = this.curate.current.groups;
     if (!groups.length) return;
     const priorities = this.curate.refinement?.priorities() ?? new Map();
@@ -63,7 +72,7 @@ export class StackRefereeWorker {
     let slice = performance.now();
     for (const group of new Set([...preferred, ...batch])) {
       if (performance.now() - slice >= 4) { await setImmediate(); slice = performance.now(); }
-      if (!this.enabled()) return;
+      if (!this.enabled() || !this.previewsReady()) return;
       if (!this.selection(group).selected || this.curate.refinement?.isFocused(group.ids)) continue;
       const captured = this.capture(group);
       if (captured.state !== 'captured') continue;
@@ -74,29 +83,38 @@ export class StackRefereeWorker {
       const support = stackRefereeSupport(provider, configuration.capability, group.ids.length);
       if (support.state !== 'ready') {
         this.lifecycle.pending.delete(snapshot.inputKey);
-        if (!this.lifecycle.inputs.outcome(snapshot, configuration.key))
-          this.lifecycle.inputs.settle(snapshot, configuration.key, support.state);
         continue;
       }
-      if (this.lifecycle.inputs.outcome(snapshot, configuration.key)) continue;
+      if (this.lifecycle.inputs.preparationFailures(snapshot) >= 2 || this.lifecycle.inputs.outcome(snapshot, configuration.key)) continue;
       await this.lifecycle.offer(this.plan(group, preferred.includes(group)));
     }
   }
   plan(group, priority) {
-    let validate, key, support, source;
+    let validate, key, support, source, transient = false;
     const sourceKey = () => fingerprint([this.curate.immich?.baseUrl, this.curate.immich?.apiKey]);
     return { role: 'stack', groupId: group.id, contract: STACK_REFEREE_CONTRACT, priority,
+      canStart: () => this.previewsReady(),
       isCurrent: () => source === undefined || source === sourceKey(),
       prepare: async (checkpoint, { snapshot, provider }) => {
         checkpoint();
+        transient = false;
         source = sourceKey();
         const configuration = this.configuration(provider); key = configuration.key;
         support = stackRefereeSupport(provider, configuration.capability, snapshot.ids.length);
         if (support.state !== 'ready') throw new Error('Unsupported Stack Referee input.');
-        const images = await stackRefereeImages(this.curate.immich, snapshot.ids, () => {
+        let images;
+        try {
+          images = await stackRefereeImages(this.curate.immich, snapshot.ids, () => {
+            checkpoint();
+            if (this.configuration(provider).key !== key) throw new Error('Stack Referee connection changed.');
+          }, this.curate.abort.signal);
+        } catch (error) {
+          // Shutdown, role-off and changed inputs are cancellation, not failed
+          // downloads. Recheck before classifying a wrapped network/abort error.
           checkpoint();
-          if (this.configuration(provider).key !== key) throw new Error('Stack Referee connection changed.');
-        }, this.curate.abort.signal);
+          transient = transientStackPreviewFailure(error);
+          throw error;
+        }
         const request = createStackRefereeRequest({ provider, capability: configuration.capability, images, inputKey: snapshot.inputKey });
         validate = request.validate;
         return request;
@@ -104,8 +122,17 @@ export class StackRefereeWorker {
       submit: prepared => prepared.submit(), validate: answer => validate(answer),
       accept: (answer, snapshot) => saveStackCheck(this.curate.store, snapshot, answer),
       finish: (result, snapshot) => {
-        if (result.state === 'failed' && key) this.lifecycle.inputs.settle(snapshot, key,
-          support?.state !== 'ready' ? support.state : result.reason);
+        if (result.state !== 'failed' || !key || support?.state !== 'ready') return;
+        this.curate.store.repo.transaction(() => {
+          if (result.phase === 'prepare' && transient) {
+            // One shared pause gates discovery AND queued work, even after a
+            // restart. A single meta value avoids a per-stack recovery queue.
+            this.curate.store.prepare(`INSERT INTO curate_meta VALUES('stack-preview-retry-at',?)
+              ON CONFLICT(key) DO UPDATE SET value=excluded.value`).run(this.lifecycle.now() + STACK_PREVIEW_PAUSE_MS);
+            if (this.lifecycle.inputs.failPreparation(snapshot) < 2) return;
+          }
+          this.lifecycle.inputs.settle(snapshot, key, result.reason);
+        });
       },
     };
   }

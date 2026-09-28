@@ -59,6 +59,7 @@ export class CurateAiLifecycle {
   }
 
   runnable(job) {
+    if (job.plan.canStart && job.plan.canStart() !== true) return false;
     if (this.curate.refinement?.isFocused(job.snapshot.ids)) return false;
     const group = this.curate.current?.byId.get(job.snapshot.groupId);
     const status = group && this.curate.refinement?.groupStatus(group);

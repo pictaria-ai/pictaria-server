@@ -10,7 +10,9 @@ All notable changes to Pictaria Server are documented here. This project follows
 - Connected the Stack Referee worker to background group discovery, bounded
   preview preparation and saved partitions. Applicable results survive restart
   and are reused by split children; open comparisons retain their membership.
-  Unsupported models and failed preparation settle without repeated downloads.
+  Unsupported model/size status is derived without per-stack database records.
+  Temporary preview failures allow one retry, with a shared three-minute pause
+  covering queued downloads and restarts; unusable previews stop immediately.
   Human decisions, changed inputs, streaming byte limits and shared request
   allowances remain enforced. Both referees stay unavailable until supported
   model acceptance and final UI status integration are complete; this does not

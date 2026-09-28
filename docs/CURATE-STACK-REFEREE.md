@@ -79,9 +79,9 @@ limit. A missing or no-longer-current group still returns `stale`.
 
 Within that envelope, exceeding a confirmed model limit remains
 `unsupported-size`, distinct from unknown capability or the overall scope cap.
-The worker checks capability and size **before offering work** and retains a
-settled outcome so rediscovery does not repeatedly prepare/download unsupported
-stacks. Only a confirmed model-size limit within the overall
+The worker checks capability and size **before offering work** and derives the
+same status directly for display, without writing a per-stack record or
+preparing/downloading unsupported stacks. Only a confirmed model-size limit within the overall
 envelope qualifies for the separate labeled Photo Referee batching exception.
 
 `createStackRefereeRequest` takes already-prepared images inside the lifecycle's
@@ -92,7 +92,8 @@ previews, with a 30-second deadline for the complete preparation phase and
 checkpoints between images. Downloads are sequential and use the existing Immich
 streaming byte reader. The client connection is captured for preparation; a
 changed Immich connection makes an in-flight result stale. No originals,
-thumbnail fallback, conversion process or repeated download pass is used.
+thumbnail fallback or conversion process is used. The image helper never retries;
+the worker's bounded temporary-failure policy below controls any later attempt.
 JPEG, PNG and WebP are accepted; LM Studio must receive an already prepared
 JPEG/PNG to avoid an unbounded conversion inside its transport.
 
@@ -126,12 +127,26 @@ reset an unchanged input's automatic allowance.
   Browser attention only changes priority; no browser is needed to discover work.
   Open comparisons defer new requests. The shared lifecycle owns the 30-second
   settling window, two-attempt limit, upcoming-comparison priority and fairness.
-- Unsupported capability and failed preparation retain a compact terminal
-  reason in the existing input/accounting JSON. Repeated discovery and restart
-  do not repeat downloads. A changed connection/model capability can remove a
-  non-paid admission limitation, but does not reset attempt or photo budgets.
-  Oversized scopes are rejected cheaply before preparation. No repair queue or
-  automatic retry timer is created for terminal outcomes.
+- Unsupported capability and oversized scopes are rejected cheaply before
+  preparation; their status is derived without a per-stack database record.
+- Unusable previews (including HTTP 403/404, excessive bytes or unsupported
+  MIME) retain a compact terminal reason in the existing input JSON. Arbitrary
+  adapter errors also stop rather than being assumed transient. Repeated
+  discovery/restart do not download these inputs again. Changed configuration
+  can remove a non-paid limitation without resetting request/photo budgets.
+- Temporary preview failures (Immich network errors, HTTP 408/429/5xx and the
+  preparation deadline) pause **all Stack Referee preview preparation for three
+  minutes**, including already queued work. Normal discovery may then offer the
+  affected input once more. A second temporary preparation failure for the same
+  input settles it as incomplete and starts the same shared pause, protecting
+  other stacks. Manual curation remains available throughout.
+- The temporary-failure count lives in existing input JSON; one integer in
+  `curate_meta` preserves the shared pause across restart. No new table, timer,
+  repair queue or Retry control. Model/scope/role changes do not reset the two
+  temporary-failure limit for unchanged inputs. Preparation failures spend no
+  model attempt or per-photo charge; existing model retry limits stay separate.
+  Shutdown, role-off and stale-input cancellation do not record failures. Raw
+  upstream errors and connection details are not stored or exposed.
 - Accepted partitions and prepared-request provenance extend the existing
   versioned advice JSON. Save and attempt completion share one transaction.
   Raw responses, image bytes and credentials are not stored. Existing overlap

@@ -119,12 +119,27 @@ export class CurateAiInputs {
     return outcome?.configurationKey === configurationKey ? outcome.reason : null;
   }
 
-  // Compact terminal preparation/support result. No retry time or repair queue.
+  preparationFailures(snapshot) {
+    return this.store.prepare("SELECT json_extract(json,'$.preparationFailures') n FROM curate_ai_inputs WHERE role=? AND input_key=?")
+      .get(snapshot.role, snapshot.inputKey)?.n ?? 0;
+  }
+
+  // Download failures have their own bounded allowance; they are not paid model
+  // attempts. Keep it with the same input so restarts/toggles cannot reset it.
+  failPreparation(snapshot) {
+    this.record(snapshot);
+    return this.store.prepare(`UPDATE curate_ai_inputs
+      SET json=json_set(json,'$.preparationFailures',min(2,coalesce(json_extract(json,'$.preparationFailures'),0)+1))
+      WHERE role=? AND input_key=? RETURNING json_extract(json,'$.preparationFailures') n`)
+      .get(snapshot.role, snapshot.inputKey).n;
+  }
+
+  // Compact terminal preparation result. No repair queue.
   // Configuration changes may remove a non-paid admission limitation, but never
   // alter the separate exact-input attempt or per-photo accounting identities.
   settle(snapshot, configurationKey, reason) {
     if (!this.current(snapshot)) return false;
-    const json = JSON.stringify({ ...snapshot, outcome: { configurationKey, reason } });
+    const json = JSON.stringify({ ...snapshot, preparationFailures: this.preparationFailures(snapshot), outcome: { configurationKey, reason } });
     this.store.prepare(`INSERT INTO curate_ai_inputs VALUES(?,?,?,?)
       ON CONFLICT(role,input_key) DO UPDATE SET json=excluded.json`)
       .run(snapshot.role, snapshot.inputKey, json, this.now());

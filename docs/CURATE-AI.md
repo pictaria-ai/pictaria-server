@@ -381,9 +381,12 @@ request/advice applicability still needs integration before activation.
 
 PIC-370's [Stack Referee worker](CURATE-STACK-REFEREE.md) now connects group
 discovery, bounded preview preparation, the grouping-only request, saved
-partitions and rebuild publication. Unsupported/preparation outcomes settle in
-the existing input JSON; accepted advice includes compact provenance. No new
-database migration is needed. Supported-model capability resolution, real-photo
+partitions and rebuild publication. Terminal preparation outcomes settle in
+the existing input JSON; temporary preview failures get at most one retry,
+behind a shared three-minute pause that also gates queued work and survives
+restart. Unsupported model/size status is derived without per-stack records.
+Accepted advice includes compact provenance. No new database migration is
+needed. Supported-model capability resolution, real-photo
 acceptance and final UI status integration still precede activation.
 
 The server composes `CurateAiLifecycle` and the Stack Referee adapter with its

@@ -7,10 +7,11 @@ import { Repository } from '../../src/enrich/repository.mjs';
 import { CurateService } from '../../src/curate/service.mjs';
 import { CurateAiExecution } from '../../src/curate/ai-execution.mjs';
 import { CurateAiLifecycle, AI_SETTLE_MS } from '../../src/curate/ai-lifecycle.mjs';
-import { StackRefereeWorker } from '../../src/curate/stack-referee-worker.mjs';
+import { StackRefereeWorker, STACK_PREVIEW_PAUSE_MS } from '../../src/curate/stack-referee-worker.mjs';
 import { CURATE_AI_AVAILABILITY } from '../../src/curate/ai-policy.mjs';
 import { AiRequestScheduler } from '../../src/ai/scheduler.mjs';
-import { ImmichClient } from '../../src/immich.mjs';
+import { ImmichClient, ImmichApiError } from '../../src/immich.mjs';
+import { ResponseTooLargeError } from '../../src/fetchWithTimeout.mjs';
 import { stackRefereeImages } from '../../src/curate/stack-referee-images.mjs';
 
 const png = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=', 'base64');
@@ -117,23 +118,124 @@ test('one initial call plus one retry settles malformed partitions and never rep
   await f.restart(); f.advance(); await f.run(); assert.equal(f.calls.length, 2);
 }));
 
-test('failed preview preparation settles without spending a call, including across restart', async () => fixture(async f => {
-  f.download = () => { throw new Error('PRIVATE UPSTREAM DETAILS'); };
+for (const [label, failure] of [
+  ['missing preview', () => { throw new ImmichApiError('PRIVATE UPSTREAM DETAILS', 404); }],
+  ['forbidden preview', () => { throw new ImmichApiError('PRIVATE UPSTREAM DETAILS', 403); }],
+  ['oversized preview', () => { throw new ResponseTooLargeError('PRIVATE UPSTREAM DETAILS'); }],
+  ['unsupported MIME', () => ({ data: png, contentType: 'image/tiff' })],
+  ['adapter error', () => { throw new Error('PRIVATE UPSTREAM DETAILS'); }],
+]) test(`${label} settles without spending a call, including across restart`, async () => fixture(async f => {
+  f.download = failure;
   await f.run(); f.advance(); assert.equal((await f.run()).reason, 'preparation-failed');
-  for (let i = 0; i < 3; i++) { f.advance(); await f.run(); }
+  for (let i = 0; i < 3; i++) { f.advance(STACK_PREVIEW_PAUSE_MS); await f.run(); }
   await f.restart(); await f.run();
-  assert.equal(f.calls.length, 0); assert.equal(f.downloads.length, 1);
+  assert.equal(f.calls.length, 0); assert.equal(f.downloads.length, label === 'unsupported MIME' ? 4 : 1);
   assert.equal(f.repo.db.prepare('SELECT COUNT(*) n FROM curate_ai_attempts').get().n, 0);
   const row = f.repo.db.prepare('SELECT json FROM curate_ai_inputs').get().json;
   assert.doesNotMatch(row, /PRIVATE|http:/);
   assert.equal(JSON.parse(row).outcome.reason, 'preparation-failed');
 }));
 
-for (const supported of [false, true]) test(`${supported ? 'confirmed small' : 'unknown'} capability settles before image preparation`, async () => fixture(async f => {
+test('an Immich outage pauses queued stacks and discovery across restart, then the entire library recovers', async () => fixture(async f => {
+  for (let i = 0; i < 8; i++) { f.add(`b${i}`, i * 600); f.add(`c${i}`, i * 600 + 1); }
+  f.answer = partition(['p1', 'p2']);
+  const client = new ImmichClient({ baseUrl: 'http://synthetic', apiKey: 'PRIVATE IMMICH KEY', fetchImpl: async () => {
+    throw new TypeError('PRIVATE NETWORK DETAILS');
+  } });
+  f.download = (id, options) => client.getAssetThumbnail(id, 'preview', options);
+  await f.run(); assert.equal(f.curate.aiLifecycle.pending.size, 8);
+  f.advance(); assert.equal((await f.run()).reason, 'preparation-failed');
+  assert.equal(f.curate.aiLifecycle.pending.size, 7, 'already queued work exists');
+  for (let i = 0; i < 3; i++) { f.advance(); await f.run(); }
+  assert.equal(f.downloads.length, 1, 'queued work cannot drain during the pause');
+  assert.ok(f.curate.current.groups.every(g => f.curate.stackReferee.status(g).reason === 'preview-cooldown'));
+  assert.equal(f.repo.db.prepare('SELECT COUNT(*) n FROM curate_ai_attempts').get().n, 0);
+  const row = f.repo.db.prepare('SELECT json FROM curate_ai_inputs').get().json;
+  assert.equal(JSON.parse(row).preparationFailures, 1); assert.equal(JSON.parse(row).outcome, undefined);
+  assert.doesNotMatch(row, /PRIVATE|http:/);
+  await f.restart(); await f.run();
+  assert.equal(f.downloads.length, 1, 'restart preserves the original pause');
+  f.download = () => ({ data: png, contentType: 'image/png' });
+  f.advance(STACK_PREVIEW_PAUSE_MS);
+  for (let i = 0; i < 10; i++) { await f.run(); f.advance(); }
+  await f.curate.refresh();
+  assert.equal(f.calls.length, 8); assert.equal(f.downloads.length, 17);
+  assert.ok(f.curate.current.groups.every(g => g.stackCheck?.state === 'checked'));
+  await f.restart(); f.advance(STACK_PREVIEW_PAUSE_MS); await f.run();
+  assert.equal(f.calls.length, 8, 'successful checks do not repeat');
+}, { count: 0 }));
+
+for (const [label, error] of [
+  ['HTTP 408', new ImmichApiError('PRIVATE DETAILS', 408)],
+  ['HTTP 429', new ImmichApiError('PRIVATE DETAILS', 429)],
+  ['HTTP 503', new ImmichApiError('PRIVATE DETAILS', 503)],
+  ['preparation deadline', new DOMException('PRIVATE DETAILS', 'TimeoutError')],
+]) test(`${label} allows only one preparation retry, including restart and model changes`, async () => fixture(async f => {
+  f.download = () => { throw error; };
+  await f.run(); f.advance(); await f.run();
+  assert.equal(f.downloads.length, 1);
+  await f.restart(); await f.run(); assert.equal(f.downloads.length, 1);
+  f.advance(STACK_PREVIEW_PAUSE_MS); await f.run(); f.advance(); await f.run();
+  assert.equal(f.downloads.length, 2);
+  assert.equal(f.curate.stackReferee.status(f.curate.current.groups[0]).reason, 'preparation-failed');
+  f.config.curateStackRefereeEnabled = false; await f.run(); f.config.curateStackRefereeEnabled = true;
+  f.provider.modelName = 'another-model'; f.cap.model = 'another-model';
+  await f.restart();
+  for (let i = 0; i < 3; i++) { f.advance(STACK_PREVIEW_PAUSE_MS); await f.run(); }
+  assert.equal(f.downloads.length, 2); assert.equal(f.calls.length, 0);
+  assert.equal(f.repo.db.prepare('SELECT COUNT(*) n FROM curate_ai_attempts').get().n, 0);
+  assert.equal(JSON.parse(f.repo.db.prepare('SELECT json FROM curate_ai_inputs').get().json).preparationFailures, 2);
+}));
+
+test('a second failed preparation also pauses other queued stacks, without settling them', async () => fixture(async f => {
+  f.download = () => { throw new ImmichApiError('PRIVATE DETAILS', 503); };
+  await f.run(); f.advance(); await f.run();
+  f.advance(STACK_PREVIEW_PAUSE_MS); await f.run();
+  f.add('b0', 600); f.add('b1', 601); await f.run();
+  f.advance(); await f.run();
+  assert.equal(f.downloads.length, 2);
+  f.advance(); await f.run();
+  assert.equal(f.downloads.length, 2);
+  const group = f.curate.current.byMember.get('b0');
+  assert.equal(f.curate.stackReferee.status(group).reason, 'preview-cooldown');
+  assert.equal(f.repo.db.prepare('SELECT COUNT(*) n FROM curate_ai_inputs').get().n, 1);
+  f.download = () => ({ data: png, contentType: 'image/png' }); f.answer = partition(['p1', 'p2']);
+  f.advance(STACK_PREVIEW_PAUSE_MS); await f.run();
+  assert.equal(f.calls.length, 1, 'unaffected queued stack can recover');
+}));
+
+for (const change of ['role-off', 'connection']) test(`${change} during a failed download records neither a failure nor a pause`, async () => fixture(async f => {
+  f.download = () => {
+    if (change === 'role-off') f.config.curateStackRefereeEnabled = false;
+    else f.immich.baseUrl = 'http://changed';
+    throw new ImmichApiError('PRIVATE DETAILS');
+  };
+  await f.run(); f.advance(); assert.equal((await f.run()).state, change === 'role-off' ? 'disabled' : 'stale');
+  assert.equal(f.repo.db.prepare('SELECT COUNT(*) n FROM curate_ai_inputs').get().n, 0);
+  assert.equal(f.curate.stackReferee.previewsReady(), true);
+}));
+
+test('shutdown aborting an in-flight Immich download records neither a failure nor a pause', async () => fixture(async f => {
+  const started = deferred();
+  const client = new ImmichClient({ baseUrl: 'http://synthetic', apiKey: 'PRIVATE IMMICH KEY', fetchImpl: async (_url, { signal }) => {
+    started.resolve();
+    return new Promise((_resolve, reject) => signal.addEventListener('abort', () => reject(signal.reason), { once: true }));
+  } });
+  f.download = (id, options) => client.getAssetThumbnail(id, 'preview', options);
+  await f.run(); f.advance(); const running = f.run();
+  await started.promise; await f.curate.close();
+  assert.equal((await running).state, 'stopped');
+  assert.equal(f.repo.db.prepare('SELECT COUNT(*) n FROM curate_ai_inputs').get().n, 0);
+  assert.equal(f.curate.stackReferee.previewsReady(), true);
+  assert.equal(f.calls.length, 0);
+}));
+
+for (const supported of [false, true]) test(`${supported ? 'confirmed small' : 'unknown'} capability is derived without records or preparation`, async () => fixture(async f => {
   if (supported) f.cap.maxImages = 2;
   await f.run(); f.advance(); await f.run();
   assert.equal(f.curate.stackReferee.status(f.curate.current.groups[0]).reason, supported ? 'unsupported-size' : 'unknown-capability');
   await f.restart(); await f.run(); assert.equal(f.downloads.length, 0); assert.equal(f.calls.length, 0);
+  assert.equal(f.repo.db.prepare('SELECT COUNT(*) n FROM curate_ai_inputs').get().n, 0);
   f.cap = { provider: f.provider.providerName, model: f.provider.modelName, comparative: true, maxImages: 30 };
   await f.run(); f.advance(); assert.equal((await f.run()).state, 'succeeded', 'new supported configuration can remove a non-paid limitation');
 }, { capability: supported }));
@@ -208,6 +310,7 @@ test('provider changes while queued are checked before downloads and do not crea
   await f.run(); f.provider.modelName = 'changed'; f.advance(); await f.run();
   assert.equal(f.downloads.length, 0); assert.equal(f.calls.length, 0);
   assert.equal(f.curate.aiLifecycle.pending.size, 0);
+  assert.equal(f.repo.db.prepare('SELECT COUNT(*) n FROM curate_ai_inputs').get().n, 0);
 }));
 
 test('production availability still prevents discovery and calls', async () => fixture(async f => {
