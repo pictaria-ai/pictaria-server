@@ -64,6 +64,8 @@ async function fixture(work, { count = 4, capability = true, availability = { st
 test('background worker checks without browser demand or Enrich, publishes non-contiguous splits, and reuses them after restart', async () => fixture(async f => {
   await f.run(); assert.equal(f.curate.aiLifecycle.pending.size, 1);
   f.advance(); assert.equal((await f.run()).state, 'succeeded');
+  assert.equal(f.curate.stackReferee.status(f.curate.current.groups[0]).state, 'updated',
+    'an accepted check awaiting publication is not an incomplete check');
   await f.curate.refresh();
   assert.deepEqual(f.curate.current.groups.map(g => g.ids), [['a0', 'a2'], ['a1', 'a3']]);
   assert.ok(f.curate.current.groups.every(g => g.stackCheck.state === 'checked'));
@@ -439,6 +441,32 @@ test('disabled referee without saved advice stays off during unrelated or local 
   f.repo.upsertAsset({ id: 'a0', checksum: 'changed' });
   assert.equal(f.curate.stackReferee.status(group).state, 'off');
 }, { availability: CURATE_AI_AVAILABILITY }));
+
+for (const change of ['import', 'decision'])
+  test(`queued checks remain neutral during a pending ${change}, then return to waiting`, async () => fixture(async f => {
+    f.add('b0', 600); f.add('b1', 601);
+    await f.run();
+    const groups = f.curate.current.groups;
+    assert.equal(groups.length, 2);
+    assert.ok(groups.every(g => f.curate.stackReferee.status(g).state === 'waiting'));
+    const pending = [...f.curate.aiLifecycle.pending.keys()];
+    if (change === 'import') f.add('unrelated', 5 * 86400);
+    else f.repo.recordDecision({ assetIds: ['a0'], addTags: ['frame/eligible'], removeTags: [], action: 'approve' });
+    assert.ok(groups.every(g => f.curate.stackReferee.status(g).state === 'updated'));
+    assert.deepEqual([...f.curate.aiLifecycle.pending.keys()], pending, 'status reads do not settle or requeue work');
+    await f.curate.refresh();
+    assert.ok(f.curate.current.groups.filter(g => g.ids.length > 1)
+      .every(g => f.curate.stackReferee.status(g).state === 'waiting'));
+    assert.equal(f.calls.length, 0); assert.equal(f.downloads.length, 0);
+  }));
+
+test('a real capture limit stays incomplete rather than becoming a neutral update', async () => fixture(async f => {
+  await f.curate.refresh();
+  assert.equal(f.curate.current.groups[0].ids.length, 31);
+  assert.deepEqual(f.curate.stackReferee.status(f.curate.current.groups[0]),
+    { state: 'incomplete', reason: 'too-many-images' });
+  assert.equal(f.calls.length, 0); assert.equal(f.downloads.length, 0);
+}, { count: 31 }));
 
 for (const change of ['image', 'availability', 'separation', 'nearby'])
   test(`${change} changes withhold a saved badge before the next rebuild, including split siblings`, async () => fixture(async f => {

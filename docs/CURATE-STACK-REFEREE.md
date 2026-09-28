@@ -197,6 +197,8 @@ reset an unchanged input's automatic allowance.
   availability or separations withhold the badge; replaced memberships cannot
   inherit a new result. Switching the role off retains valid completed checks;
   unchecked groups stay off without changing their explanation during imports.
+  Queued or just-accepted checks awaiting a rebuild use the neutral updated state,
+  not a failure message. Actual input limits still report an incomplete check.
   Decided photos carry no pending-referee status.
 - **Why?** retains the deterministic explanation and adds the applicable model
   reason as plain text. A current checked grouping no longer says that no AI

@@ -12,6 +12,7 @@ All notable changes to Pictaria Server are documented here. This project follows
   AI badge, without changing open photos or draft choices. Badge validity is
   scoped to the saved check: unrelated imports and decisions do not hide it
   during Save & next, and turning the role off retains valid completed checks.
+  Queued or just-accepted checks awaiting a rebuild do not show failure messages.
   The server resolves the previously evaluated Venice model at a ten-image ceiling;
   unverified models/endpoints remain unavailable. Both referee availability
   flags stay off pending real-provider and visual acceptance. See

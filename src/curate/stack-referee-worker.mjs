@@ -67,6 +67,7 @@ export class StackRefereeWorker {
     const selection = this.selection(group);
     if (!selection.selected) return { state: 'skipped', reason: selection.reason };
     const captured = this.capture(group);
+    if (captured.state === 'stale') return { state: 'updated' };
     if (captured.state !== 'captured') return { state: 'incomplete', reason: captured.reason ?? captured.state };
     const { snapshot } = captured;
     try {
