@@ -227,12 +227,10 @@ export class ImmichClient {
   // ceiling) can pass maxBytes: past it the download aborts with a
   // ResponseTooLargeError instead of buffering. Without it the default
   // response ceiling applies.
-  // An optional signal lets a caller abandon the download (the optional
-  // embedding step bounds each preview fetch to its photo's run window).
   async getAssetThumbnail(assetId, size = 'preview', { maxBytes, signal } = {}) {
     return this.requestBytes(
       `/assets/${encodeURIComponent(assetId)}/thumbnail?size=${encodeURIComponent(size)}`,
-      { ...(maxBytes === undefined ? {} : { maxBytes }), signal },
+      { ...(maxBytes === undefined ? {} : { maxBytes }), ...(signal ? { signal } : {}) },
     );
   }
 

@@ -59,12 +59,14 @@ export class CurateAiLifecycle {
   }
 
   runnable(job) {
+    if (job.plan.canStart && job.plan.canStart() !== true) return false;
     if (this.curate.refinement?.isFocused(job.snapshot.ids)) return false;
     const group = this.curate.current?.byId.get(job.snapshot.groupId);
     const status = group && this.curate.refinement?.groupStatus(group);
     const settled = !status || !['waiting', 'checking', 'updated'].includes(status.state);
     if (job.snapshot.role === 'stack') return selectStackReferee(this.curate.config, {
       memberCount: group?.ids.length, pending: Boolean(group), deterministicSettled: settled, route: group?.route,
+      currentCheck: group?.stackCheck?.state === 'checked',
     }, this.availability).selected;
     return settled;
   }
@@ -93,7 +95,7 @@ export class CurateAiLifecycle {
         role: snapshot.role, inputKey: snapshot.inputKey,
         photoIds: [...snapshot.actionable, ...snapshot.contextIds], contextPhotoIds: snapshot.contextIds,
         resolveProvider: this.resolveProvider, priority: plan.priority === true,
-        isCurrent: () => !job.superseded && this.inputs.current(snapshot),
+        isCurrent: () => !job.superseded && this.inputs.current(snapshot) && (!plan.isCurrent || plan.isCurrent() === true),
         canStart: () => this.runnable(job),
         recordInput: () => this.inputs.record(snapshot),
         prepare: (checkpoint, provider) => plan.prepare(checkpoint, { snapshot: structuredClone(snapshot), provider }),
@@ -108,6 +110,15 @@ export class CurateAiLifecycle {
       if ((retry || waiting) && !job.superseded && this.pending.size < MAX_AI_PENDING && this.enabled(snapshot.role) && this.inputs.current(snapshot)) {
         job.readyAt = this.now() + (retry ? AI_SETTLE_MS : 1000);
         this.pending.set(snapshot.inputKey, job);
+      }
+      if (!this.pending.has(snapshot.inputKey) && this.inputs.current(snapshot)) {
+        // Terminal worker bookkeeping only; no dependent request is launched.
+        // Acceptance itself remains in the executor's transaction above.
+        const finished = plan.finish?.(result, structuredClone(snapshot));
+        if (finished && typeof finished.then === 'function') {
+          Promise.resolve(finished).catch(() => {});
+          throw new TypeError('Curate AI completion must be synchronous.');
+        }
       }
       return result;
     } catch {

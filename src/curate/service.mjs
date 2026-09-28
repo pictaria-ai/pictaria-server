@@ -1,6 +1,7 @@
 import { reviewConfig } from '../enrich/reviewBuckets.mjs';
 import { Worker } from 'node:worker_threads';
 import { groupPhotos } from './grouping.mjs';
+import { applyStackChecks } from './stack-referee-results.mjs';
 import { settledCandidateGroups, rememberSettledGroups } from './settled-groups.mjs';
 import { CurateRefinement } from './refinement.mjs';
 import { CurateError } from './contracts.mjs';
@@ -68,6 +69,7 @@ export class CurateService {
         ...(this.candidateEnabled ? settledCandidateGroups(this.store, { stacks, connection: this.refinement?.connection })
           : groupPhotos(this.store.pending(), { stacks, separations: this.store.separations() })),
       };
+      result = applyStackChecks(this.store, result, stacks);
     } else
       result = await new Promise((resolve, reject) => {
         const worker = new Worker(new URL('./worker.mjs', import.meta.url), {
@@ -88,7 +90,9 @@ export class CurateService {
         });
       });
     this.abort.signal.throwIfAborted();
-    if (this.refinement) result.retentionLimited = await rememberSettledGroups(this.store, this.refinement.saved, result, this.refinement.now());
+    if (this.refinement) result.retentionLimited = await rememberSettledGroups(this.store, this.refinement.saved,
+      { ...result, groups: result.groupsForRetention ?? result.groups }, this.refinement.now());
+    delete result.groupsForRetention;
     this.abort.signal.throwIfAborted();
     // No await between complete replacement and publication. A concurrent
     // source change remains queued in curate_dirty for the next rebuild.
@@ -203,6 +207,7 @@ export class CurateService {
         Boolean(this.repo.db.prepare('SELECT 1 FROM curate_dirty LIMIT 1').get()),
       groups: groups.map((g) => ({ id: g.id, memberCount: g.ids.length, route: g.route,
           similarity: view.section === 'decided' ? null : this.refinement?.groupStatus(g) ?? null,
+          stackReferee: view.section === 'decided' ? null : this.stackReferee?.status(g) ?? null,
           photos: this.store.covers(g.ids.slice(0, 3)) })),
       nextOffset: offset + limit < view.total ? offset + limit : null,
     };
@@ -237,6 +242,7 @@ export class CurateService {
       automaticKeeperEligible: group.ids.length >= 2,
       algorithm: view.method,
       similarity: this.refinement?.groupStatus(group) ?? null,
+      stackReferee: this.stackReferee?.status(group) ?? null,
       // Reasons use the applicable current calculation. Old view membership is
       // never replaced by a newer machine proposal when a comparison opens.
       reasons: this.current?.byId.get(groupId)?.reasons ?? ['Membership preserved from the opened Curate view.'],
@@ -334,10 +340,11 @@ export class CurateService {
     if (this.backgroundWork || this.closed) return;
     this.backgroundWork = (async () => {
       this.metadata.settingsChanged();
-      if (!this.refinement?.enabled() && !this.metadata.demanded() && !this.aiLifecycle?.pending.size && !this.aiLifecycle?.active) return;
+      if (!this.refinement?.enabled() && !this.metadata.demanded() && !this.stackReferee?.enabled() && !this.aiLifecycle?.pending.size && !this.aiLifecycle?.active) return;
       await this.refresh();
       this.metadata.wake();
       await this.refinement?.tick();
+      await this.stackReferee?.discover();
       this.aiLifecycle?.tick();
       if (Date.now() >= (this.nextAiMaintenance ?? 0)) {
         this.aiLifecycle?.maintain();
