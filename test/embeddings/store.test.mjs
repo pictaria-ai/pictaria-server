@@ -137,3 +137,33 @@ test('the schema rejects impossible vectors and survives a restart', () => {
     repo.close();
   } finally { rmSync(dir, { recursive: true, force: true }); }
 });
+
+test('currency is exact with bytes in hand and excludes deleted photos and corrupted rows', () => {
+  withRepo((repo) => {
+    const store = new EmbeddingStore(repo.db, { limits: { spacesPerModel: 8, lookupChunk: 500, coverageCacheMs: 0 } });
+    const space = store.resolveSpace({ backend, model, calibrationVersion, calibration: wave(64) });
+    addAsset(repo, 'a1'); addAsset(repo, 'a2');
+    store.save({ assetId: 'a1', spaceId: space.id, source: store.sourceOf('a1'), imageSha256: 'a'.repeat(64), vector: wave(64, 1) });
+    store.save({ assetId: 'a2', spaceId: space.id, source: store.sourceOf('a2'), imageSha256: 'b'.repeat(64), vector: wave(64, 2) });
+    assert.equal(store.isCurrent('a1', space.id, { imageSha256: 'a'.repeat(64) }), true);
+    assert.equal(store.isCurrent('a1', space.id, { imageSha256: 'c'.repeat(64) }), false, 'different bytes are not current');
+    assert.throws(() => store.save({ assetId: 'a1', spaceId: space.id, source: {}, imageSha256: 'not-a-hash', vector: wave(64) }));
+
+    // Adoption only applies to identical bytes.
+    addAsset(repo, 'a1', { thumbhash: 'edited' });
+    assert.equal(store.adopt({ assetId: 'a1', spaceId: space.id, source: store.sourceOf('a1'), imageSha256: 'c'.repeat(64) }), false);
+    assert.equal(store.isCurrent('a1', space.id), false);
+    assert.equal(store.adopt({ assetId: 'a1', spaceId: space.id, source: store.sourceOf('a1'), imageSha256: 'a'.repeat(64) }), true);
+    assert.equal(store.isCurrent('a1', space.id), true);
+
+    // A photo Immich no longer has is never current.
+    repo.markAssetsMissing(['a2']);
+    assert.equal(store.isCurrent('a2', space.id), false);
+    assert.deepEqual([...store.vectors(space.id, ['a1', 'a2']).keys()], ['a1']);
+    assert.equal(store.coverage({ backend, model }).current, 1);
+
+    // A row whose bytes no longer match its space is excluded on read.
+    repo.db.prepare('UPDATE asset_embeddings SET vector=? WHERE asset_id=?').run(Buffer.alloc(32), 'a1');
+    assert.equal(store.vectors(space.id, ['a1']).size, 0);
+  });
+});

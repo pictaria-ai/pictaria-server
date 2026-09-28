@@ -26,6 +26,11 @@ export function normalizeEmbeddingModel(value) {
   return name || DEFAULT_EMBEDDING_MODEL;
 }
 
+// Known output sizes guard against a misrouted or misbehaving service.
+export function expectedDimensions(model) {
+  return SUGGESTED_EMBEDDING_MODELS.find((entry) => entry.name === model)?.dims ?? null;
+}
+
 export function validEmbeddingModel(value) {
   return typeof value === 'string' && MODEL_NAME.test(value);
 }

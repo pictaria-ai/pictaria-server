@@ -2,6 +2,7 @@ import { randomBytes } from 'node:crypto';
 import { appendHttpUrlPath, normalizeHttpUrl } from '../config.mjs';
 import { structuredUpstreamDiagnostic } from '../diagnostics.mjs';
 import { readBodyBounded } from '../fetchWithTimeout.mjs';
+import { expectedDimensions } from './models.mjs';
 
 // Client for Immich's internal machine-learning service (port 3003). It is not
 // part of Immich's public API: the request shape below matches Immich's own
@@ -55,7 +56,13 @@ export class ImmichMlClient {
       method: 'POST', body: form.body, headers: { 'Content-Type': form.contentType },
       accept: 'application/json', signal, timeoutMs,
     });
-    return parseVisualEmbedding(text);
+    const vector = parseVisualEmbedding(text);
+    const expected = expectedDimensions(model);
+    if (expected && vector.length !== expected) {
+      throw new EmbeddingServiceError(
+        `The machine-learning service returned ${vector.length} values; ${model} produces ${expected}.`, 'ml_invalid_response');
+    }
+    return vector;
   }
 
   async #request(path, { method, body = undefined, headers = {}, accept, signal, timeoutMs }) {

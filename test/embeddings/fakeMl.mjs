@@ -6,9 +6,11 @@ import { createHash } from 'node:crypto';
 // response of {"clip": "<JSON array string>", imageHeight, imageWidth}. Vectors
 // are a deterministic function of the image bytes, the model and `variant`, so
 // a changed variant stands in for a preprocessing change in a new release.
-export async function startFakeMl({ dims = 512, models = null } = {}) {
+const MODEL_DIMS = { 'ViT-B-32__openai': 512, 'ViT-B-16-SigLIP__webli': 768 };
+
+export async function startFakeMl({ dims = null, models = null } = {}) {
   const state = {
-    dims, variant: 0, noise: 0, delayMs: 0, status: null, pong: 'pong', raw: null,
+    dims, variant: 0, noise: 0, delayMs: 0, slowAfter: 0, slowMs: 0, status: null, pong: 'pong', raw: null,
     models: models ?? new Set(['ViT-B-32__openai', 'ViT-B-16-SigLIP__webli']),
     requests: [],
   };
@@ -29,6 +31,8 @@ export async function startFakeMl({ dims = 512, models = null } = {}) {
     const entries = JSON.parse(parts.entries?.data.toString('utf8') ?? 'null');
     const image = parts.image;
     const model = entries?.clip?.visual?.modelName;
+    // Predictions after the first `slowAfter` wait `slowMs` (e.g. calibration fast, photos slow).
+    if (state.slowMs && state.requests.length >= state.slowAfter) await new Promise((resolve) => setTimeout(resolve, state.slowMs));
     state.requests.push({ model, entries, bytes: image?.data.length ?? 0, contentType: image?.contentType ?? null,
       filename: image?.filename ?? null, sha256: image ? createHash('sha256').update(image.data).digest('hex') : null });
     if (state.status) {
@@ -44,7 +48,7 @@ export async function startFakeMl({ dims = 512, models = null } = {}) {
       response.writeHead(200, { 'content-type': 'application/json' }).end(state.raw);
       return;
     }
-    const vector = vectorFor(image.data, model, state.variant, state.dims).map((x, i) => x + state.noise * Math.sin(i * 13));
+    const vector = vectorFor(image.data, model, state.variant, state.dims ?? MODEL_DIMS[model] ?? 512).map((x, i) => x + state.noise * Math.sin(i * 13));
     response.writeHead(200, { 'content-type': 'application/json' })
       .end(JSON.stringify({ clip: JSON.stringify(vector), imageHeight: 256, imageWidth: 384 }));
   });

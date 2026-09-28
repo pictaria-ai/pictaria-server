@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { mkdtempSync, rmSync } from 'node:fs';
+import { createServer } from 'node:http';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -81,7 +82,7 @@ test('Enrich embeds the preview it already downloaded, alongside the vision call
     assert.equal(vectorCount(repo), 2);
     assert.deepEqual(repo.db.prepare('SELECT source_checksum, source_thumbhash FROM asset_embeddings ORDER BY asset_id').all()
       .map((row) => ({ ...row })), [{ source_checksum: 's1', source_thumbhash: 'h1' }, { source_checksum: 's2', source_thumbhash: 'h2' }]);
-    assert.match(log.join('\n'), /image embeddings: 2 new, 0 already current, 0 skipped, 0 failed/);
+    assert.match(log.join('\n'), /image embeddings: 2 new, 0 already current, 0 skipped, 0 too slow, 0 failed · \d+ ms per photo · waited \d+ ms on average/);
     // Timing records only the photo's enrichment; the embedding wait is outside it.
     assert.equal(repo.db.prepare('SELECT COUNT(*) AS n FROM enrich_photo_executions').get().n, 2);
   });
@@ -109,7 +110,7 @@ test('an unavailable machine-learning service never affects enrichment', async (
     assert.equal(counters.failed, 0);
     assert.equal(vectorCount(repo), 0);
     assert.match(log.join('\n'), /image embeddings paused for this run/);
-    assert.match(log.at(-1), /0 new, 0 already current, 2 skipped, 0 failed/);
+    assert.match(log.at(-1), /0 new, 0 already current, 2 skipped, 0 too slow, 0 failed/);
   }, { url: 'http://127.0.0.1:9' });
 });
 
@@ -146,4 +147,40 @@ test('the job runner opens one session per run and closes it before recording hi
   assert.match(log, /image embeddings: on \(test-model\)/);
   assert.match(log, /image embeddings: 0 new/);
   assert.equal(runner.status().liveCounters.failed, 1, 'embedding log lines are not counted as photo outcomes');
+});
+
+test('cancelling a run mid-photo aborts its embedding and nothing is written afterwards', { timeout: 15000 }, async (t) => {
+  const rejections = [];
+  const record = (reason) => rejections.push(reason);
+  process.on('unhandledRejection', record);
+  t.after(() => process.removeListener('unhandledRejection', record));
+  let visionStarted;
+  const started = new Promise((resolve) => { visionStarted = resolve; });
+  const lmStudio = createServer((request) => { request.resume(); request.once('end', visionStarted); });
+  await new Promise((resolve) => lmStudio.listen(0, '127.0.0.1', resolve));
+  t.after(async () => { lmStudio.closeAllConnections(); await new Promise((resolve) => lmStudio.close(resolve)); });
+  await withEnvironment(async ({ repo, ml, service }) => {
+    const config = {
+      promptsDir: fileURLToPath(new URL('../../prompts', import.meta.url)), promptVersion: 'v1',
+      promptOverrides: { systemPrompt: '', userTemplate: '' }, defaultProvider: 'local_lmstudio', imageSource: 'preview',
+      maxFailuresPerAsset: 2,
+      providers: { local_lmstudio: { modelName: 'test-model', baseUrl: `http://127.0.0.1:${lmStudio.address().port}/v1`, apiKey: 'lm-studio', timeoutMs: 60000 } },
+    };
+    const runner = new EnrichJobRunner({
+      repo, config, embeddings: service, taxonomy: loadTaxonomy(fileURLToPath(new URL('../../taxonomy/v1.json', import.meta.url))),
+      immich: { getAsset: async (id) => ({ id, checksum: 'sum', thumbhash: 'hash' }),
+        getAssetThumbnail: async (id) => ({ data: Buffer.from(`preview-${id}`), contentType: 'image/jpeg' }) },
+    });
+    // The calibration answers promptly; the photo's embedding stalls.
+    Object.assign(ml.state, { slowAfter: 1, slowMs: 1500 });
+    runner.start({ assetIds: ['a1'], sendToCurate: false });
+    await started;
+    assert.equal(runner.cancel(), true);
+    for (let i = 0; i < 300 && runner.isRunning(); i++) await new Promise((resolve) => setTimeout(resolve, 10));
+    assert.equal(runner.isRunning(), false);
+    await new Promise((resolve) => setTimeout(resolve, 1800)); // longer than the stalled ML answer
+    assert.equal(vectorCount(repo), 0);
+    assert.deepEqual(rejections, []);
+    assert.match(runner.status().log.join('\n'), /image embeddings: 0 new/);
+  });
 });

@@ -36,26 +36,90 @@ async function timed(work) {
   return { value, ms: Math.round(performance.now() - started) };
 }
 
-// Bilinear sample of the calibration pixels into a new width × height image,
-// reading the source rectangle [x0, x0 + sw) × [y0, y0 + sh).
-function resample(width, height, { x0 = 0, y0 = 0, sw = CALIBRATION_SIZE.width, sh = CALIBRATION_SIZE.height } = {}) {
-  const src = calibrationPixels(), { width: W, height: H } = CALIBRATION_SIZE;
-  const out = Buffer.alloc(width * height * 3);
-  for (let y = 0; y < height; y++) {
-    for (let x = 0; x < width; x++) {
-      const fx = Math.min(W - 1, Math.max(0, x0 + ((x + 0.5) * sw) / width - 0.5));
-      const fy = Math.min(H - 1, Math.max(0, y0 + ((y + 0.5) * sh) / height - 0.5));
-      const ix = Math.floor(fx), iy = Math.floor(fy), dx = fx - ix, dy = fy - iy;
+// Pillow-style separable resampling (8-bit rounding after each pass) so the
+// probe can reproduce what the service does and alter one step at a time.
+const FILTERS = {
+  bilinear: { support: 1, weight: (x) => (x = Math.abs(x)) < 1 ? 1 - x : 0 },
+  bicubic: { support: 2, weight: (x) => {
+    const a = -0.5;
+    x = Math.abs(x);
+    return x < 1 ? ((a + 2) * x - (a + 3)) * x * x + 1 : x < 2 ? (((x - 5) * x + 8) * x - 4) * a : 0;
+  } },
+};
+
+function pass(src, width, height, size, horizontal, filterName) {
+  const inSize = horizontal ? width : height;
+  const out = Buffer.alloc((horizontal ? size * height : width * size) * 3);
+  const scale = inSize / size, filterScale = Math.max(scale, 1);
+  for (let o = 0; o < size; o++) {
+    let weights = [], first = 0;
+    if (filterName === 'nearest') {
+      first = Math.min(inSize - 1, Math.floor((o + 0.5) * scale));
+      weights = [1];
+    } else {
+      const { support, weight } = FILTERS[filterName];
+      const center = (o + 0.5) * scale, reach = support * filterScale;
+      first = Math.max(Math.trunc(center - reach + 0.5), 0);
+      const last = Math.min(Math.trunc(center + reach + 0.5), inSize);
+      for (let i = first; i < last; i++) weights.push(weight((i - center + 0.5) / filterScale));
+      const total = weights.reduce((sum, w) => sum + w, 0);
+      weights = weights.map((w) => w / total);
+    }
+    const lines = horizontal ? height : width;
+    for (let line = 0; line < lines; line++) {
       for (let c = 0; c < 3; c++) {
-        const at = (px, py) => src[(Math.min(H - 1, py) * W + Math.min(W - 1, px)) * 3 + c];
-        const value = at(ix, iy) * (1 - dx) * (1 - dy) + at(ix + 1, iy) * dx * (1 - dy)
-          + at(ix, iy + 1) * (1 - dx) * dy + at(ix + 1, iy + 1) * dx * dy;
-        out[(y * width + x) * 3 + c] = Math.round(value);
+        let value = 0;
+        for (let k = 0; k < weights.length; k++) {
+          const i = first + k;
+          value += weights[k] * src[((horizontal ? line * width + i : i * width + line) * 3) + c];
+        }
+        out[((horizontal ? line * size + o : o * width + line) * 3) + c] = Math.max(0, Math.min(255, Math.round(value)));
       }
     }
   }
-  return { data: encodePng(width, height, out), contentType: 'image/png' };
+  return out;
 }
+
+function resize(rgb, width, height, outWidth, outHeight, filterName) {
+  const wide = pass(rgb, width, height, outWidth, true, filterName);
+  return pass(wide, outWidth, height, outHeight, false, filterName);
+}
+
+function crop(rgb, width, x0, y0, cropWidth, cropHeight) {
+  const out = Buffer.alloc(cropWidth * cropHeight * 3);
+  for (let y = 0; y < cropHeight; y++) rgb.copy(out, y * cropWidth * 3, ((y0 + y) * width + x0) * 3, ((y0 + y) * width + x0 + cropWidth) * 3);
+  return out;
+}
+
+const png = (rgb, width, height) => ({ data: encodePng(width, height, rgb), contentType: 'image/png' });
+
+// Immich 2.7.5–3.2.2 CLIP preprocessing: shortest side to the model size
+// (224 for the suggested base models) with bicubic resampling, then a centre
+// crop. Sending an image already at 224 × 224 skips both on the service side.
+function preprocessed({ filter = 'bicubic', mode = 'shortest', size = 224, transform = null } = {}) {
+  const { width: W, height: H } = CALIBRATION_SIZE;
+  let rgb;
+  if (mode === 'squash') rgb = resize(calibrationPixels(), W, H, size, size, filter);
+  else {
+    const scaledWidth = Math.trunc((W / H) * size);
+    const scaled = resize(calibrationPixels(), W, H, scaledWidth, size, filter);
+    rgb = crop(scaled, scaledWidth, Math.trunc(scaledWidth / 2 - size / 2), 0, size, size);
+  }
+  if (transform) rgb = transform(Buffer.from(rgb));
+  return png(rgb, size, size);
+}
+
+const swapChannels = (rgb) => { for (let i = 0; i < rgb.length; i += 3) [rgb[i], rgb[i + 2]] = [rgb[i + 2], rgb[i]]; return rgb; };
+// A CLIP-mean/std model normalised with SigLIP's 0.5/0.5 instead: send pixels
+// that the service's correct normalisation maps to the wrong values.
+const CLIP_MEAN = [0.48145466, 0.4578275, 0.40821073], CLIP_STD = [0.26862954, 0.26130258, 0.27577711];
+const renormalise = (rgb) => {
+  for (let i = 0; i < rgb.length; i++) {
+    const c = i % 3, p = rgb[i] / 255;
+    rgb[i] = Math.max(0, Math.min(255, Math.round(255 * (CLIP_MEAN[c] + (CLIP_STD[c] * (p - 0.5)) / 0.5))));
+  }
+  return rgb;
+};
 
 async function expectFailure(label, work) {
   try {
@@ -80,19 +144,28 @@ report.calibrationMs = calibration.map(({ ms }) => ms);
 report.repeatCosine = calibration.slice(1).map(({ value }) => cosineSimilarity(reference, value));
 report.repeatExact = calibration.slice(1).every(({ value }) => value.every((x, i) => x === reference[i]));
 
-// What the service does itself (shortest-side resize, centre crop) versus a
-// release that squashes the whole frame instead.
-const cropped = await client.embedImage(resample(256, 256, { x0: 64, sw: 256 }), { model });
-const squashed = await client.embedImage(resample(256, 256), { model });
-const larger = await client.embedImage(resample(768, 512), { model });
-report.preprocessing = {
-  centreCropCosine: cosineSimilarity(reference, cropped),
-  squashCosine: cosineSimilarity(reference, squashed),
-  upscaledCosine: cosineSimilarity(reference, larger),
-  squashDetected: cosineSimilarity(reference, squashed) < CALIBRATION_MATCH,
+// Each variant changes exactly one preprocessing step. The first reproduces
+// the service's own pipeline and should match the reference almost exactly.
+const variants = {
+  emulatedService: preprocessed(),
+  bilinearResampling: preprocessed({ filter: 'bilinear' }),
+  nearestResampling: preprocessed({ filter: 'nearest' }),
+  squashInsteadOfCrop: preprocessed({ mode: 'squash' }),
+  swappedRedBlue: preprocessed({ transform: swapChannels }),
+  siglipNormalisation: preprocessed({ transform: renormalise }),
 };
+// `cosine` compares with the service's own result for the calibration image;
+// `vsEmulated` isolates the one changed step even if the emulation is imperfect.
+report.preprocessing = {};
+const vectors = {};
+for (const [name, image] of Object.entries(variants)) vectors[name] = await client.embedImage(image, { model });
+for (const [name, vector] of Object.entries(vectors)) {
+  const similarity = cosineSimilarity(reference, vector);
+  report.preprocessing[name] = { cosine: similarity, vsEmulated: cosineSimilarity(vectors.emulatedService, vector),
+    separateSpace: similarity < CALIBRATION_MATCH };
+}
 
-const photoSized = resample(1440, 960);
+const photoSized = png(resize(calibrationPixels(), CALIBRATION_SIZE.width, CALIBRATION_SIZE.height, 1440, 960, 'bicubic'), 1440, 960);
 report.photoSizedMs = [];
 for (let i = 0; i < repeats; i++) report.photoSizedMs.push((await timed(() => client.embedImage(photoSized, { model }))).ms);
 

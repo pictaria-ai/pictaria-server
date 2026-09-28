@@ -1434,7 +1434,8 @@
       if (coverage.otherVectors) parts.push(`${coverage.otherVectors.toLocaleString()} from other models or service versions are kept but not used.`);
       if (status.lastRun) {
         const run = status.lastRun;
-        parts.push(`Last run: ${run.embedded} new, ${run.current} already current, ${run.busy + run.waiting + run.paused} skipped, ${run.failed} failed.`);
+        parts.push(`Last run: ${run.embedded} new, ${run.current} already current, ${run.busy + run.waiting + run.paused} skipped, ${run.late ?? 0} too slow, ${run.failed} failed.`);
+        if (run.reason) parts.push(`It stopped early — ${run.reason}.`);
       }
       el('embeddingsCoverage').textContent = parts.join(' ');
     }

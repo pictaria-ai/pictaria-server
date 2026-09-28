@@ -227,18 +227,20 @@ export class ImmichClient {
   // ceiling) can pass maxBytes: past it the download aborts with a
   // ResponseTooLargeError instead of buffering. Without it the default
   // response ceiling applies.
-  async getAssetThumbnail(assetId, size = 'preview', { maxBytes } = {}) {
+  // An optional signal lets a caller abandon the download (the optional
+  // embedding step bounds each preview fetch to its photo's run window).
+  async getAssetThumbnail(assetId, size = 'preview', { maxBytes, signal } = {}) {
     return this.requestBytes(
       `/assets/${encodeURIComponent(assetId)}/thumbnail?size=${encodeURIComponent(size)}`,
-      maxBytes === undefined ? {} : { maxBytes },
+      { ...(maxBytes === undefined ? {} : { maxBytes }), signal },
     );
   }
 
   // Callers with a tighter budget than the original-class default (e.g. the
   // referee's per-image ceiling) pass their own maxBytes; past it the download
   // aborts with a ResponseTooLargeError instead of buffering.
-  async getAssetOriginal(assetId, { maxBytes = ORIGINAL_MAX_RESPONSE_BYTES } = {}) {
-    return this.requestBytes(`/assets/${encodeURIComponent(assetId)}/original`, { maxBytes });
+  async getAssetOriginal(assetId, { maxBytes = ORIGINAL_MAX_RESPONSE_BYTES, signal } = {}) {
+    return this.requestBytes(`/assets/${encodeURIComponent(assetId)}/original`, { maxBytes, signal });
   }
 
   async listTags({ strict = false } = {}) {
@@ -290,12 +292,13 @@ export class ImmichClient {
     return text ? JSON.parse(text) : null;
   }
 
-  async requestBytes(path, { maxBytes = DEFAULT_MAX_RESPONSE_BYTES } = {}) {
+  async requestBytes(path, { maxBytes = DEFAULT_MAX_RESPONSE_BYTES, signal } = {}) {
     const { buffer, contentType } = await this.#request(path, {
       method: 'GET',
       body: null,
       accept: 'image/*, application/octet-stream',
       maxBytes,
+      signal,
     });
     return {
       data: buffer,

@@ -1147,16 +1147,24 @@ public API; see [Immich compatibility](IMMICH-COMPATIBILITY.md#machine-learning-
   itself uses for smart search. When the run already downloaded the preview,
   the same bytes are reused; with `thumbnail` or `original` runs, Pictaria
   fetches the preview separately so one set of embeddings never mixes sizes.
-- The request runs beside the vision-model call, one at a time. Pictaria waits
-  at most five seconds after the photo's enrichment for the vector. If the
-  service is still busy, the next photo is simply left without one.
+- The request runs beside the vision-model call, one at a time, and only for
+  a photo the run is analyzing; Curate and the AI referee never send one.
+  Pictaria waits at most five seconds after the photo's enrichment for the
+  vector. Anything still running then, including a separate preview download,
+  is aborted. No embedding work continues in the background or after a run is
+  cancelled or stops.
 - The photo's enrichment never depends on it. A slow, failing or unreachable
   service leaves photos enriched normally without embeddings. Three consecutive
-  service failures pause the step for the rest of the run. A photo the service
-  cannot read counts as one failure without pausing anything.
+  service failures, or three answers that arrive too late, pause the step for
+  the rest of the run. A photo the service cannot read counts as one failure
+  without pausing anything.
+- A database error while reading or saving embeddings is treated as a storage
+  problem rather than a machine-learning one. The step stops for the run and
+  says so in the run log and the server log, and Settings shows the reason.
 - A photo keeps its embedding even when its vision call fails.
 - The run log ends with a summary such as `image embeddings: 48 new, 2 already
-  current, 1 skipped, 0 failed · 180 ms per photo`. Photo timing and
+  current, 1 skipped, 0 too slow, 0 failed · 180 ms per photo · waited 40 ms
+  on average (at most 900 ms) after enrichment`. Photo timing and
   [performance comparisons](#performance-comparison-and-photo-details)
   exclude the embedding step.
 - The setting is read when a run starts, like the other processing controls.
@@ -1196,8 +1204,13 @@ model name alone is not enough:
   instead, and some models then squash the image rather than crop it.
 - NPU builds (RKNN, ARM NN) run quantized models.
 
-So each run starts by embedding a fixed synthetic calibration image and
-compares the result with the calibration stored for each earlier set:
+So each run starts by embedding a fixed synthetic calibration image. It is
+wider than tall, with distinct shapes at both edges, coloured regions, smooth
+gradients and a fine checkerboard, so crop, resampling, normalization and
+channel-order changes all move its vector. Pictaria compares the result with
+the calibration stored for each earlier set. `bin/ml-probe.mjs` measures, on a
+real service, how far each kind of change moves the vector compared with
+repeat noise:
 
 - Near-identical (cosine similarity ≥ 0.9995) continues the matching set.
 - Anything else starts a new *embedding space*, and the log says so.
@@ -1206,9 +1219,28 @@ compares the result with the calibration stored for each earlier set:
 - If a service produces eight different sets for one model, embedding pauses
   until its output is stable.
 
-A photo edited or rotated in Immich gets a new preview and thumbhash. Its stored
-vector is then treated as out of date and is replaced the next time the photo is
-embedded.
+**Which image, and when a vector is current.** Pictaria embeds Immich's
+unedited preview, the rendition it downloads without `edited=true`; Immich's
+own smart search also embeds a preview. Each vector records three things from
+the moment it was embedded:
+
+- the SHA-256 of the exact bytes;
+- the photo's original checksum;
+- its Immich thumbhash, which Immich itself uses as the thumbnail cache key.
+
+A vector counts as current only while the photo is still in Immich and both the
+checksum and thumbhash still match. Coverage counts and future consumers use
+only current vectors. Edits, rotations and regenerated previews with different
+content change the thumbhash, so their vectors read as out of date.
+
+Whenever Enrich downloads the preview again, the bytes are compared exactly:
+
+- identical bytes under new metadata keep the vector without another request;
+- changed bytes are embedded again.
+
+Changing only Immich's preview size or format keeps the thumbhash, so that
+case is caught the next time the preview is downloaded rather than
+immediately.
 
 **Storage and status.**
 

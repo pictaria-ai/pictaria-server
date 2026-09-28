@@ -5,8 +5,16 @@ import { cosineSimilarity, decodeVector, encodeVector } from './vectors.mjs';
 // Permanent Pictaria-owned image embeddings (schema 22). A space is one set of
 // mutually comparable vectors: backend, model, dimensions and the calibration
 // vector the service returned when the space was created. Vectors from
-// different spaces are never compared. Each vector records the source identity
-// of the rendition that was embedded, so an edited photo reads as stale.
+// different spaces are never compared.
+//
+// Source identity: the SHA-256 of the exact preview bytes embedded, plus the
+// photo's original checksum and Immich thumbhash when they were embedded. A
+// vector is current while the photo is present and both recorded values still
+// match. Immich uses the thumbhash as its own thumbnail cache key, so edits,
+// rotations and regenerated previews with different content read as stale.
+// Whenever Enrich has the preview bytes again, their hash is compared too, so
+// a regenerated preview with unchanged thumbhash (for example after changing
+// Immich's preview size or format) is re-embedded at that point.
 export const EMBEDDING_SCHEMA = `
 CREATE TABLE IF NOT EXISTS embedding_spaces (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -32,6 +40,9 @@ CREATE TABLE IF NOT EXISTS asset_embeddings (
 );
 CREATE INDEX IF NOT EXISTS idx_asset_embeddings_space ON asset_embeddings(space_id, asset_id);
 `;
+
+// SQL predicate over asset_embeddings e joined to assets a.
+const CURRENT = 'a.missing_since IS NULL AND a.checksum IS e.source_checksum AND a.thumbhash IS e.source_thumbhash';
 
 export const EMBEDDING_STORE_LIMITS = Object.freeze({
   // A service whose output changes on every run would otherwise add a space
@@ -99,24 +110,38 @@ export class EmbeddingStore {
     return { checksum: row?.checksum ?? null, thumbhash: row?.thumbhash ?? null };
   }
 
-  isCurrent(assetId, spaceId) {
+  // With imageSha256 (the bytes in hand), currency is exact; without it, it
+  // rests on the recorded checksum/thumbhash described above.
+  isCurrent(assetId, spaceId, { imageSha256 = null } = {}) {
     return this.db.prepare(`SELECT 1 FROM asset_embeddings e JOIN assets a ON a.asset_id=e.asset_id
-      WHERE e.asset_id=? AND e.space_id=? AND a.checksum IS e.source_checksum AND a.thumbhash IS e.source_thumbhash`)
-      .get(assetId, spaceId) !== undefined;
+      WHERE e.asset_id=? AND e.space_id=? AND ${CURRENT} AND (? IS NULL OR e.image_sha256=?)`)
+      .get(assetId, spaceId, imageSha256, imageSha256) !== undefined;
+  }
+
+  // Identical preview bytes under changed metadata (an edit can change the
+  // thumbhash without touching the unedited preview): record the new identity
+  // instead of asking the service for the same vector again.
+  adopt({ assetId, spaceId, source, imageSha256 }) {
+    const result = this.db.prepare(`UPDATE asset_embeddings SET source_checksum=?, source_thumbhash=?
+      WHERE asset_id=? AND space_id=? AND image_sha256=?`)
+      .run(source.checksum ?? null, source.thumbhash ?? null, assetId, spaceId, imageSha256);
+    return Number(result.changes) > 0;
   }
 
   save({ assetId, spaceId, source, imageSha256, vector, now = new Date().toISOString() }) {
     const space = this.db.prepare('SELECT dims FROM embedding_spaces WHERE id=?').get(spaceId);
-    if (!space || space.dims !== vector.length) {
+    const encoded = encodeVector(vector);
+    if (!space || space.dims !== vector.length || encoded.length !== space.dims * 4) {
       throw new EmbeddingServiceError('The embedding does not match its stored space.', 'ml_output_changed');
     }
+    if (!/^[0-9a-f]{64}$/.test(imageSha256)) throw new Error('image_sha256 must be a lowercase SHA-256 hex digest.');
     this.db.prepare(`INSERT INTO asset_embeddings
       (asset_id, space_id, source_checksum, source_thumbhash, image_sha256, vector, created_at)
       VALUES (?, ?, ?, ?, ?, ?, ?)
       ON CONFLICT(asset_id, space_id) DO UPDATE SET source_checksum=excluded.source_checksum,
         source_thumbhash=excluded.source_thumbhash, image_sha256=excluded.image_sha256,
         vector=excluded.vector, created_at=excluded.created_at`)
-      .run(assetId, spaceId, source.checksum ?? null, source.thumbhash ?? null, imageSha256, encodeVector(vector), now);
+      .run(assetId, spaceId, source.checksum ?? null, source.thumbhash ?? null, imageSha256, encoded, now);
   }
 
   // Current vectors for explicit photos in one space. Stale or missing photos
@@ -126,9 +151,11 @@ export class EmbeddingStore {
     const ids = [...new Set(assetIds)];
     for (let i = 0; i < ids.length; i += this.limits.lookupChunk) {
       const chunk = ids.slice(i, i + this.limits.lookupChunk);
-      const rows = this.db.prepare(`SELECT e.asset_id, e.vector FROM asset_embeddings e JOIN assets a ON a.asset_id=e.asset_id
+      // Stored rows are re-validated on read: exact length for the space.
+      const rows = this.db.prepare(`SELECT e.asset_id, e.vector FROM asset_embeddings e
+        JOIN assets a ON a.asset_id=e.asset_id JOIN embedding_spaces s ON s.id=e.space_id
         WHERE e.space_id=? AND e.asset_id IN (${chunk.map(() => '?').join(',')})
-          AND a.checksum IS e.source_checksum AND a.thumbhash IS e.source_thumbhash`).all(spaceId, ...chunk);
+          AND ${CURRENT} AND length(e.vector)=s.dims*4`).all(spaceId, ...chunk);
       for (const row of rows) {
         const vector = decodeVector(row.vector);
         if (vector) found.set(row.asset_id, vector);
@@ -145,7 +172,7 @@ export class EmbeddingStore {
     }
     const space = this.latestSpace({ backend, model });
     const counts = space ? this.db.prepare(`SELECT COUNT(*) AS vectors,
-        COALESCE(SUM(CASE WHEN a.checksum IS e.source_checksum AND a.thumbhash IS e.source_thumbhash THEN 1 ELSE 0 END), 0) AS current
+        COALESCE(SUM(CASE WHEN a.asset_id IS NOT NULL AND ${CURRENT} THEN 1 ELSE 0 END), 0) AS current
       FROM asset_embeddings e LEFT JOIN assets a ON a.asset_id=e.asset_id WHERE e.space_id=?`).get(space.id) : null;
     const other = this.db.prepare('SELECT COUNT(*) AS n FROM asset_embeddings WHERE space_id IS NOT ?').get(space?.id ?? null).n;
     const value = {

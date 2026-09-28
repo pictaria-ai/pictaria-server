@@ -26,15 +26,17 @@ export function loadPrompts(promptsDir, promptVersion = 'v1') {
 // maxBytes tightens the download cap for original-class fetches only (the
 // referee's per-image ceiling); thumbnails and previews are small and keep
 // the Immich client's default.
-export async function fetchImage(immich, assetId, imageSource, { maxBytes = null } = {}) {
+export async function fetchImage(immich, assetId, imageSource, { maxBytes = null, signal = null } = {}) {
+  const options = { ...(maxBytes === null ? {} : { maxBytes }), ...(signal ? { signal } : {}) };
+  const extra = Object.keys(options).length ? options : undefined;
   if (imageSource === 'original') {
-    return immich.getAssetOriginal(assetId, maxBytes === null ? undefined : { maxBytes });
+    return immich.getAssetOriginal(assetId, extra);
   }
   const size = imageSource === 'thumbnail' ? 'thumbnail' : 'preview';
   // maxBytes applies to every source: a preview can be config-dependently
   // large in Immich, and budgeted callers (the referee's group ceiling)
   // need the download to abort rather than buffer past their cap.
-  return immich.getAssetThumbnail(assetId, size, maxBytes === null ? undefined : { maxBytes });
+  return immich.getAssetThumbnail(assetId, size, extra);
 }
 
 // Abort a run when this many photos fail before anything succeeds — that
@@ -483,7 +485,7 @@ async function executeBatch({
         // rendition Immich's own CLIP uses), so one space never mixes sizes.
         if (embeddings) {
           embedding = embeddings.embed(previewDownloaded ? { assetId, image }
-            : { assetId, loadImage: () => fetchImage(immich, assetId, 'preview') });
+            : { assetId, loadImage: (signal) => fetchImage(immich, assetId, 'preview', { signal }) });
         }
         stage = 'provider';
         const { normalized, decisions, retryCount } = await analyzeWithValidationRetry(

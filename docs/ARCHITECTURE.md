@@ -242,17 +242,25 @@ existing durable sync queue. The multi-keeper comparison UI follows separately.
   separate storage and do not fill or sleep inside the decision queue. Enrich
   exposes status and retry. See [Enrich](ENRICH.md#the-pipeline).
 - **Image embeddings** (optional, PIC-381): `embeddings/service.mjs` gives
-  each Enrich run one session, created when the run starts. The runner starts
-  the photo's embedding beside the vision call and waits a bounded time for it
-  outside photo timing. Sessions never throw into a run. They keep one request
-  in flight, skip photos while busy or while the model loads, and pause after
-  repeated service failures. `embeddings/store.mjs` owns schema 22 /
+  each Enrich run one session, created when the run starts and closed in the
+  run's `finally`, so it shares the run's cancellation signal and shutdown
+  drain. The runner starts the photo's embedding beside the vision call and,
+  outside photo timing, waits at most `settleMs` for it. Anything still running
+  then, including a preview download, is aborted, and nothing is stored once a
+  photo's window or the run has closed. Sessions never throw into a run. They
+  keep one request in flight, skip photos while the model loads, and pause
+  after repeated service failures or late answers. Database errors stop a
+  session as storage failures in the run and server logs, never as
+  machine-learning failures. `embeddings/store.mjs` owns schema 22 /
   persistent-state contract 27: `embedding_spaces` (backend, model, dimensions,
-  calibration vector) and `asset_embeddings` (float32 vector plus the embedded
-  rendition's checksum/thumbhash and byte hash). A synthetic calibration image
+  calibration vector) and `asset_embeddings` (float32 vector, the embedded
+  bytes' SHA-256, and the photo's checksum/thumbhash at that time). Reads
+  re-check exact byte lengths and currency. A synthetic calibration image
   (`embeddings/calibration.mjs`) decides which space a session writes to, so
-  changed service output never mixes with stored vectors. Settings v9 adds the
-  switch, URL and model. See [Image embeddings](ENRICH.md#image-embeddings).
+  changed service output never mixes with stored vectors. The client
+  (`embeddings/client.mjs`) treats responses as untrusted: bounded body, strict
+  JSON, known model dimensions, finite values, non-zero norm. Settings v9 adds
+  the switch, URL and model. See [Image embeddings](ENRICH.md#image-embeddings).
 - **Enrich timing**: `enrich/timing.mjs` owns compact execution/request records
   and their schema, appended to the base enrichment schema by the repository.
   Schema 10 / persistent-state contract 12 adds timing tables and a nullable

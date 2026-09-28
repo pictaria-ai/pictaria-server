@@ -13,12 +13,15 @@ All notable changes to Pictaria Server are documented here. This project follows
   Immich's own `ViT-B-32__openai`. Each photo an Enrich run analyzes also has
   its Immich preview embedded, beside the vision call, and the vector is kept
   permanently in `enrichment.sqlite`. The step never fails, re-runs or
-  noticeably delays enrichment: one request at a time, a bounded wait, a pause
-  after repeated service failures, and photos left without a vector when the
-  service is busy or still downloading a model. A synthetic calibration image
+  noticeably delays enrichment: one request at a time, a wait of at most five
+  seconds after each photo before its request (and any preview download) is
+  aborted, a pause after repeated service failures or late answers, and photos
+  left without a vector while a model downloads. Database errors are reported
+  as storage problems rather than hidden. A synthetic calibration image
   separates embedding spaces, so a changed model or changed Immich
-  preprocessing never mixes incompatible vectors, and edited photos read as out
-  of date. **Test connection** checks unsaved values with a synthetic image.
+  preprocessing never mixes incompatible vectors. Vectors record the exact
+  preview bytes plus the photo's checksum and thumbhash, so edited photos read
+  as out of date and changed previews are re-embedded. **Test connection** checks unsaved values with a synthetic image.
   The home page shows the machine-learning connection and Enrich shows
   coverage. The service has no authentication, and the docs say to publish it
   only on a trusted network. Enrichment schema 22 / persistent-state contract

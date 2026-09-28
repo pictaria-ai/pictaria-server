@@ -12,15 +12,16 @@ export const EMBEDDING_LIMITS = Object.freeze({
   // A run waits this long for calibration, then enriches photos without
   // vectors until the model is ready.
   calibrationWaitMs: 15_000,
-  // Extra wait for a photo's vector once its enrichment has finished.
+  // Extra wait for a photo's vector once its enrichment has finished; work
+  // still running then is aborted.
   settleMs: 5_000,
-  // Consecutive service failures that pause embedding for the rest of a run.
+  // Consecutive service failures (including requests still running when the
+  // photo's wait expires) that pause embedding for the rest of a run.
   failureLimit: 3,
   // Immich restarts its idle machine-learning worker; a first ping after a
   // quiet period can wait for it to boot.
   sessionPingTimeoutMs: 60_000,
-  // How long a finishing run waits for abandoned work before returning. An
-  // Immich preview download is not abortable, so never wait for it in full.
+  // Safety bound for aborted work to drain; every request takes the signal.
   closeGraceMs: 1_000,
   connectionCacheMs: 60_000,
   testTimeoutMs: 120_000,
@@ -29,9 +30,8 @@ export const EMBEDDING_LIMITS = Object.freeze({
 // Optional Enrich step. Sessions never throw into the enrichment run: every
 // outcome is counted and logged, and a missing vector is left for backfill.
 export class EmbeddingService {
-  constructor({ repo, config, fetchImpl = fetch, now = Date.now, elapsedNow = () => performance.now(),
-    limits = EMBEDDING_LIMITS, wait = (ms, signal) => sleep(ms, undefined, { signal }) }) {
-    Object.assign(this, { repo, config, fetchImpl, now, elapsedNow, limits, wait });
+  constructor({ repo, config, fetchImpl = fetch, now = Date.now, elapsedNow = () => performance.now(), limits = EMBEDDING_LIMITS }) {
+    Object.assign(this, { repo, config, fetchImpl, now, elapsedNow, limits });
     this.lastConnection = null;
     this.lastSession = null;
     this.testing = false;
@@ -119,6 +119,10 @@ export class EmbeddingService {
   }
 }
 
+// Resource policy: embedding work exists only inside an Enrich run and only for
+// a photo that run is analyzing. At most one request is in flight; it starts
+// beside the photo's vision call and must finish within settleMs after that
+// photo's enrichment, or it is aborted. Nothing outlives its photo or the run.
 class EmbeddingSession {
   constructor(service, { url, model, log, signal }) {
     Object.assign(this, { service, url, model, log });
@@ -128,10 +132,12 @@ class EmbeddingSession {
     this.signal = signal ? AbortSignal.any([signal, this.controller.signal]) : this.controller.signal;
     this.space = null;
     this.stopped = null;
-    this.inFlight = null;
+    this.reason = null;
+    this.request = null;
     this.failures = 0;
     this.embedMs = 0;
-    this.counts = { embedded: 0, current: 0, busy: 0, waiting: 0, paused: 0, failed: 0 };
+    this.waits = { count: 0, totalMs: 0, maxMs: 0 };
+    this.counts = { embedded: 0, current: 0, busy: 0, waiting: 0, paused: 0, late: 0, failed: 0 };
   }
 
   async start() {
@@ -144,7 +150,7 @@ class EmbeddingSession {
     this.client = client;
     this.log(`image embeddings: on (${this.model})`);
     this.calibration = this.#calibrate();
-    await Promise.race([this.calibration, this.service.wait(this.limits.calibrationWaitMs, this.signal).catch(() => {})]);
+    await within(this.calibration, this.limits.calibrationWaitMs, this.signal);
     if (!this.space && !this.stopped && !this.signal.aborted) {
       this.log('image embeddings: waiting for the machine-learning service to load the model (the first use downloads it); photos continue without embeddings until it is ready');
     }
@@ -155,9 +161,17 @@ class EmbeddingSession {
       await this.client.ping({ signal: this.signal, timeoutMs: this.limits.sessionPingTimeoutMs });
       const vector = await this.client.embedImage(calibrationImage(),
         { model: this.model, signal: this.signal, timeoutMs: this.limits.calibrationTimeoutMs });
-      const space = this.store.resolveSpace({
-        backend: EMBEDDING_BACKEND, model: this.model, calibrationVersion: CALIBRATION_VERSION, calibration: vector,
-      });
+      this.signal.throwIfAborted();
+      let space;
+      try {
+        space = this.store.resolveSpace({
+          backend: EMBEDDING_BACKEND, model: this.model, calibrationVersion: CALIBRATION_VERSION, calibration: vector,
+        });
+      } catch (error) {
+        if (error instanceof EmbeddingServiceError) throw error;
+        this.#storageFailure(error);
+        return;
+      }
       if (this.signal.aborted) return;
       this.space = space;
       if (space.replacesEarlier) {
@@ -171,81 +185,149 @@ class EmbeddingSession {
   }
 
   // Starts embedding one photo when the lane is free. Returns a promise that
-  // never rejects, or null when the photo is left without a vector.
+  // never rejects, or null when the photo is left without a vector. With the
+  // preview bytes in hand, an unchanged vector is recognised exactly.
   embed({ assetId, image = null, loadImage = null }) {
     if (this.closed || this.stopped) { this.counts.paused++; return null; }
     if (!this.space) { this.counts.waiting++; return null; }
-    if (this.inFlight) { this.counts.busy++; return null; }
-    let source;
+    if (this.request) { this.counts.busy++; return null; }
+    let source, imageSha256 = null;
     try {
-      if (this.store.isCurrent(assetId, this.space.id)) { this.counts.current++; return null; }
+      if (image) imageSha256 = sha256(image.data);
+      if (this.store.isCurrent(assetId, this.space.id, { imageSha256 })) { this.counts.current++; return null; }
       source = this.store.sourceOf(assetId);
-    } catch { this.counts.failed++; return null; }
-    const work = this.#embed(assetId, source, image, loadImage).finally(() => {
-      if (this.inFlight === work) this.inFlight = null;
+    } catch (error) {
+      this.#storageFailure(error);
+      return null;
+    }
+    const controller = new AbortController();
+    const signal = AbortSignal.any([this.signal, controller.signal]);
+    const promise = this.#embed({ assetId, source, image, imageSha256, loadImage, signal }).finally(() => {
+      if (this.request?.promise === promise) this.request = null;
     });
-    this.inFlight = work;
-    return work;
+    this.request = { promise, controller };
+    return promise;
   }
 
-  async #embed(assetId, source, image, loadImage) {
+  async #embed({ assetId, source, image, imageSha256, loadImage, signal }) {
     const started = this.service.elapsedNow();
+    const spaceId = this.space.id;
     try {
-      const input = image ?? await loadImage();
-      this.signal.throwIfAborted();
-      const vector = await this.client.embedImage(input, { model: this.model, signal: this.signal });
+      const input = image ?? await loadImage(signal);
+      signal.throwIfAborted();
+      const hash = imageSha256 ?? sha256(input.data);
+      if (this.#storage(() => this.store.adopt({ assetId, spaceId, source, imageSha256: hash }))) {
+        this.counts.current++;
+        return 'current';
+      }
+      const vector = await this.client.embedImage(input, { model: this.model, signal });
+      // Never write once the photo's window or the run has closed.
+      signal.throwIfAborted();
       if (vector.length !== this.space.dims) {
         throw new EmbeddingServiceError('the machine-learning service changed its output during this run', 'ml_output_changed');
       }
-      this.store.save({ assetId, spaceId: this.space.id, source,
-        imageSha256: createHash('sha256').update(input.data).digest('hex'), vector });
+      this.#storage(() => this.store.save({ assetId, spaceId, source, imageSha256: hash, vector }));
       this.counts.embedded++;
       this.failures = 0;
       this.embedMs += this.service.elapsedNow() - started;
       return 'embedded';
     } catch (error) {
+      if (error instanceof StorageFailure) return 'storage-error';
       if (this.signal.aborted) return 'cancelled';
-      this.counts.failed++;
-      if (error instanceof EmbeddingServiceError && error.service) {
-        this.failures++;
-        if (error.code === 'ml_output_changed' || this.failures >= this.limits.failureLimit) {
-          this.#stop(error.code, `image embeddings paused for the rest of this run: ${safeMessage(error)}`);
-        }
+      if (signal.aborted) {
+        // The photo's window expired first: slower than enrichment itself.
+        this.counts.late++;
+        this.#serviceFailure(new EmbeddingServiceError(
+          `the machine-learning service took longer than ${Math.round(this.limits.settleMs / 1000)} seconds after the photo finished`, 'ml_late'));
+        return 'late';
       }
+      this.counts.failed++;
+      if (error instanceof EmbeddingServiceError && error.service) this.#serviceFailure(error);
       return 'failed';
     }
   }
 
-  // Wait briefly for a photo's vector so it normally lands with its photo.
+  // Bounded post-vision wait. Work still running when it expires is aborted
+  // and drained, so no request continues in the background.
   async settle(pending) {
     if (!pending) return;
-    await Promise.race([pending, this.service.wait(this.limits.settleMs, this.signal).catch(() => {})]);
+    const started = this.service.elapsedNow();
+    const finished = await within(pending, this.limits.settleMs, this.signal);
+    if (!finished && this.request?.promise === pending) this.request.controller.abort();
+    if (!finished) await within(pending, this.limits.closeGraceMs);
+    const waited = this.service.elapsedNow() - started;
+    this.waits.count++;
+    this.waits.totalMs += waited;
+    this.waits.maxMs = Math.max(this.waits.maxMs, waited);
   }
 
   async close({ cancelled = false } = {}) {
     if (this.closed) return;
     this.closed = true;
-    if (!cancelled && this.inFlight) await this.settle(this.inFlight);
-    // Anything still pending after that grace is abandoned; its photo is left
-    // for backfill. The service may still finish a model download on its own.
+    if (!cancelled && this.request) await this.settle(this.request.promise);
+    // The calibration may still be loading a model; the service can finish
+    // that download on its own, but this session stops waiting for it.
     this.controller.abort();
-    const pending = [this.inFlight, this.calibration].filter(Boolean);
-    if (pending.length) await Promise.race([Promise.all(pending), sleep(this.limits.closeGraceMs)]);
-    const { embedded, current, busy, waiting, paused, failed } = this.counts;
+    await within(Promise.all([this.request?.promise, this.calibration].filter(Boolean)), this.limits.closeGraceMs);
+    const { embedded, current, busy, waiting, paused, late, failed } = this.counts;
     const skipped = busy + waiting + paused;
+    const averageMs = embedded ? Math.round(this.embedMs / embedded) : null;
+    const wait = this.waits.count ? { averageMs: Math.round(this.waits.totalMs / this.waits.count), maxMs: Math.round(this.waits.maxMs) } : null;
     if (this.client) {
-      this.log(`image embeddings: ${embedded} new, ${current} already current, ${skipped} skipped, ${failed} failed`
-        + (embedded ? ` · ${Math.round(this.embedMs / embedded)} ms per photo` : ''));
+      this.log(`image embeddings: ${embedded} new, ${current} already current, ${skipped} skipped, ${late} too slow, ${failed} failed`
+        + (averageMs !== null ? ` · ${averageMs} ms per photo` : '')
+        + (wait ? ` · waited ${wait.averageMs} ms on average (at most ${wait.maxMs} ms) after enrichment` : ''));
     }
-    this.service.lastSession = { model: this.model, ...this.counts, stopped: this.stopped,
-      averageMs: embedded ? Math.round(this.embedMs / embedded) : null, finishedAt: new Date(this.service.now()).toISOString() };
+    this.service.lastSession = { model: this.model, ...this.counts, stopped: this.stopped, reason: this.reason,
+      averageMs, wait, finishedAt: new Date(this.service.now()).toISOString() };
+  }
+
+  #serviceFailure(error) {
+    this.failures++;
+    if (error.code === 'ml_output_changed' || this.failures >= this.limits.failureLimit) {
+      this.#stop(error.code, `image embeddings paused for the rest of this run: ${safeMessage(error)}`);
+    }
+  }
+
+  // Database failures are not machine-learning failures: stop, say so plainly
+  // in the run log and server log, and let the Enrich run report its own state.
+  #storage(work) {
+    try { return work(); } catch (error) {
+      if (error instanceof EmbeddingServiceError) throw error;
+      this.#storageFailure(error);
+      throw new StorageFailure();
+    }
+  }
+
+  #storageFailure(error) {
+    const message = safeMessage(error);
+    console.error(`[Pictaria] Image embeddings could not read or write the Enrich database: ${message}`);
+    this.#stop('storage_error', `image embeddings stopped for this run: the Enrich database rejected an embedding read or write (${message}). This is a storage problem, not a machine-learning one; check the server's disk and database`);
   }
 
   #stop(code, message) {
     if (this.stopped) return;
     this.stopped = code;
+    this.reason = message;
     this.log(message);
   }
+}
+
+class StorageFailure extends Error {}
+
+function sha256(data) {
+  return createHash('sha256').update(data).digest('hex');
+}
+
+// Resolves true when the promise settles first, false when ms elapse or the
+// signal aborts. Clears its timer either way.
+async function within(promise, ms, signal = null) {
+  const timer = new AbortController();
+  const stop = signal ? AbortSignal.any([signal, timer.signal]) : timer.signal;
+  try {
+    return await Promise.race([promise.then(() => true, () => true),
+      sleep(ms, false, { signal: stop }).catch(() => false)]);
+  } finally { timer.abort(); }
 }
 
 function safeMessage(error) {

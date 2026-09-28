@@ -465,8 +465,8 @@
       const parts = [status.configured ? status.model : 'machine-learning URL not set'];
       parts.push(`${coverage.current.toLocaleString()} photo${coverage.current === 1 ? '' : 's'} with current embeddings`);
       const run = status.lastRun;
-      if (run) parts.push(`last run ${run.embedded} new · ${run.busy + run.waiting + run.paused} skipped · ${run.failed} failed`);
-      if (run?.stopped) parts.push('paused during that run — see its log');
+      if (run) parts.push(`last run ${run.embedded} new · ${run.busy + run.waiting + run.paused} skipped · ${(run.late ?? 0) + run.failed} failed or too slow`);
+      if (run?.stopped) parts.push(run.stopped === 'storage_error' ? 'stopped by a database error — see the run log' : 'paused during that run — see its log');
       el('embeddingsStatus').textContent = parts.join(' · ');
     }
 

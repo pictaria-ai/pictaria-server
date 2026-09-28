@@ -60,7 +60,7 @@ test('a session calibrates, stores one vector per photo and reuses current vecto
     assert.equal(ml.predictions(), 3);
     assert.match(first.log.join('\n'), /image embeddings: on \(ViT-B-32__openai\)/);
     assert.match(first.log.join('\n'), /started a 512-dimension set/);
-    assert.match(first.log.at(-1), /2 new, 0 already current, 0 skipped, 0 failed/);
+    assert.match(first.log.at(-1), /2 new, 0 already current, 0 skipped, 0 too slow, 0 failed/);
     const space = repo.embeddings.latestSpace({ backend: 'immich_ml', model: 'ViT-B-32__openai' });
     assert.equal(repo.embeddings.vectors(space.id, ['a1', 'a2']).size, 2);
     assert.equal(repo.db.prepare('SELECT image_sha256 FROM asset_embeddings WHERE asset_id=?').get('a1').image_sha256.length, 64);
@@ -105,7 +105,7 @@ test('photos continue without vectors while the model loads, then embed once rea
     ml.state.delayMs = 0;
     assert.equal(await session.embed({ assetId: 'a2', image: photo('a2') }), 'embedded');
     await session.close();
-    assert.match(log.at(-1), /1 new, 0 already current, 1 skipped, 0 failed/);
+    assert.match(log.at(-1), /1 new, 0 already current, 1 skipped, 0 too slow, 0 failed/);
   });
 });
 
@@ -215,7 +215,7 @@ test('Test connection checks draft values without storing anything', async () =>
   await withService(async ({ repo, ml, service }) => {
     const result = await service.test({ url: ml.url, model: 'ViT-B-16-SigLIP__webli' });
     assert.deepEqual({ ...result, elapsedMs: typeof result.elapsedMs }, {
-      ok: true, model: 'ViT-B-16-SigLIP__webli', dims: 512, elapsedMs: 'number', vectors: 'first-set' });
+      ok: true, model: 'ViT-B-16-SigLIP__webli', dims: 768, elapsedMs: 'number', vectors: 'first-set' });
     assert.equal(repo.db.prepare('SELECT COUNT(*) AS n FROM embedding_spaces').get().n, 0);
     await run(service, []);
     assert.equal((await service.test({})).vectors, 'reused');
@@ -269,4 +269,126 @@ test('a model download that outlasts Test connection explains itself', async () 
       return true;
     });
   }, { serviceLimits: { ...limits, testTimeoutMs: 100 } });
+});
+
+test('work still running when the photo’s wait expires is aborted, drained and counted as too slow', async () => {
+  await withService(async ({ repo, ml, service }) => {
+    addAssets(repo, 'a1', 'a2', 'a3', 'a4');
+    const log = [];
+    const session = service.session({ log: (message) => log.push(message) });
+    await session.start();
+    ml.state.delayMs = 400; // slower than settleMs (60 ms here)
+    for (const id of ['a1', 'a2', 'a3']) {
+      const pending = session.embed({ assetId: id, image: photo(id) });
+      const started = Date.now();
+      await session.settle(pending);
+      assert.ok(Date.now() - started < 300, 'the wait is bounded and the request aborted');
+      assert.equal(await pending, 'late');
+      assert.equal(session.request, null, 'nothing left running between photos');
+    }
+    assert.equal(session.counts.late, 3);
+    assert.equal(session.stopped, 'ml_late');
+    assert.equal(session.embed({ assetId: 'a4', image: photo('a4') }), null);
+    await session.close();
+    await new Promise((resolve) => setTimeout(resolve, 450));
+    assert.equal(repo.db.prepare('SELECT COUNT(*) AS n FROM asset_embeddings').get().n, 0, 'late answers are never stored');
+    assert.match(log.join('\n'), /paused for the rest of this run: the machine-learning service took longer than 0 seconds/);
+    assert.match(log.at(-1), /3 too slow/);
+    assert.ok(service.status().lastRun.wait.maxMs < 300);
+  }, { serviceLimits: { ...limits, settleMs: 60 } });
+});
+
+test('an expired wait also aborts a preview download in progress', async () => {
+  await withService(async ({ repo, service }) => {
+    addAssets(repo, 'a1');
+    const session = service.session();
+    await session.start();
+    let aborted = false;
+    const pending = session.embed({ assetId: 'a1', loadImage: (signal) => new Promise((resolve, reject) => {
+      signal.addEventListener('abort', () => { aborted = true; reject(signal.reason); }, { once: true });
+    }) });
+    await session.settle(pending);
+    assert.equal(aborted, true);
+    assert.equal(await pending, 'late');
+    await session.close();
+  }, { serviceLimits: { ...limits, settleMs: 50 } });
+});
+
+test('database failures stop the session as storage problems, not machine-learning ones', async (t) => {
+  const errors = [];
+  t.mock.method(console, 'error', (...args) => errors.push(args.join(' ')));
+  await withService(async ({ repo, ml, service }) => {
+    addAssets(repo, 'a1', 'a2');
+    const log = [];
+    const session = service.session({ log: (message) => log.push(message) });
+    await session.start();
+    const original = repo.embeddings.save;
+    repo.embeddings.save = () => { throw Object.assign(new Error('database or disk is full'), { code: 'ERR_SQLITE_ERROR' }); };
+    assert.equal(await session.embed({ assetId: 'a1', image: photo('a1') }), 'storage-error');
+    repo.embeddings.save = original;
+    assert.equal(session.stopped, 'storage_error');
+    assert.equal(session.counts.failed, 0, 'not counted as a machine-learning failure');
+    assert.equal(session.embed({ assetId: 'a2', image: photo('a2') }), null);
+    await session.close();
+    assert.match(log.join('\n'), /Enrich database rejected an embedding read or write \(database or disk is full\)\. This is a storage problem/);
+    assert.match(errors.join('\n'), /\[Pictaria\] Image embeddings could not read or write the Enrich database: database or disk is full/);
+    assert.equal(service.status().lastRun.stopped, 'storage_error');
+    assert.match(service.status().lastRun.reason, /storage problem/);
+    assert.equal(ml.predictions(), 2, 'the calibration and the one request that could not be saved');
+  });
+  // Reads fail the same way.
+  await withService(async ({ repo, service }) => {
+    const session = service.session({ log: () => {} });
+    await session.start();
+    repo.embeddings.isCurrent = () => { throw new Error('database disk image is malformed'); };
+    assert.equal(session.embed({ assetId: 'a1', image: photo('a1') }), null);
+    assert.equal(session.stopped, 'storage_error');
+    await session.close();
+  });
+});
+
+test('identical preview bytes under changed metadata are adopted without a request', async () => {
+  await withService(async ({ repo, ml, service }) => {
+    addAssets(repo, 'a1');
+    await run(service, [['a1', photo('a1')]]);
+    const requests = ml.predictions();
+    // An Immich edit can change the thumbhash while the unedited preview stays identical.
+    repo.upsertAsset({ id: 'a1', checksum: 'sum-a1', thumbhash: 'edited-hash' });
+    const space = repo.embeddings.latestSpace({ backend: 'immich_ml', model: 'ViT-B-32__openai' });
+    assert.equal(repo.embeddings.isCurrent('a1', space.id), false);
+    const second = await run(service, [['a1', photo('a1')]]);
+    assert.deepEqual(second.outcomes, ['current']);
+    assert.equal(ml.predictions(), requests + 1, 'only the calibration');
+    assert.equal(repo.embeddings.isCurrent('a1', space.id), true);
+    assert.equal(repo.db.prepare('SELECT source_thumbhash FROM asset_embeddings').get().source_thumbhash, 'edited-hash');
+  });
+});
+
+test('changed preview bytes under unchanged metadata are re-embedded when the bytes are in hand', async () => {
+  await withService(async ({ repo, ml, service }) => {
+    addAssets(repo, 'a1');
+    await run(service, [['a1', photo('a1')]]);
+    const before = repo.db.prepare('SELECT image_sha256, hex(vector) AS vector FROM asset_embeddings').get();
+    // e.g. Immich's preview size or format changed and previews were regenerated.
+    const regenerated = { data: Buffer.from('regenerated-preview-a1'), contentType: 'image/webp' };
+    const second = await run(service, [['a1', regenerated]]);
+    assert.deepEqual(second.outcomes, ['embedded']);
+    const after = repo.db.prepare('SELECT image_sha256, hex(vector) AS vector FROM asset_embeddings').get();
+    assert.notEqual(after.image_sha256, before.image_sha256);
+    assert.notEqual(after.vector, before.vector);
+    assert.equal(ml.state.requests.at(-1).contentType, 'image/webp');
+  });
+});
+
+test('a known model returning the wrong number of dimensions is rejected before storage', async () => {
+  await withService(async ({ repo, ml, service }) => {
+    ml.state.dims = 768; // e.g. a proxy routing to a service running a different model
+    const log = [];
+    const session = service.session({ log: (message) => log.push(message) });
+    await session.start();
+    assert.equal(session.stopped, 'ml_invalid_response');
+    assert.match(log.join('\n'), /returned 768 values; ViT-B-32__openai produces 512/);
+    await session.close();
+    assert.equal(repo.db.prepare('SELECT COUNT(*) AS n FROM embedding_spaces').get().n, 0);
+  });
 });
