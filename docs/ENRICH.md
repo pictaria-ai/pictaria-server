@@ -1173,8 +1173,10 @@ public API; see [Immich compatibility](IMMICH-COMPATIBILITY.md#machine-learning-
   Turning it on or off never re-enriches anything.
 
 Photos that Enrich skips because they are already enriched are not downloaded,
-so they get no embedding from this step. Generating embeddings for photos
-enriched before you turned this on is separate, planned work. Turning **Enable
+so they get no embedding from this step. For evaluation, the Curate
+[stacking lab](CURATE-STACKING-LAB.md#pictaria-embeddings-pic-381) can compute
+embeddings for the photos of one time group on request, under the same rules. A
+general backfill for photos enriched earlier is separate, planned work. Turning **Enable
 AI enrichment** off also stops embeddings, since they are produced only by
 Enrich runs.
 

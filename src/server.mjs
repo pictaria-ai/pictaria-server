@@ -48,6 +48,7 @@ import { createBackupRoutes } from './routes/backup.mjs';
 import { createEnrichRoutes } from './routes/enrich.mjs';
 import { createEmbeddingRoutes } from './routes/embeddings.mjs';
 import { EmbeddingService } from './embeddings/service.mjs';
+import { LabEmbeddings } from './curate/lab-embeddings.mjs';
 import { createInsightsRoutes } from './routes/insights.mjs';
 import { createSettingsRoutes } from './routes/settings.mjs';
 import { createSupportRoutes } from './routes/support.mjs';
@@ -215,6 +216,7 @@ curate.ai = new CurateAiExecution({ attempts: repo.curate.aiAttempts, limits: re
 curate.aiLifecycle = new CurateAiLifecycle({ curate, execution: curate.ai,
   resolveProvider: () => createCurateAiProvider(config), availability: CURATE_AI_AVAILABILITY });
 const embeddings = new EmbeddingService({ repo, config });
+curate.lab.embeddings = new LabEmbeddings(curate.lab, embeddings);
 const enrichRunner = new EnrichJobRunner({ repo, immich, taxonomy, config, profiles, aiScheduler, aiConnections, embeddings, onTagsQueued: () => aiTagSync.wake() });
 const enrichScheduler = new EnrichScheduler({ runner: enrichRunner, repo, config });
 const referee = new RefereeService({ repo, immich, review, enrichRunner, config, aiScheduler, aiConnections, log: (message) => console.log(`[Pictaria] ${message}`) });

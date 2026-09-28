@@ -7,6 +7,17 @@ All notable changes to Pictaria Server are documented here. This project follows
 
 ### Development
 
+- Added Pictaria embeddings to the Curate stacking lab. **Compute embeddings**
+  embeds the open group's photos that have none yet, as a bounded, cancellable
+  pass through Immich's machine-learning service. It makes no AI provider
+  calls, and the vectors are stored in the same permanent table as the Enrich
+  step. The lab shows the pairwise similarity table and adds an embedding rule
+  to both modes: a threshold in individual filters, and very-similar / middle /
+  clearly-different bands in combined evidence. Missing embeddings stay
+  unknown, and search ranks do not corroborate embeddings. The thresholds are
+  uncalibrated starting points for PIC-381's evaluation. Production grouping is
+  unchanged.
+
 - Added optional image embeddings to Enrich (off by default). Settings →
   Enrich → Image embeddings points Pictaria at the machine-learning container
   that comes with Immich (`IMMICH_ML_URL`) and chooses a model, defaulting to

@@ -48,7 +48,9 @@ export async function startFakeMl({ dims = null, models = null } = {}) {
       response.writeHead(200, { 'content-type': 'application/json' }).end(state.raw);
       return;
     }
-    const vector = vectorFor(image.data, model, state.variant, state.dims ?? MODEL_DIMS[model] ?? 512).map((x, i) => x + state.noise * Math.sin(i * 13));
+    const chosen = state.vectorFor?.(image.data, model);
+    const vector = (chosen ?? vectorFor(image.data, model, state.variant, state.dims ?? MODEL_DIMS[model] ?? 512))
+      .map((x, i) => x + state.noise * Math.sin(i * 13));
     response.writeHead(200, { 'content-type': 'application/json' })
       .end(JSON.stringify({ clip: JSON.stringify(vector), imageHeight: 256, imageWidth: 384 }));
   });

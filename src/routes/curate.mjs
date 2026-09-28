@@ -18,6 +18,30 @@ export function createCurateRoutes({ curate, review = null, enrichRunner = null 
         result = curate.lab.comparison(url.searchParams.get('viewId'), Number(url.searchParams.get('groupId') ?? -1));
       } else if (request.method === 'POST' && path === 'lab/ranks/plan') {
         result = curate.lab.ranks.plan(await readObject(request, { maxBytes: 8192 }));
+      } else if (request.method === 'POST' && path === 'lab/embeddings/plan') {
+        if (!curate.lab.embeddings) throw new CurateError('Image embeddings are not available in this build.', 'lab_embeddings_unavailable', 503);
+        result = curate.lab.embeddings.plan(await readObject(request, { maxBytes: 4096 }));
+      } else if (request.method === 'POST' && path === 'lab/embeddings/run') {
+        if (!curate.lab.embeddings) throw new CurateError('Image embeddings are not available in this build.', 'lab_embeddings_unavailable', 503);
+        const body = await readObject(request, { maxBytes: 4096 });
+        const controller = new AbortController();
+        const close = () => { if (!response.writableFinished) controller.abort(); };
+        response.once('close', close);
+        try {
+          await curate.lab.embeddings.run(body, { signal: controller.signal, emit: async event => {
+            if (response.destroyed) { controller.abort(); controller.signal.throwIfAborted(); }
+            if (!response.headersSent) response.writeHead(200, { 'Content-Type': 'application/x-ndjson', 'X-Accel-Buffering': 'no' });
+            // At most one small event per photo in a bounded pass.
+            response.write(JSON.stringify(event) + '\n');
+          } });
+          response.end();
+        } catch (error) {
+          if (response.destroyed) return true;
+          if (!response.headersSent) throw error;
+          response.end(JSON.stringify({ type: 'error', code: error instanceof CurateError ? error.code : 'lab_embeddings_interrupted',
+            message: error instanceof CurateError ? error.message : 'Embedding pass interrupted. Completed photos are kept.' }) + '\n');
+        } finally { response.removeListener('close', close); }
+        return true;
       } else if (request.method === 'POST' && path === 'lab/ranks/run') {
         const body = await readObject(request, { maxBytes: 8192 });
         const controller = new AbortController();

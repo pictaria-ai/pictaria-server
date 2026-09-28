@@ -5,7 +5,8 @@ import { join } from 'node:path';
 import { Repository } from '../../src/enrich/repository.mjs';
 import { bootServer } from './harness.mjs';
 
-export async function curatePreviewFixture({ stackSize = 52, singles = 52, metadataReady = false, stacking = true, prepare = () => {} } = {}) {
+export async function curatePreviewFixture({ stackSize = 52, singles = 52, metadataReady = false, stacking = true, prepare = () => {},
+  env = {}, thumbnail = null } = {}) {
   const dir = mkdtempSync(join(tmpdir(), 'curate-preview-'));
   const repo = new Repository(join(dir, 'enrichment.sqlite'));
   repo.initSchema();
@@ -60,6 +61,8 @@ export async function curatePreviewFixture({ stackSize = 52, singles = 52, metad
     };
     if (path.endsWith('/thumbnail')) {
       response.writeHead(200, { 'content-type': 'image/png' });
+      const custom = thumbnail?.(path.split('/')[3]);
+      if (custom) return response.end(custom);
       return response.end(
         Buffer.from(
           'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVQIHWP4z8DwHwAFgAI/ScLbtAAAAABJRU5ErkJggg==',
@@ -112,6 +115,7 @@ export async function curatePreviewFixture({ stackSize = 52, singles = 52, metad
         IMMICH_API_KEY: 'synthetic',
         CURATE_REFEREE_ENABLED: 'false',
         CURATE_BURST_GROUPING: String(stacking),
+        ...env,
       },
     });
   } catch (error) {

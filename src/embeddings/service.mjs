@@ -35,6 +35,8 @@ export class EmbeddingService {
     this.lastConnection = null;
     this.lastSession = null;
     this.testing = false;
+    // Open sessions: 'enrich' (one per Enrich run) and 'lab' (explicit passes).
+    this.active = new Set();
   }
 
   settings() {
@@ -115,7 +117,30 @@ export class EmbeddingService {
   // model even if Settings change while it is running.
   session({ log = () => {}, signal = null } = {}) {
     const { enabled, url, model } = this.settings();
-    return enabled ? new EmbeddingSession(this, { url, model, log, signal }) : null;
+    return enabled ? new EmbeddingSession(this, { url, model, log, signal, kind: 'enrich' }) : null;
+  }
+
+  // An explicit pass a person starts for a few photos (the stacking lab). It
+  // needs the URL and model from Settings but not the automatic Enrich
+  // switch, runs one at a time, and yields to Enrich: it cannot start during
+  // an Enrich session and stops between photos when one begins.
+  labPass({ log = () => {}, signal = null } = {}) {
+    const { url, model } = this.settings();
+    if (!url) {
+      throw new EmbeddingServiceError('Set the Immich machine-learning URL in Settings → Enrich → Image embeddings first.',
+        'ml_not_configured', { service: false });
+    }
+    if (this.enrichActive()) {
+      throw new EmbeddingServiceError('An Enrich run is embedding photos right now. Try again when it finishes.', 'ml_busy', { service: false });
+    }
+    if ([...this.active].some((session) => session.kind === 'lab')) {
+      throw new EmbeddingServiceError('Another embedding pass is running. Try again when it finishes.', 'ml_busy', { service: false });
+    }
+    return new EmbeddingSession(this, { url, model, log, signal, kind: 'lab' });
+  }
+
+  enrichActive() {
+    return [...this.active].some((session) => session.kind === 'enrich');
   }
 }
 
@@ -127,8 +152,9 @@ export class EmbeddingService {
 // from every vision provider, so it is its own resource in the AI scheduler's
 // terms; a future embed-only backfill must share one server-wide lane here.
 class EmbeddingSession {
-  constructor(service, { url, model, log, signal }) {
-    Object.assign(this, { service, url, model, log });
+  constructor(service, { url, model, log, signal, kind }) {
+    Object.assign(this, { service, url, model, log, kind });
+    service.active.add(this);
     this.store = service.repo.embeddings;
     this.limits = service.limits;
     this.controller = new AbortController();
@@ -143,7 +169,9 @@ class EmbeddingSession {
     this.counts = { embedded: 0, current: 0, busy: 0, waiting: 0, paused: 0, late: 0, failed: 0 };
   }
 
-  async start() {
+  // Enrich waits briefly for the model and continues without vectors; an
+  // explicit pass waits for it (bounded by the caller's signal).
+  async start({ waitForModel = false } = {}) {
     let client = null;
     try { client = this.url ? new ImmichMlClient({ baseUrl: this.url, fetchImpl: this.service.fetchImpl }) : null; } catch {}
     if (!client) {
@@ -153,7 +181,8 @@ class EmbeddingSession {
     this.client = client;
     this.log(`image embeddings: on (${this.model})`);
     this.calibration = this.#calibrate();
-    await within(this.calibration, this.limits.calibrationWaitMs, this.signal);
+    if (waitForModel) await within(this.calibration, this.limits.calibrationTimeoutMs, this.signal);
+    else await within(this.calibration, this.limits.calibrationWaitMs, this.signal);
     if (!this.space && !this.stopped && !this.signal.aborted) {
       this.log('image embeddings: waiting for the machine-learning service to load the model (the first use downloads it); photos continue without embeddings until it is ready');
     }
@@ -267,6 +296,7 @@ class EmbeddingSession {
   async close({ cancelled = false } = {}) {
     if (this.closed) return;
     this.closed = true;
+    this.service.active.delete(this);
     if (!cancelled && this.request) await this.settle(this.request.promise);
     // The calibration may still be loading a model; the service can finish
     // that download on its own, but this session stops waiting for it.
@@ -281,8 +311,11 @@ class EmbeddingSession {
         + (averageMs !== null ? ` · ${averageMs} ms per photo` : '')
         + (wait ? ` · waited ${wait.averageMs} ms on average (at most ${wait.maxMs} ms) after enrichment` : ''));
     }
-    this.service.lastSession = { model: this.model, ...this.counts, stopped: this.stopped, reason: this.reason,
+    const summary = { model: this.model, ...this.counts, stopped: this.stopped, reason: this.reason,
       averageMs, wait, finishedAt: new Date(this.service.now()).toISOString() };
+    // Settings and Enrich report the last Enrich run; lab passes report their own.
+    if (this.kind === 'enrich') this.service.lastSession = summary;
+    this.summary = summary;
   }
 
   #serviceFailure(error) {
