@@ -68,8 +68,20 @@ export function plainReasons(comparison) {
     );
   }
   // Keep unmapped recorded reasons visible too: there is no separate raw-details panel.
-  for (const reason of comparison.reasons ?? []) result.push(copy.get(reason) ?? reason);
+  for (const reason of comparison.reasons ?? []) {
+    result.push(comparison.stackReferee?.state === 'checked' && reason === 'Provisional time group: similarity evidence is pending or incomplete.'
+      ? 'Before the AI check, these nearby photos were grouped provisionally.' : copy.get(reason) ?? reason);
+  }
+  if (comparison.stackReferee?.state === 'checked' && typeof comparison.stackReferee.reason === 'string')
+    result.push(comparison.stackReferee.reason);
   return result.length
     ? [...new Set(result)]
     : ['No further grouping explanation is available for this saved view.'];
+}
+
+export function groupingAlgorithmLabel(comparison) {
+  if (comparison.stackReferee?.state === 'updated' || !/^candidate-\d+$/.test(comparison.algorithm))
+    return 'Grouping from this saved view';
+  return `Candidate algorithm ${comparison.algorithm.split('-')[1]} · ${comparison.stackReferee?.state === 'checked'
+    ? 'Stack Referee checked' : 'no AI stack check'}`;
 }

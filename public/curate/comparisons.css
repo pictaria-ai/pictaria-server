@@ -231,6 +231,7 @@ button {
 .similarity-indicator[data-phase='checking'] { color: #60a5fa; animation-duration: .8s; }
 .similarity-indicator[data-phase='attention'] { color: #fbbf24; }
 .similarity-indicator[data-phase='limited'] { color: var(--p-muted); }
+.similarity-indicator[data-phase='ai-checked'] { color: var(--p-accent); font-size: 10px; border-width: 2px; }
 :root[data-theme='light'] .similarity-indicator[data-phase='checking'] { color: #2563eb; }
 :root[data-theme='light'] .similarity-indicator[data-phase='attention'] { color: #aa6400; }
 #comparison-similarity { display: flex; align-items: center; gap: 12px; }

@@ -13,6 +13,8 @@ import { AiRequestScheduler } from '../../src/ai/scheduler.mjs';
 import { ImmichClient, ImmichApiError } from '../../src/immich.mjs';
 import { ResponseTooLargeError } from '../../src/fetchWithTimeout.mjs';
 import { stackRefereeImages } from '../../src/curate/stack-referee-images.mjs';
+import { aiBackendKey } from '../../src/curate/ai-limits.mjs';
+import { ProviderRequestError } from '../../src/enrich/providers.mjs';
 
 const png = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=', 'base64');
 const partition = (...groups) => ({ groups: groups.map(ids => ({ ids, reason: 'Same subject and composition.' })) });
@@ -361,3 +363,32 @@ test('groups beyond the discovery window are reached even when earlier work cann
   assert.equal(f.curate.stackReferee.status(last).reason, 'unknown-capability');
   assert.equal(f.calls.length, 0); assert.equal(f.downloads.length, 0);
 }, { count: 0, capability: false }));
+
+test('provider pauses and request allowances have honest card and global status without raw diagnostics', async () => fixture(async f => {
+  await f.run();
+  assert.equal(f.curate.stackReferee.activity().state, 'waiting');
+  const guard = f.repo.curate.aiLimits;
+  const ticket = guard.startProvider(aiBackendKey(f.provider));
+  guard.finish(ticket, new ProviderRequestError('PRIVATE DIAGNOSTICS', { status: 401 }));
+  const view = await f.curate.openView();
+  assert.equal(view.stackRefereeActivity.state, 'paused');
+  assert.equal(view.groups[0].stackReferee.reason, 'provider-auth');
+  assert.doesNotMatch(JSON.stringify(view), /PRIVATE/);
+  const captured = f.curate.stackReferee.capture(f.curate.current.groups[0]);
+  f.repo.db.prepare('INSERT INTO curate_ai_skipped_inputs VALUES(?,?,?)').run('stack', captured.snapshot.inputKey, Date.now());
+  assert.equal(f.curate.stackReferee.status(f.curate.current.groups[0]).reason, 'photo-limit');
+}));
+
+test('a successful badge is withheld during source rebuild and is absent from Decided comparisons', async () => fixture(async f => {
+  await f.run(); f.advance(); await f.run(); await f.curate.refresh();
+  const group = f.curate.current.groups[0];
+  assert.equal(f.curate.stackReferee.status(group).state, 'checked');
+  f.repo.upsertAsset({ id: 'a0', fileCreatedAt: new Date(1_700_000_000_000).toISOString(), checksum: 'changed' });
+  assert.equal(f.curate.stackReferee.status(group).state, 'updated');
+  await f.curate.refresh();
+  assert.notEqual(f.curate.stackReferee.status(f.curate.current.byMember.get('a0')).state, 'checked');
+  f.repo.recordDecision({ assetIds: ['a0'], addTags: ['frame/eligible', 'frame/reviewed'], removeTags: [], action: 'approve' });
+  const view = await f.curate.openView({ section: 'decided' });
+  assert.equal(view.groups[0].stackReferee, null);
+  assert.equal(f.curate.comparison(view.viewId, view.groups[0].id).stackReferee, null);
+}));

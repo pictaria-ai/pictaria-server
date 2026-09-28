@@ -2,7 +2,8 @@ import { CurateClient, request, decisionSummary } from './client.js';
 import { comesAfter } from './order.js';
 import { explanation } from './explanation.js';
 import { PreviewImages } from './preview-images.js';
-import { node, thumbnail, photoCard, groupCard, savedOutcome, outcomeLabel, groupSimilarity, similarityLabel, similarityDetail, similarityIndicator } from './photos.js';
+import { node, thumbnail, photoCard, groupCard, savedOutcome, outcomeLabel, groupSimilarity, similarityDetail, similarityIndicator, groupPresentation, statusIndicator } from './photos.js';
+import { stackRefereePresentation } from './referee-status.js';
 
 const el = (id) => document.getElementById(id);
 const client = new CurateClient();
@@ -185,13 +186,15 @@ function showViewStatus(view) {
   const status = paused ? `Checks paused${progress}` : checking ? `Checking stacks${progress}`
     : metadata?.problem ? 'Photo information paused'
     : metadata?.state === 'refreshing' ? 'Refreshing photo information' : '';
-  el('refinement').textContent = status;
+  const referee = stackRefereePresentation(view.stackRefereeActivity);
+  el('refinement').textContent = [status, referee?.title].filter(Boolean).join(' · ');
   el('refinement').title = [paused ? refinement?.problem : metadata?.problem,
     checking ? 'Remaining checks across all pending photos, including outside this view. Includes queued and in-progress checks. Each check covers nearby photos that may form more than one stack.' : '',
+    referee?.detail ?? '',
   ].filter(Boolean).join(' ');
   const activity = paused ? { state: 'paused' } : refinement?.state === 'searching' || metadata?.state === 'refreshing'
     ? { state: 'checking' } : checking ? { state: 'waiting' } : null;
-  const indicator = similarityIndicator(activity, { warning: paused });
+  const indicator = similarityIndicator(activity, { warning: paused }) ?? (referee ? statusIndicator(referee) : null);
   if (indicator) {
     indicator.title = indicator.ariaLabel = el('refinement').title || (paused ? 'Stack checks paused' : 'Checking pending stacks in the background');
   }
@@ -199,42 +202,47 @@ function showViewStatus(view) {
   if (slot.firstChild?.dataset.phase !== indicator?.dataset.phase) slot.replaceChildren(...(indicator ? [indicator] : []));
   else if (indicator) slot.firstChild.title = slot.firstChild.ariaLabel = indicator.title;
   for (const group of view.groups) {
-    cards.get(group.id)?.updateSimilarity(group.similarity);
-    if (state.comparison?.groupId === group.id) showComparisonSimilarity(group.similarity);
+    cards.get(group.id)?.updateSimilarity(group.similarity, group.stackReferee);
+    if (state.comparison?.groupId === group.id) showComparisonSimilarity(group.similarity, group.stackReferee);
   }
   scheduleUpdates();
 }
-function showComparisonSimilarity(status) {
-  if (state.comparison) state.comparison.similarity = status;
+function showComparisonSimilarity(status, referee = state.comparison?.stackReferee) {
+  if (state.comparison) {
+    state.comparison.similarity = status;
+    state.comparison.stackReferee = referee;
+  }
   // A machine update is for the next view, not an instruction to abandon an
   // inspected comparison. Real scope/input conflicts still use the Save guards.
   if (status?.state === 'updated') status = null;
   else status = groupSimilarity(state.groups.find(group => group.id === state.comparison?.groupId), status);
-  const title = similarityLabel(status);
-  const working = ['waiting', 'checking'].includes(status?.state);
-  const detail = [similarityDetail(status), working
+  const presentation = groupPresentation({ similarity: status, stackReferee: referee });
+  const hasReferee = Boolean(stackRefereePresentation(referee));
+  const title = presentation.title;
+  const working = ['waiting', 'checking'].includes(presentation.phase);
+  const detail = [presentation.detail, hasReferee && similarityDetail(status) ? `Earlier grouping: ${similarityDetail(status)}` : '', working
     ? 'This stack may change after checking. You can still choose which photos to keep.'
-    : status?.uncertain || ['incomplete', 'paused', 'limited', 'unavailable'].includes(status?.state)
+    : !hasReferee && (status?.uncertain || ['incomplete', 'paused', 'limited', 'unavailable'].includes(status?.state))
       ? 'You can still choose which photos to keep.' : ''].filter(Boolean).join(' ');
   for (const id of ['comparison-similarity','photo-similarity']) {
     const target = el(id);
     target.hidden = (!title && !(state.comparison?.ids.length > 1)) || (id === 'photo-similarity' && state.viewerMode === 'single');
-    const signature = JSON.stringify([state.comparison?.id, status]);
+    const signature = JSON.stringify([state.comparison?.id, status, referee]);
     if (target.dataset.status === signature) continue;
     target.dataset.status = signature;
     if (id === 'comparison-similarity') {
-      target.replaceChildren(explanation(state.comparison, 'stack-reason', status ? {
-        title, detail, indicator: similarityIndicator(status),
+      target.replaceChildren(explanation(state.comparison, 'stack-reason', title ? {
+        title, detail, indicator: statusIndicator(presentation),
       } : null));
       continue;
     }
     const copy = node('div'), heading = node('div', undefined, 'check-heading');
     heading.append(node('strong', title || 'Stack comparison'));
     if (state.comparison?.ids.length > 1)
-      heading.append(explanation(state.comparison, 'photo-stack-reason', status ? { title, detail } : null));
+      heading.append(explanation(state.comparison, 'photo-stack-reason', title ? { title, detail } : null));
     copy.append(heading);
     if (detail) copy.append(node('p', detail));
-    const indicator = similarityIndicator(status);
+    const indicator = statusIndicator(presentation);
     target.replaceChildren(...(indicator ? [indicator] : []), copy);
     target.classList.toggle('check-pending', working);
   }

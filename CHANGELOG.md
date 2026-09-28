@@ -7,6 +7,14 @@ All notable changes to Pictaria Server are documented here. This project follows
 
 ### Development
 
+- Connected Stack Referee status to Curate cards, comparisons and background
+  activity: named progress, quiet unavailable explanations and a current-result
+  AI badge, without changing open photos or draft choices. The server now
+  resolves the previously evaluated Venice model at a ten-image ceiling;
+  unverified models/endpoints remain unavailable. Both referee availability
+  flags stay off pending real-provider and visual acceptance. See
+  [Stack Referee implementation](docs/CURATE-STACK-REFEREE.md).
+
 - Connected the Stack Referee worker to background group discovery, bounded
   preview preparation and saved partitions. Applicable results survive restart
   and are reused by split children; open comparisons retain their membership.

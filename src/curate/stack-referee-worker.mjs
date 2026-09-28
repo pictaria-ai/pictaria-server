@@ -5,6 +5,7 @@ import { selectStackReferee } from './ai-policy.mjs';
 import { STACK_REFEREE_CONTRACT, stackRefereeSupport, createStackRefereeRequest } from './stack-referee-contract.mjs';
 import { stackRefereeImages, transientStackPreviewFailure } from './stack-referee-images.mjs';
 import { saveStackCheck } from './stack-referee-results.mjs';
+import { aiBackendKey } from './ai-limits.mjs';
 
 export const STACK_PREVIEW_PAUSE_MS = 3 * 60_000;
 
@@ -36,8 +37,32 @@ export class StackRefereeWorker {
     }, this.lifecycle.availability);
   }
   capture(group) { return this.lifecycle.inputs.capture({ role: 'stack', groupId: group.id, contract: STACK_REFEREE_CONTRACT }); }
+  blockingStatus(provider) {
+    if (!this.previewsReady()) return { state: 'paused', reason: 'preview-cooldown' };
+    const guard = this.curate.store.aiLimits.providerStatus(aiBackendKey(provider));
+    if (guard.state === 'paused') return { state: 'paused', reason: `provider-${guard.reason}` };
+    if (guard.state === 'cooldown') return { state: 'paused', reason: 'provider-cooldown' };
+    if (guard.state === 'busy') return { state: 'waiting', reason: 'shared-provider' };
+    return null;
+  }
+  activeStatus() {
+    const scheduling = this.lifecycle.execution.schedulingStatus();
+    return scheduling.state === 'waiting' ? { state: 'waiting', reason: 'shared-provider' } : { state: 'checking' };
+  }
+  activity() {
+    if (!this.enabled()) return { state: 'off' };
+    const active = this.lifecycle.active?.snapshot.role === 'stack';
+    const queued = [...this.lifecycle.pending.values()].filter(job => job.snapshot.role === 'stack').length;
+    if (!active && !queued) return this.previewsReady() ? { state: 'idle' } : { state: 'paused', reason: 'preview-cooldown' };
+    if (active) return { ...this.activeStatus(), queued };
+    try { return { ...(this.blockingStatus(this.lifecycle.resolveProvider()) ?? { state: 'waiting' }), queued }; }
+    catch { return { state: 'paused', reason: 'configuration', queued }; }
+  }
   status(group) {
     const current = this.curate.current?.byId.get(group.id);
+    // Do not certify cached success while a newer source projection is pending.
+    if (this.curate.current?.generation !== this.curate.store.generation() ||
+        this.curate.store.prepare('SELECT 1 FROM curate_dirty LIMIT 1').get()) return { state: 'updated' };
     if (current?.stackCheck) return current.stackCheck;
     if (!current) return { state: 'updated' };
     if (!this.enabled()) return { state: 'off' };
@@ -53,11 +78,14 @@ export class StackRefereeWorker {
       if (this.lifecycle.inputs.preparationFailures(snapshot) >= 2) return { state: 'incomplete', reason: 'preparation-failed' };
       const reason = this.lifecycle.inputs.outcome(snapshot, key);
       if (reason) return { state: 'incomplete', reason };
-      if (this.lifecycle.active?.snapshot.inputKey === snapshot.inputKey) return { state: 'checking' };
+      if (this.lifecycle.active?.snapshot.inputKey === snapshot.inputKey) return this.activeStatus();
       const eligibility = this.curate.store.aiAttempts.eligibility('stack', snapshot.inputKey);
       if (['settled', 'exhausted'].includes(eligibility)) return { state: 'incomplete', reason: 'attempts-finished' };
+      if (this.curate.store.prepare('SELECT 1 FROM curate_ai_skipped_inputs WHERE role=? AND input_key=?').get('stack', snapshot.inputKey))
+        return { state: 'incomplete', reason: 'photo-limit' };
+      const blocked = this.blockingStatus(provider);
+      if (blocked) return blocked;
     } catch { return { state: 'incomplete', reason: 'configuration' }; }
-    if (!this.previewsReady()) return { state: 'waiting', reason: 'preview-cooldown' };
     return { state: 'waiting' };
   }
   async discover() {
