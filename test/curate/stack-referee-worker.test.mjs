@@ -392,3 +392,71 @@ test('a successful badge is withheld during source rebuild and is absent from De
   assert.equal(view.groups[0].stackReferee, null);
   assert.equal(f.curate.comparison(view.viewId, view.groups[0].id).stackReferee, null);
 }));
+
+test('unrelated imports and Save & next preserve checked badges before the background rebuild', async () => fixture(async f => {
+  for (let g = 0; g < 4; g++) for (let p = 0; p < 2; p++)
+    f.add(`00000000-0000-4000-8000-${String(g * 2 + p + 1).padStart(12, '0')}`, g * 600 + p);
+  f.answer = partition(['p1', 'p2']);
+  await f.run(); f.advance();
+  for (let g = 0; g < 4; g++) await f.run();
+  const view = await f.curate.openView();
+  assert.equal(view.groups.length, 4);
+  const states = () => f.curate.page(view.viewId).groups.map(g => g.stackReferee.state);
+  assert.deepEqual(states(), Array(4).fill('checked'));
+  f.add('unrelated', 5 * 86400);
+  assert.deepEqual(states(), Array(4).fill('checked'), 'a distant dirty photo does not hide any badge');
+  f.repo.curate.flushIds(['unrelated']);
+  assert.notEqual(f.curate.current.generation, f.repo.curate.generation());
+  assert.deepEqual(states(), Array(4).fill('checked'), 'a projected distant photo does not hide any badge');
+  const first = f.curate.comparison(view.viewId, view.groups[0].id);
+  const { expiresAt, ...operation } = await f.curate.issueDecision(first.id);
+  await f.curate.applyDecision({ ...operation, outcomes: Object.fromEntries(first.ids.map(id => [id, 'approve'])) });
+  const published = f.curate.current;
+  const next = f.curate.comparison(view.viewId, view.groups[1].id);
+  assert.equal(next.stackReferee.state, 'checked');
+  assert.equal(f.curate.current, published, 'opening the next comparison did not rebuild the library');
+  assert.equal(f.calls.length, 4, 'status reads never repeat checks');
+}, { count: 0 }));
+
+test('split children keep valid checks through sibling decisions and role-off', async () => fixture(async f => {
+  await f.run(); f.advance(); await f.run(); await f.curate.refresh();
+  const group = f.curate.current.byMember.get('a0');
+  f.repo.recordDecision({ assetIds: ['a1'], addTags: ['frame/eligible'], removeTags: [], action: 'approve' });
+  assert.equal(f.curate.stackReferee.status(group).state, 'checked');
+  f.config.curateStackRefereeEnabled = false;
+  f.add('unrelated', 5 * 86400);
+  assert.equal(f.curate.stackReferee.status(group).state, 'checked');
+  assert.equal(f.calls.length, 1);
+}));
+
+test('disabled referee without saved advice stays off during unrelated or local changes', async () => fixture(async f => {
+  await f.curate.refresh();
+  const group = f.curate.current.groups[0];
+  f.add('unrelated', 5 * 86400);
+  assert.equal(f.curate.stackReferee.status(group).state, 'off');
+  f.repo.curate.flushIds(['unrelated']);
+  assert.equal(f.curate.stackReferee.status(group).state, 'off');
+  f.repo.upsertAsset({ id: 'a0', checksum: 'changed' });
+  assert.equal(f.curate.stackReferee.status(group).state, 'off');
+}, { availability: CURATE_AI_AVAILABILITY }));
+
+for (const change of ['image', 'availability', 'separation', 'nearby'])
+  test(`${change} changes withhold a saved badge before the next rebuild, including split siblings`, async () => fixture(async f => {
+    await f.run(); f.advance(); await f.run(); await f.curate.refresh();
+    const group = f.curate.current.byMember.get('a0');
+    if (change === 'image') f.repo.upsertAsset({ id: 'a1', checksum: 'changed',
+      fileCreatedAt: new Date(1_700_000_000_000 + 5 * 86400000).toISOString() });
+    if (change === 'availability') f.repo.upsertAsset({ id: 'a1', isOffline: true });
+    if (change === 'nearby') f.add('nearby', 60); // Beyond the old 15-second scope, inside the candidate span.
+    if (change === 'separation') {
+      const view = await f.curate.openView();
+      const sibling = f.curate.comparison(view.viewId, f.curate.current.byMember.get('a1').id);
+      f.repo.curate.separate(sibling.id, sibling.ids.map(id => [id]));
+    }
+    const published = f.curate.current;
+    assert.equal(f.curate.stackReferee.status(group).state, 'updated');
+    assert.equal(f.curate.current, published, 'status does not change the open grouping');
+    f.config.curateStackRefereeEnabled = false;
+    assert.equal(f.curate.stackReferee.status(group).state, 'updated', 'role-off does not certify stale evidence');
+    assert.equal(f.calls.length, 1);
+  }));

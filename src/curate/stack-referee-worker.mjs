@@ -4,7 +4,7 @@ import { enrichmentProviderConfiguration } from '../enrich/providers.mjs';
 import { selectStackReferee } from './ai-policy.mjs';
 import { STACK_REFEREE_CONTRACT, stackRefereeSupport, createStackRefereeRequest } from './stack-referee-contract.mjs';
 import { stackRefereeImages, transientStackPreviewFailure } from './stack-referee-images.mjs';
-import { saveStackCheck } from './stack-referee-results.mjs';
+import { saveStackCheck, stackCheckCurrent } from './stack-referee-results.mjs';
 import { aiBackendKey } from './ai-limits.mjs';
 
 export const STACK_PREVIEW_PAUSE_MS = 3 * 60_000;
@@ -60,12 +60,10 @@ export class StackRefereeWorker {
   }
   status(group) {
     const current = this.curate.current?.byId.get(group.id);
-    // Do not certify cached success while a newer source projection is pending.
-    if (this.curate.current?.generation !== this.curate.store.generation() ||
-        this.curate.store.prepare('SELECT 1 FROM curate_dirty LIMIT 1').get()) return { state: 'updated' };
-    if (current?.stackCheck) return current.stackCheck;
-    if (!current) return { state: 'updated' };
+    if (current?.stackCheck) return stackCheckCurrent(this.curate.store, current.stackCheck)
+      ? current.stackCheck : { state: 'updated' };
     if (!this.enabled()) return { state: 'off' };
+    if (!current) return { state: 'updated' };
     const selection = this.selection(group);
     if (!selection.selected) return { state: 'skipped', reason: selection.reason };
     const captured = this.capture(group);

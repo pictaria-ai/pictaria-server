@@ -1,7 +1,31 @@
 import { fingerprint, validateAdvice } from './contracts.mjs';
 import { STACK_REFEREE_CONTRACT } from './stack-referee-contract.mjs';
+import { CANDIDATE_LIMITS } from './candidate.mjs';
 
 const same = (a, b) => a.length === b.length && a.every((id, i) => id === b[i]);
+
+function membersCurrent(store, record) {
+  const saved = record.stackCheck;
+  return Boolean(saved && same(record.ids, saved.members.map(m => m[0])) &&
+    saved.members.every(([id, key, availability, separation]) => {
+      const p = store.photo(id);
+      return p && p.inputKey === key && p.availability === availability && store.separationKey(id) === separation;
+    }));
+}
+
+// A status read can happen between a decision/import and the next rebuild.
+// Validate the original bounded check, including siblings of split children,
+// without treating a library-wide generation change as a changed AI input.
+export function stackCheckCurrent(store, check) {
+  const row = store.prepare("SELECT json FROM curate_advice WHERE role='check' AND input_key=? AND schema_version=?")
+    .get(check.inputKey, STACK_REFEREE_CONTRACT);
+  if (!row) return false;
+  const record = JSON.parse(row.json);
+  // Project just these members, as other advice reads do. Human decisions can
+  // subtract members without changing their image/evidence signatures.
+  store.flushIds(record.ids);
+  return membersCurrent(store, record) && !store.pendingScopeChanges(record.ids, CANDIDATE_LIMITS.spanMs);
+}
 
 // Extend the existing versioned advice JSON, not a second job/history store.
 // Acceptance runs inside the executor's current-input transaction.
@@ -33,13 +57,9 @@ export function applyStackChecks(store, result, stacks = true) {
     JOIN curate_photos p ON p.asset_id=m.asset_id
     WHERE a.role='check' AND a.schema_version=? AND p.state='undecided'`).iterate(STACK_REFEREE_CONTRACT);
   for (const row of rows) {
-    const record = JSON.parse(row.json), saved = record.stackCheck;
-    if (!saved || !same(record.ids, saved.members.map(m => m[0]))) continue;
+    const record = JSON.parse(row.json);
+    if (!membersCurrent(store, record)) continue;
     const ids = new Set(record.ids);
-    if (saved.members.some(([id, key, availability, separation]) => {
-      const p = store.photo(id);
-      return !p || p.inputKey !== key || p.availability !== availability || store.separationKey(id) !== separation;
-    })) continue;
     const groups = new Set(record.ids.map(id => byMember.get(id)).filter(Boolean));
     if ([...groups].some(g => g.ids.some(id => !ids.has(id)))) continue;
     validateAdvice(record.ids, record.result, 'check');

@@ -190,9 +190,14 @@ reset an unchanged input's automatic allowance.
   page, through the existing header activity slot. This reports admitted work,
   not an invented remaining-library total. Cards use their existing date/progress
   line, so statuses do not grow them. Open comparisons keep photos and drafts
-  while their status changes. Source changes awaiting rebuild withhold old AI
-  badges, and replaced memberships cannot inherit a new result. Decided photos
-  carry no pending-referee status.
+  while their status changes. Badge applicability checks the saved check's own
+  member signatures (including split siblings) and pending nearby source changes,
+  rather than the library-wide rebuild generation. Unrelated imports or decisions
+  do not hide an unchanged stack's badge during Save & next. Changed inputs,
+  availability or separations withhold the badge; replaced memberships cannot
+  inherit a new result. Switching the role off retains valid completed checks;
+  unchecked groups stay off without changing their explanation during imports.
+  Decided photos carry no pending-referee status.
 - **Why?** retains the deterministic explanation and adds the applicable model
   reason as plain text. A current checked grouping no longer says that no AI
   check occurred. A changed grouping falls back to the saved-view explanation.
@@ -207,6 +212,12 @@ deployment is part of this development slice.
 Before activation, verify the following with approved real-photo inputs and
 the actual provider/model paths we intend to support:
 
+- Measure coverage on the test library after deterministic grouping settles:
+  count pending uncertain stacks and photos in the 2–10, 11–30 and over-30 size
+  bands, with the percentage of uncertain stacks covered by the registered
+  model. Keep pending deterministic work and supported compositions skipped by
+  the default scope separate. This is an offline inventory, not extra AI calls;
+  report counts only and use it to assess the ten-image ceiling before activation.
 - A non-contiguous partition with 20–30 images where the confirmed model limit
   permits it. Valid membership JSON does not prove correct image-to-alias
   association. Never exceed a known model limit to satisfy this gate; a smaller
