@@ -8,12 +8,14 @@ will recommend photos within the resulting stacks.
 
 ## Current development state
 
-PIC-370 has started with the request/response contract in
-[`stack-referee-contract.mjs`](../src/curate/stack-referee-contract.mjs).
-This module is exercised with synthetic providers through the existing scheduler,
-changing-input lifecycle, executor and advice validator. It is **not connected to
-background discovery or the review page**. Both new AI availability flags remain
-false; this change alone submits no requests and changes no stacks.
+PIC-370 now has a request/response contract and a background worker composed with
+the existing scheduler, changing-input lifecycle, executor and advice validator.
+The worker discovers current groups, prepares bounded previews, saves accepted
+partitions and publishes them through normal grouping rebuilds and stable views.
+Tests exercise this path with synthetic providers and injected comparative
+capabilities. **Both production availability flags remain false.** The default
+capability resolver supplies no supported models yet. No new model request or
+changed stack is enabled by this development slice.
 
 The [shared AI guide](CURATE-AI.md) defines scheduling, settings, attempts and
 human authority. The following agreed behavior remains the integration target:
@@ -63,8 +65,10 @@ contracts, not the correctness of a model's visual judgment.
 `stackRefereeSupport` requires explicit server-supplied comparative capability
 and an image limit matching the resolved provider and model. The presence of an
 `analyzeImages` method or a successful single-image connection verification is
-insufficient. Unknown capability cannot submit a request. This slice does not
-implement a capability registry, discovery probe or user override.
+insufficient. Unknown capability cannot submit a request. The worker accepts a
+server-owned resolver; its default returns unknown. The supported-model registry,
+live acceptance and activation remain pending. There is no paid capability
+probe or user-supplied capability override.
 
 The contract and lifecycle share an overall 30-photo automation limit. Larger
 current stacks return `input-limit` / `too-many-images` with `limit: 30`, including
@@ -75,16 +79,20 @@ limit. A missing or no-longer-current group still returns `stale`.
 
 Within that envelope, exceeding a confirmed model limit remains
 `unsupported-size`, distinct from unknown capability or the overall scope cap.
-The future worker must check capability and size **before offering work** and
-retain a settled outcome so rediscovery does not repeatedly prepare/download
-unsupported stacks. Only a confirmed model-size limit within the overall
+The worker checks capability and size **before offering work** and retains a
+settled outcome so rediscovery does not repeatedly prepare/download unsupported
+stacks. Only a confirmed model-size limit within the overall
 envelope qualifies for the separate labeled Photo Referee batching exception.
 
 `createStackRefereeRequest` takes already-prepared images inside the lifecycle's
 preparation phase. It enforces 2–30 images, 2 MiB per image and 24 MiB total raw
 bytes, as well as the confirmed model limit. It never pads, truncates, batches,
-downloads or falls back. The worker must also enforce these limits while fetching
-and preparing renditions; this in-memory boundary is not a download limit.
+downloads or falls back. The worker also enforces these limits while fetching
+previews, with a 30-second deadline for the complete preparation phase and
+checkpoints between images. Downloads are sequential and use the existing Immich
+streaming byte reader. The client connection is captured for preparation; a
+changed Immich connection makes an in-flight result stale. No originals,
+thumbnail fallback, conversion process or repeated download pass is used.
 JPEG, PNG and WebP are accepted; LM Studio must receive an already prepared
 JPEG/PNG to avoid an unbounded conversion inside its transport.
 
@@ -102,26 +110,50 @@ attempt accounting and retries; no Enrich validation-retry wrapper is used.
 exhaustive-partition validator. Duplicated, omitted or invented IDs and unexpected
 keeper/rank fields are rejected. Only valid aliases are mapped back to asset IDs.
 Member and group presentation order are normalized to input order without
-repairing membership. The model's concise reasons are returned as untrusted
-display text for the existing escaped rendering path.
+repairing membership. The model's concise reasons are retained as untrusted
+display text for the existing escaped rendering path. A waiting retry retains
+only validator metadata, not the previous request's image buffers.
 
 The request fingerprint is provenance, **not** a replacement for the lifecycle's
 input/attempt key. Changing the model or request byte identity must not silently
 reset an unchanged input's automatic allowance.
 
-## Next integration slice
+## Background work and saved results
 
-Connect model-capability resolution and bounded preview preparation to current
-stack discovery; persist compact accepted partition/provenance and terminal
-per-input outcomes; apply still-current partitions during regrouping; and expose
-the existing working/checked/limited-evidence states in the UI. Include restart,
-split-child reuse, stale-input, toggle, request-limit and human-view stability
-coverage before turning on availability. Scope selection, open-comparison
-deferral and next-five priority should reuse the shared policy and lifecycle.
+- Discovery rotates over 32 current groups per tick, additionally considering
+  up to 32 groups with browser attention. It yields between small work slices.
+  Unsupported/finished early groups do not prevent later groups from admission.
+  Browser attention only changes priority; no browser is needed to discover work.
+  Open comparisons defer new requests. The shared lifecycle owns the 30-second
+  settling window, two-attempt limit, upcoming-comparison priority and fairness.
+- Unsupported capability and failed preparation retain a compact terminal
+  reason in the existing input/accounting JSON. Repeated discovery and restart
+  do not repeat downloads. A changed connection/model capability can remove a
+  non-paid admission limitation, but does not reset attempt or photo budgets.
+  Oversized scopes are rejected cheaply before preparation. No repair queue or
+  automatic retry timer is created for terminal outcomes.
+- Accepted partitions and prepared-request provenance extend the existing
+  versioned advice JSON. Save and attempt completion share one transaction.
+  Raw responses, image bytes and credentials are not stored. Existing overlap
+  replacement and protected accounting cleanup remain in use; no new database
+  table or migration is required.
+- A read-only grouping worker applies applicable partitions after deterministic
+  grouping. It can split a current group but cannot join groups. Existing human
+  separations, changed photo inputs and newly joined members invalidate the old
+  check. Human decisions can subtract members without rechecking the remaining
+  children. Role/scope toggles do not erase an applicable result.
+- The deterministic cache retains its own pre-AI groups. It must never learn an
+  AI partition as deterministic evidence. Open views retain their original
+  membership; the new composition is published for the existing refresh/update
+  path. Cards/comparisons expose a separate `stackReferee` status, while the final
+  visual status integration remains pending.
 
-Preparation failures and unsupported inputs also need a settled outcome at the
-worker boundary so rediscovery cannot repeatedly prepare the same failing stack.
-No new paid validation or deployment is part of this contract-only slice.
+## Before activation
+
+Finish supported-model capability resolution and connect the recorded statuses
+to the review UI before enabling the Stack Referee. The Photo Referee is a
+separate implementation. No new paid validation or deployment is part of this
+worker development slice.
 
 Before activation, verify the following with approved real-photo inputs and
 the actual provider/model paths we intend to support:

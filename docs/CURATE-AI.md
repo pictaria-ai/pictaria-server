@@ -379,15 +379,17 @@ request/advice applicability still needs integration before activation.
 
 ## Changing inputs and protected cleanup (PIC-346)
 
-PIC-370's first [Stack Referee request contract](CURATE-STACK-REFEREE.md) now
-implements the grouping-only prompt, explicit capability/image envelope,
-one-call transport boundary and strict partition validation. It is not yet
-connected to real group discovery, partition publication or worker availability.
+PIC-370's [Stack Referee worker](CURATE-STACK-REFEREE.md) now connects group
+discovery, bounded preview preparation, the grouping-only request, saved
+partitions and rebuild publication. Unsupported/preparation outcomes settle in
+the existing input JSON; accepted advice includes compact provenance. No new
+database migration is needed. Supported-model capability resolution, real-photo
+acceptance and final UI status integration still precede activation.
 
-The server composes `CurateAiLifecycle` with its existing service, executor and
-shared scheduler. This is infrastructure for the upcoming role workers, not an
-active source of AI requests. No worker discovers/offers real groups yet, and
-both availability flags remain false.
+The server composes `CurateAiLifecycle` and the Stack Referee adapter with its
+existing service, executor and shared scheduler. Both availability flags remain
+false, so this is not an active source of AI requests. Tests explicitly inject
+availability and matching model capability to exercise the integrated path.
 
 - A role adapter offers a current group and versioned prompt/schema contract,
   optionally selecting an actionable Photo Referee batch. The lifecycle derives

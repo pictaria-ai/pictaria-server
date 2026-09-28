@@ -21,6 +21,7 @@ import { TagWriteCoordinator } from './enrich/tagWriteCoordinator.mjs';
 import { AiTagSyncService } from './enrich/aiTagSync.mjs';
 import { CaptionWritebackService } from './enrich/captionWriteback.mjs';
 import { RefereeService } from './enrich/refereeService.mjs';
+import { StackRefereeWorker } from './curate/stack-referee-worker.mjs';
 import { AiRequestScheduler } from './ai/scheduler.mjs';
 import { CurateAiExecution } from './curate/ai-execution.mjs';
 import { CurateAiLifecycle } from './curate/ai-lifecycle.mjs';
@@ -212,6 +213,7 @@ curate.ai = new CurateAiExecution({ attempts: repo.curate.aiAttempts, limits: re
   stopped: () => lifecycle.stopped, scheduler: aiScheduler });
 curate.aiLifecycle = new CurateAiLifecycle({ curate, execution: curate.ai,
   resolveProvider: () => createCurateAiProvider(config), availability: CURATE_AI_AVAILABILITY });
+curate.stackReferee = new StackRefereeWorker(curate);
 const enrichRunner = new EnrichJobRunner({ repo, immich, taxonomy, config, profiles, aiScheduler, aiConnections, onTagsQueued: () => aiTagSync.wake() });
 const enrichScheduler = new EnrichScheduler({ runner: enrichRunner, repo, config });
 const referee = new RefereeService({ repo, immich, review, enrichRunner, config, aiScheduler, aiConnections, log: (message) => console.log(`[Pictaria] ${message}`) });

@@ -227,10 +227,10 @@ export class ImmichClient {
   // ceiling) can pass maxBytes: past it the download aborts with a
   // ResponseTooLargeError instead of buffering. Without it the default
   // response ceiling applies.
-  async getAssetThumbnail(assetId, size = 'preview', { maxBytes } = {}) {
+  async getAssetThumbnail(assetId, size = 'preview', { maxBytes, signal } = {}) {
     return this.requestBytes(
       `/assets/${encodeURIComponent(assetId)}/thumbnail?size=${encodeURIComponent(size)}`,
-      maxBytes === undefined ? {} : { maxBytes },
+      { ...(maxBytes === undefined ? {} : { maxBytes }), ...(signal ? { signal } : {}) },
     );
   }
 
@@ -290,12 +290,13 @@ export class ImmichClient {
     return text ? JSON.parse(text) : null;
   }
 
-  async requestBytes(path, { maxBytes = DEFAULT_MAX_RESPONSE_BYTES } = {}) {
+  async requestBytes(path, { maxBytes = DEFAULT_MAX_RESPONSE_BYTES, signal } = {}) {
     const { buffer, contentType } = await this.#request(path, {
       method: 'GET',
       body: null,
       accept: 'image/*, application/octet-stream',
       maxBytes,
+      signal,
     });
     return {
       data: buffer,

@@ -112,6 +112,25 @@ export class CurateAiInputs {
       .run(snapshot.role, snapshot.inputKey, JSON.stringify(snapshot), this.now());
   }
 
+  outcome(snapshot, configurationKey) {
+    const row = this.store.prepare('SELECT json FROM curate_ai_inputs WHERE role=? AND input_key=?')
+      .get(snapshot.role, snapshot.inputKey);
+    const outcome = row && JSON.parse(row.json).outcome;
+    return outcome?.configurationKey === configurationKey ? outcome.reason : null;
+  }
+
+  // Compact terminal preparation/support result. No retry time or repair queue.
+  // Configuration changes may remove a non-paid admission limitation, but never
+  // alter the separate exact-input attempt or per-photo accounting identities.
+  settle(snapshot, configurationKey, reason) {
+    if (!this.current(snapshot)) return false;
+    const json = JSON.stringify({ ...snapshot, outcome: { configurationKey, reason } });
+    this.store.prepare(`INSERT INTO curate_ai_inputs VALUES(?,?,?,?)
+      ON CONFLICT(role,input_key) DO UPDATE SET json=excluded.json`)
+      .run(snapshot.role, snapshot.inputKey, json, this.now());
+    return true;
+  }
+
   protected(snapshot, liveKeys, comparisons) {
     if (liveKeys.has(snapshot.inputKey)) return true;
     const ids = [...snapshot.ids, ...snapshot.contextIds];
