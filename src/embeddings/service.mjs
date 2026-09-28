@@ -119,10 +119,13 @@ export class EmbeddingService {
   }
 }
 
-// Resource policy: embedding work exists only inside an Enrich run and only for
-// a photo that run is analyzing. At most one request is in flight; it starts
-// beside the photo's vision call and must finish within settleMs after that
-// photo's enrichment, or it is aborted. Nothing outlives its photo or the run.
+// Resource policy: embedding work exists only inside an Enrich run (one run at
+// a time) and only for a photo that run is analyzing. At most one request is
+// in flight; it starts beside the photo's vision call and must finish within
+// settleMs after that photo's enrichment, or it is aborted. Nothing outlives
+// its photo or the run. The machine-learning service is a different origin
+// from every vision provider, so it is its own resource in the AI scheduler's
+// terms; a future embed-only backfill must share one server-wide lane here.
 class EmbeddingSession {
   constructor(service, { url, model, log, signal }) {
     Object.assign(this, { service, url, model, log });
@@ -188,7 +191,7 @@ class EmbeddingSession {
   // never rejects, or null when the photo is left without a vector. With the
   // preview bytes in hand, an unchanged vector is recognised exactly.
   embed({ assetId, image = null, loadImage = null }) {
-    if (this.closed || this.stopped) { this.counts.paused++; return null; }
+    if (this.closed || this.stopped || this.signal.aborted) { this.counts.paused++; return null; }
     if (!this.space) { this.counts.waiting++; return null; }
     if (this.request) { this.counts.busy++; return null; }
     let source, imageSha256 = null;

@@ -392,3 +392,18 @@ test('a known model returning the wrong number of dimensions is rejected before 
     assert.equal(repo.db.prepare('SELECT COUNT(*) AS n FROM embedding_spaces').get().n, 0);
   });
 });
+
+test('no new embedding starts once the run has been cancelled', async () => {
+  await withService(async ({ repo, ml, service }) => {
+    addAssets(repo, 'a1');
+    const run = new AbortController();
+    const session = service.session({ signal: run.signal });
+    await session.start();
+    const before = ml.predictions();
+    run.abort();
+    assert.equal(session.embed({ assetId: 'a1', image: photo('a1') }), null);
+    assert.equal(session.counts.paused, 1);
+    await session.close({ cancelled: true });
+    assert.equal(ml.predictions(), before);
+  });
+});
