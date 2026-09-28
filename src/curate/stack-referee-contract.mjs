@@ -58,6 +58,22 @@ function reject(code) {
   throw new CurateError('Stack Referee request is not supported for these inputs.', code, 400);
 }
 
+// Separate closure: a queued retry may retain its validator/provenance, but
+// must not retain the previous request's image buffers while waiting its turn.
+function partitionValidator(ids, aliases, provenance) {
+  const byAlias = new Map(aliases.map((alias, i) => [alias, ids[i]]));
+  const position = new Map(ids.map((id, i) => [id, i]));
+  return answer => {
+    const checked = validateAdvice(aliases, answer, 'check');
+    const result = { groups: checked.groups.map(group => ({
+      ids: group.ids.map(alias => byAlias.get(alias)).sort((a, b) => position.get(a) - position.get(b)),
+      reason: group.reason.trim(),
+    })).sort((a, b) => position.get(a.ids[0]) - position.get(b.ids[0])) };
+    validateAdvice(ids, result, 'check');
+    return { result, provenance: structuredClone(provenance) };
+  };
+}
+
 // Construct inside the lifecycle's preparation callback, after its checkpoint.
 // Images must already be fetched with bounded reads. No download, conversion,
 // fallback, retry, persistence or activation occurs here. The returned submit
@@ -99,8 +115,6 @@ export function createStackRefereeRequest({ provider, capability, images, inputK
   // Request provenance is distinct from the lifecycle's retry identity. A model
   // change must not mint a fresh automatic allowance for unchanged photo inputs.
   provenance.requestKey = fingerprint(provenance);
-  const byAlias = new Map(aliases.map((alias, i) => [alias, ids[i]]));
-  const position = new Map(ids.map((id, i) => [id, i]));
   return Object.freeze({
     get provenance() { return structuredClone(provenance); },
     async submit() {
@@ -109,15 +123,6 @@ export function createStackRefereeRequest({ provider, capability, images, inputK
       const answer = await provider.analyzeImages(prepared, prompt);
       return answer.normalizedOutput;
     },
-    validate(answer) {
-      const checked = validateAdvice(aliases, answer, 'check');
-      const result = { groups: checked.groups.map(group => ({
-        ids: group.ids.map(alias => byAlias.get(alias)).sort((a, b) => position.get(a) - position.get(b)),
-        reason: group.reason.trim(),
-      })).sort((a, b) => position.get(a.ids[0]) - position.get(b.ids[0])) };
-      // Normalize presentation order only, never membership or missing fields.
-      validateAdvice(ids, result, 'check');
-      return { result, provenance: structuredClone(provenance) };
-    },
+    validate: partitionValidator(ids, aliases, provenance),
   });
 }
