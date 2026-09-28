@@ -138,6 +138,8 @@ function statusError(status, text) {
   let detail = '';
   try { detail = structuredUpstreamDiagnostic(JSON.parse(text), { maxBytes: 200 }); } catch { /* plain-text body */ }
   const suffix = detail ? ` (${detail})` : '';
+  // Immich answers 400 only for an empty or zero-sized image. An undecodable
+  // image, an unknown model name and a failed model load are all a bare 500.
   if (status === 400) {
     return new EmbeddingServiceError(`The machine-learning service could not read this image${suffix}.`, 'ml_image_rejected',
       { status, service: false });
@@ -150,7 +152,7 @@ function statusError(status, text) {
   }
   if (status === 500) {
     return new EmbeddingServiceError(
-      `The machine-learning service could not run this model${suffix}. Check the model name; first use downloads it, which needs internet access.`,
+      `The machine-learning service could not process the request${suffix}. Check the model name; a model's first use downloads it, which needs internet access.`,
       'ml_model_failed', { status });
   }
   if ([502, 503, 504].includes(status)) {

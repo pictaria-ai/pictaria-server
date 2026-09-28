@@ -121,7 +121,15 @@ of it as possible:
   array is also accepted).
 
 Immich's own server sends this same request, and it is identical in Immich
-2.7.5, 3.1.0, 3.2.2 and `main` (source-checked September 27, 2026). The
+2.7.5, 3.1.0, 3.2.2 and `main` (source-checked September 27, 2026). A live
+check against Immich **v3.2.0** with `bin/ml-probe.mjs` confirmed it on
+September 27, 2026:
+
+- 512-dimension unit vectors from `ViT-B-32__openai`;
+- bit-identical repeats;
+- about 0.2–0.3 s per synthetic preview over a VPN.
+
+An undecodable image and an unknown model name both return a bare HTTP 500. The
 *vectors* can still change between releases: `main` changes CLIP resizing and
 cropping, so the same model name produces different embeddings. Pictaria
 detects that with a synthetic calibration image and starts a new embedding

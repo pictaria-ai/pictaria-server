@@ -1156,8 +1156,10 @@ public API; see [Immich compatibility](IMMICH-COMPATIBILITY.md#machine-learning-
 - The photo's enrichment never depends on it. A slow, failing or unreachable
   service leaves photos enriched normally without embeddings. Three consecutive
   service failures, or three answers that arrive too late, pause the step for
-  the rest of the run. A photo the service cannot read counts as one failure
-  without pausing anything.
+  the rest of the run. Immich creates its previews itself, so an unreadable
+  preview should not occur. If one does, the service answers with the same
+  generic server error it uses for model failures, and it counts toward that
+  pause.
 - A database error while reading or saving embeddings is treated as a storage
   problem rather than a machine-learning one. The step stops for the run and
   says so in the run log and the server log, and Settings shows the reason.
@@ -1210,7 +1212,12 @@ gradients and a fine checkerboard, so crop, resampling, normalization and
 channel-order changes all move its vector. Pictaria compares the result with
 the calibration stored for each earlier set. `bin/ml-probe.mjs` measures, on a
 real service, how far each kind of change moves the vector compared with
-repeat noise:
+repeat noise.
+
+On Immich v3.2.0 with `ViT-B-32__openai`, repeated calls returned identical
+vectors. Changing a single preprocessing step scored between 0.99885 (nearest
+resampling) and 0.95012 (squash instead of crop), all below the 0.9995 match
+threshold. The comparison works like this:
 
 - Near-identical (cosine similarity ≥ 0.9995) continues the matching set.
 - Anything else starts a new *embedding space*, and the log says so.

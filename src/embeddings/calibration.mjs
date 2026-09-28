@@ -10,8 +10,12 @@ import { crc32, deflateSync } from 'node:zlib';
 // the pixels only together with CALIBRATION_VERSION.
 export const CALIBRATION_VERSION = 1;
 
-// Repeated inference on one host is effectively exact; cross-runtime noise is
-// far smaller than a preprocessing change. Validated against live services.
+// Measured with bin/ml-probe.mjs against Immich v3.2.0 (ViT-B-32__openai,
+// 2026-09-27): repeat calls were bit-identical, and single-step changes scored
+// nearest resampling 0.99885, bilinear 0.99770, R/B swap 0.98783, SigLIP
+// normalization 0.97653 and squash-instead-of-crop 0.95012. The threshold sits
+// between exact repeats and the smallest material change, leaving room for
+// cross-runtime floating-point noise.
 export const CALIBRATION_MATCH = 0.9995;
 
 const WIDTH = 384, HEIGHT = 256;

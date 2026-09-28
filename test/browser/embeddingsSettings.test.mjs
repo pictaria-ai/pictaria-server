@@ -46,7 +46,7 @@ test('image embeddings are configured in Settings → Enrich, tested with draft 
     // A bad model name is reported without a save.
     await page.evaluate(`${input('embeddingsModel')}.value = 'Unknown__model'; document.getElementById("embeddingsTest").click()`);
     await page.waitFor('document.getElementById("embeddingsTestNote").classList.contains("bad")');
-    assert.match(await page.evaluate('document.getElementById("embeddingsTestNote").textContent'), /could not run this model/);
+    assert.match(await page.evaluate('document.getElementById("embeddingsTestNote").textContent'), /could not process the request/);
 
     await page.evaluate(`${input('embeddingsModel')}.value = 'ViT-B-32__openai'; ${input('embeddingsEnabled')}.click(); document.querySelector('#save-enrich').click()`);
     await page.waitFor('document.querySelector("#note-enrich").textContent.includes("Saved")');
