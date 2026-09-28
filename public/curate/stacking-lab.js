@@ -204,7 +204,7 @@ function reset() {
   el('gap').value = current.gapSeconds; el('gap').max = current.gapSeconds;
   el('span').value = 180; el('threshold').value = 0.1;
   for (const id of ['use-span', 'use-hash', 'use-people', 'use-identities', 'use-ranks', 'use-embeddings', 'combined-mode']) el(id).checked = false;
-  el('embedding-threshold').value = 0.9;
+  el('embedding-threshold').value = 0.865;
   el('near-embedding').value = COMBINED_DEFAULTS.nearEmbedding; el('far-embedding').value = COMBINED_DEFAULTS.farEmbedding;
   el('near-hash').value = COMBINED_DEFAULTS.nearHash; el('far-hash').value = COMBINED_DEFAULTS.farHash;
   el('rank-cutoff').value = COMBINED_DEFAULTS.outsideLimit; el('rank-contrast').value = COMBINED_DEFAULTS.rankContrast;

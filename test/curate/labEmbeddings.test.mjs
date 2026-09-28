@@ -42,7 +42,7 @@ test('combined mode: very similar embeddings support alone, the middle band need
     { state: 'supported', reason: 'Very similar embeddings without observed conflict', notes: ['ThumbHash unknown', 'Enrich people unknown', 'Embedding 0.970 (very similar)'] });
   assert.equal(assessPair(a, b, { ...base, embeddingSimilarity: table([['a', 'b', 0.97]]) }).reason, 'ThumbHash and embeddings disagree');
   // The middle band needs people agreement or a middle-band hash, not search ranks.
-  const middle = table([['a', 'b', 0.9]]);
+  const middle = table([['a', 'b', 0.88]]);
   assert.equal(assessPair(a, b, { ...base, thumbhash: false, embeddingSimilarity: middle }).state, 'supported');
   assert.equal(assessPair(a, b, { ...base, thumbhash: false, people: false, embeddingSimilarity: middle }).state, 'uncertain');
   const rows = new Map(['a', 'b'].map(id => [id, { state: 'complete', photos: [{ id, rank: null }, { id: id === 'a' ? 'b' : 'a', rank: 1 }] }]));
@@ -53,7 +53,7 @@ test('combined mode: very similar embeddings support alone, the middle band need
   assert.equal(assessPair(a, c, { ...base, embeddingSimilarity: table([]) }).state, 'uncertain');
 });
 
-test('combined mode: clearly different embeddings corroborate separation but never separate alone', () => {
+test('combined mode: clearly different embeddings separate unless ThumbHash or reciprocal ranks disagree', () => {
   const base = { ...COMBINED_DEFAULTS, gapMs: 15000, thumbhash: true, people: true, embeddings: true };
   const solo = photo('solo', 0, 0, 'one'), couple = photo('couple', 1000, 0, 'couple'), landscape = photo('landscape', 2000, 255, null);
   const far = table([['solo', 'couple', 0.7], ['solo', 'landscape', 0.6], ['couple', 'landscape', 0.6]]);
@@ -64,15 +64,44 @@ test('combined mode: clearly different embeddings corroborate separation but nev
   assert.equal(assessPair(solo, couple, { ...base, embeddings: false }).state, 'uncertain');
   // Clearly different embeddings and ThumbHash together separate.
   assert.equal(assessPair(solo, landscape, { ...base, people: false, embeddingSimilarity: far }).reason, 'Clearly different embeddings and ThumbHash');
-  // Alone they do not.
-  const alone = assessPair(solo, photo('x', 3000, null, null), { ...base, embeddingSimilarity: table([['solo', 'x', 0.5]]) });
-  assert.deepEqual([alone.state, alone.reason], ['uncertain', 'Clearly different embeddings need corroboration']);
+  // Alone they separate too.
+  const x = photo('x', 3000, null, null);
+  const alone = assessPair(solo, x, { ...base, embeddingSimilarity: table([['solo', 'x', 0.5]]) });
+  assert.deepEqual([alone.state, alone.reason], ['separate', 'Clearly different embeddings']);
+  // A very close ThumbHash or reciprocal near ranks pointing the other way keep the pair uncertain.
+  const twin = photo('twin', 1000, 0, 'one');
+  assert.deepEqual(Object.values(assessPair(solo, twin, { ...base, embeddingSimilarity: table([['solo', 'twin', 0.8]]) })).slice(0, 2),
+    ['uncertain', 'ThumbHash and embeddings disagree']);
+  const rows = new Map(['solo', 'x'].map(id => [id, { state: 'complete', photos: [{ id, rank: null }, { id: id === 'solo' ? 'x' : 'solo', rank: 1 }] }]));
+  const ranked = assessPair(solo, x, { ...base, ranks: true, embeddingSimilarity: table([['solo', 'x', 0.5]]) }, rows);
+  assert.deepEqual([ranked.state, ranked.reason], ['uncertain', 'Clearly different embeddings conflict with reciprocal ranks']);
   // Very similar embeddings contradicting people evidence stay uncertain.
   assert.equal(assessPair(solo, couple, { ...base, embeddingSimilarity: table([['solo', 'couple', 0.99]]) }).reason,
     'Very similar embeddings conflict with people evidence');
   const result = combinedPartition([solo, couple, landscape], { ...base, embeddingSimilarity: far });
   assert.deepEqual(ids(result.groups), [['solo'], ['couple'], ['landscape']]);
   assert.throws(() => combinedPartition([solo, couple], { ...base, nearEmbedding: 0.8, farEmbedding: 0.9, embeddingSimilarity: far }), /ordered embedding bands/);
+});
+
+test('the calibrated defaults reproduce judged ViT-B-32 groups with embeddings as the only evidence', () => {
+  // Rounded similarities from real groups judged by eye (PIC-381): photos 1–4,
+  // 5–8 and 9–10 are three stacks; pairs not listed are unrelated scenes.
+  const photos = Array.from({ length: 10 }, (_, i) => photo(String(i + 1), i * 1000, null));
+  const known = new Map(Object.entries({ '1|2': .934, '1|3': .932, '1|4': .92, '2|3': .921, '2|4': .893, '3|4': .942,
+    '5|6': .906, '5|7': .9, '5|8': .907, '5|9': .856, '5|10': .778, '6|7': .918, '6|8': .944, '6|9': .864, '6|10': .814,
+    '7|8': .936, '7|9': .9, '7|10': .875, '8|9': .898, '8|10': .838, '9|10': .885 }));
+  const similarity = (a, b) => known.get([a, b].sort((m, n) => m - n).join('|')) ?? 0.7;
+  const judged = [['1', '2', '3', '4'], ['5', '6', '7', '8'], ['9', '10']];
+  assert.deepEqual(ids(partition(photos, { gapMs: 15000, embeddings: true, embeddingSimilarity: similarity }).groups), judged);
+  const combined = combinedPartition(photos, { gapMs: 15000, embeddings: true, embeddingSimilarity: similarity });
+  assert.deepEqual(ids(combined.groups), judged);
+  // A clearly-different ceiling of 0.85 would attach photo 9 to the second stack.
+  assert.deepEqual(ids(combinedPartition(photos, { gapMs: 15000, embeddings: true, farEmbedding: 0.85, embeddingSimilarity: similarity }).groups),
+    [['1', '2', '3', '4'], ['5', '6', '7', '8', '9'], ['10']]);
+  // Two shots of one stack in the middle band, a third clearly different.
+  const three = photos.slice(0, 3), pair = table([['1', '2', 0.897], ['1', '3', 0.784], ['2', '3', 0.817]]);
+  assert.deepEqual(ids(partition(three, { gapMs: 15000, embeddings: true, embeddingSimilarity: pair }).groups), [['1', '2'], ['3']]);
+  assert.deepEqual(ids(combinedPartition(three, { gapMs: 15000, embeddings: true, embeddingSimilarity: pair }).groups), [['1', '2'], ['3']]);
 });
 
 test('with embeddings off the combined rules are unchanged, whatever similarities exist', () => {

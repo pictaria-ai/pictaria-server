@@ -250,24 +250,32 @@ Highlighting a photo also shows its similarity to the other photos.
 The rules have two modes:
 
 - **Individual filters:** with **Pictaria embeddings** on, every pair in a group
-  must reach the threshold, initially 0.900. A missing embedding cannot pass,
+  must reach the threshold, initially 0.865. A missing embedding cannot pass,
   as with a missing ThumbHash.
 - **Combined evidence:** the embedding has three bands, initially very similar
-  at ≥ 0.950 and clearly different at ≤ 0.800.
+  at ≥ 0.900 and clearly different at ≤ 0.865.
   - Very similar embeddings support a pair on their own unless other evidence
     conflicts.
   - The middle band needs people agreement or a middle-band ThumbHash.
   - Reciprocal search ranks do not corroborate embeddings, because Immich's
     ranks may come from the same model.
-  - Clearly different embeddings corroborate a people, ThumbHash or rank-contrast
-    difference, but never separate a pair alone.
+  - Clearly different embeddings separate a pair on their own. Against
+    reciprocal near search ranks they stay uncertain.
   - A very close ThumbHash with clearly different embeddings, or the reverse,
     stays uncertain, as do very similar embeddings that contradict people
     evidence.
   - With the switch off, the combined rules are exactly the ones above.
 
-All values are uncalibrated starting points for `ViT-B-32__openai`; other
-models need their own bands. If Immich's smart search uses the same model,
+The defaults come from a first calibration of `ViT-B-32__openai` on five real
+groups (31 photos), judged by eye. Photos in the same stack mostly scored 0.885
+or more with each other, and unrelated scenes 0.73 or less. Separate stacks of a
+similar scene scored 0.78–0.90, overlapping the same-stack range, so no single
+pair cutoff separates them. Requiring every pair to reach 0.865 matched the
+judged stacks, except that it split off the last two shots of one stack, which
+had changed angle; that split was judged acceptable. Combined evidence uses
+0.865 as its clearly-different ceiling for the same reason: one clearly
+different pair keeps two groups apart. Other models need their own values. If
+Immich's smart search uses the same model,
 these embeddings and its search ranks are not independent evidence. They are
 the same vectors compared directly instead of ranked across the library. The
 copied summary includes the settings, coverage and pairwise similarities, with

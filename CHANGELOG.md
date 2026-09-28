@@ -20,8 +20,11 @@ All notable changes to Pictaria Server are documented here. This project follows
   selects. Pictaria sends at most one prediction at a time across Enrich, lab
   passes and **Test connection**; Enrich goes first and takes the service back
   from a lab pass. Server shutdown cancels passes, and nothing is written after
-  that. The thresholds are uncalibrated starting points for PIC-381's
-  evaluation. Production grouping is unchanged.
+  that. The defaults come from a first calibration of `ViT-B-32__openai` on
+  real groups: every pair must reach 0.865 in individual filters; combined
+  evidence treats ≥ 0.900 as very similar and ≤ 0.865 as clearly different,
+  and clearly different embeddings separate a pair on their own. Production
+  grouping is unchanged.
 
 - Added optional image embeddings to Enrich (off by default). Settings →
   Enrich → Image embeddings points Pictaria at the machine-learning container

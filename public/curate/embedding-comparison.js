@@ -125,7 +125,7 @@ export class EmbeddingComparison {
   }
   render() {
     if (this.photos.length < 2) { this.table.replaceChildren(); return; }
-    const table = node('table', undefined, 'embedding-matrix'), caption = node('caption', `Cosine similarity of Pictaria embeddings${this.model ? ` (${this.model})` : ''}. Higher is more alike; — means a photo has no embedding yet. Not calibrated.`);
+    const table = node('table', undefined, 'embedding-matrix'), caption = node('caption', `Cosine similarity of Pictaria embeddings${this.model ? ` (${this.model})` : ''}. Higher is more alike; — means a photo has no embedding yet.`);
     table.append(caption);
     const head = node('thead'), labels = node('tr'); labels.append(node('th', 'Photo'));
     for (let i = 0; i < this.photos.length; i++) { const th = node('th', String(i + 1)); th.scope = 'col'; labels.append(th); }

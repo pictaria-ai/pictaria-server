@@ -51,25 +51,26 @@ test('the lab computes Pictaria embeddings on request and uses them in both expe
   const row = await page.evaluate('[...document.querySelectorAll("#embedding-table tbody tr:first-child td")].map(n => n.textContent)');
   assert.deepEqual(row, ['·', '0.970', '0.600']);
 
-  // Individual filters: 1–2 pass 0.9, 3 does not.
+  // Individual filters: 1–2 pass the 0.865 default, 3 does not.
   assert.match(await text('#result'), /3 photos → 2 groups \(2 \+ 1\)/);
   await page.evaluate('(() => { const s=document.querySelector("#embedding-threshold"); s.value="0.59"; s.dispatchEvent(new Event("input")); })()');
   assert.match(await text('#result'), /3 photos → 2 groups/, 'every pair must pass: 1–3 is 0.600 but 2–3 is 0.582');
   await page.evaluate('(() => { const s=document.querySelector("#embedding-threshold"); s.value="0.55"; s.dispatchEvent(new Event("input")); })()');
   assert.match(await text('#result'), /3 photos → 1 group/);
-  // Combined: very similar embeddings support 1–2; 3 stays provisional.
+  // Combined: very similar embeddings support 1–2; clearly different ones separate 3.
   await click('#combined-mode');
+  assert.match(await text('#result'), /3 photos → 2 groups \(2 \+ 1\)/);
   await click('#lab-photos .photo-image');
   assert.match(await text('#pair-evidence'), /Photos 1 ↔ 2: supported\. Very similar embeddings without observed conflict\..*Embedding 0\.970 \(very similar\)/s);
-  assert.match(await text('#pair-evidence'), /Photos 1 ↔ 3: uncertain\..*Embedding 0\.600 \(clearly different\)/s);
+  assert.match(await text('#pair-evidence'), /Photos 1 ↔ 3: separation proposed\. Clearly different embeddings\..*Embedding 0\.600 \(clearly different\)/s);
   assert.match(await page.evaluate('document.querySelectorAll(".lab-distance")[1].textContent'), /Embedding similarity: 0\.970/);
   await page.evaluate('(() => { const n=document.querySelector("#far-embedding"); n.value="0.99"; n.dispatchEvent(new Event("input")); })()');
   assert.match(await text('#experiment-error'), /ordered embedding bands/);
   assert.equal(await page.evaluate('document.querySelector("#copy").disabled'), true);
-  await page.evaluate('(() => { const n=document.querySelector("#far-embedding"); n.value="0.8"; n.dispatchEvent(new Event("input")); })()');
+  await page.evaluate('(() => { const n=document.querySelector("#far-embedding"); n.value="0.865"; n.dispatchEvent(new Event("input")); })()');
   await page.evaluate('Object.defineProperty(navigator,"clipboard",{configurable:true,value:{writeText:async text=>{window.copied=text}}})');
   await click('#copy');
-  assert.match(await page.evaluate('window.copied'), /Pictaria embeddings: very similar ≥ 0\.950, clearly different ≤ 0\.800/);
+  assert.match(await page.evaluate('window.copied'), /Pictaria embeddings: very similar ≥ 0\.900, clearly different ≤ 0\.865/);
   assert.match(await page.evaluate('window.copied'), /Pictaria embeddings \(ViT-B-32__openai\): 3 of 3 photos covered\nPhotos 1 ↔ 2: 0\.970/);
   assert.doesNotMatch(await page.evaluate('window.copied'), /00000000|target-portrait|synthetic/);
   await page.send('Emulation.setDeviceMetricsOverride', { width: 375, height: 812, deviceScaleFactor: 1, mobile: true });

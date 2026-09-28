@@ -54,7 +54,7 @@ export function timeGroups(photos, gapMs) {
 
 // embeddingSimilarity(a, b) returns stored Pictaria-embedding cosine or null.
 export function partition(photos, { gapMs, spanMs = null, thumbhash = false, threshold = 0.1, people = false, identities = false,
-  embeddings = false, embeddingThreshold = 0.9, embeddingSimilarity = null }) {
+  embeddings = false, embeddingThreshold = 0.865, embeddingSimilarity = null }) {
   if (photos.length > LAB_PHOTO_LIMIT) throw Error(`Experiments support at most ${LAB_PHOTO_LIMIT} photos.`);
   if (!Number.isFinite(gapMs) || gapMs < 0 || gapMs > 180000 ||
       (spanMs !== null && (!Number.isFinite(spanMs) || spanMs < 0 || spanMs > 3600000)) ||

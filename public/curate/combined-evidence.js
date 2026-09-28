@@ -2,9 +2,10 @@ import { LAB_PHOTO_LIMIT, decodeHash, hashDistance, peopleCategory, recognizedPe
 import { evidencePartition } from './evidence-partition.js';
 import { rankObservation } from './rank-evidence.js';
 
-// Embedding bands are uncalibrated starting values for ViT-B-32__openai.
+// Embedding bands come from a first ViT-B-32__openai calibration on real
+// groups (PIC-381); other models need their own.
 export const COMBINED_DEFAULTS = Object.freeze({ nearHash: .025, farHash: .15, outsideLimit: 2, rankContrast: 8,
-  nearEmbedding: .95, farEmbedding: .8 });
+  nearEmbedding: .9, farEmbedding: .865 });
 const key = (a, b) => JSON.stringify([a, b].sort());
 
 function evaluator(photos, settings, rows) {
@@ -86,6 +87,10 @@ function evaluator(photos, settings, rows) {
         : p.far ? 'Clearly different embeddings and ThumbHash' : 'Clearly different embeddings and returned rank contrast';
     } else if (p.conflict || contrast) reason = 'Conflicting evidence needs review';
     else if ((p.near && p.embFar) || (p.embNear && p.far)) reason = 'ThumbHash and embeddings disagree';
+    // Clearly different embeddings separate on their own unless reciprocal
+    // near ranks point the other way.
+    else if (p.embFar && p.reciprocal) reason = 'Clearly different embeddings conflict with reciprocal ranks';
+    else if (p.embFar) { state = 'separate'; reason = 'Clearly different embeddings'; }
     else if (p.near || p.embNear || (p.middle && (p.agreement || p.reciprocal)) || (p.embMiddle && (p.agreement || p.middle))
         || (p.reciprocal && p.agreement)) {
       state = 'supported'; reason = p.near ? 'Very close ThumbHash without observed conflict'
@@ -94,7 +99,6 @@ function evaluator(photos, settings, rows) {
         : p.embMiddle ? 'Middle-band embeddings have independent corroboration' : 'Reciprocal ranks and people agreement support alternatives';
     } else if (p.embMiddle && p.reciprocal) reason = 'Embeddings and search ranks may come from the same model; needs independent composition evidence';
     else if (p.reciprocal) reason = 'Reciprocal ranks need independent composition evidence';
-    else if (p.embFar) reason = 'Clearly different embeddings need corroboration';
     return { state, reason, notes };
   };
 }
