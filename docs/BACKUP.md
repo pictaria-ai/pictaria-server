@@ -17,10 +17,11 @@ live in Immich and are covered by whatever backs Immich up.
 | `wake-word-models/` (`WAKE_WORD_MODELS_DIR`) | custom openWakeWord models and their integrity registry | No — unless you retained the originals |
 | `persistent-state.json` | inventory that prevents missing state from being silently recreated | Safety metadata — restore it with the snapshot |
 
-Optional [image embeddings](ENRICH.md#image-embeddings) add about 2–3 KB per
-embedded photo to `enrichment.sqlite` and therefore to each snapshot: roughly
-60–90 MB for 30,000 photos. They could be recomputed, but only slowly, from the
-photos, so they are backed up with the rest of the database.
+Optional [image embeddings](ENRICH.md#image-embeddings) add about 1.5 KB per
+embedded photo with the default model (2 KB for 768-dimension models) to
+`enrichment.sqlite` and therefore to each snapshot: roughly 45 MB for 30,000
+photos, for each set of embeddings kept. They could be recomputed, but only
+slowly, from the photos, so they are backed up with the rest of the database.
 
 Pictaria creates the initial versioned `settings.json` during startup, even
 when you have not saved any runtime overrides. The first automatic snapshot

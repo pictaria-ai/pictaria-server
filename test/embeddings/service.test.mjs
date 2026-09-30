@@ -298,6 +298,30 @@ test('work still running when the photo’s wait expires is aborted, drained and
   }, { serviceLimits: { ...limits, settleMs: 60 } });
 });
 
+test('a service slower than enrichment spends the run’s wait budget, then pauses instead of setting the pace', async () => {
+  await withService(async ({ repo, ml, service }) => {
+    addAssets(repo, 'a1', 'a2', 'a3');
+    const log = [];
+    const session = service.session({ log: (message) => log.push(message) });
+    await session.start();
+    ml.state.delayMs = 300; // answers every time, but slower than the instant enrichment here
+    const first = session.embed({ assetId: 'a1', image: photo('a1') });
+    await session.settle(first);
+    assert.equal(await first, 'embedded', 'the first wait fits the 500 ms floor');
+    const second = session.embed({ assetId: 'a2', image: photo('a2') });
+    const started = Date.now();
+    await session.settle(second);
+    assert.ok(Date.now() - started < 450, 'the wait stops at the remaining budget, far short of the 2 s limit');
+    assert.equal(await second, 'late');
+    assert.equal(session.stopped, 'ml_slow');
+    assert.equal(session.failures, 0, 'a spent budget is its own reason, not a service failure');
+    assert.equal(session.embed({ assetId: 'a3', image: photo('a3') }), null, 'the rest of the run goes without embeddings');
+    await session.close();
+    assert.match(log.join('\n'), /answering more slowly than enrichment/);
+    assert.equal(repo.db.prepare('SELECT COUNT(*) AS n FROM asset_embeddings').get().n, 1);
+  }, { serviceLimits: { ...limits, settleMs: 2_000, settleBudget: { floorMs: 500, share: 0.1 } } });
+});
+
 test('an expired wait also aborts a preview download in progress', async () => {
   await withService(async ({ repo, service }) => {
     addAssets(repo, 'a1');

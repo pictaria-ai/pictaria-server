@@ -15,6 +15,10 @@ export const EMBEDDING_LIMITS = Object.freeze({
   // Extra wait for a photo's vector once its enrichment has finished; work
   // still running then is aborted.
   settleMs: 5_000,
+  // All post-enrichment waits in one run may add up to floorMs plus this
+  // share of the run so far. A service that answers, but slower than the
+  // vision calls, would otherwise set the pace of the whole run.
+  settleBudget: Object.freeze({ floorMs: 10_000, share: 0.1 }),
   // Consecutive service failures (including requests still running when the
   // photo's wait expires) that pause embedding for the rest of a run.
   failureLimit: 3,
@@ -250,6 +254,7 @@ class EmbeddingSession {
     this.embedMs = 0;
     this.waits = { count: 0, totalMs: 0, maxMs: 0 };
     this.counts = { embedded: 0, current: 0, busy: 0, waiting: 0, paused: 0, late: 0, failed: 0 };
+    this.startedAt = service.elapsedNow();
   }
 
   // Enrich waits briefly for the model and continues without vectors; an
@@ -356,8 +361,9 @@ class EmbeddingSession {
       if (this.signal.aborted) return 'cancelled';
       if (signal.aborted) {
         // The photo's window expired first: slower than enrichment itself.
+        // A spent wait budget has already paused the session with its reason.
         this.counts.late++;
-        this.#serviceFailure(new EmbeddingServiceError(
+        if (!this.stopped) this.#serviceFailure(new EmbeddingServiceError(
           `the machine-learning service took longer than ${Math.round(this.limits.settleMs / 1000)} seconds after the photo finished`, 'ml_late'));
         return 'late';
       }
@@ -368,11 +374,20 @@ class EmbeddingSession {
   }
 
   // Bounded post-vision wait. Work still running when it expires is aborted
-  // and drained, so no request continues in the background.
+  // and drained, so no request continues in the background. An Enrich run
+  // also has a wait budget; spending it pauses embedding for the rest of the
+  // run instead of letting a slow service throttle enrichment.
   async settle(pending) {
     if (!pending) return;
     const started = this.service.elapsedNow();
-    const finished = await within(pending, this.limits.settleMs, this.signal);
+    const budget = this.kind === 'enrich' ? this.limits.settleBudget : null;
+    const allowance = budget ? budget.floorMs + budget.share * (started - this.startedAt) - this.waits.totalMs : Infinity;
+    const limit = Math.max(0, Math.min(this.limits.settleMs, allowance));
+    const finished = await within(pending, limit, this.signal);
+    if (!finished && limit < this.limits.settleMs) {
+      this.#stop('ml_slow', 'image embeddings paused for the rest of this run: the machine-learning service is answering more slowly '
+        + 'than enrichment, and waiting for it would slow the run down; enrichment continues without them.');
+    }
     if (!finished && this.request?.promise === pending) this.request.controller.abort();
     if (!finished) await within(pending, this.limits.closeGraceMs);
     const waited = this.service.elapsedNow() - started;

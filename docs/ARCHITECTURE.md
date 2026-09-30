@@ -257,9 +257,10 @@ existing durable sync queue. The multi-keeper comparison UI follows separately.
   session as storage failures in the run and server logs, never as
   machine-learning failures. `embeddings/store.mjs` owns schema 22 /
   persistent-state contract 27: `embedding_spaces` (backend, model, dimensions,
-  calibration vector) and `asset_embeddings` (float32 vector, the embedded
-  bytes' SHA-256, and the photo's checksum/thumbhash at that time). Reads
-  re-check exact byte lengths and currency. A synthetic calibration image
+  calibration vector) and `asset_embeddings` (unit-length float16 vector, the
+  embedded bytes' SHA-256, and the photo's checksum/thumbhash at that time).
+  Reads re-check exact byte lengths and currency, and also accept float32
+  rows written before float16. A synthetic calibration image
   (`embeddings/calibration.mjs`) decides which space a session writes to, so
   changed service output never mixes with stored vectors. The client
   (`embeddings/client.mjs`) treats responses as untrusted: bounded body, strict

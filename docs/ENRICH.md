@@ -1201,8 +1201,11 @@ public API; see [Immich compatibility](IMMICH-COMPATIBILITY.md#machine-learning-
   never send one.
   Pictaria waits at most five seconds after the photo's enrichment for the
   vector. Anything still running then, including a separate preview download,
-  is aborted. No embedding work continues in the background or after a run is
-  cancelled or stops.
+  is aborted. Across a run, those waits may add up to 10% of the run's time
+  plus 10 seconds. A service that answers, but more slowly than the vision
+  calls, uses that up and pauses the step for the rest of the run, so it never
+  sets the pace of Enrich. No embedding work continues in the background or
+  after a run is cancelled or stops.
 - The photo's enrichment never depends on it. A slow, failing or unreachable
   service leaves photos enriched normally without embeddings. Three consecutive
   service failures, or three answers that arrive too late, pause the step for
@@ -1304,9 +1307,11 @@ immediately.
 **Storage and status.**
 
 - Vectors live in `enrichment.sqlite` (tables `embedding_spaces` and
-  `asset_embeddings`), stored as float32. That is about 2 KB per photo at 512
-  dimensions and 3 KB at 768, or roughly 60–90 MB for 30,000 photos. They are
-  included in every backup.
+  `asset_embeddings`). Photo vectors are stored at unit length in half
+  precision (float16), which changes a similarity by about 0.00001 at most;
+  calibration vectors stay float32. That is about 1.5 KB per photo at 512
+  dimensions and 2 KB at 768, or roughly 45 MB for 30,000 photos with the
+  default model, for each set kept. They are included in every backup.
 - Settings shows how many photos have current embeddings for the configured
   model and how many belong to other spaces.
 - The Enrich Status card shows coverage and the last run's counts.

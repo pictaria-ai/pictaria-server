@@ -6,7 +6,7 @@ import { join } from 'node:path';
 
 import { Repository } from '../../src/enrich/repository.mjs';
 import { EmbeddingStore } from '../../src/embeddings/store.mjs';
-import { cosineSimilarity, decodeVector, encodeVector } from '../../src/embeddings/vectors.mjs';
+import { cosineSimilarity, decodeStoredVector, decodeVector, encodeHalfVector, encodeVector, fromHalf, toHalf } from '../../src/embeddings/vectors.mjs';
 
 const backend = 'immich_ml', model = 'ViT-B-32__openai', calibrationVersion = 1;
 const wave = (dims, phase = 0, scale = 1) => Float32Array.from({ length: dims }, (_, i) => scale * Math.sin(i * 0.37 + phase) + 0.1);
@@ -32,6 +32,37 @@ test('vectors round-trip as little-endian float32 and cosine ignores scale', () 
   assert.ok(Math.abs(cosineSimilarity(vector, vector.map((x) => x * 9)) - 1) < 1e-6);
   assert.equal(cosineSimilarity(vector, Float32Array.from([1, 2, 3])), null);
   assert.equal(cosineSimilarity(vector, new Float32Array(4)), null);
+});
+
+test('photo vectors are stored as unit-length float16; float32 rows from earlier builds still read', () => {
+  // Every finite half value round-trips exactly; float32 input rounds to the nearest half.
+  for (let h = 0; h < 0x10000; h++) {
+    const value = fromHalf(h);
+    if (!Number.isNaN(value) && value !== 0) assert.equal(toHalf(value), h);
+  }
+  assert.equal(fromHalf(toHalf(0.1)), 0.0999755859375);
+  const vector = Float32Array.from([1.5, -2.25, 3.125, 1e-7]);
+  const encoded = encodeHalfVector(vector);
+  assert.equal(encoded.length, 8);
+  const decoded = decodeStoredVector(encoded, 4);
+  assert.ok(Math.abs(Math.hypot(...decoded) - 1) < 1e-3, 'stored at unit length');
+  assert.ok(cosineSimilarity(decoded, vector) > 0.9999);
+  assert.deepEqual([...decodeStoredVector(encodeVector(vector), 4)], [...vector], 'float32 rows read unchanged');
+  assert.equal(decodeStoredVector(Buffer.alloc(6), 4), null);
+  withRepo((repo) => {
+    const store = repo.embeddings;
+    const space = store.resolveSpace({ backend, model, calibrationVersion, calibration: wave(512) });
+    addAsset(repo, 'a1'); addAsset(repo, 'a2');
+    store.save({ assetId: 'a1', spaceId: space.id, source: store.sourceOf('a1'), imageSha256: 'f'.repeat(64), vector: wave(512, 1) });
+    assert.equal(repo.db.prepare('SELECT length(vector) AS n FROM asset_embeddings').get().n, 1024, 'two bytes per dimension');
+    assert.equal(repo.db.prepare('SELECT length(calibration) AS n FROM embedding_spaces').get().n, 2048, 'calibration stays float32');
+    // A float32 row written before float16 storage still counts and reads.
+    repo.db.prepare(`INSERT INTO asset_embeddings (asset_id, space_id, source_checksum, source_thumbhash, image_sha256, vector, created_at)
+      VALUES ('a2', ?, 'sum-a2', 'hash-a2', ?, ?, '2026-09-28T00:00:00Z')`).run(space.id, 'e'.repeat(64), encodeVector(wave(512, 2)));
+    const both = store.vectors(space.id, ['a1', 'a2']);
+    assert.equal(both.size, 2);
+    assert.ok(Math.abs(cosineSimilarity(both.get('a1'), both.get('a2')) - cosineSimilarity(wave(512, 1), wave(512, 2))) < 1e-4);
+  });
 });
 
 test('spaces are matched by calibration output, not by model name alone', () => {
@@ -83,7 +114,9 @@ test('saved vectors are current until the photo’s rendition changes', () => {
     assert.equal(store.isCurrent('a1', space.id), true);
     assert.equal(store.isCurrent('a2', space.id), true, 'missing thumbhashes compare as equal NULLs');
     assert.equal(store.isCurrent('missing', space.id), false);
-    assert.deepEqual([...store.vectors(space.id, ['a1', 'a1', 'missing']).get('a1')], [...vector]);
+    const stored = store.vectors(space.id, ['a1', 'a1', 'missing']);
+    assert.deepEqual([...stored.keys()], ['a1']);
+    assert.ok(cosineSimilarity(stored.get('a1'), vector) > 0.9999, 'float16 keeps the direction');
     // An Immich edit regenerates the preview and its thumbhash.
     addAsset(repo, 'a1', { thumbhash: 'edited' });
     assert.equal(store.isCurrent('a1', space.id), false);
