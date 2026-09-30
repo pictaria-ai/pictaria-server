@@ -37,7 +37,7 @@ All notable changes to Pictaria Server are documented here. This project follows
   permanently in `enrichment.sqlite`. The step never fails, re-runs or
   noticeably delays enrichment: one request at a time, a wait of at most five
   seconds after each photo before its request (and any preview download) is
-  aborted, a run-wide wait budget of 10% of the run plus 10 seconds (a service
+  aborted, a run-wide wait budget of 10% of the run plus 3 seconds (a service
   that answers but more slowly than the vision calls pauses the step instead of
   setting Enrich's pace), a pause after repeated service failures or late
   answers, and photos left without a vector while a model downloads. Photo

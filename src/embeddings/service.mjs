@@ -17,8 +17,9 @@ export const EMBEDDING_LIMITS = Object.freeze({
   settleMs: 5_000,
   // All post-enrichment waits in one run may add up to floorMs plus this
   // share of the run so far. A service that answers, but slower than the
-  // vision calls, would otherwise set the pace of the whole run.
-  settleBudget: Object.freeze({ floorMs: 10_000, share: 0.1 }),
+  // vision calls, would otherwise set the pace of the whole run. The floor
+  // absorbs one slowish answer; it is small so short runs stay quick too.
+  settleBudget: Object.freeze({ floorMs: 3_000, share: 0.1 }),
   // Consecutive service failures (including requests still running when the
   // photo's wait expires) that pause embedding for the rest of a run.
   failureLimit: 3,

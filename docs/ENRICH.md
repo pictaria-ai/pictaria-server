@@ -1202,7 +1202,7 @@ public API; see [Immich compatibility](IMMICH-COMPATIBILITY.md#machine-learning-
   Pictaria waits at most five seconds after the photo's enrichment for the
   vector. Anything still running then, including a separate preview download,
   is aborted. Across a run, those waits may add up to 10% of the run's time
-  plus 10 seconds. A service that answers, but more slowly than the vision
+  plus 3 seconds. A service that answers, but more slowly than the vision
   calls, uses that up and pauses the step for the rest of the run, so it never
   sets the pace of Enrich. No embedding work continues in the background or
   after a run is cancelled or stops.
