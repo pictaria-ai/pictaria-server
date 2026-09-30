@@ -1,3 +1,5 @@
+import { stackRefereePresentation } from './referee-status.js';
+
 export function node(tag, text, className) {
   const element = document.createElement(tag);
   if (text !== undefined) element.textContent = text;
@@ -117,11 +119,21 @@ export function similarityIndicator(status, { warning = false } = {}) {
   const label = similarityLabel(status);
   // Per-stack limitations are quiet information. Only overall paused work uses a warning.
   const phase = warning ? 'attention' : similarityPhase(status);
-  if (!label || !phase) return null;
-  const indicator = node('span', phase === 'attention' ? '!' : phase === 'limited' ? 'i' : '', 'similarity-indicator');
+  return statusIndicator({ title: label, detail: similarityDetail(status), phase });
+}
+
+export function groupPresentation(group) {
+  const similarity = groupSimilarity(group);
+  const referee = stackRefereePresentation(group?.stackReferee);
+  return referee ?? { title: similarityLabel(similarity), detail: similarityDetail(similarity), phase: similarityPhase(similarity) };
+}
+
+export function statusIndicator({ title, detail, phase }) {
+  if (!title || !phase) return null;
+  const indicator = node('span', phase === 'attention' ? '!' : phase === 'limited' ? 'i' : phase === 'ai-checked' ? 'AI' : '', 'similarity-indicator');
   indicator.dataset.phase = phase;
   indicator.setAttribute('role', 'img');
-  indicator.title = [label, similarityDetail(status)].filter(Boolean).join('. ');
+  indicator.title = [title, detail].filter(Boolean).join('. ');
   indicator.setAttribute('aria-label', indicator.title);
   return indicator;
 }
@@ -175,17 +187,18 @@ export function groupCard(group, open, { decide, select, selected = false, decid
     check.onchange = () => select?.(group,check.checked); selection.append(check); card.append(selection);
   }
   if (actions.childElementCount) caption.append(actions);
-  card.updateSimilarity = (value) => {
+  card.updateSimilarity = (value, referee = group.stackReferee) => {
     if (decided) {
       chip.hidden = true;
       date.hidden = false;
       status.hidden = true; return;
     }
     group.similarity = value;
+    group.stackReferee = referee;
     value = groupSimilarity(group, value);
     chip.textContent = group.memberCount > 1 ? `${group.memberCount} photos` : 'Single photo';
-    const label = similarityLabel(value);
-    const indicator = similarityIndicator(value);
+    const presentation = groupPresentation(group), label = presentation.title;
+    const indicator = statusIndicator(presentation);
     if (status.textContent !== label) status.textContent = label;
     status.title = label;
     // Progress temporarily replaces the date. Settled/incomplete details stay

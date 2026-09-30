@@ -1,5 +1,5 @@
 import { node } from './photos.js';
-import { plainReasons } from './explanation-copy.js';
+import { plainReasons, groupingAlgorithmLabel } from './explanation-copy.js';
 
 // An overlay inside the active dialog: hover, focus or tap never reflows photos.
 export function explanation(comparison, prefix, status = null) {
@@ -34,9 +34,7 @@ export function explanation(comparison, prefix, status = null) {
   panel.append(reasons);
   const algorithm = node(
     'p',
-    /^candidate-\d+$/.test(comparison.algorithm)
-      ? `Candidate algorithm ${comparison.algorithm.split('-')[1]} · no AI stack check`
-      : 'Grouping from this saved view',
+    groupingAlgorithmLabel(comparison),
     'p-muted why-algorithm',
   );
   panel.append(algorithm);

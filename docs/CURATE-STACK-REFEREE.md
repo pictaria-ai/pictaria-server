@@ -13,9 +13,10 @@ the existing scheduler, changing-input lifecycle, executor and advice validator.
 The worker discovers current groups, prepares bounded previews, saves accepted
 partitions and publishes them through normal grouping rebuilds and stable views.
 Tests exercise this path with synthetic providers and injected comparative
-capabilities. **Both production availability flags remain false.** The default
-capability resolver supplies no supported models yet. No new model request or
-changed stack is enabled by this development slice.
+capabilities. The server now supplies the evidence-based capability resolver
+described below; Curate displays its recorded states. **Both production
+availability flags remain false.** No new model request or changed stack is
+enabled by this development slice.
 
 The [shared AI guide](CURATE-AI.md) defines scheduling, settings, attempts and
 human authority. The following agreed behavior remains the integration target:
@@ -66,9 +67,28 @@ contracts, not the correctness of a model's visual judgment.
 and an image limit matching the resolved provider and model. The presence of an
 `analyzeImages` method or a successful single-image connection verification is
 insufficient. Unknown capability cannot submit a request. The worker accepts a
-server-owned resolver; its default returns unknown. The supported-model registry,
-live acceptance and activation remain pending. There is no paid capability
-probe or user-supplied capability override.
+server-owned resolver; without one it returns unknown. The server composes
+`refereeCapability` from `src/curate/referee-capabilities.mjs`:
+
+| Provider and endpoint | Exact model | Evaluated request ceiling |
+| --- | --- | --- |
+| Venice, `https://api.venice.ai/api/v1` | `qwen3-vl-235b-a22b` | 10 images |
+
+This initial entry comes from the PIC-366 evaluation: the hosted model accepted
+ten images and rejected thirty. Ten is a conservative evaluated ceiling, not a
+claim about the service's absolute maximum. See the
+[recorded engineering boundary](../experiments/curate-v13/ENGINEERING-BOUNDARIES.md#3-logical-comparisons-and-provider-requests-are-different).
+It establishes a bounded input route, not acceptance of the new Stack Referee
+prompt/schema or general grouping quality. Live acceptance and activation remain
+pending. No other provider/model is implicitly supported, including local aliases
+or compatible endpoints carrying the same model name. A connection check or a
+vision catalog flag alone does not add an entry. There is no paid capability
+probe, network catalog request, fallback model or user-supplied capability override.
+
+Add future entries only with evidence for the exact provider/model/endpoint,
+comparative input size and actual transport/schema behavior. Keep their visual
+acceptance separate. The current Curate provider/model selection still follows
+Enrich or its existing explicit override; the registry never changes that choice.
 
 The contract and lifecycle share an overall 30-photo automation limit. Larger
 current stacks return `input-limit` / `too-many-images` with `limit: 30`, including
@@ -160,19 +180,46 @@ reset an unchanged input's automatic allowance.
 - The deterministic cache retains its own pre-AI groups. It must never learn an
   AI partition as deterministic evidence. Open views retain their original
   membership; the new composition is published for the existing refresh/update
-  path. Cards/comparisons expose a separate `stackReferee` status, while the final
-  visual status integration remains pending.
+  path. Cards/comparisons expose a separate `stackReferee` status. A current check
+  displays a small **AI** badge with **AI checked** hover text, including split
+  singles. Queued/running work uses a spinner naming the Stack Referee; temporary
+  pauses and finished incomplete checks use a quiet information icon. Unsupported
+  models/sizes, preparation failures and provider pauses have distinct plain
+  explanations. They do not block human choices or pretend a check succeeded.
+- Status polling also reports queued/active referee work outside the visible
+  page, through the existing header activity slot. This reports admitted work,
+  not an invented remaining-library total. Cards use their existing date/progress
+  line, so statuses do not grow them. Open comparisons keep photos and drafts
+  while their status changes. Badge applicability checks the saved check's own
+  member signatures (including split siblings) and pending nearby source changes,
+  rather than the library-wide rebuild generation. Unrelated imports or decisions
+  do not hide an unchanged stack's badge during Save & next. Changed inputs,
+  availability or separations withhold the badge; replaced memberships cannot
+  inherit a new result. Switching the role off retains valid completed checks;
+  unchecked groups stay off without changing their explanation during imports.
+  Queued or just-accepted checks awaiting a rebuild use the neutral updated state,
+  not a failure message. Actual input limits still report an incomplete check.
+  Decided photos carry no pending-referee status.
+- **Why?** retains the deterministic explanation and adds the applicable model
+  reason as plain text. A current checked grouping no longer says that no AI
+  check occurred. A changed grouping falls back to the saved-view explanation.
+  The Photo Referee star and recommendations remain a separate implementation.
 
 ## Before activation
 
-Finish supported-model capability resolution and connect the recorded statuses
-to the review UI before enabling the Stack Referee. The Photo Referee is a
-separate implementation. No new paid validation or deployment is part of this
-worker development slice.
+Model capability resolution and recorded-status presentation are connected.
+The Photo Referee is a separate implementation. No new paid validation or
+deployment is part of this development slice.
 
 Before activation, verify the following with approved real-photo inputs and
 the actual provider/model paths we intend to support:
 
+- Measure coverage on the test library after deterministic grouping settles:
+  count pending uncertain stacks and photos in the 2–10, 11–30 and over-30 size
+  bands, with the percentage of uncertain stacks covered by the registered
+  model. Keep pending deterministic work and supported compositions skipped by
+  the default scope separate. This is an offline inventory, not extra AI calls;
+  report counts only and use it to assess the ten-image ceiling before activation.
 - A non-contiguous partition with 20–30 images where the confirmed model limit
   permits it. Valid membership JSON does not prove correct image-to-alias
   association. Never exceed a known model limit to satisfy this gate; a smaller
@@ -182,3 +229,9 @@ the actual provider/model paths we intend to support:
   OpenRouter/Gemini schema projection, including the reason's `minLength`.
   Mock transport tests do not establish provider acceptance, and a successful
   compatibility call does not establish visual grouping quality.
+
+Start live validation with the registered Venice model at or below ten images,
+including a non-contiguous mixed-subject partition and a genuine keep-together
+control. The larger 20–30-image gate stays explicitly untested until a model
+with a supported envelope can exercise it. Do not raise the registered ceiling,
+silently batch a full-stack check, or claim all-provider acceptance to close it.

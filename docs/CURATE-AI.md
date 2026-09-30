@@ -386,8 +386,9 @@ the existing input JSON; temporary preview failures get at most one retry,
 behind a shared three-minute pause that also gates queued work and survives
 restart. Unsupported model/size status is derived without per-stack records.
 Accepted advice includes compact provenance. No new database migration is
-needed. Supported-model capability resolution, real-photo
-acceptance and final UI status integration still precede activation.
+needed. The server resolves the evaluated Venice model with a ten-image ceiling
+and the UI presents recorded progress, limitations and current AI checks.
+Real-provider/schema and real-photo acceptance still precede activation.
 
 The server composes `CurateAiLifecycle` and the Stack Referee adapter with its
 existing service, executor and shared scheduler. Both availability flags remain

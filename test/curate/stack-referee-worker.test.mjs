@@ -13,6 +13,8 @@ import { AiRequestScheduler } from '../../src/ai/scheduler.mjs';
 import { ImmichClient, ImmichApiError } from '../../src/immich.mjs';
 import { ResponseTooLargeError } from '../../src/fetchWithTimeout.mjs';
 import { stackRefereeImages } from '../../src/curate/stack-referee-images.mjs';
+import { aiBackendKey } from '../../src/curate/ai-limits.mjs';
+import { ProviderRequestError } from '../../src/enrich/providers.mjs';
 
 const png = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=', 'base64');
 const partition = (...groups) => ({ groups: groups.map(ids => ({ ids, reason: 'Same subject and composition.' })) });
@@ -62,6 +64,8 @@ async function fixture(work, { count = 4, capability = true, availability = { st
 test('background worker checks without browser demand or Enrich, publishes non-contiguous splits, and reuses them after restart', async () => fixture(async f => {
   await f.run(); assert.equal(f.curate.aiLifecycle.pending.size, 1);
   f.advance(); assert.equal((await f.run()).state, 'succeeded');
+  assert.equal(f.curate.stackReferee.status(f.curate.current.groups[0]).state, 'updated',
+    'an accepted check awaiting publication is not an incomplete check');
   await f.curate.refresh();
   assert.deepEqual(f.curate.current.groups.map(g => g.ids), [['a0', 'a2'], ['a1', 'a3']]);
   assert.ok(f.curate.current.groups.every(g => g.stackCheck.state === 'checked'));
@@ -361,3 +365,126 @@ test('groups beyond the discovery window are reached even when earlier work cann
   assert.equal(f.curate.stackReferee.status(last).reason, 'unknown-capability');
   assert.equal(f.calls.length, 0); assert.equal(f.downloads.length, 0);
 }, { count: 0, capability: false }));
+
+test('provider pauses and request allowances have honest card and global status without raw diagnostics', async () => fixture(async f => {
+  await f.run();
+  assert.equal(f.curate.stackReferee.activity().state, 'waiting');
+  const guard = f.repo.curate.aiLimits;
+  const ticket = guard.startProvider(aiBackendKey(f.provider));
+  guard.finish(ticket, new ProviderRequestError('PRIVATE DIAGNOSTICS', { status: 401 }));
+  const view = await f.curate.openView();
+  assert.equal(view.stackRefereeActivity.state, 'paused');
+  assert.equal(view.groups[0].stackReferee.reason, 'provider-auth');
+  assert.doesNotMatch(JSON.stringify(view), /PRIVATE/);
+  const captured = f.curate.stackReferee.capture(f.curate.current.groups[0]);
+  f.repo.db.prepare('INSERT INTO curate_ai_skipped_inputs VALUES(?,?,?)').run('stack', captured.snapshot.inputKey, Date.now());
+  assert.equal(f.curate.stackReferee.status(f.curate.current.groups[0]).reason, 'photo-limit');
+}));
+
+test('a successful badge is withheld during source rebuild and is absent from Decided comparisons', async () => fixture(async f => {
+  await f.run(); f.advance(); await f.run(); await f.curate.refresh();
+  const group = f.curate.current.groups[0];
+  assert.equal(f.curate.stackReferee.status(group).state, 'checked');
+  f.repo.upsertAsset({ id: 'a0', fileCreatedAt: new Date(1_700_000_000_000).toISOString(), checksum: 'changed' });
+  assert.equal(f.curate.stackReferee.status(group).state, 'updated');
+  await f.curate.refresh();
+  assert.notEqual(f.curate.stackReferee.status(f.curate.current.byMember.get('a0')).state, 'checked');
+  f.repo.recordDecision({ assetIds: ['a0'], addTags: ['frame/eligible', 'frame/reviewed'], removeTags: [], action: 'approve' });
+  const view = await f.curate.openView({ section: 'decided' });
+  assert.equal(view.groups[0].stackReferee, null);
+  assert.equal(f.curate.comparison(view.viewId, view.groups[0].id).stackReferee, null);
+}));
+
+test('unrelated imports and Save & next preserve checked badges before the background rebuild', async () => fixture(async f => {
+  for (let g = 0; g < 4; g++) for (let p = 0; p < 2; p++)
+    f.add(`00000000-0000-4000-8000-${String(g * 2 + p + 1).padStart(12, '0')}`, g * 600 + p);
+  f.answer = partition(['p1', 'p2']);
+  await f.run(); f.advance();
+  for (let g = 0; g < 4; g++) await f.run();
+  const view = await f.curate.openView();
+  assert.equal(view.groups.length, 4);
+  const states = () => f.curate.page(view.viewId).groups.map(g => g.stackReferee.state);
+  assert.deepEqual(states(), Array(4).fill('checked'));
+  f.add('unrelated', 5 * 86400);
+  assert.deepEqual(states(), Array(4).fill('checked'), 'a distant dirty photo does not hide any badge');
+  f.repo.curate.flushIds(['unrelated']);
+  assert.notEqual(f.curate.current.generation, f.repo.curate.generation());
+  assert.deepEqual(states(), Array(4).fill('checked'), 'a projected distant photo does not hide any badge');
+  const first = f.curate.comparison(view.viewId, view.groups[0].id);
+  const { expiresAt, ...operation } = await f.curate.issueDecision(first.id);
+  await f.curate.applyDecision({ ...operation, outcomes: Object.fromEntries(first.ids.map(id => [id, 'approve'])) });
+  const published = f.curate.current;
+  const next = f.curate.comparison(view.viewId, view.groups[1].id);
+  assert.equal(next.stackReferee.state, 'checked');
+  assert.equal(f.curate.current, published, 'opening the next comparison did not rebuild the library');
+  assert.equal(f.calls.length, 4, 'status reads never repeat checks');
+}, { count: 0 }));
+
+test('split children keep valid checks through sibling decisions and role-off', async () => fixture(async f => {
+  await f.run(); f.advance(); await f.run(); await f.curate.refresh();
+  const group = f.curate.current.byMember.get('a0');
+  f.repo.recordDecision({ assetIds: ['a1'], addTags: ['frame/eligible'], removeTags: [], action: 'approve' });
+  assert.equal(f.curate.stackReferee.status(group).state, 'checked');
+  f.config.curateStackRefereeEnabled = false;
+  f.add('unrelated', 5 * 86400);
+  assert.equal(f.curate.stackReferee.status(group).state, 'checked');
+  assert.equal(f.calls.length, 1);
+}));
+
+test('disabled referee without saved advice stays off during unrelated or local changes', async () => fixture(async f => {
+  await f.curate.refresh();
+  const group = f.curate.current.groups[0];
+  f.add('unrelated', 5 * 86400);
+  assert.equal(f.curate.stackReferee.status(group).state, 'off');
+  f.repo.curate.flushIds(['unrelated']);
+  assert.equal(f.curate.stackReferee.status(group).state, 'off');
+  f.repo.upsertAsset({ id: 'a0', checksum: 'changed' });
+  assert.equal(f.curate.stackReferee.status(group).state, 'off');
+}, { availability: CURATE_AI_AVAILABILITY }));
+
+for (const change of ['import', 'decision'])
+  test(`queued checks remain neutral during a pending ${change}, then return to waiting`, async () => fixture(async f => {
+    f.add('b0', 600); f.add('b1', 601);
+    await f.run();
+    const groups = f.curate.current.groups;
+    assert.equal(groups.length, 2);
+    assert.ok(groups.every(g => f.curate.stackReferee.status(g).state === 'waiting'));
+    const pending = [...f.curate.aiLifecycle.pending.keys()];
+    if (change === 'import') f.add('unrelated', 5 * 86400);
+    else f.repo.recordDecision({ assetIds: ['a0'], addTags: ['frame/eligible'], removeTags: [], action: 'approve' });
+    assert.ok(groups.every(g => f.curate.stackReferee.status(g).state === 'updated'));
+    assert.deepEqual([...f.curate.aiLifecycle.pending.keys()], pending, 'status reads do not settle or requeue work');
+    await f.curate.refresh();
+    assert.ok(f.curate.current.groups.filter(g => g.ids.length > 1)
+      .every(g => f.curate.stackReferee.status(g).state === 'waiting'));
+    assert.equal(f.calls.length, 0); assert.equal(f.downloads.length, 0);
+  }));
+
+test('a real capture limit stays incomplete rather than becoming a neutral update', async () => fixture(async f => {
+  await f.curate.refresh();
+  assert.equal(f.curate.current.groups[0].ids.length, 31);
+  assert.deepEqual(f.curate.stackReferee.status(f.curate.current.groups[0]),
+    { state: 'incomplete', reason: 'too-many-images' });
+  assert.equal(f.calls.length, 0); assert.equal(f.downloads.length, 0);
+}, { count: 31 }));
+
+for (const change of ['image', 'availability', 'separation', 'nearby'])
+  test(`${change} changes withhold a saved badge before the next rebuild, including split siblings`, async () => fixture(async f => {
+    await f.run(); f.advance(); await f.run(); await f.curate.refresh();
+    const group = f.curate.current.byMember.get('a0');
+    if (change === 'image') f.repo.upsertAsset({ id: 'a1', checksum: 'changed',
+      fileCreatedAt: new Date(1_700_000_000_000 + 5 * 86400000).toISOString() });
+    if (change === 'availability') f.repo.upsertAsset({ id: 'a1', isOffline: true });
+    if (change === 'nearby') f.add('nearby', 60); // Beyond the old 15-second scope, inside the candidate span.
+    if (change === 'separation') {
+      const view = await f.curate.openView();
+      const sibling = f.curate.comparison(view.viewId, f.curate.current.byMember.get('a1').id);
+      f.repo.curate.separate(sibling.id, sibling.ids.map(id => [id]));
+    }
+    const published = f.curate.current;
+    assert.equal(f.curate.stackReferee.status(group).state, 'updated');
+    assert.equal(f.curate.current, published, 'status does not change the open grouping');
+    f.config.curateStackRefereeEnabled = false;
+    assert.equal(f.curate.stackReferee.status(group).state, 'updated', 'role-off does not certify stale evidence');
+    assert.equal(f.calls.length, 1);
+  }));

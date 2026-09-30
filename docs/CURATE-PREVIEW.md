@@ -280,11 +280,17 @@ and explains that turning stacks off allows individual review. It never saves a
 page-sized subset as though it were the whole stack. Known thumbnail failures
 block Save until the previews can be retried.
 
-### Planned referee indicators
+### Referee indicators
 
-The optional referees will add two independent indicators when integrated:
-**AI checked** for a successfully checked current grouping, and a gold **★**
-for Photo Referee recommendations, with stars on the recommended photos and
+The Stack Referee presentation is connected: a small **AI** badge means
+**AI checked** for a successfully checked current grouping. Its waiting/running
+spinner names the Stack Referee; unavailable results and temporary pauses use
+a quiet information icon. The existing header activity slot also reports
+admitted referee work outside the visible page. Open comparisons retain their
+photos and draft choices as status updates arrive.
+
+The separate Photo Referee will add a gold **★**
+for recommendations, with stars on the recommended photos and
 a recommendation count in the hover text. Either indicator can appear without
 the other; a keeper star does not imply that the Stack Referee ran.
 
@@ -293,9 +299,10 @@ photos or invalidated results must not retain a successful AI badge. A successfu
 Stack Referee check can replace the limited-evidence icon when it resolves the
 grouping uncertainty; earlier evidence remains in **Why?**. Queued/running AI work
 uses a spinner naming the step. Unavailable AI results leave manual curation
-available with a quiet explanation rather than a permanent spinner. This is the
-agreed presentation plan only: this preview does not yet display AI referee badges
-or run these referees.
+available with a quiet explanation rather than a permanent spinner. Recorded
+model reasons appear as plain text alongside deterministic evidence in **Why?**.
+Both workers remain unavailable in production pending activation acceptance;
+synthetic tests exercise these states without making live AI calls.
 ## Implementation boundaries
 
 - `public/curate/client.js` owns serialized view/comparison opens, tab ownership

@@ -200,6 +200,7 @@ export class CurateService {
       offset,
       metadata: this.metadata.status(),
       refinement,
+      stackRefereeActivity: this.stackReferee?.activity() ?? null,
       updatesAvailable:
         view.generation !== this.store.generation() ||
         Boolean(refinement?.ready) ||
@@ -242,7 +243,7 @@ export class CurateService {
       automaticKeeperEligible: group.ids.length >= 2,
       algorithm: view.method,
       similarity: this.refinement?.groupStatus(group) ?? null,
-      stackReferee: this.stackReferee?.status(group) ?? null,
+      stackReferee: reviewState === 'decided' ? null : this.stackReferee?.status(group) ?? null,
       // Reasons use the applicable current calculation. Old view membership is
       // never replaced by a newer machine proposal when a comparison opens.
       reasons: this.current?.byId.get(groupId)?.reasons ?? ['Membership preserved from the opened Curate view.'],
