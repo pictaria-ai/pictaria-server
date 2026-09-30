@@ -22,7 +22,7 @@ const table = (entries) => {
 test('individual filters require every pair to reach the embedding threshold; missing embeddings cannot pass', () => {
   const photos = [photo('a', 0), photo('b', 1000), photo('c', 2000)];
   const similarity = table([['a', 'b', 0.96], ['a', 'c', 0.7], ['b', 'c', 0.93]]);
-  const settings = { gapMs: 15000, embeddings: true, embeddingThreshold: 0.9, embeddingSimilarity: similarity };
+  const settings = { gapMs: 15000, embeddings: true, embeddingRule: 'every', embeddingThreshold: 0.9, embeddingSimilarity: similarity };
   const result = partition(photos, settings);
   assert.deepEqual(ids(result.groups), [['a', 'b'], ['c']], 'b–c alone cannot chain c to a');
   assert.match(result.reasons.get('c'), /embedding difference/);
@@ -105,25 +105,25 @@ test('calibrated ViT-B-32 defaults on judged groups: every-pair filtering splits
     const settings = { gapMs: 15000, embeddings: true, embeddingSimilarity: similarity, ...extra };
     const combined = combinedPartition(photos, settings);
     return { individual: ids(partition(photos, settings).groups), combined: ids(combined.groups), summaries: combined.summaries,
-      average: ids(partition(photos, { ...settings, embeddingRule: 'average', embeddingThreshold: 0.815 }).groups) };
+      every: ids(partition(photos, { ...settings, embeddingRule: 'every', embeddingThreshold: 0.865 }).groups) };
   };
   // Judged 4 + 4 + 2; photos 9–10 score 0.778–0.900 with 5–8. Pairs not listed are unrelated scenes.
   const first = run(numbered(10), lookup({ '1|2': .934, '1|3': .932, '1|4': .92, '2|3': .921, '2|4': .893, '3|4': .942,
     '5|6': .906, '5|7': .9, '5|8': .907, '5|9': .856, '5|10': .778, '6|7': .918, '6|8': .944, '6|9': .864, '6|10': .814,
     '7|8': .936, '7|9': .9, '7|10': .875, '8|9': .898, '8|10': .838, '9|10': .885 }, 0.7));
-  assert.deepEqual(first.individual, [['1', '2', '3', '4'], ['5', '6', '7', '8'], ['9', '10']]);
+  assert.deepEqual(first.every, [['1', '2', '3', '4'], ['5', '6', '7', '8'], ['9', '10']]);
   // Embeddings alone cannot separate 9–10 from 5–8, so combined evidence attaches them provisionally.
   assert.deepEqual(first.combined, [['1', '2', '3', '4'], ['5', '6', '7', '8', '9', '10']]);
   assert.match(first.summaries[1], /^Provisional/);
   // Judged 1–2 + 3, at scores (0.784, 0.817) that elsewhere held one stack.
   const three = run(numbered(3), lookup({ '1|2': .897, '1|3': .784, '2|3': .817 }));
-  assert.deepEqual(three.individual, [['1', '2'], ['3']]);
+  assert.deepEqual(three.every, [['1', '2'], ['3']]);
   assert.deepEqual([three.combined, three.summaries[0].startsWith('Provisional')], [[['1', '2', '3']], true]);
   // Photos 1–8 of a landscape group: 1–6 are one scene from different angles (0.805–0.968); 7 and 8 differ.
   const landscape = run(numbered(8), lookup({ '1|2': .923, '1|3': .864, '1|4': .92, '1|5': .914, '1|6': .927, '1|7': .558, '1|8': .691,
     '2|3': .95, '2|4': .864, '2|5': .869, '2|6': .876, '2|7': .577, '2|8': .71, '3|4': .805, '3|5': .813, '3|6': .82, '3|7': .598,
     '3|8': .682, '4|5': .937, '4|6': .968, '4|7': .514, '4|8': .616, '5|6': .928, '5|7': .515, '5|8': .619, '6|7': .523, '6|8': .62, '7|8': .697 }));
-  assert.deepEqual(landscape.individual, [['1', '2'], ['3'], ['4', '5', '6'], ['7'], ['8']], 'every pair at 0.865 splits the scene');
+  assert.deepEqual(landscape.every, [['1', '2'], ['3'], ['4', '5', '6'], ['7'], ['8']], 'every pair at 0.865 splits the scene');
   assert.deepEqual(landscape.combined, [['1', '2', '3', '4', '5', '6'], ['7'], ['8']]);
   // Photos 1–8 of a 13-photo group: 1, 2, 7 and 8 show the same people framed
   // differently (0.820–0.885 across the two framings); 3–6 show someone else.
@@ -132,14 +132,15 @@ test('calibrated ViT-B-32 defaults on judged groups: every-pair filtering splits
     '3|8': .753, '4|5': .943, '4|6': .942, '4|7': .75, '4|8': .714, '5|6': .928, '5|7': .767, '5|8': .737, '6|7': .765, '6|8': .739, '7|8': .885 });
   const people = numbered(8, (n) => ({ recognizedIds: [1, 2, 7, 8].includes(n) ? ['A'] : ['B'] }));
   const framed = run(people, framings);
-  assert.deepEqual(framed.individual, [['1', '2'], ['3', '4', '5', '6'], ['7', '8']]);
+  assert.deepEqual(framed.every, [['1', '2'], ['3', '4', '5', '6'], ['7', '8']]);
   assert.deepEqual(framed.combined, [['1', '2', '7', '8'], ['3', '4', '5', '6']]);
   assert.deepEqual(run(people, framings, { identities: true }).combined, [['1', '2', '7', '8'], ['3', '4', '5', '6']]);
-  // Averaging a photo's similarity to the group keeps one lower pair from splitting a stack.
-  assert.deepEqual(first.average, [['1', '2', '3', '4'], ['5', '6', '7', '8', '9', '10']]);
-  assert.deepEqual(three.average, [['1', '2'], ['3']], 'photo 3 averages 0.8005 against 1–2');
-  assert.deepEqual(landscape.average, [['1', '2', '3', '4', '5', '6'], ['7'], ['8']]);
-  assert.deepEqual(framed.average, [['1', '2', '7', '8'], ['3', '4', '5', '6']]);
+  // The default, average similarity to the group at 0.800, keeps one lower
+  // pair from splitting a stack. The 3-photo group sits on its boundary.
+  assert.deepEqual(first.individual, [['1', '2', '3', '4'], ['5', '6', '7', '8', '9', '10']]);
+  assert.deepEqual(three.individual, [['1', '2', '3']], 'photo 3 averages 0.8005 against 1–2');
+  assert.deepEqual(landscape.individual, [['1', '2', '3', '4', '5', '6'], ['7'], ['8']]);
+  assert.deepEqual(framed.individual, [['1', '2', '7', '8'], ['3', '4', '5', '6']]);
   assert.throws(() => partition(numbered(2), { gapMs: 15000, embeddings: true, embeddingRule: 'median' }), /Invalid experiment settings/);
 });
 

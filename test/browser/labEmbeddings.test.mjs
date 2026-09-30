@@ -53,16 +53,15 @@ test('the lab computes Pictaria embeddings on request and uses them in both expe
   const row = await page.evaluate('[...document.querySelectorAll("#embedding-table tbody tr:first-child td")].map(n => n.textContent)');
   assert.deepEqual(row, ['·', '0.970', '0.600']);
 
-  // Individual filters: 1–2 pass the 0.865 default, 3 does not.
+  // Individual filters: 1–2 pass the default (average to the group at 0.800), 3 does not.
   assert.match(await text('#result'), /3 photos → 2 groups \(2 \+ 1\)/);
   await page.evaluate('(() => { const s=document.querySelector("#embedding-threshold"); s.value="0.59"; s.dispatchEvent(new Event("input")); })()');
-  assert.match(await text('#result'), /3 photos → 2 groups/, 'every pair must pass: 1–3 is 0.600 but 2–3 is 0.582');
-  // The average rule lets photo 3 join: its mean similarity to 1–2 is 0.591.
+  assert.match(await text('#result'), /3 photos → 1 group/, 'photo 3 averages 0.591 against 1–2');
   const rule = (value) => page.evaluate(`(() => { const r=document.querySelector("#embedding-rule"); r.value=${JSON.stringify(value)}; r.dispatchEvent(new Event("input")); })()`);
+  await rule('every');
+  assert.match(await text('#result'), /3 photos → 2 groups/, 'every pair must pass: 1–3 is 0.600 but 2–3 is 0.582');
   await rule('average');
   assert.match(await text('#result'), /3 photos → 1 group/);
-  await rule('every');
-  assert.match(await text('#result'), /3 photos → 2 groups/);
   await page.evaluate('(() => { const s=document.querySelector("#embedding-threshold"); s.value="0.55"; s.dispatchEvent(new Event("input")); })()');
   assert.match(await text('#result'), /3 photos → 1 group/);
   // Combined: very similar embeddings support 1–2; clearly different ones separate 3.

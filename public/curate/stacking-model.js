@@ -53,10 +53,11 @@ export function timeGroups(photos, gapMs) {
 }
 
 // embeddingSimilarity(a, b) returns stored Pictaria-embedding cosine or null.
-// embeddingRule 'every' needs every pair to reach the threshold; 'average'
-// compares a photo's mean similarity to the group's photos with it.
+// embeddingRule 'average' compares a photo's mean similarity to the group's
+// photos with the threshold; 'every' needs every pair to reach it. The
+// defaults fit David's judged groups best with ViT-B-32 and SigLIP 2 (PIC-381).
 export function partition(photos, { gapMs, spanMs = null, thumbhash = false, threshold = 0.1, people = false, identities = false,
-  embeddings = false, embeddingThreshold = 0.865, embeddingRule = 'every', embeddingSimilarity = null }) {
+  embeddings = false, embeddingThreshold = 0.8, embeddingRule = 'average', embeddingSimilarity = null }) {
   if (photos.length > LAB_PHOTO_LIMIT) throw Error(`Experiments support at most ${LAB_PHOTO_LIMIT} photos.`);
   if (!Number.isFinite(gapMs) || gapMs < 0 || gapMs > 180000 ||
       (spanMs !== null && (!Number.isFinite(spanMs) || spanMs < 0 || spanMs > 3600000)) ||

@@ -249,12 +249,12 @@ Highlighting a photo also shows its similarity to the other photos.
 
 The rules have two modes:
 
-- **Individual filters:** with **Pictaria embeddings** on, every pair in a group
-  must reach the threshold, initially 0.865. A missing embedding cannot pass,
-  as with a missing ThumbHash. **Rule → average to the group** instead lets a
-  photo join when its average similarity to the group's photos reaches the
-  threshold, so one lower pair, such as a different angle, does not split a
-  stack on its own.
+- **Individual filters:** with **Pictaria embeddings** on, a photo joins a
+  group when its average similarity to the group's photos reaches the
+  threshold, initially 0.800, so one lower pair, such as a different angle,
+  does not split a stack on its own. **Rule → every pair** instead requires
+  every pair to reach it. A missing embedding cannot pass either way, as with a
+  missing ThumbHash.
 - **Combined evidence:** the embedding has three bands, initially very similar
   at ≥ 0.900 and clearly different at ≤ 0.750.
   - Very similar embeddings support a pair on their own unless other evidence
@@ -279,9 +279,13 @@ similar scene, others parts of one stack, such as the same people framed
 differently or one landscape from different angles. No embedding cutoff decides
 that zone. Requiring every pair to reach 0.865 matched five of the groups (one
 with an acceptable extra split) but broke up stacks in the other three, and
-lowering it to fix those merged stacks elsewhere. No pair judged the same stack
-scored below 0.78, so combined evidence separates on embeddings alone only at
-0.75 or less. Between 0.75 and 0.90, ThumbHash or people evidence decides;
+lowering it to fix those merged stacks elsewhere. On seven groups later scored
+with both ViT-B-32 and SigLIP 2 (`ViT-B-16-SigLIP2__webli`), averaging a photo's
+similarity to the group at 0.800 placed 96% and 95% of photo pairs as judged,
+against 66% and 75% for every pair at 0.865, so it became the individual-filter
+default; SigLIP 2 was no better than ViT-B-32 overall. No pair judged the same
+stack scored below 0.78, so combined evidence separates on embeddings alone only
+at 0.75 or less. Between 0.75 and 0.90, ThumbHash or people evidence decides;
 without it the pair stays uncertain, the case the AI Stack Referee is meant for.
 Other models need their own values. If Immich's smart search uses the same
 model, these embeddings and its search ranks are not independent evidence. They
