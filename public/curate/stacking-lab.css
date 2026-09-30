@@ -73,4 +73,8 @@
 #pair-evidence p { margin-block: 8px; }
 
 .rank-outside { display: block; color: var(--p-muted); font-size: 10px; }
+/* The similarity matrix has no trailing evidence column. */
+/* The whole similarity matrix stays visible, so it can be read or captured at once. */
+.lab-rank-scroll.embedding-scroll { max-height: none; }
+.lab-rank-scroll .embedding-matrix td:last-child { text-align: center; white-space: nowrap; min-width: 0; }
 .strict-hint[hidden], .combined-hint[hidden] { display: none; }

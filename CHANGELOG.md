@@ -7,6 +7,57 @@ All notable changes to Pictaria Server are documented here. This project follows
 
 ### Development
 
+- Added Pictaria embeddings to the Curate stacking lab. **Compute embeddings**
+  embeds the open group's photos that have none yet, as a bounded, cancellable
+  pass through Immich's machine-learning service. It makes no AI provider
+  calls, and the vectors are stored in the same permanent table as the Enrich
+  step. The lab shows the pairwise similarity table and adds an embedding rule
+  to both modes: a threshold in individual filters, and very-similar / middle /
+  clearly-different bands in combined evidence. Missing embeddings stay
+  unknown, and search ranks do not corroborate embeddings. Every pass
+  rechecks the service first; with full coverage the button becomes
+  **Recheck service**, and the worklist follows whichever set the check
+  selects. Pictaria sends at most one prediction at a time across Enrich, lab
+  passes and **Test connection**; Enrich goes first and takes the service back
+  from a lab pass. Server shutdown cancels passes, and nothing is written after
+  that. The defaults come from a first calibration of `ViT-B-32__openai` on
+  real groups. Individual filters join a photo to a group when its average
+  similarity to the group's photos reaches 0.800 (requiring every pair, the
+  earlier rule, remains a choice). Combined evidence treats ≥ 0.900 as very
+  similar and ≤ 0.750 as clearly different, and clearly different embeddings
+  separate a pair on their own unless both photos show the same recognized
+  people. The similarity table shows every row. Production grouping is
+  unchanged.
+
+- Added optional image embeddings to Enrich (off by default). Settings →
+  Enrich → Image embeddings points Pictaria at the machine-learning container
+  that comes with Immich (`IMMICH_ML_URL`) and chooses a model, defaulting to
+  Immich's own `ViT-B-32__openai`. Each photo an Enrich run analyzes also has
+  its Immich preview embedded, beside the vision call, and the vector is kept
+  permanently in `enrichment.sqlite`. The step never fails, re-runs or
+  noticeably delays enrichment: one request at a time, a wait of at most five
+  seconds after each photo before its request (and any preview download) is
+  aborted, a run-wide wait budget of 10% of the run plus 3 seconds (a service
+  that answers but more slowly than the vision calls pauses the step instead of
+  setting Enrich's pace), a pause after repeated service failures or late
+  answers, and photos left without a vector while a model downloads. Photo
+  vectors are stored as unit-length float16, about 1.5 KB per photo with the
+  default model. Database errors are reported
+  as storage problems rather than hidden. A synthetic calibration image
+  separates embedding spaces, so a changed model or changed Immich
+  preprocessing never mixes incompatible vectors. Vectors record the exact
+  preview bytes plus the photo's checksum and thumbhash, so edited photos read
+  as out of date and changed previews are re-embedded. **Test connection** checks unsaved values with a synthetic image and, when
+  the address cannot be reached, explains that it must work from the Pictaria
+  server itself; the docs cover connecting through Immich's Docker network when
+  both run on one machine.
+  The home page shows the machine-learning connection and Enrich shows
+  coverage. The service has no authentication, and the docs say to publish it
+  only on a trusted network. Enrichment schema 22 / persistent-state contract
+  27 / settings version 9, with the standard pre-upgrade recovery snapshot;
+  upgrading enables nothing and backfills nothing. Nothing consumes the
+  embeddings yet.
+
 - Connected the Stack Referee worker to background group discovery, bounded
   preview preparation and saved partitions. Applicable results survive restart
   and are reused by split children; open comparisons retain their membership.

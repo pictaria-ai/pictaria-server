@@ -26,15 +26,17 @@ export function loadPrompts(promptsDir, promptVersion = 'v1') {
 // maxBytes tightens the download cap for original-class fetches only (the
 // referee's per-image ceiling); thumbnails and previews are small and keep
 // the Immich client's default.
-export async function fetchImage(immich, assetId, imageSource, { maxBytes = null } = {}) {
+export async function fetchImage(immich, assetId, imageSource, { maxBytes = null, signal = null } = {}) {
+  const options = { ...(maxBytes === null ? {} : { maxBytes }), ...(signal ? { signal } : {}) };
+  const extra = Object.keys(options).length ? options : undefined;
   if (imageSource === 'original') {
-    return immich.getAssetOriginal(assetId, maxBytes === null ? undefined : { maxBytes });
+    return immich.getAssetOriginal(assetId, extra);
   }
   const size = imageSource === 'thumbnail' ? 'thumbnail' : 'preview';
   // maxBytes applies to every source: a preview can be config-dependently
   // large in Immich, and budgeted callers (the referee's group ceiling)
   // need the download to abort rather than buffer past their cap.
-  return immich.getAssetThumbnail(assetId, size, maxBytes === null ? undefined : { maxBytes });
+  return immich.getAssetThumbnail(assetId, size, extra);
 }
 
 // Abort a run when this many photos fail before anything succeeds — that
@@ -246,6 +248,7 @@ async function executeBatch({
   timingSession,
   aiSession = null,
   aiConnections = null,
+  embeddings = null,
 }) {
   immich = captureClient(immich);
   if (provider) provider = captureClient(provider);
@@ -446,12 +449,14 @@ async function executeBatch({
       let photoErrorKind = null;
       let processingRunId = null;
       let stage = 'download';
+      let embedding = null;
       analyzed += 1;
       counters.analyzed += 1;
       log(`${position} analyzing ${assetId}`);
       const overloadRetryLimit = overloadRetriesSuppressed ? 0 : PROVIDER_OVERLOAD_RETRY_LIMIT;
       try {
         let image;
+        let previewDownloaded = imageSource === 'preview';
         try {
           image = await fetchImage(immich, assetId, imageSource);
         } catch (fetchError) {
@@ -461,6 +466,7 @@ async function executeBatch({
           if (fetchError?.name === 'ResponseTooLargeError' && imageSource === 'original') {
             log(`${position} original for ${assetId} exceeds the download cap; using preview`);
             image = await fetchImage(immich, assetId, 'preview');
+            previewDownloaded = true;
           } else {
             throw fetchError;
           }
@@ -473,6 +479,13 @@ async function executeBatch({
           log('stopping early: cancellation requested after image download');
           stopped = true;
           break;
+        }
+        // The optional embedding runs beside the vision call and never affects
+        // this photo's outcome. Only the Immich preview is embedded (the
+        // rendition Immich's own CLIP uses), so one space never mixes sizes.
+        if (embeddings) {
+          embedding = embeddings.embed(previewDownloaded ? { assetId, image }
+            : { assetId, loadImage: (signal) => fetchImage(immich, assetId, 'preview', { signal }) });
         }
         stage = 'provider';
         const { normalized, decisions, retryCount } = await analyzeWithValidationRetry(
@@ -601,6 +614,8 @@ async function executeBatch({
       } finally {
         photoTiming?.finish(photoOutcome, photoErrorKind, processingRunId ?? null);
       }
+      // Outside photo timing: provider comparisons exclude the embedding.
+      if (embedding) await embeddings.settle(embedding);
     }
     scanned += assets.length;
 

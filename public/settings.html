@@ -98,6 +98,7 @@
     .save-row .p-btn { flex-shrink: 0; }
     .save-note { font-size: 12px; color: var(--p-muted); flex: 1; min-width: 0; }
     .save-note.bad { color: var(--p-danger); }
+    .save-note.ok { color: var(--p-ok); }
     .caption-wb-status { padding: 0 0 9px; }
     .caption-wb-actions { display: flex; align-items: center; gap: 10px; margin-top: 8px; }
     .caption-wb-actions .p-btn { flex-shrink: 0; }
@@ -336,6 +337,13 @@
             <button id="captionWbNow" class="p-btn accent" type="button" hidden>Write existing captions now</button>
             <span id="captionWbNote" class="save-note" aria-live="polite"></span>
           </div>
+        </div>
+        <div id="embeddingsTools" class="caption-wb-status" hidden>
+          <div class="caption-wb-actions">
+            <button id="embeddingsTest" class="p-btn" type="button">Test connection</button>
+            <span id="embeddingsTestNote" class="save-note" role="status" aria-live="polite"></span>
+          </div>
+          <div id="embeddingsCoverage" class="setting-desc" role="status" aria-live="polite"></div>
         </div>
         <div class="save-row">
           <button id="save-enrich" class="p-btn primary">Save Enrich settings</button>
@@ -811,6 +819,11 @@
         { key: 'captionWriteback', type: 'switch', desc: 'Copies each photo’s AI caption into its Immich description, making photos searchable in Immich by what’s in them. Pictaria fills an empty description or updates its own earlier text and checks immediately before writing; Immich cannot make that check and update atomic, so a narrow concurrent human-edit race remains. Runs in the background; new enrichments follow automatically.', docs: 'https://github.com/pictaria-ai/pictaria-server/blob/main/docs/ENRICH.md#writing-captions-to-immich-descriptions' },
         { key: 'imageSource', type: 'select', labels: { preview: 'Preview (recommended)', thumbnail: 'Thumbnail (fastest, least detail)', original: 'Original (largest upload)' }, desc: 'The image size sent to the model for analysis.' },
         { key: 'inferenceHostLabel', type: 'text', placeholder: 'e.g. M4 Mac mini · LM Studio', desc: 'Optional label copied into each new run’s history, useful when comparing the same model on different machines. You supply and maintain this text; Pictaria does not inspect the model host.' },
+        { group: 'Image embeddings', groupDesc: 'Optional. While photos are enriched, Pictaria also asks your Immich machine-learning service for an image embedding of each photo’s preview and keeps it in its own database, where future Curate features can compare photos. Photos enriched before you turn this on are not processed automatically.' },
+        { key: 'embeddingsEnabled', type: 'switch', desc: 'Adds an embedding step to every Enrich run: manual, queued and daily. It runs beside the vision model, never fails a photo and never re-runs enrichment. Off by default.', docs: 'https://github.com/pictaria-ai/pictaria-server/blob/main/docs/ENRICH.md#image-embeddings' },
+        { key: 'embeddingsUrl', type: 'text', placeholder: 'http://immich_machine_learning:3003', desc: 'Immich’s machine-learning container, as reachable from the Pictaria server itself (not only from your browser). On the same machine as Immich, connect Pictaria to Immich’s Docker network and use the container’s name. Otherwise publish its port 3003 only on a network you trust: it has no password. Only photo previews and a synthetic test image are sent.', docs: 'https://github.com/pictaria-ai/pictaria-server/blob/main/docs/ENRICH.md#connecting-to-the-machine-learning-service' },
+        { key: 'embeddingsModel', type: 'text', placeholder: 'ViT-B-32__openai', desc: 'An Immich CLIP model name. The default is Immich’s own smart-search model, so usually nothing extra is downloaded. Alternatives such as ViT-B-16-SigLIP__webli are downloaded by the machine-learning service on first use (about 0.8–1.7 GB) and use extra memory while loaded. Changing the model starts a new set of embeddings; earlier ones are kept but never mixed.' },
+        { groupEnd: true },
         { group: 'Run history', groupDesc: 'Keep older runs available in Enrich and Performance. Lowering a limit permanently removes older records; increasing it cannot restore deleted history. Enrichment results and Curate decisions are preserved.' },
         { key: 'historyRuns', type: 'number', min: 100, max: 1000, width: 140, desc: 'Keep 100–1,000 run summaries, including saved settings and overall results. Default: 100. Photo and request details have separate limits and may expire sooner.' },
         { key: 'historyLogs', type: 'number', min: 0, max: 100, width: 140, desc: 'Keep diagnostic logs for the newest 0–100 runs. Default: 100. Older summaries remain available without their logs. Each log is capped at 256 KiB.' },
@@ -1148,6 +1161,10 @@
           if (section === 'enrich' && row.key === 'captionWriteback') {
             target.append(el('captionWbStatus'));
           }
+          if (section === 'enrich' && row.key === 'embeddingsModel') {
+            target.append(el('embeddingsTools'));
+            el('embeddingsTools').hidden = false;
+          }
         }
         if (!box.querySelector('.field')) {
           // Server process predates this section — fields will appear after
@@ -1224,6 +1241,7 @@
       renderSubs(settings);
       void loadBackupStatus();
       void loadCaptionWbStatus();
+      void loadEmbeddingsStatus();
       void loadRefereeStatus();
       void loadServerVersion();
       void loadAiConnections();
@@ -1393,6 +1411,67 @@
       }
       el('captionWbNow').disabled = paused;
     }
+
+    // --- image embeddings (Settings → Enrich) ---
+
+    async function loadEmbeddingsStatus() {
+      let status;
+      try {
+        const response = await fetch('/api/enrich/embeddings', { headers: headers() });
+        if (!response.ok) return; // server predates image embeddings
+        status = await response.json();
+      } catch {
+        return;
+      }
+      const { coverage, model } = status;
+      const parts = [];
+      if (coverage.vectors) {
+        parts.push(`${coverage.current.toLocaleString()} photo${coverage.current === 1 ? '' : 's'} have current embeddings from ${model}.`);
+        const stale = coverage.vectors - coverage.current;
+        if (stale) parts.push(`${stale.toLocaleString()} changed in Immich since and will be replaced when re-embedded.`);
+      } else {
+        parts.push(`No embeddings stored for ${model} yet.`);
+      }
+      if (coverage.otherVectors) parts.push(`${coverage.otherVectors.toLocaleString()} from other models or service versions are kept but not used.`);
+      if (status.lastRun) {
+        const run = status.lastRun;
+        parts.push(`Last run: ${run.embedded} new, ${run.current} already current, ${run.busy + run.waiting + run.paused} skipped, ${run.late ?? 0} too slow, ${run.failed} failed.`);
+        if (run.reason) parts.push(`It stopped early — ${run.reason}.`);
+      }
+      el('embeddingsCoverage').textContent = parts.join(' ');
+    }
+
+    el('embeddingsTest').addEventListener('click', async () => {
+      const button = el('embeddingsTest');
+      const note = el('embeddingsTestNote');
+      button.disabled = true;
+      note.classList.remove('bad', 'ok');
+      note.textContent = 'Testing… A model’s first use can take several minutes while the service downloads it.';
+      try {
+        const response = await fetch('/api/enrich/embeddings/test', {
+          method: 'POST',
+          headers: headers({ 'Content-Type': 'application/json' }),
+          body: JSON.stringify({ url: el('f2-enrich-embeddingsUrl').value, model: el('f2-enrich-embeddingsModel').value }),
+        });
+        if (response.status === 401) { showLogin(); return; }
+        const body = await response.json().catch(() => null);
+        if (!response.ok) throw new Error(body?.error?.message ?? 'The connection test failed.');
+        const took = body.elapsedMs < 1000 ? `${body.elapsedMs} ms` : `${(body.elapsedMs / 1000).toFixed(1)} s`;
+        const unsaved = ['embeddingsUrl', 'embeddingsModel'].some((key) =>
+          fieldValue({ type: 'text' }, el(`f2-enrich-${key}`)) !== cleanState.enrich?.[key]);
+        note.classList.add('ok');
+        note.textContent = `Connected in ${took}.` + ({
+          reused: ' Matches your stored embeddings.',
+          'new-set': ' The service’s output has changed, so the next Enrich run starts a new set.',
+          'first-set': '',
+        }[body.vectors] ?? '') + (unsaved ? ' Save to use these settings.' : '');
+      } catch (error) {
+        note.classList.add('bad');
+        note.textContent = error.message;
+      } finally {
+        button.disabled = false;
+      }
+    });
 
     async function loadCaptionWbStatus() {
       let status;

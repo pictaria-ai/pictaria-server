@@ -12,7 +12,7 @@ import { configuredSecrets, sanitizeDiagnostic } from '../diagnostics.mjs';
 const LOG_TAIL_LIMIT = 500;
 
 export class EnrichJobRunner {
-  constructor({ repo, immich, taxonomy, config, profiles = null, onTagsQueued = () => {}, aiScheduler = null, aiConnections = null }) {
+  constructor({ repo, immich, taxonomy, config, profiles = null, onTagsQueued = () => {}, aiScheduler = null, aiConnections = null, embeddings = null }) {
     this.repo = repo;
     this.immich = immich;
     this.taxonomy = taxonomy;
@@ -21,6 +21,8 @@ export class EnrichJobRunner {
     this.onTagsQueued = onTagsQueued;
     this.aiScheduler = aiScheduler;
     this.aiConnections = aiConnections;
+    // Optional image-embedding step (EmbeddingService); null in CLI/tests.
+    this.embeddings = embeddings;
     this.activeProvider = null;
     this.aiSession = null;
     this.state = idleState();
@@ -495,12 +497,22 @@ export class EnrichJobRunner {
     this.activeProvider = provider;
     let listed = 0;
     let aiSession;
+    let embeddings = null;
     try {
       aiSession = this.aiScheduler?.session(provider, 'enrich', {
         signal: lifecycle.providerAbortController.signal,
         eligible: () => !this.stopped && !this.state.cancelRequested,
       });
       this.aiSession = aiSession;
+      // Read once per run, like the other processing controls. The session
+      // never fails the run; photos without vectors are left for backfill.
+      embeddings = this.embeddings?.session({
+        log: (message) => this.#onProgress(message),
+        signal: lifecycle.providerAbortController.signal,
+      }) ?? null;
+      // Only await when enabled: runs without embeddings keep their exact
+      // start ordering relative to cancellation.
+      if (embeddings) await embeddings.start();
       const { counters, listedForReview } = await runBatch({
         immich: execution.immich,
         repo: this.repo,
@@ -532,6 +544,7 @@ export class EnrichJobRunner {
         shouldStop: () => this.state.cancelRequested,
         signal: lifecycle.providerAbortController.signal,
         log: (message) => this.#onProgress(message),
+        embeddings,
       });
       this.state.counters = counters;
       listed = listedForReview ?? 0;
@@ -543,6 +556,13 @@ export class EnrichJobRunner {
       this.state.finishedAt = new Date().toISOString();
       this.#log(`run failed: ${this.state.error}`);
     } finally {
+      if (embeddings) {
+        try {
+          await embeddings.close({ cancelled: this.state.cancelRequested || lifecycle.interrupted || this.stopped });
+        } catch (error) {
+          this.#log(`image embeddings: could not finish cleanly: ${error instanceof Error ? error.message : error}`);
+        }
+      }
       aiSession?.close();
       if (this.aiSession === aiSession) this.aiSession = null;
       this.state.running = false;

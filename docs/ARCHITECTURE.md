@@ -35,6 +35,8 @@ src/
   enrich/           enrichment pipeline + current review service
   curate/           v1.3 grouping/evidence foundation, read-only worker and
                     leased comparisons; see CURATE-FOUNDATION.md
+  embeddings/       optional Enrich image embeddings: Immich machine-learning
+                    client, calibration, embedding-space store, run sessions
   activity/         fail-open structured operational events + merged read model;
                     operational events retained for 90 days
   albums/           smart-album jobs, store (JSON file), scheduler; Best-of
@@ -106,8 +108,11 @@ existing durable sync queue. The multi-keeper comparison UI follows separately.
   HTTPS or a VPN, per [Exposing beyond your
   LAN](../README.md#exposing-beyond-your-lan).
 - **Errors**: JSON `{ "error": { "code", "message" } }` everywhere.
-- **Immich client**: `src/immich.mjs` is the only place that talks to Immich.
-  Binary responses are `{ data, contentType }`.
+- **Immich client**: `src/immich.mjs` is the only place that talks to
+  Immich's public API. Binary responses are `{ data, contentType }`. The one
+  exception is optional image embeddings: `src/embeddings/client.mjs` reaches
+  Immich's internal, unauthenticated machine-learning service (`/ping`,
+  `/predict`) and nothing else.
 - **No runtime npm dependencies** — `node:` builtins only. Keep it that way.
 - **State**: each feature owns one file (or directory) under `data/`, path
   overridable per feature (`DATABASE_PATH`, `FRAME_DB_PATH`,
@@ -236,6 +241,31 @@ existing durable sync queue. The multi-keeper comparison UI follows separately.
   favorite/never-show tag work, prioritizing human requests; AI retries have
   separate storage and do not fill or sleep inside the decision queue. Enrich
   exposes status and retry. See [Enrich](ENRICH.md#the-pipeline).
+- **Image embeddings** (optional, PIC-381): `embeddings/service.mjs` gives
+  each Enrich run one session, created when the run starts and closed in the
+  run's `finally`, so it shares the run's cancellation signal and shutdown
+  drain. The runner starts the photo's embedding beside the vision call and,
+  outside photo timing, waits at most `settleMs` for it. Anything still running
+  then, including a preview download, is aborted, and nothing is stored once a
+  photo's window or the run has closed. Sessions never throw into a run. They
+  skip photos while the model loads and pause after repeated service failures
+  or late answers. A service-wide `PredictionLane` admits one prediction at a
+  time across Enrich sessions, stacking-lab passes (`curate/lab-embeddings.mjs`)
+  and connection tests. It serves them by priority (Enrich, test, lab), then by
+  arrival, and releases only after the request settles. A new Enrich session
+  preempts a lab pass, and Curate shutdown cancels and drains lab passes. Database errors stop a
+  session as storage failures in the run and server logs, never as
+  machine-learning failures. `embeddings/store.mjs` owns schema 22 /
+  persistent-state contract 27: `embedding_spaces` (backend, model, dimensions,
+  calibration vector) and `asset_embeddings` (unit-length float16 vector, the
+  embedded bytes' SHA-256, and the photo's checksum/thumbhash at that time).
+  Reads re-check exact byte lengths and currency, and also accept float32
+  rows written before float16. A synthetic calibration image
+  (`embeddings/calibration.mjs`) decides which space a session writes to, so
+  changed service output never mixes with stored vectors. The client
+  (`embeddings/client.mjs`) treats responses as untrusted: bounded body, strict
+  JSON, known model dimensions, finite values, non-zero norm. Settings v9 adds
+  the switch, URL and model. See [Image embeddings](ENRICH.md#image-embeddings).
 - **Enrich timing**: `enrich/timing.mjs` owns compact execution/request records
   and their schema, appended to the base enrichment schema by the repository.
   Schema 10 / persistent-state contract 12 adds timing tables and a nullable

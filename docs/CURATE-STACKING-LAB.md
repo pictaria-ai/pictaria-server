@@ -194,9 +194,104 @@ uncertain contamination, missing ranks and contradictory observations; real-phot
 false merges and missed alternatives still need evaluation.
 
 This does not implement exact-checksum/rendition rules, detected-face counts,
-scene tags, Pictaria vectors, production defaults or either AI role. The lab still
-ignores saved human separations, so it cannot stand in for production acceptance.
-No supported/provisional label here authorizes bypassing an AI stack check.
+scene tags, production defaults or either AI role. Pictaria embeddings are covered
+in the next section. The lab still ignores saved human separations, so it cannot
+stand in for production acceptance. No supported/provisional label here
+authorizes bypassing an AI stack check.
+
+## Pictaria embeddings (PIC-381)
+
+**Pictaria embeddings** compares photos using stored image embeddings from
+Immich's machine-learning service; see [Image embeddings](ENRICH.md#image-embeddings).
+This is the evaluation step for PIC-381: are direct embeddings worth adding to
+Curate, and with which model? Opening a group shows any embeddings already
+stored for the model set in **Settings → Enrich → Image embeddings**, including
+those Enrich created, without contacting the service.
+
+**Compute embeddings** is an explicit, bounded pass for the open group:
+
+- Every pass first checks the service with the synthetic calibration image.
+  That decides which set of embeddings the photos belong to. The worklist is
+  then rebuilt against that set:
+  - photos with no current embedding there are embedded, at most 60 per pass;
+    **Compute missing embeddings** continues;
+  - if the service's output has changed, a new set starts and every photo is
+    embedded again;
+  - returning to an earlier output reuses its stored embeddings.
+
+  There are no automatic passes.
+- With every photo covered, the button becomes **Recheck service**. The check
+  costs one request, and it is the way to notice a changed service when
+  automatic Enrich embeddings are off. Opening a group never contacts the
+  service.
+- Each photo's Immich preview is downloaded and sent to the machine-learning
+  service one photo at a time. On a desktop-class host that is well under a
+  second per photo. No AI provider is called.
+- It needs the machine-learning URL but not the automatic Enrich switch.
+- Pictaria sends at most one prediction at a time, server-wide. Enrich, lab
+  passes and **Test connection** share one queue, with Enrich first.
+- A pass cannot start while an Enrich run is embedding photos. If an Enrich
+  run starts during a pass, the pass stops and its current request is aborted
+  before Enrich's first request is sent. Only one pass runs at a time, with a
+  five-minute overall deadline.
+- **Cancel**, closing the window, or the server shutting down stops a pass.
+  Nothing is written after that, and photos already embedded are kept.
+
+The vectors go to the same permanent table under the same identity rules as the
+Enrich step, so later experiments, Enrich runs and future Curate features reuse
+them. A photo whose preview bytes are unchanged is adopted without a request.
+The browser receives only pairwise cosine similarities, rounded to four
+decimals, never the vectors. They are held fixed until a pass ends.
+
+**Embedding similarity table** shows every pair's similarity. **—** means a
+photo has no current embedding for that model; it is unknown, not "different".
+Highlighting a photo also shows its similarity to the other photos.
+
+The rules have two modes:
+
+- **Individual filters:** with **Pictaria embeddings** on, a photo joins a
+  group when its average similarity to the group's photos reaches the
+  threshold, initially 0.800, so one lower pair, such as a different angle,
+  does not split a stack on its own. **Rule → every pair** instead requires
+  every pair to reach it. A missing embedding cannot pass either way, as with a
+  missing ThumbHash.
+- **Combined evidence:** the embedding has three bands, initially very similar
+  at ≥ 0.900 and clearly different at ≤ 0.750.
+  - Very similar embeddings support a pair on their own unless other evidence
+    conflicts.
+  - The middle band needs people agreement or a middle-band ThumbHash.
+  - Reciprocal search ranks do not corroborate embeddings, because Immich's
+    ranks may come from the same model.
+  - Clearly different embeddings separate a pair on their own. Against the
+    same recognized people (at least one), or reciprocal near search ranks,
+    they stay uncertain. Enrich people categories do not count here: many
+    unrelated photos share "none".
+  - A very close ThumbHash with clearly different embeddings, or the reverse,
+    stays uncertain, as do very similar embeddings that contradict people
+    evidence.
+  - With the switch off, the combined rules are exactly the ones above.
+
+The defaults come from a calibration of `ViT-B-32__openai` on eight real groups
+(64 photos), judged by eye. Photos in the same stack mostly scored 0.885 or more
+with each other, and clearly different scenes about 0.75 or less. Between about
+0.78 and 0.90 the judgments went both ways: some pairs were separate stacks of a
+similar scene, others parts of one stack, such as the same people framed
+differently or one landscape from different angles. No embedding cutoff decides
+that zone. Requiring every pair to reach 0.865 matched five of the groups (one
+with an acceptable extra split) but broke up stacks in the other three, and
+lowering it to fix those merged stacks elsewhere. On seven groups later scored
+with both ViT-B-32 and SigLIP 2 (`ViT-B-16-SigLIP2__webli`), averaging a photo's
+similarity to the group at 0.800 placed 96% and 95% of photo pairs as judged,
+against 66% and 75% for every pair at 0.865, so it became the individual-filter
+default; SigLIP 2 was no better than ViT-B-32 overall. No pair judged the same
+stack scored below 0.78, so combined evidence separates on embeddings alone only
+at 0.75 or less. Between 0.75 and 0.90, ThumbHash or people evidence decides;
+without it the pair stays uncertain, the case the AI Stack Referee is meant for.
+Other models need their own values. If Immich's smart search uses the same
+model, these embeddings and its search ranks are not independent evidence. They
+are the same vectors compared directly instead of ranked across the library. The
+copied summary includes the settings, coverage and pairwise similarities, with
+photo numbers but no IDs or names.
 
 ## Individual-filter rules
 
@@ -274,7 +369,10 @@ face-count experiment.
 ## Isolation, snapshots and limits
 
 - No provider requests, human/tag/album mutations, settings saves or saved stack
-  corrections originate from this page. It does not issue decision leases.
+  corrections originate from this page. It does not issue decision leases. The
+  one exception to "read-only" is **Compute embeddings**. It contacts the
+  configured Immich machine-learning service and stores Pictaria embeddings,
+  the same permanent records the optional Enrich step writes, and nothing else.
   Reading it can update the existing derived local Curate cache, and viewing
   thumbnails uses the ordinary read-only Immich image proxy. Other independent
   scheduled work in the instance continues normally.
@@ -313,4 +411,5 @@ The lab is separate from PIC-367's production grouping, PIC-370's AI stack check
 and PIC-371's production explanations. Experiments should inform those choices;
 no threshold selected here is adopted automatically. Remove the lab entry point,
 browser modules, service/routes and worker together when this evaluation aid is
-retired. It owns no persistent domain records to migrate.
+retired. It owns no persistent domain records to migrate. Embeddings computed
+here belong to the Enrich embedding store and stay when the lab is removed.
