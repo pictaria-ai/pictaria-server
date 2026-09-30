@@ -46,6 +46,8 @@ test('Settings verifies a paused saved AI connection through authenticated sched
   assert.equal(await page.evaluate(`fetch('/api/ai/connections/verify',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({target:'enrich',baseUrl:'http://forbidden.test'})}).then(r=>r.status)`), 400);
   await page.evaluate('document.querySelector("#verify-ai-enrich").click()');
   await page.waitFor('document.querySelector("#ai-verification-note").textContent.includes("Connection verified")');
+  // Verification shows its result before the separate connection-status refresh finishes.
+  await page.waitFor('document.querySelector("#ai-connection-curate").textContent.includes("Ready")');
   assert.equal(requests.length, 1);
   assert.match(JSON.stringify(requests[0]), /synthetic test image/);
   assert.match(await page.evaluate('document.querySelector("#ai-connection-curate").textContent'), /Ready/);
