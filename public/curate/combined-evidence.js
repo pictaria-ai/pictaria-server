@@ -2,10 +2,12 @@ import { LAB_PHOTO_LIMIT, decodeHash, hashDistance, peopleCategory, recognizedPe
 import { evidencePartition } from './evidence-partition.js';
 import { rankObservation } from './rank-evidence.js';
 
-// Embedding bands come from a first ViT-B-32__openai calibration on real
-// groups (PIC-381); other models need their own.
+// Embedding bands come from a ViT-B-32__openai calibration on real groups
+// (PIC-381); other models need their own. Pairs judged the same stack never
+// scored below 0.78, while 0.78-0.90 held both verdicts, so only 0.75 or less
+// separates on embeddings alone.
 export const COMBINED_DEFAULTS = Object.freeze({ nearHash: .025, farHash: .15, outsideLimit: 2, rankContrast: 8,
-  nearEmbedding: .9, farEmbedding: .865 });
+  nearEmbedding: .9, farEmbedding: .75 });
 const key = (a, b) => JSON.stringify([a, b].sort());
 
 function evaluator(photos, settings, rows) {

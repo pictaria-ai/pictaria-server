@@ -253,7 +253,7 @@ The rules have two modes:
   must reach the threshold, initially 0.865. A missing embedding cannot pass,
   as with a missing ThumbHash.
 - **Combined evidence:** the embedding has three bands, initially very similar
-  at ≥ 0.900 and clearly different at ≤ 0.865.
+  at ≥ 0.900 and clearly different at ≤ 0.750.
   - Very similar embeddings support a pair on their own unless other evidence
     conflicts.
   - The middle band needs people agreement or a middle-band ThumbHash.
@@ -268,21 +268,21 @@ The rules have two modes:
     evidence.
   - With the switch off, the combined rules are exactly the ones above.
 
-The defaults come from a first calibration of `ViT-B-32__openai` on seven real
-groups (54 photos), judged by eye. Photos in the same stack mostly scored 0.885
-or more with each other, and unrelated scenes 0.73 or less. Between about 0.78
-and 0.90 the judgments went both ways: some pairs were separate stacks of a
+The defaults come from a calibration of `ViT-B-32__openai` on eight real groups
+(64 photos), judged by eye. Photos in the same stack mostly scored 0.885 or more
+with each other, and clearly different scenes about 0.75 or less. Between about
+0.78 and 0.90 the judgments went both ways: some pairs were separate stacks of a
 similar scene, others parts of one stack, such as the same people framed
-differently. No embedding cutoff decides that zone. Requiring every pair to
-reach 0.865 matched five of the groups (one with an acceptable extra split) but
-broke up stacks in the other two, and lowering it to fix those merged stacks
-elsewhere. Combined evidence uses 0.865 as its clearly-different ceiling,
-because one clearly different pair keeps two groups apart. When both photos
-show the same recognized people, such a pair stays uncertain instead, so it can
-still join. Other models need their own values. If Immich's smart search uses
-the same model,
-these embeddings and its search ranks are not independent evidence. They are
-the same vectors compared directly instead of ranked across the library. The
+differently or one landscape from different angles. No embedding cutoff decides
+that zone. Requiring every pair to reach 0.865 matched five of the groups (one
+with an acceptable extra split) but broke up stacks in the other three, and
+lowering it to fix those merged stacks elsewhere. No pair judged the same stack
+scored below 0.78, so combined evidence separates on embeddings alone only at
+0.75 or less. Between 0.75 and 0.90, ThumbHash or people evidence decides;
+without it the pair stays uncertain, the case the AI Stack Referee is meant for.
+Other models need their own values. If Immich's smart search uses the same
+model, these embeddings and its search ranks are not independent evidence. They
+are the same vectors compared directly instead of ranked across the library. The
 copied summary includes the settings, coverage and pairwise similarities, with
 photo numbers but no IDs or names.
 

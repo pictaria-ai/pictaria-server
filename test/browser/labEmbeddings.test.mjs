@@ -67,10 +67,10 @@ test('the lab computes Pictaria embeddings on request and uses them in both expe
   await page.evaluate('(() => { const n=document.querySelector("#far-embedding"); n.value="0.99"; n.dispatchEvent(new Event("input")); })()');
   assert.match(await text('#experiment-error'), /ordered embedding bands/);
   assert.equal(await page.evaluate('document.querySelector("#copy").disabled'), true);
-  await page.evaluate('(() => { const n=document.querySelector("#far-embedding"); n.value="0.865"; n.dispatchEvent(new Event("input")); })()');
+  await page.evaluate('(() => { const n=document.querySelector("#far-embedding"); n.value="0.75"; n.dispatchEvent(new Event("input")); })()');
   await page.evaluate('Object.defineProperty(navigator,"clipboard",{configurable:true,value:{writeText:async text=>{window.copied=text}}})');
   await click('#copy');
-  assert.match(await page.evaluate('window.copied'), /Pictaria embeddings: very similar ≥ 0\.900, clearly different ≤ 0\.865/);
+  assert.match(await page.evaluate('window.copied'), /Pictaria embeddings: very similar ≥ 0\.900, clearly different ≤ 0\.750/);
   assert.match(await page.evaluate('window.copied'), /Pictaria embeddings \(ViT-B-32__openai\): 3 of 3 photos covered\nPhotos 1 ↔ 2: 0\.970/);
   assert.doesNotMatch(await page.evaluate('window.copied'), /00000000|target-portrait|synthetic/);
   await page.send('Emulation.setDeviceMetricsOverride', { width: 375, height: 812, deviceScaleFactor: 1, mobile: true });

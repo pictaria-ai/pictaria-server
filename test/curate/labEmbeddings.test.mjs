@@ -70,7 +70,7 @@ test('combined mode: clearly different embeddings separate unless ThumbHash, the
   assert.deepEqual([alone.state, alone.reason], ['separate', 'Clearly different embeddings']);
   // A very close ThumbHash or reciprocal near ranks pointing the other way keep the pair uncertain.
   const twin = photo('twin', 1000, 0, 'one');
-  assert.deepEqual(Object.values(assessPair(solo, twin, { ...base, embeddingSimilarity: table([['solo', 'twin', 0.8]]) })).slice(0, 2),
+  assert.deepEqual(Object.values(assessPair(solo, twin, { ...base, embeddingSimilarity: table([['solo', 'twin', 0.7]]) })).slice(0, 2),
     ['uncertain', 'ThumbHash and embeddings disagree']);
   const rows = new Map(['solo', 'x'].map(id => [id, { state: 'complete', photos: [{ id, rank: null }, { id: id === 'solo' ? 'x' : 'solo', rank: 1 }] }]));
   const ranked = assessPair(solo, x, { ...base, ranks: true, embeddingSimilarity: table([['solo', 'x', 0.5]]) }, rows);
@@ -78,13 +78,13 @@ test('combined mode: clearly different embeddings separate unless ThumbHash, the
   // The same recognized people keep an embedding-only difference uncertain; a matching Enrich category does not.
   const person = (id, time, byte, ids) => ({ ...photo(id, time, byte, 'one'), recognizedIds: ids });
   const p1 = person('p1', 0, null, ['A']), p2 = person('p2', 1000, null, ['A']), p3 = person('p3', 2000, null, ['B']);
-  const framed = table([['p1', 'p2', 0.82], ['p1', 'p3', 0.82]]), withIds = { ...base, thumbhash: false, identities: true, embeddingSimilarity: framed };
+  const framed = table([['p1', 'p2', 0.7], ['p1', 'p3', 0.7]]), withIds = { ...base, thumbhash: false, identities: true, embeddingSimilarity: framed };
   assert.deepEqual(Object.values(assessPair(p1, p2, withIds)).slice(0, 2), ['uncertain', 'Clearly different embeddings, but the same recognized people']);
   assert.equal(assessPair(p1, p2, { ...withIds, identities: false }).state, 'separate', 'a matching people category alone does not count');
   assert.equal(assessPair(p1, p3, withIds).state, 'separate');
   // Corroborated separation still wins over the same people.
   const q1 = person('q1', 0, 0, ['A']), q2 = person('q2', 1000, 255, ['A']);
-  assert.equal(assessPair(q1, q2, { ...base, identities: true, embeddingSimilarity: table([['q1', 'q2', 0.82]]) }).reason,
+  assert.equal(assessPair(q1, q2, { ...base, identities: true, embeddingSimilarity: table([['q1', 'q2', 0.7]]) }).reason,
     'Clearly different embeddings and ThumbHash');
   // Very similar embeddings contradicting people evidence stay uncertain.
   assert.equal(assessPair(solo, couple, { ...base, embeddingSimilarity: table([['solo', 'couple', 0.99]]) }).reason,
@@ -94,35 +94,46 @@ test('combined mode: clearly different embeddings separate unless ThumbHash, the
   assert.throws(() => combinedPartition([solo, couple], { ...base, nearEmbedding: 0.8, farEmbedding: 0.9, embeddingSimilarity: far }), /ordered embedding bands/);
 });
 
-test('the calibrated defaults reproduce judged ViT-B-32 groups, and the same recognized people rejoin a stack embeddings split', () => {
-  // Rounded similarities from real groups judged by eye (PIC-381): photos 1–4,
-  // 5–8 and 9–10 are three stacks; pairs not listed are unrelated scenes.
-  const photos = Array.from({ length: 10 }, (_, i) => photo(String(i + 1), i * 1000, null));
-  const known = new Map(Object.entries({ '1|2': .934, '1|3': .932, '1|4': .92, '2|3': .921, '2|4': .893, '3|4': .942,
+test('calibrated ViT-B-32 defaults on judged groups: every-pair filtering splits ambiguous stacks; combined evidence joins them or leaves them uncertain', () => {
+  // Rounded similarities from real groups judged by eye (PIC-381).
+  const numbered = (n, extra = () => ({})) => Array.from({ length: n }, (_, i) => ({ ...photo(String(i + 1), i * 1000, null), ...extra(i + 1) }));
+  const lookup = (entries, otherwise = null) => {
+    const known = new Map(Object.entries(entries));
+    return (a, b) => known.get([a, b].sort((m, n) => m - n).join('|')) ?? otherwise;
+  };
+  const run = (photos, similarity, extra = {}) => {
+    const settings = { gapMs: 15000, embeddings: true, embeddingSimilarity: similarity, ...extra };
+    const combined = combinedPartition(photos, settings);
+    return { individual: ids(partition(photos, settings).groups), combined: ids(combined.groups), summaries: combined.summaries };
+  };
+  // Judged 4 + 4 + 2; photos 9–10 score 0.778–0.900 with 5–8. Pairs not listed are unrelated scenes.
+  const first = run(numbered(10), lookup({ '1|2': .934, '1|3': .932, '1|4': .92, '2|3': .921, '2|4': .893, '3|4': .942,
     '5|6': .906, '5|7': .9, '5|8': .907, '5|9': .856, '5|10': .778, '6|7': .918, '6|8': .944, '6|9': .864, '6|10': .814,
-    '7|8': .936, '7|9': .9, '7|10': .875, '8|9': .898, '8|10': .838, '9|10': .885 }));
-  const similarity = (a, b) => known.get([a, b].sort((m, n) => m - n).join('|')) ?? 0.7;
-  const judged = [['1', '2', '3', '4'], ['5', '6', '7', '8'], ['9', '10']];
-  assert.deepEqual(ids(partition(photos, { gapMs: 15000, embeddings: true, embeddingSimilarity: similarity }).groups), judged);
-  const combined = combinedPartition(photos, { gapMs: 15000, embeddings: true, embeddingSimilarity: similarity });
-  assert.deepEqual(ids(combined.groups), judged);
-  // A clearly-different ceiling of 0.85 would attach photo 9 to the second stack.
-  assert.deepEqual(ids(combinedPartition(photos, { gapMs: 15000, embeddings: true, farEmbedding: 0.85, embeddingSimilarity: similarity }).groups),
-    [['1', '2', '3', '4'], ['5', '6', '7', '8', '9'], ['10']]);
-  // Two shots of one stack in the middle band, a third clearly different.
-  const three = photos.slice(0, 3), pair = table([['1', '2', 0.897], ['1', '3', 0.784], ['2', '3', 0.817]]);
-  assert.deepEqual(ids(partition(three, { gapMs: 15000, embeddings: true, embeddingSimilarity: pair }).groups), [['1', '2'], ['3']]);
-  assert.deepEqual(ids(combinedPartition(three, { gapMs: 15000, embeddings: true, embeddingSimilarity: pair }).groups), [['1', '2'], ['3']]);
+    '7|8': .936, '7|9': .9, '7|10': .875, '8|9': .898, '8|10': .838, '9|10': .885 }, 0.7));
+  assert.deepEqual(first.individual, [['1', '2', '3', '4'], ['5', '6', '7', '8'], ['9', '10']]);
+  // Embeddings alone cannot separate 9–10 from 5–8, so combined evidence attaches them provisionally.
+  assert.deepEqual(first.combined, [['1', '2', '3', '4'], ['5', '6', '7', '8', '9', '10']]);
+  assert.match(first.summaries[1], /^Provisional/);
+  // Judged 1–2 + 3, at scores (0.784, 0.817) that elsewhere held one stack.
+  const three = run(numbered(3), lookup({ '1|2': .897, '1|3': .784, '2|3': .817 }));
+  assert.deepEqual(three.individual, [['1', '2'], ['3']]);
+  assert.deepEqual([three.combined, three.summaries[0].startsWith('Provisional')], [[['1', '2', '3']], true]);
+  // Photos 1–8 of a landscape group: 1–6 are one scene from different angles (0.805–0.968); 7 and 8 differ.
+  const landscape = run(numbered(8), lookup({ '1|2': .923, '1|3': .864, '1|4': .92, '1|5': .914, '1|6': .927, '1|7': .558, '1|8': .691,
+    '2|3': .95, '2|4': .864, '2|5': .869, '2|6': .876, '2|7': .577, '2|8': .71, '3|4': .805, '3|5': .813, '3|6': .82, '3|7': .598,
+    '3|8': .682, '4|5': .937, '4|6': .968, '4|7': .514, '4|8': .616, '5|6': .928, '5|7': .515, '5|8': .619, '6|7': .523, '6|8': .62, '7|8': .697 }));
+  assert.deepEqual(landscape.individual, [['1', '2'], ['3'], ['4', '5', '6'], ['7'], ['8']], 'every pair at 0.865 splits the scene');
+  assert.deepEqual(landscape.combined, [['1', '2', '3', '4', '5', '6'], ['7'], ['8']]);
   // Photos 1–8 of a 13-photo group: 1, 2, 7 and 8 show the same people framed
   // differently (0.820–0.885 across the two framings); 3–6 show someone else.
-  const framing = Array.from({ length: 8 }, (_, i) => ({ ...photo(String(i + 1), i * 1000, null), recognizedIds: [1, 2, 7, 8].includes(i + 1) ? ['A'] : ['B'] }));
-  const scores = new Map(Object.entries({ '1|2': .943, '1|3': .666, '1|4': .687, '1|5': .674, '1|6': .705, '1|7': .82, '1|8': .85,
+  const framings = lookup({ '1|2': .943, '1|3': .666, '1|4': .687, '1|5': .674, '1|6': .705, '1|7': .82, '1|8': .85,
     '2|3': .693, '2|4': .728, '2|5': .699, '2|6': .732, '2|7': .862, '2|8': .873, '3|4': .919, '3|5': .958, '3|6': .914, '3|7': .761,
-    '3|8': .753, '4|5': .943, '4|6': .942, '4|7': .75, '4|8': .714, '5|6': .928, '5|7': .767, '5|8': .737, '6|7': .765, '6|8': .739, '7|8': .885 }));
-  const framingSimilarity = (a, b) => scores.get([a, b].sort((m, n) => m - n).join('|')) ?? null;
-  const settings = { gapMs: 15000, embeddings: true, embeddingSimilarity: framingSimilarity };
-  assert.deepEqual(ids(combinedPartition(framing, settings).groups), [['1', '2'], ['3', '4', '5', '6'], ['7', '8']], 'embeddings alone split the framings');
-  assert.deepEqual(ids(combinedPartition(framing, { ...settings, identities: true }).groups), [['1', '2', '7', '8'], ['3', '4', '5', '6']]);
+    '3|8': .753, '4|5': .943, '4|6': .942, '4|7': .75, '4|8': .714, '5|6': .928, '5|7': .767, '5|8': .737, '6|7': .765, '6|8': .739, '7|8': .885 });
+  const people = numbered(8, (n) => ({ recognizedIds: [1, 2, 7, 8].includes(n) ? ['A'] : ['B'] }));
+  const framed = run(people, framings);
+  assert.deepEqual(framed.individual, [['1', '2'], ['3', '4', '5', '6'], ['7', '8']]);
+  assert.deepEqual(framed.combined, [['1', '2', '7', '8'], ['3', '4', '5', '6']]);
+  assert.deepEqual(run(people, framings, { identities: true }).combined, [['1', '2', '7', '8'], ['3', '4', '5', '6']]);
 });
 
 test('with embeddings off the combined rules are unchanged, whatever similarities exist', () => {
