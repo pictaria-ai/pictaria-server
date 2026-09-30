@@ -41,7 +41,7 @@ export class EmbeddingComparison {
     this.status = node('p', '', 'p-muted'); this.status.setAttribute('role', 'status');
     this.estimate = node('p', '', 'p-muted lab-small');
     const controls = node('div', undefined, 'compare-tools'); controls.append(this.button, this.cancel);
-    this.table = node('div', undefined, 'lab-rank-scroll'); this.table.tabIndex = 0;
+    this.table = node('div', undefined, 'lab-rank-scroll embedding-scroll'); this.table.tabIndex = 0;
     this.table.setAttribute('role', 'region'); this.table.setAttribute('aria-label', 'Embedding similarity; scroll to see more columns');
     root.replaceChildren(controls, this.estimate, this.status);
     tableRoot.replaceChildren(this.table);

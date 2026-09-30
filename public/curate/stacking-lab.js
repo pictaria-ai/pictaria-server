@@ -195,7 +195,7 @@ function settings() {
     identities: el('use-identities').checked, ranks: el('use-ranks').checked,
     nearHash: el('use-hash').checked ? Number(el('near-hash').value) : COMBINED_DEFAULTS.nearHash, farHash: el('use-hash').checked ? Number(el('far-hash').value) : COMBINED_DEFAULTS.farHash,
     outsideLimit: el('use-ranks').checked ? Number(el('rank-cutoff').value) : COMBINED_DEFAULTS.outsideLimit, rankContrast: el('use-ranks').checked ? Number(el('rank-contrast').value) : COMBINED_DEFAULTS.rankContrast, combined: el('combined-mode').checked,
-    embeddings: el('use-embeddings').checked, embeddingThreshold: Number(el('embedding-threshold').value),
+    embeddings: el('use-embeddings').checked, embeddingThreshold: Number(el('embedding-threshold').value), embeddingRule: el('embedding-rule').value,
     nearEmbedding: el('use-embeddings').checked ? Number(el('near-embedding').value) : COMBINED_DEFAULTS.nearEmbedding,
     farEmbedding: el('use-embeddings').checked ? Number(el('far-embedding').value) : COMBINED_DEFAULTS.farEmbedding,
     embeddingSimilarity: embeddingPanel ? (a, b) => embeddingPanel.similarity(a, b) : null };
@@ -204,7 +204,7 @@ function reset() {
   el('gap').value = current.gapSeconds; el('gap').max = current.gapSeconds;
   el('span').value = 180; el('threshold').value = 0.1;
   for (const id of ['use-span', 'use-hash', 'use-people', 'use-identities', 'use-ranks', 'use-embeddings', 'combined-mode']) el(id).checked = false;
-  el('embedding-threshold').value = 0.865;
+  el('embedding-threshold').value = 0.865; el('embedding-rule').value = 'every';
   el('near-embedding').value = COMBINED_DEFAULTS.nearEmbedding; el('far-embedding').value = COMBINED_DEFAULTS.farEmbedding;
   el('near-hash').value = COMBINED_DEFAULTS.nearHash; el('far-hash').value = COMBINED_DEFAULTS.farHash;
   el('rank-cutoff').value = COMBINED_DEFAULTS.outsideLimit; el('rank-contrast').value = COMBINED_DEFAULTS.rankContrast;
@@ -224,7 +224,7 @@ function recalculate() {
   el('span').disabled = !el('use-span').checked;
   el('threshold').disabled = combined || !el('use-hash').checked;
   el('threshold-value').textContent = Number(el('threshold').value).toFixed(3);
-  el('embedding-threshold').disabled = combined || !el('use-embeddings').checked;
+  el('embedding-threshold').disabled = el('embedding-rule').disabled = combined || !el('use-embeddings').checked;
   el('embedding-threshold-value').textContent = Number(el('embedding-threshold').value).toFixed(3);
   el('near-embedding').disabled = el('far-embedding').disabled = !combined || !el('use-embeddings').checked;
   if (combined && el('use-embeddings').checked && (['near-embedding', 'far-embedding'].some(id => !el(id).value || !el(id).checkValidity())
@@ -302,7 +302,7 @@ el('more').onclick = async () => {
   catch (e) { error('error', e.message); }
   finally { el('more').disabled = false; el('build').disabled = false; }
 };
-for (const input of document.querySelectorAll('.lab-settings input')) input.addEventListener('input', recalculate);
+for (const input of document.querySelectorAll('.lab-settings input, .lab-settings select')) input.addEventListener('input', recalculate);
 el('reset').onclick = reset;
 el('refresh-recognition').onclick = refreshRecognition;
 el('check-ranking').onclick = checkRanking;
@@ -311,7 +311,7 @@ el('copy').onclick = async () => {
   const s = settings();
   const rankSummary = ranking ? `\nImmich similarity ranking (earliest reference; timeline images; first 50 excluding reference)\n${el('ranking-status').textContent}\n${current.photos.map((p, i) => `Photo ${i + 1}: ${cards.get(p.id).rank.textContent}`).join('\n')}` : '';
   const hashSummary = !s.thumbhash ? 'off' : s.combined ? `very close ≤ ${s.nearHash.toFixed(3)}, clearly different ≥ ${s.farHash.toFixed(3)}` : `${s.threshold.toFixed(3)} (every pair)`;
-  const embeddingSummary = !s.embeddings ? 'off' : s.combined ? `very similar ≥ ${s.nearEmbedding.toFixed(3)}, clearly different ≤ ${s.farEmbedding.toFixed(3)}` : `≥ ${s.embeddingThreshold.toFixed(3)} (every pair)`;
+  const embeddingSummary = !s.embeddings ? 'off' : s.combined ? `very similar ≥ ${s.nearEmbedding.toFixed(3)}, clearly different ≤ ${s.farEmbedding.toFixed(3)}` : `≥ ${s.embeddingThreshold.toFixed(3)} (${s.embeddingRule === 'average' ? 'average to the group' : 'every pair'})`;
   const text = `Stacking lab (experimental)\nStarting gap: ${current.gapSeconds} s\nGap: ${s.gapMs / 1000} s; span: ${s.spanMs === null ? 'unlimited' : s.spanMs / 1000 + ' s'}\nThumbHash: ${hashSummary}; Enrich people categories (none/one/couple/group): ${s.people ? 'on' : 'off'}\nDifferent recognized people (nonempty lists with no identities in common): ${s.identities ? 'on' : 'off'}\n${el('recognition-status').textContent}\n${el('result').textContent}\n${el('evidence-note').textContent.split('. Photo links')[0]}${rankSummary}\nMode: ${s.combined ? 'Combined evidence (experimental)' : 'Individual filters'}; outside photos ahead / minimum contrast: ${s.ranks && s.combined ? `${s.outsideLimit} / ${s.rankContrast}` : 'off'}\n${el('combined-summary').textContent}\nPictaria embeddings: ${embeddingSummary}\n${rankPanel?.summary() ?? ''}\n${embeddingPanel?.summary() ?? ''}\n${[...el('pair-evidence').children].map(p => p.textContent).join('\n')}`;
   try {
     if (navigator.clipboard?.writeText) await navigator.clipboard.writeText(text);

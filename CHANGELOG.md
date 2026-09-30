@@ -24,7 +24,9 @@ All notable changes to Pictaria Server are documented here. This project follows
   real groups: every pair must reach 0.865 in individual filters; combined
   evidence treats ≥ 0.900 as very similar and ≤ 0.750 as clearly different,
   and clearly different embeddings separate a pair on their own unless both
-  photos show the same recognized people. Production grouping is unchanged.
+  photos show the same recognized people. Individual filters can instead
+  require a photo's average similarity to a group, and the similarity table
+  shows every row. Production grouping is unchanged.
 
 - Added optional image embeddings to Enrich (off by default). Settings →
   Enrich → Image embeddings points Pictaria at the machine-learning container

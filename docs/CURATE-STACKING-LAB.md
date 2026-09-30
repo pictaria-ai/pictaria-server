@@ -251,7 +251,10 @@ The rules have two modes:
 
 - **Individual filters:** with **Pictaria embeddings** on, every pair in a group
   must reach the threshold, initially 0.865. A missing embedding cannot pass,
-  as with a missing ThumbHash.
+  as with a missing ThumbHash. **Rule → average to the group** instead lets a
+  photo join when its average similarity to the group's photos reaches the
+  threshold, so one lower pair, such as a different angle, does not split a
+  stack on its own.
 - **Combined evidence:** the embedding has three bands, initially very similar
   at ≥ 0.900 and clearly different at ≤ 0.750.
   - Very similar embeddings support a pair on their own unless other evidence

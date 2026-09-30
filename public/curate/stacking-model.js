@@ -53,13 +53,16 @@ export function timeGroups(photos, gapMs) {
 }
 
 // embeddingSimilarity(a, b) returns stored Pictaria-embedding cosine or null.
+// embeddingRule 'every' needs every pair to reach the threshold; 'average'
+// compares a photo's mean similarity to the group's photos with it.
 export function partition(photos, { gapMs, spanMs = null, thumbhash = false, threshold = 0.1, people = false, identities = false,
-  embeddings = false, embeddingThreshold = 0.865, embeddingSimilarity = null }) {
+  embeddings = false, embeddingThreshold = 0.865, embeddingRule = 'every', embeddingSimilarity = null }) {
   if (photos.length > LAB_PHOTO_LIMIT) throw Error(`Experiments support at most ${LAB_PHOTO_LIMIT} photos.`);
   if (!Number.isFinite(gapMs) || gapMs < 0 || gapMs > 180000 ||
       (spanMs !== null && (!Number.isFinite(spanMs) || spanMs < 0 || spanMs > 3600000)) ||
       !Number.isFinite(threshold) || threshold < 0 || threshold > 1 ||
-      !Number.isFinite(embeddingThreshold) || embeddingThreshold < -1 || embeddingThreshold > 1) throw Error('Invalid experiment settings.');
+      !Number.isFinite(embeddingThreshold) || embeddingThreshold < -1 || embeddingThreshold > 1 ||
+      !['every', 'average'].includes(embeddingRule)) throw Error('Invalid experiment settings.');
   const sorted = [...photos].sort((a, b) =>
     (a.time ?? Infinity) - (b.time ?? Infinity) || a.id.localeCompare(b.id));
   const hashes = new Map(photos.map((p) => [p.id, decodeHash(p.thumbhash)]));
@@ -77,7 +80,7 @@ export function partition(photos, { gapMs, spanMs = null, thumbhash = false, thr
       if (spanMs !== null && photo.time - group[0].time > spanMs) {
         blocked.add('Total span'); continue;
       }
-      let compatible = true;
+      let compatible = true, total = 0;
       for (const member of group) {
         const a = recognized.get(photo.id), b = recognized.get(member.id);
         if (identities && identitiesDiffer(a, b)) {
@@ -97,11 +100,15 @@ export function partition(photos, { gapMs, spanMs = null, thumbhash = false, thr
         if (embeddings) {
           // Like a missing hash, a missing embedding cannot pass this rule.
           const similarity = embeddingSimilarity?.(photo.id, member.id) ?? null;
-          if (similarity === null || similarity < embeddingThreshold) {
+          if (similarity === null || (embeddingRule === 'every' && similarity < embeddingThreshold)) {
             blocked.add(similarity === null ? 'Embedding unavailable' : 'Embedding difference');
             compatible = false; break;
           }
+          total += similarity;
         }
+      }
+      if (compatible && embeddings && embeddingRule === 'average' && total / group.length < embeddingThreshold) {
+        blocked.add('Embedding difference'); compatible = false;
       }
       if (compatible) { found = group; break; }
     }

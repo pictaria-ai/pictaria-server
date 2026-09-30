@@ -94,7 +94,7 @@ test('combined mode: clearly different embeddings separate unless ThumbHash, the
   assert.throws(() => combinedPartition([solo, couple], { ...base, nearEmbedding: 0.8, farEmbedding: 0.9, embeddingSimilarity: far }), /ordered embedding bands/);
 });
 
-test('calibrated ViT-B-32 defaults on judged groups: every-pair filtering splits ambiguous stacks; combined evidence joins them or leaves them uncertain', () => {
+test('calibrated ViT-B-32 defaults on judged groups: every-pair filtering splits ambiguous stacks; the average rule and combined evidence join them or leave them uncertain', () => {
   // Rounded similarities from real groups judged by eye (PIC-381).
   const numbered = (n, extra = () => ({})) => Array.from({ length: n }, (_, i) => ({ ...photo(String(i + 1), i * 1000, null), ...extra(i + 1) }));
   const lookup = (entries, otherwise = null) => {
@@ -104,7 +104,8 @@ test('calibrated ViT-B-32 defaults on judged groups: every-pair filtering splits
   const run = (photos, similarity, extra = {}) => {
     const settings = { gapMs: 15000, embeddings: true, embeddingSimilarity: similarity, ...extra };
     const combined = combinedPartition(photos, settings);
-    return { individual: ids(partition(photos, settings).groups), combined: ids(combined.groups), summaries: combined.summaries };
+    return { individual: ids(partition(photos, settings).groups), combined: ids(combined.groups), summaries: combined.summaries,
+      average: ids(partition(photos, { ...settings, embeddingRule: 'average', embeddingThreshold: 0.815 }).groups) };
   };
   // Judged 4 + 4 + 2; photos 9–10 score 0.778–0.900 with 5–8. Pairs not listed are unrelated scenes.
   const first = run(numbered(10), lookup({ '1|2': .934, '1|3': .932, '1|4': .92, '2|3': .921, '2|4': .893, '3|4': .942,
@@ -134,6 +135,12 @@ test('calibrated ViT-B-32 defaults on judged groups: every-pair filtering splits
   assert.deepEqual(framed.individual, [['1', '2'], ['3', '4', '5', '6'], ['7', '8']]);
   assert.deepEqual(framed.combined, [['1', '2', '7', '8'], ['3', '4', '5', '6']]);
   assert.deepEqual(run(people, framings, { identities: true }).combined, [['1', '2', '7', '8'], ['3', '4', '5', '6']]);
+  // Averaging a photo's similarity to the group keeps one lower pair from splitting a stack.
+  assert.deepEqual(first.average, [['1', '2', '3', '4'], ['5', '6', '7', '8', '9', '10']]);
+  assert.deepEqual(three.average, [['1', '2'], ['3']], 'photo 3 averages 0.8005 against 1–2');
+  assert.deepEqual(landscape.average, [['1', '2', '3', '4', '5', '6'], ['7'], ['8']]);
+  assert.deepEqual(framed.average, [['1', '2', '7', '8'], ['3', '4', '5', '6']]);
+  assert.throws(() => partition(numbered(2), { gapMs: 15000, embeddings: true, embeddingRule: 'median' }), /Invalid experiment settings/);
 });
 
 test('with embeddings off the combined rules are unchanged, whatever similarities exist', () => {
