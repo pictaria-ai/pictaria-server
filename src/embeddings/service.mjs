@@ -42,7 +42,7 @@ export const REACHABILITY_HINT = 'The address must work from Pictaria’s own se
 const unreachable = (error) => ['ml_unreachable', 'ml_timeout'].includes(error?.code);
 
 // Lane priorities: Enrich first, then a person's connection test, then lab passes.
-const PRIORITY = Object.freeze({ enrich: 2, test: 1, lab: 0 });
+const PRIORITY = Object.freeze({ enrich: 2, test: 1, lab: 0, backfill: 0 });
 
 // Every prediction Pictaria sends to the machine-learning service goes through
 // this one lane: at most one request in flight for the whole server, across
@@ -107,7 +107,8 @@ export class EmbeddingService {
     this.lastConnection = null;
     this.lastSession = null;
     this.testing = false;
-    // Open sessions: 'enrich' (one per Enrich run) and 'lab' (explicit passes).
+    // Open sessions: 'enrich' (one per Enrich run), 'lab' (explicit passes)
+    // and 'backfill' (Settings → embed enriched photos).
     this.active = new Set();
     this.lane = new PredictionLane();
   }
@@ -198,11 +199,14 @@ export class EmbeddingService {
   session({ log = () => {}, signal = null } = {}) {
     const { enabled, url, model } = this.settings();
     if (!enabled) return null;
-    // Enrich takes the service back from an explicit lab pass: the pass's
-    // current request is aborted and drained before Enrich's first prediction.
+    // Enrich takes the service back from an explicit lab pass or a backfill:
+    // its current request is aborted and drained before Enrich's first
+    // prediction. A backfill waits for the run and then continues.
     for (const session of this.active) {
       if (session.kind === 'lab') {
         session.preempt('An Enrich run started embedding photos, so this pass stopped to leave the machine-learning service to it. Completed photos are kept.');
+      } else if (session.kind === 'backfill') {
+        session.preempt('An Enrich run started, so embedding enriched photos waits for it to finish.');
       }
     }
     return new EmbeddingSession(this, { url, model, log, signal, kind: 'enrich' });
@@ -221,10 +225,40 @@ export class EmbeddingService {
     if (this.enrichActive()) {
       throw new EmbeddingServiceError('An Enrich run is embedding photos right now. Try again when it finishes.', 'ml_busy', { service: false });
     }
-    if ([...this.active].some((session) => session.kind === 'lab')) {
+    if (this.passActive()) {
       throw new EmbeddingServiceError('Another embedding pass is running. Try again when it finishes.', 'ml_busy', { service: false });
     }
     return new EmbeddingSession(this, { url, model, log, signal, kind: 'lab' });
+  }
+
+  // One pass of the enriched-photo backfill. Unlike a lab pass it needs the
+  // Image embeddings switch, since the switch means "use embeddings". The
+  // caller waits out Enrich runs and starts a new pass afterwards.
+  backfillPass({ log = () => {}, signal = null, model = null } = {}) {
+    const { enabled, url, model: selected } = this.settings();
+    if (!enabled) {
+      throw new EmbeddingServiceError('Turn on Image embeddings in Settings → Enrich first.', 'ml_off', { service: false });
+    }
+    if (!url) {
+      throw new EmbeddingServiceError('Set the Immich machine-learning URL in Settings → Enrich → Image embeddings first.',
+        'ml_not_configured', { service: false });
+    }
+    if (model !== null && model !== selected) {
+      throw new EmbeddingServiceError('The embedding model changed in Settings. Start again to embed photos for the new model.',
+        'ml_model_changed', { service: false });
+    }
+    if (this.enrichActive()) {
+      throw new EmbeddingServiceError('An Enrich run is embedding photos right now.', 'ml_busy', { service: false });
+    }
+    if (this.passActive()) {
+      throw new EmbeddingServiceError('A stacking-lab pass is embedding photos. Try again when it finishes.', 'ml_busy', { service: false });
+    }
+    return new EmbeddingSession(this, { url, model: selected, log, signal, kind: 'backfill' });
+  }
+
+  // A lab pass or a backfill pass holds the explicit-work slot.
+  passActive() {
+    return [...this.active].some((session) => session.kind === 'lab' || session.kind === 'backfill');
   }
 
   enrichActive() {

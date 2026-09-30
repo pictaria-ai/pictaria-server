@@ -1312,10 +1312,49 @@ immediately.
   calibration vectors stay float32. That is about 1.5 KB per photo at 512
   dimensions and 2 KB at 768, or roughly 45 MB for 30,000 photos with the
   default model, for each set kept. They are included in every backup.
-- Settings shows how many photos have current embeddings for the configured
-  model and how many belong to other spaces.
+- Settings shows how many enriched photos have embeddings for the selected
+  model and lists every stored set; see
+  [Embedding photos you enriched earlier](#embedding-photos-you-enriched-earlier).
 - The Enrich Status card shows coverage and the last run's counts.
 - While the step is on, the home page shows the machine-learning connection.
+
+### Embedding photos you enriched earlier
+
+Enrich embeds only the photos it analyzes, so photos enriched before the step
+was on have no embeddings. Settings → Enrich → Image embeddings shows how many
+enriched photos have one for the selected model, and **Embed N enriched
+photos** embeds the rest.
+
+- It needs the **Image embeddings** switch on and saved, a machine-learning URL,
+  and Immich connected.
+- Only enriched photos are included: photos with a successful enrichment that
+  are still in Immich and not discarded. Photos you enrich later get embeddings
+  as part of Enrich.
+- Photos go newest capture first, one at a time, through the same queue and
+  rules as Enrich. There is one prediction at a time server-wide, with the same
+  identity checks, and a calibration check comes first. A changed model or
+  preprocessing therefore starts a new set rather than mixing vectors.
+- Enrich goes first. When an Enrich run starts, the backfill's current request
+  is aborted, and the job waits for the run to finish before it continues.
+- **Stop** keeps completed photos, and nothing is written afterwards. Pressing
+  the button again continues with whatever is still missing, so a restart loses
+  nothing.
+- It stops, with the reason, after three consecutive service failures, a
+  database error, or ten photos in a row that could not be embedded (usually
+  previews that could not be downloaded). A single photo that can't be embedded
+  is skipped.
+- Immich's own machine-learning jobs share the container and may run more
+  slowly meanwhile.
+
+Settings also lists every stored embedding set. For each one it shows:
+
+- the model and its dimensions;
+- how many photos have a current embedding;
+- how many are out of date because the photo changed in Immich;
+- when the set was created, and whether it is in use.
+
+A model you switched away from, or an earlier version of the service's output,
+is kept but never mixed with the set in use.
 
 ## Review data model (Curate)
 

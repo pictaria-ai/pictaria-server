@@ -1,9 +1,10 @@
 import { readJsonBody, sendError, sendJson } from '../http.mjs';
 import { EmbeddingServiceError } from '../embeddings/client.mjs';
 
-// Status and connection test for the optional Enrich image-embedding step.
-// Photos never leave through these routes: the test embeds a synthetic image.
-export function createEmbeddingRoutes({ embeddings }) {
+// Status, connection test and the enriched-photo backfill for the optional
+// Enrich image-embedding step. The test embeds a synthetic image; only the
+// backfill sends photo previews, one at a time, to the configured service.
+export function createEmbeddingRoutes({ embeddings, backfill = null }) {
   return async function handleEmbeddingRoute(request, response, url) {
     if (!url.pathname.startsWith('/api/enrich/embeddings')) return false;
     response.setHeader('Cache-Control', 'no-store');
@@ -11,8 +12,23 @@ export function createEmbeddingRoutes({ embeddings }) {
     if (request.method === 'GET' && url.pathname === '/api/enrich/embeddings') {
       // ?check=1 refreshes the cached ping (home page); otherwise status only.
       const connection = url.searchParams.get('check') === '1' ? await embeddings.connection() : undefined;
-      const status = embeddings.status();
+      const status = { ...embeddings.status(), ...(backfill ? backfill.status() : {}) };
       sendJson(response, 200, connection ? { ...status, connection } : status);
+      return true;
+    }
+
+    if (backfill && request.method === 'POST' && url.pathname === '/api/enrich/embeddings/backfill') {
+      try {
+        sendJson(response, 202, { backfill: backfill.start() });
+      } catch (error) {
+        if (!(error instanceof EmbeddingServiceError)) throw error;
+        sendError(response, 409, error.code, error.message);
+      }
+      return true;
+    }
+
+    if (backfill && request.method === 'POST' && url.pathname === '/api/enrich/embeddings/backfill/stop') {
+      sendJson(response, 200, { backfill: await backfill.stop() });
       return true;
     }
 

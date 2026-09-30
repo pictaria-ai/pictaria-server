@@ -102,6 +102,15 @@
     .caption-wb-status { padding: 0 0 9px; }
     .caption-wb-actions { display: flex; align-items: center; gap: 10px; margin-top: 8px; }
     .caption-wb-actions .p-btn { flex-shrink: 0; }
+    .embeddings-sets { margin-top: 10px; max-width: 100%; overflow-x: auto; }
+    .embeddings-sets table { border-collapse: collapse; font-size: 12px; min-width: 100%; }
+    .embeddings-sets caption { text-align: left; color: var(--p-muted); padding-bottom: 6px; }
+    .embeddings-sets th, .embeddings-sets td { border-bottom: 1px solid var(--p-line); padding: 6px 8px; text-align: left; white-space: nowrap; }
+    .embeddings-sets td.num, .embeddings-sets th.num { text-align: right; }
+    .embeddings-sets td:first-child { white-space: normal; overflow-wrap: anywhere; }
+    .embeddings-backfill-actions { flex-wrap: wrap; }
+    .embeddings-backfill-actions .save-note { flex: 1 1 14em; }
+    @media (max-width: 520px) { .embeddings-sets .optional { display: none; } }
     /* Show/hide toggle inside API-key fields. The wrapper must
        share the input's 340px cap — positioned against a full-width
        wrapper, the eye would float far right of the field on desktop. */
@@ -344,6 +353,15 @@
             <span id="embeddingsTestNote" class="save-note" role="status" aria-live="polite"></span>
           </div>
           <div id="embeddingsCoverage" class="setting-desc" role="status" aria-live="polite"></div>
+          <div id="embeddingsBackfill" hidden>
+            <div class="caption-wb-actions embeddings-backfill-actions">
+              <button id="embeddingsBackfillStart" class="p-btn" type="button" disabled>Embed enriched photos</button>
+              <button id="embeddingsBackfillStop" class="p-btn" type="button" hidden>Stop</button>
+              <span id="embeddingsBackfillNote" class="save-note" role="status" aria-live="polite"></span>
+            </div>
+            <p class="setting-desc">Embeds the enriched photos that don’t have an embedding yet: each preview goes to the machine-learning service, one at a time, about 0.1–0.3 s each. Enrich runs go first. Photos you enrich later get embeddings as part of Enrich.</p>
+          </div>
+          <div id="embeddingsSets" class="embeddings-sets" hidden></div>
         </div>
         <div class="save-row">
           <button id="save-enrich" class="p-btn primary">Save Enrich settings</button>
@@ -1423,23 +1441,135 @@
       } catch {
         return;
       }
-      const { coverage, model } = status;
+      const { coverage, model, enriched } = status;
       const parts = [];
-      if (coverage.vectors) {
+      if (enriched) {
+        parts.push(`${model}: ${enriched.current.toLocaleString()} of ${enriched.total.toLocaleString()} enriched photo${enriched.total === 1 ? '' : 's'} have embeddings.`);
+      } else if (coverage.vectors) {
         parts.push(`${coverage.current.toLocaleString()} photo${coverage.current === 1 ? '' : 's'} have current embeddings from ${model}.`);
-        const stale = coverage.vectors - coverage.current;
-        if (stale) parts.push(`${stale.toLocaleString()} changed in Immich since and will be replaced when re-embedded.`);
       } else {
         parts.push(`No embeddings stored for ${model} yet.`);
       }
-      if (coverage.otherVectors) parts.push(`${coverage.otherVectors.toLocaleString()} from other models or service versions are kept but not used.`);
+      if (!status.sets && coverage.otherVectors) parts.push(`${coverage.otherVectors.toLocaleString()} from other models or service versions are kept but not used.`);
       if (status.lastRun) {
         const run = status.lastRun;
         parts.push(`Last run: ${run.embedded} new, ${run.current} already current, ${run.busy + run.waiting + run.paused} skipped, ${run.late ?? 0} too slow, ${run.failed} failed.`);
         if (run.reason) parts.push(`It stopped early — ${run.reason}.`);
       }
       el('embeddingsCoverage').textContent = parts.join(' ');
+      renderEmbeddingsBackfill(status);
+      renderEmbeddingSets(status);
     }
+
+    let embeddingsPoll = null;
+    const plural = (n, word) => `${n.toLocaleString()} ${word}${n === 1 ? '' : 's'}`;
+
+    function backfillSummary(job) {
+      const parts = [`${job.embedded.toLocaleString()} embedded`];
+      if (job.current) parts.push(`${job.current.toLocaleString()} already current`);
+      if (job.failed) parts.push(`${job.failed.toLocaleString()} skipped`);
+      return parts.join(' · ');
+    }
+
+    function backfillEta(job) {
+      if (!job.total || !job.done || !job.elapsedMs) return '';
+      const minutes = Math.round((job.total - job.done) * job.elapsedMs / job.done / 60000);
+      return minutes < 1 ? ' · under a minute left' : ` · about ${plural(minutes, 'minute')} left`;
+    }
+
+    // Settings → Enrich → Image embeddings → embed enriched photos (PIC-391).
+    function renderEmbeddingsBackfill(status) {
+      const box = el('embeddingsBackfill');
+      clearTimeout(embeddingsPoll);
+      if (!status.backfill) { box.hidden = true; return; } // server predates the backfill
+      box.hidden = false;
+      const job = status.backfill, missing = status.enriched?.missing ?? 0;
+      const start = el('embeddingsBackfillStart'), stop = el('embeddingsBackfillStop'), note = el('embeddingsBackfillNote');
+      // With every enriched photo covered the coverage line says so; no button.
+      start.hidden = job.running || !missing;
+      stop.hidden = !job.running;
+      stop.disabled = false;
+      start.textContent = `Embed ${plural(missing, 'enriched photo')}`;
+      start.disabled = job.running || !status.enabled || !status.configured;
+      note.classList.remove('bad', 'ok');
+      if (job.running) {
+        note.textContent = job.state === 'waiting'
+          ? `Waiting for the Enrich run to finish · ${job.done.toLocaleString()}${job.total ? ` of ${job.total.toLocaleString()}` : ''} done so far`
+          : job.total === null ? 'Checking the machine-learning service…'
+          : `Embedding enriched photos: ${job.done.toLocaleString()} of ${job.total.toLocaleString()}${backfillEta(job)}`;
+        embeddingsPoll = setTimeout(() => { void loadEmbeddingsStatus(); }, 2000);
+      } else if (job.state === 'finished') {
+        note.classList.add('ok');
+        note.textContent = `${backfillSummary(job)} · finished ${new Date(job.finishedAt).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}`;
+      } else if (job.state === 'stopped' || job.state === 'failed') {
+        const byYou = job.reason === 'you stopped it';
+        if (!byYou) note.classList.add('bad');
+        note.textContent = byYou ? `Stopped. ${backfillSummary(job)}.` : `Stopped: ${job.reason}. ${backfillSummary(job)}.`;
+      } else {
+        note.textContent = !status.enabled ? 'Turn on Image embeddings and save to embed enriched photos.'
+          : !status.configured ? 'Set the machine-learning URL and save to embed enriched photos.' : '';
+      }
+    }
+
+    // Every stored set, so a model switch or an Immich update is visible (PIC-390).
+    function renderEmbeddingSets(status) {
+      const box = el('embeddingsSets');
+      const sets = status.sets ?? [];
+      box.hidden = !sets.length;
+      if (!sets.length) { box.replaceChildren(); return; }
+      const table = document.createElement('table');
+      const caption = document.createElement('caption');
+      caption.textContent = 'Stored embedding sets';
+      const head = document.createElement('tr');
+      for (const [label, cls] of [['Model', ''], ['Dimensions', 'num optional'], ['Photos', 'num'], ['Out of date', 'num'], ['Created', 'optional'], ['Status', '']]) {
+        const th = document.createElement('th'); th.scope = 'col'; th.textContent = label; if (cls) th.className = cls; head.append(th);
+      }
+      const thead = document.createElement('thead'); thead.append(head);
+      const tbody = document.createElement('tbody');
+      for (const set of sets) {
+        const row = document.createElement('tr');
+        const cells = [
+          [set.latestForModel ? set.model : `${set.model} (earlier version)`, ''],
+          [String(set.dims), 'num optional'],
+          [set.current.toLocaleString(), 'num'],
+          [(set.vectors - set.current).toLocaleString(), 'num'],
+          [new Date(set.createdAt).toLocaleDateString(), 'optional'],
+          [set.inUse ? 'In use' : 'Kept, not used', ''],
+        ];
+        for (const [text, cls] of cells) { const td = document.createElement('td'); td.textContent = text; if (cls) td.className = cls; row.append(td); }
+        tbody.append(row);
+      }
+      table.append(caption, thead, tbody);
+      box.replaceChildren(table);
+    }
+
+    async function postBackfill(path, pending) {
+      const note = el('embeddingsBackfillNote');
+      note.classList.remove('bad', 'ok');
+      note.textContent = pending;
+      try {
+        const response = await fetch(`/api/enrich/embeddings/${path}`, { method: 'POST', headers: headers({ 'Content-Type': 'application/json' }), body: '{}' });
+        if (response.status === 401) { showLogin(); return; }
+        const body = await response.json().catch(() => null);
+        if (!response.ok) throw new Error(body?.error?.message ?? 'Could not reach Pictaria Server.');
+      } catch (error) {
+        note.classList.add('bad');
+        note.textContent = error.message;
+        el('embeddingsBackfillStart').disabled = false;
+        el('embeddingsBackfillStop').disabled = false;
+        return;
+      }
+      await loadEmbeddingsStatus();
+    }
+
+    el('embeddingsBackfillStart').addEventListener('click', () => {
+      el('embeddingsBackfillStart').disabled = true;
+      void postBackfill('backfill', 'Starting…');
+    });
+    el('embeddingsBackfillStop').addEventListener('click', () => {
+      el('embeddingsBackfillStop').disabled = true;
+      void postBackfill('backfill/stop', 'Stopping…');
+    });
 
     el('embeddingsTest').addEventListener('click', async () => {
       const button = el('embeddingsTest');

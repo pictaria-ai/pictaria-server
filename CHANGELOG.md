@@ -29,6 +29,13 @@ All notable changes to Pictaria Server are documented here. This project follows
   people. The similarity table shows every row. Production grouping is
   unchanged.
 
+- Added **Embed enriched photos** to Settings → Enrich → Image embeddings
+  (PIC-391). One press embeds every enriched photo that has no current
+  embedding for the selected model, newest capture first and one at a time.
+  Enrich runs go first; the job waits for them and then continues. **Stop**
+  keeps completed photos, and pressing again continues with what is still
+  missing. Settings also lists every stored embedding set with its photo
+  counts and the one in use (PIC-390).
 - Added optional image embeddings to Enrich (off by default). Settings →
   Enrich → Image embeddings points Pictaria at the machine-learning container
   that comes with Immich (`IMMICH_ML_URL`) and chooses a model, defaulting to

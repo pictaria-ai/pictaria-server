@@ -49,6 +49,7 @@ import { createBackupRoutes } from './routes/backup.mjs';
 import { createEnrichRoutes } from './routes/enrich.mjs';
 import { createEmbeddingRoutes } from './routes/embeddings.mjs';
 import { EmbeddingService } from './embeddings/service.mjs';
+import { EmbeddingBackfill } from './embeddings/backfill.mjs';
 import { LabEmbeddings } from './curate/lab-embeddings.mjs';
 import { createInsightsRoutes } from './routes/insights.mjs';
 import { createSettingsRoutes } from './routes/settings.mjs';
@@ -218,6 +219,8 @@ curate.aiLifecycle = new CurateAiLifecycle({ curate, execution: curate.ai,
   resolveProvider: () => createCurateAiProvider(config), availability: CURATE_AI_AVAILABILITY });
 curate.stackReferee = new StackRefereeWorker(curate);
 const embeddings = new EmbeddingService({ repo, config });
+const embeddingBackfill = new EmbeddingBackfill({ service: embeddings, immich,
+  immichReady: () => missingImmichSettings(config).length === 0, log: (message) => console.log(`[Pictaria] ${message}`) });
 curate.lab.embeddings = new LabEmbeddings(curate.lab, embeddings);
 const enrichRunner = new EnrichJobRunner({ repo, immich, taxonomy, config, profiles, aiScheduler, aiConnections, embeddings, onTagsQueued: () => aiTagSync.wake() });
 const enrichScheduler = new EnrichScheduler({ runner: enrichRunner, repo, config });
@@ -340,11 +343,12 @@ lifecycle.register('album-scheduler', 3000, (timeoutMs) => albumScheduler.stop(t
 // next tick sweeps the partial and retries.
 lifecycle.register('backup', 3000, (timeoutMs) => awaitDrain(backupDrain, timeoutMs));
 lifecycle.register('thumbhash-backfill', 3000, (timeoutMs) => awaitDrain(thumbhashBackfill, timeoutMs));
+lifecycle.register('embedding-backfill', 3000, () => embeddingBackfill.close());
 
 const features = [
   createCurateRoutes({ curate, review, enrichRunner }),
   createActivityRoutes({ activityHistory }),
-  createEmbeddingRoutes({ embeddings }),
+  createEmbeddingRoutes({ embeddings, backfill: embeddingBackfill }),
   createEnrichRoutes({ review, aiTagSync, enrichRunner, taxonomy, profiles, repo, requireImmich, config, immich, captionWriteback, referee, activityLog }),
   createAlbumsRoutes({ immich, store: albumStore, config, requireImmich, enrichRepo: repo }),
   createWakeWordRoutes({ store: wakeWordModels }),

@@ -250,10 +250,15 @@ existing durable sync queue. The multi-keeper comparison UI follows separately.
   photo's window or the run has closed. Sessions never throw into a run. They
   skip photos while the model loads and pause after repeated service failures
   or late answers. A service-wide `PredictionLane` admits one prediction at a
-  time across Enrich sessions, stacking-lab passes (`curate/lab-embeddings.mjs`)
-  and connection tests. It serves them by priority (Enrich, test, lab), then by
+  time across Enrich sessions, stacking-lab passes (`curate/lab-embeddings.mjs`),
+  the enriched-photo backfill (`embeddings/backfill.mjs`) and connection tests.
+  It serves them by priority (Enrich, test, then lab or backfill), then by
   arrival, and releases only after the request settles. A new Enrich session
-  preempts a lab pass, and Curate shutdown cancels and drains lab passes. Database errors stop a
+  preempts a lab pass or backfill pass; the backfill waits for the run and then
+  continues. Only one of a lab pass and a backfill runs at a time. Curate
+  shutdown cancels and drains lab passes, and server shutdown the backfill. The
+  backfill keeps no state: vectors are saved as it goes, so starting again
+  continues with what is missing. Database errors stop a
   session as storage failures in the run and server logs, never as
   machine-learning failures. `embeddings/store.mjs` owns schema 22 /
   persistent-state contract 27: `embedding_spaces` (backend, model, dimensions,
