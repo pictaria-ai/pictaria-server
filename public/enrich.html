@@ -200,6 +200,10 @@
       </div>
       <p class="p-muted" style="margin-bottom: 0">AI tags sync after each photo is enriched. Curate decisions stay separate.</p>
       <p id="tagSyncError" class="p-muted" hidden></p>
+      <div id="embeddingsRow" class="es-main" style="margin-top: 12px" hidden>
+        <strong>Image embeddings</strong><span id="embeddingsStatus" class="p-muted" role="status"></span>
+        <div class="p-grow"></div><a href="/settings.html#sec-enrich" class="p-muted" style="font-size: 12px">embedding settings</a>
+      </div>
     </section>
 
     <section id="runPanel" class="p-panel panel">
@@ -447,7 +451,27 @@
       await refresh();
     });
 
+    // Optional Enrich step (Settings → Enrich → Image embeddings). Checked at
+    // most every 10 seconds; coverage is cached server-side as well.
+    let embeddingsCheckedAt = 0;
+    async function refreshEmbeddings() {
+      if (Date.now() - embeddingsCheckedAt < 10000) return;
+      embeddingsCheckedAt = Date.now();
+      let status;
+      try { status = await api('/api/enrich/embeddings'); } catch { return; }
+      el('embeddingsRow').hidden = !status.enabled;
+      if (!status.enabled) return;
+      const { coverage } = status;
+      const parts = [status.configured ? status.model : 'machine-learning URL not set'];
+      parts.push(`${coverage.current.toLocaleString()} photo${coverage.current === 1 ? '' : 's'} with current embeddings`);
+      const run = status.lastRun;
+      if (run) parts.push(`last run ${run.embedded} new · ${run.busy + run.waiting + run.paused} skipped · ${(run.late ?? 0) + run.failed} failed or too slow`);
+      if (run?.stopped) parts.push(run.stopped === 'storage_error' ? 'stopped by a database error — see the run log' : 'paused during that run — see its log');
+      el('embeddingsStatus').textContent = parts.join(' · ');
+    }
+
     async function refresh() {
+      void refreshEmbeddings();
       try {
         const profileEpoch = profileUI.epoch();
         const status = await api('/api/enrich/status');

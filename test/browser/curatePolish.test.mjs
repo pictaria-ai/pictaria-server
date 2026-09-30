@@ -54,21 +54,25 @@ test(
       await page.evaluate('document.querySelector("#photo-large").src.includes("' + fixture.id(1) + '")'),
       true,
     );
+    // Keys are ignored while the next photo's preview is still opening, as a
+    // person would wait for it; wait the same way so slow runners don't drop one.
+    const showing = (n) => page.waitFor(
+      `document.querySelector("#photo-loading").hidden && document.querySelector("#photo-large").src.includes("${fixture.id(n)}")`);
     await key('s');
-    assert.match(
-      await page.evaluate('document.querySelector("#photo-large").src'),
-      new RegExp(fixture.id(2)),
-    );
+    await showing(2);
     await key('f');
+    await showing(3);
     await key('y');
+    await showing(4);
     await key('n');
-    assert.equal(await page.evaluate('document.querySelector("#photo-view").open'), false);
+    await page.waitFor('!document.querySelector("#photo-view").open');
     assert.equal(operations(), 0, 'last keyboard mark returns to comparison, without saving');
     assert.equal(
       await page.evaluate('document.querySelector("#selection-count").textContent'),
       '1 Yes · 1 Skip · 1 Fav · 1 No',
     );
     await click('#context-photos .photo-image');
+    await page.waitFor('document.querySelector("#photo-view").open && document.querySelector("#photo-loading").hidden');
     await key('n');
     assert.equal(operations(), 0);
     assert.equal(fixture.repo.curate.photo(fixture.contextId).state, 'approved');

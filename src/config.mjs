@@ -3,6 +3,7 @@ import { basename, dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { STACK_REFEREE_SCOPES } from './curate/ai-policy.mjs';
 import { HISTORY_LIMITS } from './enrich/historyRetention.mjs';
+import { DEFAULT_EMBEDDING_MODEL, normalizeEmbeddingModel, validEmbeddingModel } from './embeddings/models.mjs';
 
 const ROOT_DIR = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 
@@ -114,6 +115,15 @@ export function loadConfig(env = process.env) {
     // descriptions or updates our own earlier writes after a final read; the
     // Immich API cannot make that read and update atomic.
     captionWriteback: parseBoolean(env.CAPTION_WRITEBACK),
+    // Optional Pictaria-owned image embeddings. Off by default: when on, each
+    // photo Enrich analyzes also sends its Immich preview to this Immich
+    // machine-learning service, which is unauthenticated (keep it on a
+    // trusted network). See docs/ENRICH.md#image-embeddings.
+    enrichEmbeddings: {
+      enabled: parseBoolean(env.ENRICH_EMBEDDINGS_ENABLED),
+      url: normalizeHttpUrl(env.IMMICH_ML_URL || ''),
+      model: parseEmbeddingModel(env.ENRICH_EMBEDDINGS_MODEL),
+    },
     defaultProvider: env.DEFAULT_PROVIDER || 'cloud_openai',
     imageSource: env.IMAGE_SOURCE || 'preview',
     // Optional operator-authored context copied into each run summary. This
@@ -448,6 +458,14 @@ function parseBoolean(value) {
 
 function clamp(value, min, max) {
   return Math.max(min, Math.min(max, value));
+}
+
+function parseEmbeddingModel(value) {
+  const model = normalizeEmbeddingModel(value);
+  if (validEmbeddingModel(model)) return model;
+  // An optional feature must not prevent startup; do not echo the value.
+  console.warn(`[Pictaria] Invalid ENRICH_EMBEDDINGS_MODEL; using ${DEFAULT_EMBEDDING_MODEL}.`);
+  return DEFAULT_EMBEDDING_MODEL;
 }
 
 function parseStackRefereeScope(value) {

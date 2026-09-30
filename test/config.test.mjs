@@ -44,6 +44,7 @@ test('every environment-configurable service base URL rejects query components',
     'OPENROUTER_BASE_URL',
     'OLLAMA_BASE_URL',
     'VENICE_BASE_URL',
+    'IMMICH_ML_URL',
   ]) {
     assert.throws(
       () => loadConfig({ [variable]: 'http://internal.invalid/chosen?' }),
@@ -227,4 +228,17 @@ test('optional Stack Referee scope normalizes environment values and falls back 
   assert.equal(warnings.length, 1);
   assert.match(warnings[0], /Invalid CURATE_STACK_REFEREE_SCOPE; using uncertain/);
   assert.doesNotMatch(warnings[0], /private-invalid-input/);
+});
+
+test('image embeddings default off with Immich’s model and tolerate a bad model name', (t) => {
+  const warnings = [];
+  t.mock.method(console, 'warn', (...args) => warnings.push(args.join(' ')));
+  assert.deepEqual(loadConfig({}).enrichEmbeddings, { enabled: false, url: '', model: 'ViT-B-32__openai' });
+  assert.deepEqual(loadConfig({ ENRICH_EMBEDDINGS_ENABLED: 'true', IMMICH_ML_URL: 'immich-machine-learning:3003/',
+    ENRICH_EMBEDDINGS_MODEL: ' immich-app/ViT-B-16-SigLIP__webli ' }).enrichEmbeddings,
+  { enabled: true, url: 'http://immich-machine-learning:3003', model: 'ViT-B-16-SigLIP__webli' });
+  assert.deepEqual(warnings, []);
+  assert.equal(loadConfig({ ENRICH_EMBEDDINGS_MODEL: 'private value with spaces' }).enrichEmbeddings.model, 'ViT-B-32__openai');
+  assert.equal(warnings.length, 1);
+  assert.doesNotMatch(warnings[0], /private value/);
 });

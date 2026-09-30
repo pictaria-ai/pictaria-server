@@ -109,6 +109,12 @@ else waits on them.
   how many summaries and logs are retained.
   ([Profiles, discovery, performance, and the full pipeline.](ENRICH.md))
 
+  Optionally, **Settings → Enrich → Image embeddings** also stores an image
+  embedding for each photo Enrich analyzes, using the machine-learning container
+  that comes with Immich. It is off by default. That container has no password,
+  so connect to it only over a network you trust.
+  ([Image embeddings.](ENRICH.md#image-embeddings))
+
 - [ ] *Optional* — **Get a free Geoapify key** for place names. Weather
   needs no account or key: it sends the frame's city or US ZIP to Open-Meteo
   for geocoding, then the resulting coordinates for the forecast. Separately,

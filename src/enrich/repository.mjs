@@ -20,6 +20,7 @@ import { DISCOVERY_SCHEMA } from './discovery.mjs';
 import { matchingRun, workEligibility } from './eligibility.mjs';
 import { SYNC_ACTION_RULES } from './reviewActions.mjs';
 import { DecisionRepository, DECISION_SCHEMA } from '../curate/decisions.mjs';
+import { EmbeddingStore, EMBEDDING_SCHEMA } from '../embeddings/store.mjs';
 import { canonicalJson, MAX_RUN_CONFIGURATION_BYTES } from './runConfiguration.mjs';
 
 const MAX_NORMALIZED_OUTPUT_BYTES = 64 * 1024;
@@ -531,6 +532,8 @@ const ENRICH_MIGRATIONS = [
   { version: 19, up(db) { db.exec(AI_ATTEMPT_SCHEMA); } },
   { version: 20, up(db) { db.exec(AI_LIMIT_SCHEMA); } },
   { version: 21, up(db) { db.exec(AI_INPUT_SCHEMA); } },
+  // Optional Pictaria-owned image embeddings (PIC-381). Additive; no backfill.
+  { version: 22, up(db) { db.exec(EMBEDDING_SCHEMA); } },
 ];
 
 // The review projection of a normalized output: exactly the fields the
@@ -617,6 +620,7 @@ export class Repository {
     this.aiTagSync = new AiTagSyncStore(this.db);
     this.curate = new CurateRepository(this);
     this.decisions = new DecisionRepository(this);
+    this.embeddings = new EmbeddingStore(this.db);
     this.historyRetention = historyRetention();
     this.db.exec('PRAGMA journal_mode = WAL');
     // Decisions, tags, and captions are personal data: keep the DB (and its
@@ -630,7 +634,7 @@ export class Repository {
   }
 
   initSchema() {
-    const schemaSql = readFileSync(SCHEMA_PATH, 'utf8') + TIMING_SCHEMA + DISCOVERY_SCHEMA + AI_TAG_SYNC_SCHEMA + CURATE_SCHEMA + DECISION_SCHEMA;
+    const schemaSql = readFileSync(SCHEMA_PATH, 'utf8') + TIMING_SCHEMA + DISCOVERY_SCHEMA + AI_TAG_SYNC_SCHEMA + CURATE_SCHEMA + DECISION_SCHEMA + EMBEDDING_SCHEMA;
     const result = migrateDatabase(this.db, {
       schema: schemaSql,
       migrations: ENRICH_MIGRATIONS,

@@ -210,7 +210,7 @@ test('an existing settings file is loaded without being rewritten or gaining a s
   const dir = mkdtempSync(join(tmpdir(), 'pictaria-settings-'));
   try {
     const path = join(dir, 'settings.json');
-    const original = '{"version":8,"credentialBindings":{},"voice":{"openAiTtsVoice":"ash"}}\n';
+    const original = '{"version":9,"credentialBindings":{},"voice":{"openAiTtsVoice":"ash"}}\n';
     writeFileSync(path, original, { mode: 0o600 });
 
     const config = makeConfig();
@@ -1285,8 +1285,8 @@ test('unknown same-version fields fail with downgrade-safe guidance', () => {
   );
 });
 
-test('the persisted settings contract matches the frozen version 7 snapshot', () => {
-  const expected = JSON.parse(readFileSync(new URL('./fixtures/upgrades/settings-contract-v8.json', import.meta.url), 'utf8'));
+test('the persisted settings contract matches the frozen version 9 snapshot', () => {
+  const expected = JSON.parse(readFileSync(new URL('./fixtures/upgrades/settings-contract-v9.json', import.meta.url), 'utf8'));
   assert.deepEqual(settingsContract(), expected);
 });
 

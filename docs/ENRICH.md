@@ -1109,6 +1109,214 @@ published in Immich's API spec, so Pictaria deliberately stays on PUT — the
 switch is tracked and will happen once the replacement is public and the
 supported-version floor allows it.
 
+## Image embeddings
+
+**Settings → Enrich → Image embeddings** is optional and off by default. With
+**Generate image embeddings** on, every Enrich run (manual, queued or Daily)
+also asks Immich's machine-learning service for an *embedding* of each photo it
+analyzes: a list of numbers that describes what the picture looks like. Pictaria
+keeps it permanently in its own database so later features can compare photos
+directly, starting with Curate stacking evaluation. Nothing uses the embeddings
+yet beyond status reporting, and Curate grouping is unchanged.
+
+### Connecting to the machine-learning service
+
+Point **Immich machine-learning URL** at the machine-learning container that
+comes with Immich (the service behind Immich's smart search and face
+recognition), then press **Test connection**. The test uses the values in the
+form, before you save, and sends one synthetic image.
+
+The address must work from the **Pictaria server itself**: from inside its
+container when Pictaria runs in Docker. An address that works from your
+computer is not enough.
+
+**Pictaria on the same machine as Immich (recommended).** Connect Pictaria to
+Immich's Docker network and use the machine-learning container's name. Nothing
+needs to be published, not even on a VPN.
+
+1. Find Immich's network. With Immich's standard Compose file it is usually
+   `immich_default`:
+
+   ```bash
+   docker inspect immich_machine_learning --format '{{range $k, $v := .NetworkSettings.Networks}}{{$k}} {{end}}'
+   ```
+2. Attach Pictaria to that network:
+   - **Docker Compose:** add the network to Pictaria's service:
+
+     ```yaml
+     services:
+       pictaria-server:
+         networks: [default, immich]
+     networks:
+       immich:
+         external: true
+         name: immich_default
+     ```
+   - **Unraid:** set the Pictaria template's **Network Type** to Immich's
+     network.
+   - **Quick trial:** `docker network connect immich_default <pictaria-container>`
+     works until the container is recreated.
+3. Use `http://immich_machine_learning:3003` (the container name in Immich's
+   standard Compose file) and press **Test connection**.
+
+On one machine, the host's own LAN or Tailscale address often does not work from
+inside Pictaria's container:
+
+- a firewall rule limiting port 3003 to the VPN interface drops the request;
+- Docker isolates separate container networks from each other;
+- Unraid's custom `br0` networks cannot reach the host at all.
+
+These failures are silent, so **Test connection** reports a timeout rather than
+a refusal.
+
+**Pictaria on a different machine.** Publish the container's port on the Immich
+host and use `http://<immich-host>:3003`:
+
+```yaml
+# In Immich's docker-compose.yml
+immich-machine-learning:
+  ports:
+    - "3003:3003"   # no authentication: trusted networks only
+```
+
+The machine-learning service has **no password**. Publish it only on a network
+you trust (your LAN or a Tailscale tailnet), never to the internet. Pictaria
+sends it photo previews and a synthetic calibration image, and never any
+credential. It is an internal Immich component rather than part of Immich's
+public API; see [Immich compatibility](IMMICH-COMPATIBILITY.md#machine-learning-service).
+
+### How the embedding step works
+
+**What happens for each photo.**
+
+- The photo's Immich **preview** is embedded. That is the rendition Immich
+  itself uses for smart search. When the run already downloaded the preview,
+  the same bytes are reused; with `thumbnail` or `original` runs, Pictaria
+  fetches the preview separately so one set of embeddings never mixes sizes.
+- The request runs beside the vision-model call, only for a photo the run is
+  analyzing. Pictaria sends at most one prediction at a time, server-wide:
+  Enrich, explicit stacking-lab passes and **Test connection** share one queue,
+  with Enrich first. An Enrich run that starts during a lab pass stops the pass
+  and aborts its current request first. Curate grouping and the AI referee
+  never send one.
+  Pictaria waits at most five seconds after the photo's enrichment for the
+  vector. Anything still running then, including a separate preview download,
+  is aborted. Across a run, those waits may add up to 10% of the run's time
+  plus 3 seconds. A service that answers, but more slowly than the vision
+  calls, uses that up and pauses the step for the rest of the run, so it never
+  sets the pace of Enrich. No embedding work continues in the background or
+  after a run is cancelled or stops.
+- The photo's enrichment never depends on it. A slow, failing or unreachable
+  service leaves photos enriched normally without embeddings. Three consecutive
+  service failures, or three answers that arrive too late, pause the step for
+  the rest of the run. Immich creates its previews itself, so an unreadable
+  preview should not occur. If one does, the service answers with the same
+  generic server error it uses for model failures, and it counts toward that
+  pause.
+- A database error while reading or saving embeddings is treated as a storage
+  problem rather than a machine-learning one. The step stops for the run and
+  says so in the run log and the server log, and Settings shows the reason.
+- A photo keeps its embedding even when its vision call fails.
+- The run log ends with a summary such as `image embeddings: 48 new, 2 already
+  current, 1 skipped, 0 too slow, 0 failed · 180 ms per photo · waited 40 ms
+  on average (at most 900 ms) after enrichment`. Photo timing and
+  [performance comparisons](#performance-comparison-and-photo-details)
+  exclude the embedding step.
+- The setting is read when a run starts, like the other processing controls.
+  Turning it on or off never re-enriches anything.
+
+Photos that Enrich skips because they are already enriched are not downloaded,
+so they get no embedding from this step. For evaluation, the Curate
+[stacking lab](CURATE-STACKING-LAB.md#pictaria-embeddings-pic-381) can compute
+embeddings for the photos of one time group on request, under the same rules. A
+general backfill for photos enriched earlier is separate, planned work. Turning **Enable
+AI enrichment** off also stops embeddings, since they are produced only by
+Enrich runs.
+
+**Models.** The default, `ViT-B-32__openai`, is Immich's own smart-search
+default, so it is usually downloaded and loaded already. Any Immich CLIP model
+name is accepted. The first time a different model is used, the
+machine-learning service downloads it from Hugging Face inside that first
+request. That can take minutes. A run waits up to 15 seconds for it, then
+continues without embeddings until the model is ready. A loaded model also
+uses memory on the Immich host until the service unloads it after idling.
+
+| Model | Dimensions | First-use download | Licence | Note |
+| --- | ---: | ---: | --- | --- |
+| `ViT-B-32__openai` (default) | 512 | 611 MB | MIT | Immich's default |
+| `ViT-B-16-SigLIP__webli` | 768 | 815 MB | Apache-2.0 | Higher recall per GB of RAM in Immich's own measurements |
+| `ViT-B-16-SigLIP2__webli` | 768 | 1.5 GB | Apache-2.0 | SigLIP 2 base model |
+| `ViT-L-14__openai` | 768 | 1.7 GB | MIT | The model the LAION aesthetic predictor expects |
+
+Sizes are the whole Hugging Face repository the service fetches, including the
+unused text half, measured September 27, 2026.
+
+**Embedding spaces: never mixing vectors.** Embeddings are comparable only
+when the same model *and* the same image preprocessing produced them. The
+model name alone is not enough:
+
+- Immich releases 2.7.5 through 3.2.2 prepare images identically: bicubic
+  resize of the shortest side, then a centre crop.
+- Immich's unreleased `main` branch follows each model's own resize settings
+  instead, and some models then squash the image rather than crop it.
+- NPU builds (RKNN, ARM NN) run quantized models.
+
+So each run starts by embedding a fixed synthetic calibration image. It is
+wider than tall, with distinct shapes at both edges, coloured regions, smooth
+gradients and a fine checkerboard, so crop, resampling, normalization and
+channel-order changes all move its vector. Pictaria compares the result with
+the calibration stored for each earlier set. `bin/ml-probe.mjs` measures, on a
+real service, how far each kind of change moves the vector compared with
+repeat noise.
+
+On Immich v3.2.0 with `ViT-B-32__openai`, repeated calls returned identical
+vectors. Changing a single preprocessing step scored between 0.99885 (nearest
+resampling) and 0.95012 (squash instead of crop), all below the 0.9995 match
+threshold. The comparison works like this:
+
+- Near-identical (cosine similarity ≥ 0.9995) continues the matching set.
+- Anything else starts a new *embedding space*, and the log says so.
+- Vectors from different spaces are never compared. Earlier ones are kept, not
+  deleted, and returning to an earlier model or service version reuses its set.
+- If a service produces eight different sets for one model, embedding pauses
+  until its output is stable.
+
+**Which image, and when a vector is current.** Pictaria embeds Immich's
+unedited preview, the rendition it downloads without `edited=true`; Immich's
+own smart search also embeds a preview. Each vector records three things from
+the moment it was embedded:
+
+- the SHA-256 of the exact bytes;
+- the photo's original checksum;
+- its Immich thumbhash, which Immich itself uses as the thumbnail cache key.
+
+A vector counts as current only while the photo is still in Immich and both the
+checksum and thumbhash still match. Coverage counts and future consumers use
+only current vectors. Edits, rotations and regenerated previews with different
+content change the thumbhash, so their vectors read as out of date.
+
+Whenever Enrich downloads the preview again, the bytes are compared exactly:
+
+- identical bytes under new metadata keep the vector without another request;
+- changed bytes are embedded again.
+
+Changing only Immich's preview size or format keeps the thumbhash, so that
+case is caught the next time the preview is downloaded rather than
+immediately.
+
+**Storage and status.**
+
+- Vectors live in `enrichment.sqlite` (tables `embedding_spaces` and
+  `asset_embeddings`). Photo vectors are stored at unit length in half
+  precision (float16), which changes a similarity by about 0.00001 at most;
+  calibration vectors stay float32. That is about 1.5 KB per photo at 512
+  dimensions and 2 KB at 768, or roughly 45 MB for 30,000 photos with the
+  default model, for each set kept. They are included in every backup.
+- Settings shows how many photos have current embeddings for the configured
+  model and how many belong to other spaces.
+- The Enrich Status card shows coverage and the last run's counts.
+- While the step is on, the home page shows the machine-learning connection.
+
 ## Review data model (Curate)
 
 Two independent axes per photo:
@@ -1344,6 +1552,13 @@ and expect the queue to breathe a little while enrichment is running.
 
 ## Endpoints
 
+- `GET /api/enrich/embeddings` — image-embedding settings, coverage for the
+  configured model and the last run's counts. `?check=1` also returns the
+  machine-learning connection state, cached for a minute.
+- `POST /api/enrich/embeddings/test` — `{ url?, model? }` (unsaved values; the
+  saved ones by default). Pings the service and embeds one synthetic image;
+  stores nothing. Reports dimensions, elapsed time and whether stored
+  embeddings would be reused (`reused`, `new-set` or `first-set`).
 - `GET|POST /api/enrich/profiles` — bounded metadata list or create a profile
   with `{ name, systemPrompt, userTemplate, taxonomy }`.
 - `GET /api/enrich/profiles/builtin` — current configured template files.
@@ -1495,6 +1710,9 @@ Daily Enrich and caption controls
 with “Paused while Enrich is off,” preserving their saved preferences. Turning
 Enrich back on restores those preferences; the normal Daily Enrich catch-up
 rules still apply. An enrichment execution already started keeps its run settings.
+
+Image embeddings are produced only inside Enrich runs, so they stop too; the
+stored embeddings and the saved preference remain.
 
 Pending caption writes remain queued. A description update already sent to Immich
 can finish, but further writes pause, including when Enrich is disabled while

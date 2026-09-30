@@ -108,6 +108,8 @@ export class StackingLab {
   }
   async close() {
     this.closed = true;
+    // Cancel explicit embedding passes before their snapshots disappear.
+    await this.embeddings?.close();
     this.views.clear();
     if (this.worker) await this.worker.terminate();
   }

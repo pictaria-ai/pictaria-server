@@ -237,8 +237,8 @@ export class ImmichClient {
   // Callers with a tighter budget than the original-class default (e.g. the
   // referee's per-image ceiling) pass their own maxBytes; past it the download
   // aborts with a ResponseTooLargeError instead of buffering.
-  async getAssetOriginal(assetId, { maxBytes = ORIGINAL_MAX_RESPONSE_BYTES } = {}) {
-    return this.requestBytes(`/assets/${encodeURIComponent(assetId)}/original`, { maxBytes });
+  async getAssetOriginal(assetId, { maxBytes = ORIGINAL_MAX_RESPONSE_BYTES, signal } = {}) {
+    return this.requestBytes(`/assets/${encodeURIComponent(assetId)}/original`, { maxBytes, signal });
   }
 
   async listTags({ strict = false } = {}) {

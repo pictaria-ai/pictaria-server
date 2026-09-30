@@ -289,6 +289,22 @@ AI inference run is not required. On older Immich, metadata reads require
 `asset.statistics` as well as the existing asset/tag read permissions to
 check completeness. See [Immich compatibility](IMMICH-COMPATIBILITY.md).
 
+## Image embeddings preview (PIC-381)
+
+This development build uses Enrich schema **22**, persistent-state contract
+**27** and settings version **9**. The upgrade:
+
+- adds two empty tables for optional image embeddings and three Settings →
+  Enrich fields;
+- does not turn embeddings on;
+- does not contact Immich's machine-learning service;
+- does not backfill vectors for photos already enriched.
+
+Startup creates the usual complete pre-migration recovery snapshot. To return
+to an older build, restore that snapshot and its matching build rather than
+switching the image against the migrated data directory. See
+[Image embeddings](ENRICH.md#image-embeddings) for setup and network guidance.
+
 ## Curate AI lifecycle preview (PIC-346)
 
 This development build uses Enrich schema **21** / persistent-state contract

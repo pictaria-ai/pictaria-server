@@ -2,7 +2,12 @@ import { LAB_PHOTO_LIMIT, decodeHash, hashDistance, peopleCategory, recognizedPe
 import { evidencePartition } from './evidence-partition.js';
 import { rankObservation } from './rank-evidence.js';
 
-export const COMBINED_DEFAULTS = Object.freeze({ nearHash: .025, farHash: .15, outsideLimit: 2, rankContrast: 8 });
+// Embedding bands come from a ViT-B-32__openai calibration on real groups
+// (PIC-381); other models need their own. Pairs judged the same stack never
+// scored below 0.78, while 0.78-0.90 held both verdicts, so only 0.75 or less
+// separates on embeddings alone.
+export const COMBINED_DEFAULTS = Object.freeze({ nearHash: .025, farHash: .15, outsideLimit: 2, rankContrast: 8,
+  nearEmbedding: .9, farEmbedding: .75 });
 const key = (a, b) => JSON.stringify([a, b].sort());
 
 function evaluator(photos, settings, rows) {
@@ -11,6 +16,9 @@ function evaluator(photos, settings, rows) {
       !Number.isInteger(s.outsideLimit) || s.outsideLimit < 0 || s.outsideLimit > 49 ||
       !Number.isInteger(s.rankContrast) || s.rankContrast < 1 || s.rankContrast > 49)
     throw Error('Choose ordered ThumbHash bands and valid outside-photo/contrast limits.');
+  if (s.embeddings && !(Number.isFinite(s.nearEmbedding) && Number.isFinite(s.farEmbedding) &&
+      s.farEmbedding >= -1 && s.nearEmbedding <= 1 && s.farEmbedding < s.nearEmbedding))
+    throw Error('Choose ordered embedding bands.');
   const hashes = new Map(photos.map(p => [p.id, decodeHash(p.thumbhash)]));
   const recognized = new Map(photos.map(p => [p.id, recognizedPeople(p)]));
   const observations = new Map();
@@ -31,7 +39,13 @@ function evaluator(photos, settings, rows) {
     const ab = s.ranks ? rankObservation(rows.get(a.id), b.id) : null;
     const ba = s.ranks ? rankObservation(rows.get(b.id), a.id) : null;
     const reciprocal = ab !== null && ba !== null && ab.outsideAhead <= s.outsideLimit && ba.outsideAhead <= s.outsideLimit;
-    const result = { ac, bc, ai, bi, identityDifference, identityConflict, conflict, agreement, distance, near, middle, far, ab, ba, reciprocal };
+    // Pictaria embeddings: stored cosine similarity; null means unknown.
+    const embedding = s.embeddings ? s.embeddingSimilarity?.(a.id, b.id) ?? null : null;
+    const embNear = embedding !== null && embedding >= s.nearEmbedding;
+    const embFar = embedding !== null && embedding <= s.farEmbedding;
+    const embMiddle = embedding !== null && !embNear && !embFar;
+    const result = { ac, bc, ai, bi, identityDifference, identityConflict, conflict, agreement, distance, near, middle, far, ab, ba, reciprocal,
+      embedding, embNear, embMiddle, embFar };
     observations.set(id, result); return result;
   };
   const contrastFrom = (a, b, rank) => {
@@ -58,17 +72,38 @@ function evaluator(photos, settings, rows) {
         : rows.get(from)?.state === 'complete' ? 'not returned' : rows.get(from)?.state ?? 'unqueried';
       notes.push(`Search → ${label(a.id, p.ab)}; ← ${label(b.id, p.ba)}${p.reciprocal ? ' (reciprocal near ranks)' : contrast ? ' (reciprocal contrast with supported alternatives)' : ' (no conclusive rank contrast)'}`);
     }
+    if (s.embeddings) notes.push(p.embedding === null ? 'Embedding unknown'
+      : `Embedding ${p.embedding.toFixed(3)} (${p.embNear ? 'very similar' : p.embFar ? 'clearly different' : 'middle band'})`);
+    // With embeddings off every emb* term is false and these rules reduce to
+    // the September 21 combined rules exactly.
     let state = 'uncertain', reason = 'Capture time only or insufficient evidence';
     if (p.identityConflict) { state = 'separate'; reason = 'Different recognized people'; }
     else if (p.conflict && p.reciprocal) reason = 'Reciprocal ranks conflict with people evidence';
+    else if (p.conflict && p.embNear) reason = 'Very similar embeddings conflict with people evidence';
     else if ((p.conflict && (p.far || contrast)) || (p.far && contrast)) {
       state = 'separate';
       reason = contrast ? 'Returned rank contrast corroborates a people or visual difference' : 'Clearly different ThumbHash corroborates people difference';
+    } else if (p.embFar && (p.conflict || p.far || contrast)) {
+      state = 'separate';
+      reason = p.conflict ? 'Clearly different embeddings corroborate a people difference'
+        : p.far ? 'Clearly different embeddings and ThumbHash' : 'Clearly different embeddings and returned rank contrast';
     } else if (p.conflict || contrast) reason = 'Conflicting evidence needs review';
-    else if (p.near || (p.middle && (p.agreement || p.reciprocal)) || (p.reciprocal && p.agreement)) {
+    else if ((p.near && p.embFar) || (p.embNear && p.far)) reason = 'ThumbHash and embeddings disagree';
+    // Clearly different embeddings separate on their own unless the same
+    // recognized people or reciprocal near ranks point the other way. Enrich
+    // people categories are too coarse to count here.
+    else if (p.embFar && s.identities && p.identityDifference === false && p.ai.size > 0)
+      reason = 'Clearly different embeddings, but the same recognized people';
+    else if (p.embFar && p.reciprocal) reason = 'Clearly different embeddings conflict with reciprocal ranks';
+    else if (p.embFar) { state = 'separate'; reason = 'Clearly different embeddings'; }
+    else if (p.near || p.embNear || (p.middle && (p.agreement || p.reciprocal)) || (p.embMiddle && (p.agreement || p.middle))
+        || (p.reciprocal && p.agreement)) {
       state = 'supported'; reason = p.near ? 'Very close ThumbHash without observed conflict'
-        : p.middle ? 'Middle-band ThumbHash has independent corroboration' : 'Reciprocal ranks and people agreement support alternatives';
-    } else if (p.reciprocal) reason = 'Reciprocal ranks need independent composition evidence';
+        : p.embNear ? 'Very similar embeddings without observed conflict'
+        : p.middle && (p.agreement || p.reciprocal) ? 'Middle-band ThumbHash has independent corroboration'
+        : p.embMiddle ? 'Middle-band embeddings have independent corroboration' : 'Reciprocal ranks and people agreement support alternatives';
+    } else if (p.embMiddle && p.reciprocal) reason = 'Embeddings and search ranks may come from the same model; needs independent composition evidence';
+    else if (p.reciprocal) reason = 'Reciprocal ranks need independent composition evidence';
     return { state, reason, notes };
   };
 }
