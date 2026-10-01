@@ -301,8 +301,9 @@ grouping uncertainty; earlier evidence remains in **Why?**. Queued/running AI wo
 uses a spinner naming the step. Unavailable AI results leave manual curation
 available with a quiet explanation rather than a permanent spinner. Recorded
 model reasons appear as plain text alongside deterministic evidence in **Why?**.
-Stack Referee is available as an opt-in, off by default, for the registered
-provider/model route. Photo Referee remains unavailable. See the
+Stack Referee is available as an opt-in, off by default, using the configured
+shared Curate provider/model and a ten-photo per-request ceiling. Photo Referee
+remains unavailable. See the
 [Stack Referee guide](CURATE-STACK-REFEREE.md) for initial evaluation limits and
 test-instance rollout; synthetic tests exercise these states without live calls.
 

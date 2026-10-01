@@ -115,13 +115,15 @@ installation; neither new role depends on Enrich being enabled. Turning Stacks
 off pauses the dependent controls without erasing their choices. The shared
 provider and optional model override apply to both roles and the existing
 referee. The existing referee's control and status are under **Current Curate
-page** and keep their existing Enrich dependency.
+page** and keep their existing Enrich dependency during preview testing. The
+production v1.3 cutover will replace the legacy referee with the new referees.
+The existing control is retained here for preview comparisons.
 
 Stack Referee is available and can be enabled or disabled through Settings.
 It defaults off; an existing explicit on preference is honored on upgrade.
 Enabling it admits eligible pending stacks throughout the library, without a
-browser trigger. The initial supported route and controlled rollout checks are
-documented in [Stack Referee implementation](CURATE-STACK-REFEREE.md).
+browser trigger. The configurable providers, request ceiling and controlled
+rollout checks are documented in [Stack Referee implementation](CURATE-STACK-REFEREE.md).
 
 Photo Referee remains unavailable. The API rejects newly enabling it, including
 clearing an override that would enable it through environment fallback. A saved
@@ -393,11 +395,13 @@ the existing input JSON; temporary preview failures get at most one retry,
 behind a shared three-minute pause that also gates queued work and survives
 restart. Unsupported model/size status is derived without per-stack records.
 Accepted advice includes compact provenance. No new database migration is
-needed. The server resolves the evaluated Venice model with a ten-image ceiling
-and the UI presents recorded progress, limitations and current AI checks.
-The registered route has passed initial small-case real-provider/schema
-evaluation. Controlled test-instance runtime acceptance remains separate; see
-the Stack Referee guide for evidence and rollout steps.
+needed. The server admits configured multi-image adapters with a ten-image
+request ceiling and the UI presents recorded progress, limitations and current
+AI checks.
+The Venice model has passed initial small-case real-provider/schema
+evaluation; other model choices are permitted without claiming that evidence.
+Controlled test-instance runtime acceptance remains separate; see the Stack
+Referee guide for evidence and rollout steps.
 
 The server composes `CurateAiLifecycle` and the Stack Referee adapter with its
 existing service, executor and shared scheduler. Stack Referee availability is

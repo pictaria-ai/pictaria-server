@@ -67,6 +67,19 @@ test('production settings opt into Stack Referee only, preserving off defaults a
   assert.equal(f.open().store.describe().curate.stackRefereeEnabled.active, false);
 });
 
+test('Settings reports the effective Stack Referee model when following Enrich or overriding it', t => {
+  const f = fixture(t, { env: { DEFAULT_PROVIDER: 'venice', VENICE_API_KEY: 'PRIVATE KEY',
+    VENICE_MODEL: 'qwen3-vl-235b-a22b', OLLAMA_LOCAL_MODEL: 'local-vision' } });
+  const status = () => f.store.describe().curate.stackRefereeEnabled.modelStatus;
+  assert.equal(status().provider, 'venice'); assert.equal(status().maxImages, 10);
+  f.store.update({ curate: { refereeProvider: 'local_ollama', refereeModel: 'chosen-vision' } });
+  assert.deepEqual(status(), { state: 'configured', provider: 'local_ollama', model: 'chosen-vision', maxImages: 10 });
+  assert.equal(f.config.defaultProvider, 'venice');
+  assert.doesNotMatch(JSON.stringify(status()), /PRIVATE|localhost|127\.0/);
+  f.store.update({ curate: { refereeProvider: '', refereeModel: '' } });
+  assert.equal(status().model, 'qwen3-vl-235b-a22b');
+});
+
 test('upgrade snapshots effective legacy keeper preference once, without turning on Stack Referee', t => {
   for (const enrich of [false, true]) for (const stacks of [false, true]) for (const referee of [false, true]) {
     const f = fixture(t, { state: legacy(), env: { ENRICH_ENABLED: String(enrich),

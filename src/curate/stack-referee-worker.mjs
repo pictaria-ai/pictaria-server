@@ -11,7 +11,7 @@ export const STACK_PREVIEW_PAUSE_MS = 3 * 60_000;
 
 // Discovery/adaptation for one role. Capability must be supplied by the server,
 // never inferred from analyzeImages or accepted from a settings/API payload.
-// Role preference and registered model capability gate production requests.
+// Role preference and the server's bounded adapter policy gate requests.
 export class StackRefereeWorker {
   constructor(curate, { capability = () => null } = {}) {
     this.curate = curate;
@@ -53,10 +53,13 @@ export class StackRefereeWorker {
     if (!this.enabled()) return { state: 'off' };
     const active = this.lifecycle.active?.snapshot.role === 'stack';
     const queued = [...this.lifecycle.pending.values()].filter(job => job.snapshot.role === 'stack').length;
-    if (!active && !queued) return this.previewsReady() ? { state: 'idle' } : { state: 'paused', reason: 'preview-cooldown' };
     if (active) return { ...this.activeStatus(), queued };
-    try { return { ...(this.blockingStatus(this.lifecycle.resolveProvider()) ?? { state: 'waiting' }), queued }; }
-    catch { return { state: 'paused', reason: 'configuration', queued }; }
+    try {
+      const provider = this.lifecycle.resolveProvider();
+      const support = stackRefereeSupport(provider, this.capability(provider), 2);
+      if (support.state !== 'ready') return { state: 'paused', reason: support.state, scope: 'configuration' };
+      return { ...(this.blockingStatus(provider) ?? { state: queued ? 'waiting' : 'idle' }), queued };
+    } catch { return { state: 'paused', reason: 'configuration', scope: 'configuration', queued }; }
   }
   status(group) {
     const current = this.curate.current?.byId.get(group.id);
@@ -73,7 +76,8 @@ export class StackRefereeWorker {
     try {
       const provider = this.lifecycle.resolveProvider(), { key, capability } = this.configuration(provider);
       const support = stackRefereeSupport(provider, capability, snapshot.ids.length);
-      if (support.state !== 'ready') return { state: 'incomplete', reason: support.state };
+      if (support.state !== 'ready') return { state: 'incomplete', reason: support.state,
+        ...(['unknown-capability', 'unsupported-provider'].includes(support.state) ? { scope: 'configuration' } : {}) };
       if (this.lifecycle.inputs.preparationFailures(snapshot) >= 2) return { state: 'incomplete', reason: 'preparation-failed' };
       const reason = this.lifecycle.inputs.outcome(snapshot, key);
       if (reason) return { state: 'incomplete', reason };
@@ -84,7 +88,7 @@ export class StackRefereeWorker {
         return { state: 'incomplete', reason: 'photo-limit' };
       const blocked = this.blockingStatus(provider);
       if (blocked) return blocked;
-    } catch { return { state: 'incomplete', reason: 'configuration' }; }
+    } catch { return { state: 'incomplete', reason: 'configuration', scope: 'configuration' }; }
     return { state: 'waiting' };
   }
   async discover() {

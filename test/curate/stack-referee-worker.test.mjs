@@ -325,11 +325,9 @@ test('production availability still requires an explicit Stack Referee preferenc
   assert.equal(f.curate.aiLifecycle.pending.size, 0);
 }, { availability: CURATE_AI_AVAILABILITY }));
 
-test('production role and capability gates admit only the registered route, then retain the split after restart', async () => fixture(async f => {
-  await f.run(); f.advance(); await f.run();
-  assert.equal(f.calls.length, 0); assert.equal(f.downloads.length, 0);
-  assert.equal(f.curate.stackReferee.status(f.curate.current.groups[0]).reason, 'unknown-capability');
-  Object.assign(f.provider, { providerName: 'venice', modelName: 'qwen3-vl-235b-a22b', baseUrl: 'https://api.venice.ai/api/v1' });
+test('production role and adapter gates honor a chosen non-Venice model and retain the split after restart', async () => fixture(async f => {
+  // This model has not been individually allowlisted. It remains the user's choice.
+  assert.equal(f.provider.providerName, 'openai_compatible');
   // Synthetic previews and model answers exercise the server's real capability
   // and role gates, scheduler, preparation, validation, storage and rebuild path.
   await f.run(); f.advance(); assert.equal((await f.run()).state, 'succeeded');
@@ -384,6 +382,18 @@ test('groups beyond the discovery window are reached even when earlier work cann
   assert.equal(f.curate.stackReferee.status(last).reason, 'unknown-capability');
   assert.equal(f.calls.length, 0); assert.equal(f.downloads.length, 0);
 }, { count: 0, capability: false }));
+
+test('unsupported adapter/configuration is visible globally even when no work was admitted', async () => fixture(async f => {
+  await f.run();
+  assert.deepEqual(f.curate.stackReferee.activity(), { state: 'paused', reason: 'unknown-capability', scope: 'configuration' });
+  const group = f.curate.current.groups[0];
+  assert.equal(f.curate.stackReferee.status(group).scope, 'configuration');
+  f.curate.aiLifecycle.resolveProvider = () => { throw new Error('PRIVATE CREDENTIAL ERROR'); };
+  const status = f.curate.stackReferee.activity();
+  assert.equal(status.reason, 'configuration'); assert.equal(status.scope, 'configuration');
+  assert.doesNotMatch(JSON.stringify(status), /PRIVATE/);
+  assert.equal(f.calls.length, 0); assert.equal(f.downloads.length, 0);
+}, { capability: false }));
 
 test('provider pauses and request allowances have honest card and global status without raw diagnostics', async () => fixture(async f => {
   await f.run();

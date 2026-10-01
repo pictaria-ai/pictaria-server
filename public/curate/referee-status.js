@@ -6,9 +6,9 @@ const reasons = {
   'provider-configuration': 'Check the AI provider configuration in Settings.',
   'provider-interrupted': 'The previous AI request was interrupted. Verify the connection in Settings.',
   'configuration': 'Check the Curate AI provider configuration in Settings.',
-  'unknown-capability': 'This model has not been verified for Stack Referee comparisons.',
+  'unknown-capability': 'Configure a Curate provider and multi-image vision model in Settings.',
   'unsupported-provider': 'This provider cannot compare stack photos.',
-  'unsupported-size': 'This stack exceeds the evaluated image limit for the selected model.',
+  'unsupported-size': 'This stack exceeds the automatic per-request image limit.',
   'too-many-images': 'This stack exceeds the 30-photo automatic comparison limit.',
   'input-limit': 'This stack exceeds an automatic comparison limit.',
   'preparation-failed': 'The previews could not be prepared within the download limits.',
@@ -19,7 +19,8 @@ const reasons = {
 
 // Explicit server state only. Neither successful similarity nor Photo Referee
 // advice implies that the Stack Referee ran. Unknown reasons stay generic.
-export function stackRefereePresentation(status) {
+export function stackRefereePresentation(status, { page = false } = {}) {
+  if (status?.scope === 'configuration' && !page) return null;
   if (!status || ['off', 'idle', 'skipped', 'updated'].includes(status.state)) return null;
   if (status.state === 'checked') return { title: 'AI checked', phase: 'ai-checked',
     detail: 'The Stack Referee checked this grouping. Photo choices are still yours.' };

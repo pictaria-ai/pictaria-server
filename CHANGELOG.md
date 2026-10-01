@@ -8,11 +8,15 @@ All notable changes to Pictaria Server are documented here. This project follows
 ### Development
 
 - Made the optional Stack Referee available in Curate Preview settings after
-  initial real-photo evaluation of the registered Venice model. It defaults off
+  initial real-photo evaluation with Venice. It defaults off
   and checks uncertain stacks unless All stacks is selected. Explicit saved or
   environment on preferences now start eligible background work, including with
-  no browser open. The ten-image model ceiling, bounded failures, saved partitions
-  and human decisions are unchanged; Photo Referee remains unavailable. See the
+  no browser open. It follows the shared Curate provider/model choice across all
+  existing multi-image adapters, including local and OpenAI-compatible models;
+  there is no Venice-only model allowlist. Settings shows the saved model and
+  conservative ten-photo request ceiling. Configuration issues appear once at
+  page level rather than on every card. Bounded failures, saved partitions and
+  human decisions are unchanged; Photo Referee remains unavailable. See the
   [evaluation limits and test rollout](docs/CURATE-STACK-REFEREE.md#test-instance-rollout).
 
 - Connected Stack Referee status to Curate cards, comparisons and background
@@ -21,8 +25,8 @@ All notable changes to Pictaria Server are documented here. This project follows
   scoped to the saved check: unrelated imports and decisions do not hide it
   during Save & next, and turning the role off retains valid completed checks.
   Queued or just-accepted checks awaiting a rebuild do not show failure messages.
-  The server resolves the previously evaluated Venice model at a ten-image ceiling;
-  unverified models/endpoints remain unavailable. See
+  The server supplies a bounded multi-image adapter policy at a ten-photo request
+  ceiling; users choose their Curate provider/model in Settings. See
   [Stack Referee implementation](docs/CURATE-STACK-REFEREE.md).
 
 - Added Pictaria embeddings to the Curate stacking lab. **Compute embeddings**

@@ -11,6 +11,7 @@ import { CurateAiExecution } from '../../src/curate/ai-execution.mjs';
 import { CurateAiLifecycle, AI_SETTLE_MS } from '../../src/curate/ai-lifecycle.mjs';
 import { AiRequestScheduler } from '../../src/ai/scheduler.mjs';
 import { fingerprint } from '../../src/curate/contracts.mjs';
+import { refereeCapability } from '../../src/curate/referee-capabilities.mjs';
 import { CURATE_AI_AVAILABILITY } from '../../src/curate/ai-policy.mjs';
 import { STACK_REFEREE_CONTRACT, STACK_REFEREE_ENVELOPE, createStackRefereeRequest, stackRefereeSupport } from '../../src/curate/stack-referee-contract.mjs';
 
@@ -183,26 +184,31 @@ for (const [name, answer] of Object.entries(malformed)) test(`rejects ${name} wi
   const f = setup(); assert.throws(() => f.build().validate(answer)); assert.equal(f.calls.length, 0);
 });
 
-for (const name of ['openai_compatible', 'venice']) test(`${name} transport sends the same alias schema and image order; raw envelope is discarded`, async () => {
-  const wire = [];
-  const provider = createProvider(name, { modelName: 'synthetic', apiKey: 'PRIVATE KEY', baseUrl: 'http://127.0.0.1:1234/v1',
-    fetchImpl: async (_url, options) => {
+for (const name of ['cloud_openai', 'local_lmstudio', 'openrouter', 'openai_compatible', 'venice', 'local_ollama', 'cloud_ollama'])
+  test(`${name} transport preserves Stack Referee aliases and image order through production admission`, async () => {
+  const wire = [], answer = JSON.stringify(together);
+  const provider = createProvider(name, { modelName: name === 'openrouter' ? 'google/gemini-synthetic' : 'synthetic',
+    apiKey: 'PRIVATE KEY', baseUrl: 'http://127.0.0.1:1234/v1', fetchImpl: async (_url, options) => {
       wire.push(JSON.parse(options.body));
-      return new Response(JSON.stringify({ choices: [{ message: { content: JSON.stringify(together) } }], secret: 'PRIVATE ENVELOPE' }),
-        { status: 200, headers: { 'content-type': 'application/json' } });
+      const body = name === 'cloud_openai' ? { output: [{ type: 'message', content: [{ type: 'output_text', text: answer }] }] }
+        : name.includes('ollama') ? { message: { content: answer } }
+        : { choices: [{ message: { content: answer } }] };
+      return new Response(JSON.stringify(body), { status: 200, headers: { 'content-type': 'application/json' } });
     } });
-  // Distinct synthetic payloads make accidental reordering detectable on wire.
   const images = photos().map((photo, i) => ({ ...photo, data: Buffer.concat([png, Buffer.from([i])]) }));
-  const request = createStackRefereeRequest({ provider, capability: capabilityFor(provider), images, inputKey });
+  const request = createStackRefereeRequest({ provider, capability: refereeCapability(provider), images, inputKey });
   const response = await request.submit();
   assert.deepEqual(response, together); assert.equal(wire.length, 1);
-  const content = wire[0].messages[1].content;
-  assert.deepEqual(content.filter(c => c.type === 'image_url').map(c => c.image_url.url), images.map(image => `data:image/png;base64,${image.data.toString('base64')}`));
-  if (name === 'venice') {
-    const schema = wire[0].response_format.json_schema.schema;
-    assert.deepEqual(schema.properties.groups.items.properties.ids.items.enum, ['p1', 'p2', 'p3']);
-  } else assert.deepEqual(wire[0].response_format, { type: 'json_object' });
-  assert.ok(content[0].text.includes(JSON.stringify(['p1', 'p2', 'p3'])));
+  assert.equal(wire[0].model, provider.modelName, 'no fallback or provider-specific model substitution');
+  let supplied;
+  if (name === 'cloud_openai') supplied = wire[0].input[1].content.filter(c => c.type === 'input_image').map(c => c.image_url.split(',')[1]);
+  else if (name.includes('ollama')) supplied = wire[0].messages[1].images;
+  else supplied = wire[0].messages[1].content.filter(c => c.type === 'image_url').map(c => c.image_url.url.split(',')[1]);
+  assert.deepEqual(supplied, images.map(image => image.data.toString('base64')));
+  const schema = name === 'cloud_openai' ? wire[0].text.format.schema
+    : name === 'local_ollama' ? wire[0].format : wire[0].response_format?.json_schema?.schema;
+  if (schema) assert.deepEqual(schema.properties.groups.items.properties.ids.items.enum, ['p1', 'p2', 'p3']);
+  else assert.ok(JSON.stringify(wire).includes('p3'), 'prompt-embedded schema retains membership aliases');
   assert.doesNotMatch(JSON.stringify(wire), /private-asset|PRIVATE CAPTION/);
   assert.equal(request.validate(response).result.groups.length, 1);
 });

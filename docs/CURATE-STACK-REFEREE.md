@@ -14,7 +14,7 @@ The worker discovers current groups, prepares bounded previews, saves accepted
 partitions and publishes them through normal grouping rebuilds and stable views.
 The Stack Referee is now available as an **opt-in** in Settings → Curate,
 off by default with **Uncertain stacks** as its default scope. The server
-supplies the evidence-based capability resolver below; Curate displays recorded
+supplies the bounded adapter policy below; Curate displays recorded
 states and accepted checks. **Photo Referee remains unavailable.** Turning on
 Stack Referee starts background work on eligible pending stacks throughout the
 library, even with no Curate page open. It is not limited to visible stacks.
@@ -39,7 +39,7 @@ human authority. The worker implements the following behavior:
 - Respect the existing two-attempt limit and provider/photo safeguards. After
   bounded failure, retain the usable grouping and a quiet explanation. No repair
   queue or routine Retry control.
-- Whole-input checking only. A stack too large for the confirmed model limit
+- Whole-input checking only. A stack too large for the per-request limit
   stays manually reviewable; independent request chunks cannot prove a global
   partition. The agreed, labeled Photo Referee exception remains separate.
 
@@ -70,32 +70,42 @@ model's visual judgment.
 
 ## Request and response boundary
 
-`stackRefereeSupport` requires explicit server-supplied comparative capability
-and an image limit matching the resolved provider and model. The presence of an
-`analyzeImages` method or a successful single-image connection verification is
-insufficient. Unknown capability cannot submit a request. The worker accepts a
-server-owned resolver; without one it returns unknown. The server composes
-`refereeCapability` from `src/curate/referee-capabilities.mjs`:
+Stack Referee uses the existing **Shared AI model** settings: follow the provider
+currently selected for Enrich, or choose a separate Curate provider and optional
+model override. Turning Enrich off does not turn this role off. The selection is
+resolved when a job starts and pinned for that call. There is no automatic
+fallback to Venice or any other provider.
 
-| Provider and endpoint | Exact model | Evaluated request ceiling |
-| --- | --- | --- |
-| Venice, `https://api.venice.ai/api/v1` | `qwen3-vl-235b-a22b` | 10 images |
+All seven existing multi-image adapters are available: OpenAI, OpenRouter,
+Venice, LM Studio, local Ollama, cloud Ollama and OpenAI-compatible endpoints.
+The selected model must accept multiple images and produce the requested JSON.
+Pictaria does not require each model name or custom endpoint to appear in an
+allowlist. Adapter support permits a bounded attempt; it does not certify that
+an arbitrary model supports vision, follows the schema or groups photos well.
 
-This initial entry comes from the PIC-366 evaluation: the hosted model accepted
-ten images and rejected thirty. Ten is a conservative evaluated ceiling, not a
-claim about the service's absolute maximum. See the
-[recorded engineering boundary](../experiments/curate-v13/ENGINEERING-BOUNDARIES.md#3-logical-comparisons-and-provider-requests-are-different).
-It establishes a bounded input route. The small-case evaluation below also
-exercised the current prompt/schema; neither establishes general grouping
-quality. No other provider/model is implicitly supported, including local aliases
-or compatible endpoints carrying the same model name. A connection check or a
-vision catalog flag alone does not add an entry. There is no paid capability
-probe, network catalog request, fallback model or user-supplied capability override.
+`refereeCapability` supplies an exact provider/model-bound admission policy with
+an initial **ten-photo per-request ceiling**. This conservative application
+limit also fits the earlier Venice input-envelope evaluation. It is not a claim
+about any provider's maximum, and some models may accept fewer images. Whole
+stacks above the limit remain available for manual review; the Stack Referee
+does not split requests into batches or silently select a different model.
+Keep the existing byte limits, two-attempt bound, provider protection, exhaustive
+partition validation and stale-result checks on every adapter. There is no paid
+capability probe or additional user capability override.
 
-Add future entries only with evidence for the exact provider/model/endpoint,
-comparative input size and actual transport/schema behavior. Keep their visual
-acceptance separate. The current Curate provider/model selection still follows
-Enrich or its existing explicit override; the registry never changes that choice.
+Settings displays the saved effective provider/model and comparison limit next
+to the Stack Referee switch, even before enabling it. Missing/invalid connection
+configuration is shown there and once at page level when enabled; it does not
+add the same failure badge to every stack. Per-stack size and request failures
+still have their own explanations. A connection check verifies connectivity,
+not multi-image judgment or grouping quality.
+
+The initial real-photo evaluation below used Venice `qwen3-vl-235b-a22b` at its
+official endpoint. Synthetic transport tests cover all seven adapters, including
+image order, alias schemas and valid response mapping, but do not claim live
+acceptance of other services or models. That evidence remains separate from the
+user's ability to select and try a model. Broader live evaluations can guide
+recommendations and future limits without becoming a model-name allowlist.
 
 The contract and lifecycle share an overall 30-photo automation limit. Larger
 current stacks return `input-limit` / `too-many-images` with `limit: 30`, including
@@ -104,17 +114,19 @@ batch-validation error or masquerade as stale inputs. The full human comparison
 remains usable; smaller Photo Referee batches do not expand this total scope
 limit. A missing or no-longer-current group still returns `stale`.
 
-Within that envelope, exceeding a confirmed model limit remains
+Within that envelope, exceeding the server's per-request image ceiling remains
 `unsupported-size`, distinct from unknown capability or the overall scope cap.
-The worker checks capability and size **before offering work** and derives the
+The worker checks adapter policy and size **before offering work** and derives the
 same status directly for display, without writing a per-stack record or
-preparing/downloading unsupported stacks. Only a confirmed model-size limit within the overall
-envelope qualifies for the separate labeled Photo Referee batching exception.
+preparing/downloading unsupported stacks. Only a known per-request size limit
+within the overall envelope qualifies for the separate labeled Photo Referee
+batching exception; it does not prove that
+the chosen model will handle the smaller batch.
 
 `createStackRefereeRequest` takes already-prepared images inside the lifecycle's
 preparation phase. It enforces 2–30 images, 2 MiB per image and 24 MiB total raw
-bytes, as well as the confirmed model limit. It never pads, truncates, batches,
-downloads or falls back. The worker also enforces these limits while fetching
+bytes, as well as the server-provided request ceiling. It never pads, truncates,
+batches, downloads or falls back. The worker also enforces these limits while fetching
 previews, with a 30-second deadline for the complete preparation phase and
 checkpoints between images. Downloads are sequential and use the existing Immich
 streaming byte reader. The client connection is captured for preparation; a
@@ -154,7 +166,7 @@ reset an unchanged input's automatic allowance.
   Browser attention only changes priority; no browser is needed to discover work.
   Open comparisons defer new requests. The shared lifecycle owns the 30-second
   settling window, two-attempt limit, upcoming-comparison priority and fairness.
-- Unsupported capability and oversized scopes are rejected cheaply before
+- Unconfigured/unsupported adapters and oversized scopes are rejected cheaply before
   preparation; their status is derived without a per-stack database record.
 - Unusable previews (including HTTP 403/404, excessive bytes or unsupported
   MIME) retain a compact terminal reason in the existing input JSON. Arbitrary
@@ -215,7 +227,7 @@ reset an unchanged input's automatic allowance.
 ## Initial activation evidence and limits
 
 On September 30, 2026, a private evaluation of the merged `50492d6` source used
-Node 22.23.2 and the registered Venice model. Four sequential calls exercised a
+Node 22.23.2 and Venice `qwen3-vl-235b-a22b`. Four sequential calls exercised a
 mixed-subject four-photo stack and a natural three-photo keep-together control,
 each in original and reversed order. All four produced valid exhaustive
 partitions, without retries or fallback, in approximately 4.5–6.8 seconds.
@@ -235,24 +247,26 @@ labels, mappings and raw answers remain outside the repository.
 A separate coherent inventory showed that the ten-image ceiling covers most
 uncertain stacks in the approved test collection. That is size coverage, not
 proof of preview-byte eligibility or model accuracy. The 20–30-image association
-gate remains untested, and other provider/schema paths remain unaccepted. Add
-support only after evaluating the actual provider/model/endpoint and envelope;
-never raise the ceiling or infer a global partition from independent batches.
+gate remains untested, and other provider/schema paths have no live acceptance
+from this pass. Configurable provider selection does not change those evidence
+limits. Raising the ceiling needs separate evaluation; never infer a global
+partition from independent batches.
 
 ## Test-instance rollout
 
 Runtime acceptance remains separate from the standalone calls. Use a reviewed
 build and the installation's existing backup/upgrade procedure. Record the
 source commit and effective provider/model; do not change credentials or the
-capability registry. Confirm Stack Referee is off before the update if the
+request policy. Confirm Stack Referee is off before the update if the
 installation previously stored an explicit on preference. Photo Referee must
 remain off/unavailable; no Enrich run or embedding backfill is needed for this
 check.
 
 1. With Stack Referee still off, record the current pending groups, decisions,
    projected tags, advice and attempt totals privately. Check the effective
-   provider resolves to the registered route. A status or capability read makes
-   no paid request. Keep the library quiet for this initial observation.
+   provider/model resolves to the selection being tested. For the initial
+   acceptance session, retain the already-evaluated Venice configuration. A
+   status or capability read makes no paid request. Keep the library quiet for this initial observation.
 2. Enable **Stack Referee → Uncertain stacks** in Settings. Observe background
    requests with Curate closed, then open Curate and inspect queued/running and
    **AI checked** states. Scope includes the whole pending library; terminal
