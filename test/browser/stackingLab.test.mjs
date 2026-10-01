@@ -45,12 +45,21 @@ test('stacking lab shows complete partitions, focused dimming, evidence, reset a
       photo.top + 100 <= Math.min(results.bottom, innerHeight);
   })()`);
   await page.send('Emulation.setDeviceMetricsOverride', { width: 1280, height: 800, deviceScaleFactor: 1, mobile: false });
+  // Each time-group card loads a preview proxied through the server to the
+  // fake Immich in this test process, and Chrome sends at most six requests
+  // per host. "Load more" would queue behind up to 50 of them, so a stall in
+  // that proxy chain under suite load could time out the 53-card wait. The
+  // grid's previews are not under test; the experiment below loads real ones.
+  const gridPreviews = (blocked) => page.send('Network.setBlockedURLs', { urls: blocked ? ['*/api/review/thumbnail/*'] : [] });
+  await page.send('Network.enable');
+  await gridPreviews(true);
   await page.navigate(`${fixture.base}/curate-stacking-lab.html`);
   await page.waitFor('document.querySelector(".gate-backdrop input")');
   await page.evaluate('document.querySelector(".gate-backdrop input").value="smoke-secret";document.querySelector(".gate-backdrop button").click()');
   await page.waitFor('document.querySelectorAll(".group-card").length===50 && !document.querySelector("#build").disabled');
   await click('#more');
   await page.waitFor('document.querySelectorAll(".group-card").length===53 && !document.querySelector("#build").disabled');
+  await gridPreviews(false);
   await click('.group-card');
   await page.waitFor('document.querySelectorAll("#lab-photos .photo-card").length===3');
   await page.waitFor('!document.querySelector("#refresh-recognition").disabled');
@@ -173,8 +182,12 @@ test('similarity errors assign no ranks, back off, and clear when opening anothe
   await click('.group-card');
   await page.waitFor('!document.querySelector("#experiment-content").hidden');
   const entered = Promise.withResolvers(), release = Promise.withResolvers();
+  // A global failure starts the shared 30-second cooldown, so the repeat click
+  // below is refused however slowly this test runs. A reference-specific
+  // error keeps only the two-second start spacing, which a loaded suite can
+  // outlast; test/curate/similarity.test.mjs covers that with a fake clock.
   fixture.similarityResponses.set(fixture.id(1), async () => { entered.resolve(); await release.promise;
-    return { status: 400, body: { message: 'PRIVATE_UPSTREAM_TEXT' } };
+    return { status: 400, body: { message: 'Smart search is not enabled. PRIVATE_UPSTREAM_TEXT' } };
   });
   await click('#check-ranking'); await entered.promise;
   assert.match(await page.evaluate('document.querySelector("#ranking-status").textContent'), /Searching Immich/);
@@ -280,11 +293,17 @@ test('multi-reference ranks stream progress, preserve partial cancellation, and 
   await click('#combined-mode'); await click('#use-ranks');
   assert.equal(await page.evaluate('getComputedStyle(document.querySelector(".threshold-control")).display'), 'none');
   assert.match(await page.evaluate('document.querySelector("#combined-summary").textContent'), /3 uncertain/);
+  // Cancel from the page as soon as the first row lands, while the pass waits
+  // out its two-second spacing. A click relayed through this test process
+  // could arrive under suite load after the second search had started.
+  await page.evaluate(`new MutationObserver((changes, observer) => {
+    const panel = document.querySelector('#rank-comparison');
+    if (!panel.textContent.includes('1 of 3 new searches complete')) return;
+    observer.disconnect(); panel.querySelector('.compare-tools button:nth-child(2)').click();
+  }).observe(document.querySelector('#rank-comparison'), { childList: true, subtree: true, characterData: true })`);
   await click('#check-group-ranks');
-  await page.waitFor('document.querySelector("#rank-comparison").textContent.includes("1 of 3 new searches complete")');
-  assert.equal(fixture.similarityReads.length, 1);
-  await click('#rank-comparison .compare-tools button:nth-child(2)');
   await page.waitFor('document.querySelector("#rank-comparison").textContent.includes("Cancelled.") && !document.querySelector("#check-group-ranks").disabled');
+  assert.equal(fixture.similarityReads.length, 1);
   assert.match(await page.evaluate('document.querySelector("#rank-comparison").textContent'), /2 new searches/);
   assert.match(await page.evaluate('document.querySelector("#rank-table tbody").textContent'), /Complete.*Unqueried/s);
   await click('#check-group-ranks');
