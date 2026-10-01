@@ -5,10 +5,10 @@ import { enrichmentProviderConfiguration } from '../enrich/providers.mjs';
 export const STACK_REFEREE_CONTRACT = 'curate_stack_check_v2';
 export const STACK_REFEREE_ENVELOPE = Object.freeze({ images: CURATE_AI_MAX_IMAGES, imageBytes: 2 * 1024 * 1024, totalBytes: 24 * 1024 * 1024 });
 
-// Capability is supplied by server-owned, model-specific evidence. An adapter
-// having analyzeImages(), or accepting a single verification PNG, is not proof
-// that the model can compare a stack. This module never discovers capability
-// with a paid request or invents a default image limit.
+// Admission policy is supplied by the server and bound to the chosen model.
+// An adapter or successful connection check does not certify model quality or
+// multi-image support. This module never probes with a paid request, changes
+// providers or chooses its own request limit.
 export function stackRefereeSupport(provider, capability, memberCount) {
   if (!Number.isSafeInteger(memberCount) || memberCount < 2)
     return { state: 'input-limit' };

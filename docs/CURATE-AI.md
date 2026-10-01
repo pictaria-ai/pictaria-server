@@ -37,7 +37,8 @@ rechecked against pending groups before preparation. Stopping during
 preparation creates no verdict, failure or size deferral. A submitted request
 can finish; its result keeps the provider/model actually used. Shared scheduling
 prevents overlap if a new Enrich run starts during an already-submitted legacy
-request on that service. Neither new preview referee is activated here.
+request on that service. Stack Referee is available as an optional preview
+worker; Photo Referee remains unavailable.
 
 ## Shared request scheduling (PIC-118)
 
@@ -103,9 +104,8 @@ separate. Restart does not reset their ledgers; recovery requires exclusive serv
 
 The server also shares durable provider protection with Enrich and the legacy
 referee, with explicit verification in Settings → AI Providers. It recovers
-interrupted work only after exclusive database ownership. Availability of both
-preview roles remains false: the role adapters and their activation acceptance
-still precede real requests.
+interrupted work only after exclusive database ownership. Stack Referee is
+available when explicitly enabled; Photo Referee remains unavailable.
 
 ## Settings and scope (PIC-345)
 
@@ -115,16 +115,23 @@ installation; neither new role depends on Enrich being enabled. Turning Stacks
 off pauses the dependent controls without erasing their choices. The shared
 provider and optional model override apply to both roles and the existing
 referee. The existing referee's control and status are under **Current Curate
-page** and keep their existing Enrich dependency.
+page** and keep their existing Enrich dependency during preview testing. The
+production v1.3 cutover will replace the legacy referee with the new referees.
+The existing control is retained here for preview comparisons.
 
-The preview workers are **not connected yet**. Their controls say so, and the
-API rejects newly enabling an unavailable worker, including clearing an override
-that would enable it through environment fallback. Saved on preferences may be
-turned off before integration; saving unrelated settings preserves them.
-An unsaved opt-out can be reversed; once saved off, it cannot be enabled until
-the worker is available. The saved-preference notice appears only for an on
-preference. Availability comes from server composition, not user settings or an environment
-switch. An on preference is not reported as an active worker while unavailable.
+Stack Referee is available and can be enabled or disabled through Settings.
+It defaults off; an existing explicit on preference is honored on upgrade.
+Enabling it admits eligible pending stacks throughout the library, without a
+browser trigger. The configurable providers, request ceiling and controlled
+rollout checks are documented in [Stack Referee implementation](CURATE-STACK-REFEREE.md).
+
+Photo Referee remains unavailable. The API rejects newly enabling it, including
+clearing an override that would enable it through environment fallback. A saved
+on preference may be turned off; saving unrelated settings preserves it. An
+unsaved opt-out can be reversed, but once saved off it cannot be enabled until
+the worker is available. Availability comes from server composition, not a user
+setting or environment switch. An on preference is not reported as an active
+worker while unavailable.
 
 `CURATE_STACK_REFEREE_SCOPE` ignores surrounding whitespace and letter case.
 Blank values use `uncertain`. Invalid environment values warn without echoing
@@ -151,9 +158,9 @@ contract but does not submit requests. `candidate-supported` is the current
 algorithm's support classification; under **Uncertain stacks** it is skipped as
 a deliberate cost/coverage choice. It is **not** a guarantee of correct grouping,
 an AI check, or a validated exact-image bypass. Unsupported/unknown routes stay
-eligible rather than guessing from explanatory text or UI icons. The future
-worker must provide current membership, decision and settled-check facts, then
-separately enforce provider limits, pause state, budgets and revision validity.
+eligible rather than guessing from explanatory text or UI icons. The
+worker provides current membership, decision and settled-check facts, then
+separately enforces provider limits, pause state, budgets and revision validity.
 
 This selective policy is the September 24 owner-approved refinement of the
 earlier check-every-group plan. Missing evidence alone should not create an
@@ -169,7 +176,9 @@ false** is saved once. Saved overrides take precedence over environment defaults
 forwarding (as in Compose) is treated as unspecified; use `false` to opt out.
 A later Enrich toggle or restart cannot reinterpret a dormant legacy preference.
 Stack Referee defaults off. Existing legacy settings are retained separately;
-no historical verdict becomes current preview advice and no AI work starts here.
+no historical verdict becomes current preview advice and this migration does
+not enable Stack Referee. Photo Referee remains unavailable even when its
+migrated preference is on.
 
 The standard pre-migration recovery point retains the original settings and
 application state. Older builds cannot read version 8 settings; rollback uses
@@ -180,9 +189,9 @@ downgrade. Synthetic upgrade/restart/restore tests cover this path.
 
 `src/curate/ai-attempts.mjs` stores compact per-role, per-input accounting in
 Enrich's existing SQLite database. `src/curate/ai-execution.mjs` adds a shared
-execution boundary for future workers. Neither is connected to a live worker;
-the preview availability flags remain false. This is a partial implementation
-of PIC-346, not the complete AI lifecycle.
+execution boundary used by the integrated Stack Referee worker. Photo Referee
+will use the same accounting when connected. The changing-input lifecycle and
+provider protections are described below.
 
 - A request has at most two charged invocations: an initial invocation and one
   possible retry. The scheduler must explicitly admit each one. This executor
@@ -373,9 +382,9 @@ After ownership and schema initialization, startup reconciles interrupted
 provider and exact-input markers once, without refunding charges. Opening the
 repository from a read-only helper does not recover live work. No schema or
 persistent-state version changes are needed for this integration: the protection
-tables already shipped as schema 20 / contract 25. Both new referee roles remain
+tables already shipped as schema 20 / contract 25. Photo Referee remains
 unavailable. The shared changing-input integration is described below; role-specific
-request/advice applicability still needs integration before activation.
+request/advice applicability still needs its separate Photo Referee integration.
 
 ## Changing inputs and protected cleanup (PIC-346)
 
@@ -386,14 +395,24 @@ the existing input JSON; temporary preview failures get at most one retry,
 behind a shared three-minute pause that also gates queued work and survives
 restart. Unsupported model/size status is derived without per-stack records.
 Accepted advice includes compact provenance. No new database migration is
-needed. The server resolves the evaluated Venice model with a ten-image ceiling
-and the UI presents recorded progress, limitations and current AI checks.
-Real-provider/schema and real-photo acceptance still precede activation.
+needed. The server admits configured multi-image adapters with a ten-image
+request ceiling and the UI presents recorded progress, limitations and current
+AI checks.
+Repeated request rejection or invalid partitions on three distinct stacks
+without an accepted check pause only Stack Referee for that AI configuration.
+The small persisted streak survives restart and toggles; success clears it and
+a different AI configuration permits work within the existing attempt limits.
+Turning the role off still retains applicable completed grouping results.
+The Venice model has passed initial small-case real-provider/schema
+evaluation; other model choices are permitted without claiming that evidence.
+Controlled test-instance runtime acceptance remains separate; see the Stack
+Referee guide for evidence and rollout steps.
 
 The server composes `CurateAiLifecycle` and the Stack Referee adapter with its
-existing service, executor and shared scheduler. Both availability flags remain
-false, so this is not an active source of AI requests. Tests explicitly inject
-availability and matching model capability to exercise the integrated path.
+existing service, executor and shared scheduler. Stack Referee availability is
+on, with the user preference still off by default; Photo Referee availability
+remains off. Tests exercise production role/capability gates with synthetic
+transport, alongside broader injected-capability lifecycle cases.
 
 - A role adapter offers a current group and versioned prompt/schema contract,
   optionally selecting an actionable Photo Referee batch. The lifecycle derives

@@ -1,5 +1,6 @@
 import { isDeepStrictEqual } from 'node:util';
 import { join } from 'node:path';
+import { stackRefereeModelStatus } from './curate/referee-capabilities.mjs';
 import { CURATE_AI_AVAILABILITY, STACK_REFEREE_SCOPES, curateAiRoleEnabled } from './curate/ai-policy.mjs';
 
 import { writePrivateFileAtomicSync } from './atomicFile.mjs';
@@ -892,6 +893,7 @@ export class SettingsStore {
         };
       }
     }
+    result.curate.stackRefereeEnabled.modelStatus = stackRefereeModelStatus(this.config);
     return result;
   }
 

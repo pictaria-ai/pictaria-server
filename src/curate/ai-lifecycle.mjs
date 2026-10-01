@@ -104,6 +104,13 @@ export class CurateAiLifecycle {
         accept: result => plan.accept(result, structuredClone(snapshot)),
       });
       job.result = result;
+      // Role-specific protection observes each attempt before another stack or
+      // retry can run. Terminal finish alone may come much later in a backlog.
+      const observed = plan.observeAttempt?.(result, structuredClone(snapshot));
+      if (observed && typeof observed.then === 'function') {
+        Promise.resolve(observed).catch(() => {});
+        throw new TypeError('Curate AI attempt observation must be synchronous.');
+      }
       const retry = result.state === 'failed' && ['submit', 'validate'].includes(result.phase) &&
         this.curate.store.aiAttempts.eligibility(snapshot.role, snapshot.inputKey) === 'eligible';
       const waiting = ['waiting', 'busy', 'provider-busy', 'provider-cooldown', 'provider-changed'].includes(result.state);
