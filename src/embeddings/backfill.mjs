@@ -101,8 +101,15 @@ export class EmbeddingBackfill {
 
   async #run(model) {
     const signal = AbortSignal.any([this.controller.signal, this.shutdown.signal]);
-    let after = null, spaceId = null, failuresInRow = 0;
     const job = this.job;
+    // The worklist is walked newest capture first, but Enrich and Curate can
+    // refresh a capture time from Immich while the job runs, moving a photo
+    // behind the cursor. So a walk that reaches the end starts again from the
+    // top, passing over photos this job already tried, and the job finishes
+    // only after a walk finds no photo it has not tried. Skipped photos (ones
+    // that could not be embedded) are not retried within a job.
+    const skipped = new Set();
+    let tried = new Set(), after = null, found = false, spaceId = null, failuresInRow = 0;
     while (!signal.aborted) {
       // Enrich goes first: wait for its run to end, then continue.
       if (this.service.enrichActive()) {
@@ -129,15 +136,23 @@ export class EmbeddingBackfill {
         if (pass.stopped === 'preempted') continue;
         if (pass.stopped || !pass.space) return this.#finish('stopped', pass.reason ?? 'the machine-learning service did not answer');
         // Calibration picks the set. A different set (the service's output
-        // changed) starts the worklist over; skipped photos stay missing, so
-        // they are not counted twice.
-        if (pass.space.id !== spaceId) { after = null; spaceId = pass.space.id; }
-        job.total = job.done + this.store.countMissingEnriched(pass.space.id) - job.failed;
+        // changed) starts the walk over; skipped photos stay skipped, so they
+        // are not counted twice.
+        if (pass.space.id !== spaceId) { spaceId = pass.space.id; tried = new Set(skipped); after = null; found = false; }
+        this.#count(spaceId);
         for (;;) {
-          const page = this.store.missingEnriched(pass.space.id, { after, limit: this.limits.pageSize });
-          if (!page.length) return this.#finish('finished', null);
+          const page = this.store.missingEnriched(spaceId, { after, limit: this.limits.pageSize });
+          if (!page.length) {
+            if (!found) return this.#finish('finished', null);
+            after = null;
+            found = false;
+            this.#count(spaceId);
+            continue;
+          }
           for (const row of page) {
             if (signal.aborted || pass.stopped) break;
+            if (tried.has(row.assetId)) { after = row; continue; }
+            found = true;
             const settings = this.service.settings();
             if (!settings.enabled) return this.#finish('stopped', 'Image embeddings were turned off');
             if (settings.model !== model) return this.#finish('stopped', 'the embedding model changed in Settings; start again to embed photos for the new model');
@@ -147,11 +162,13 @@ export class EmbeddingBackfill {
             // A photo interrupted by Enrich or Stop is not counted; it is offered again.
             if (outcome === 'cancelled' || outcome === 'paused') break;
             after = row;
+            tried.add(row.assetId);
             job.done++;
             if (outcome === 'embedded') { job.embedded++; failuresInRow = 0; }
             else if (outcome === 'current') { job.current++; failuresInRow = 0; }
             else {
               job.failed++;
+              skipped.add(row.assetId);
               if (++failuresInRow >= this.limits.failureLimit) {
                 return this.#finish('stopped', `${failuresInRow} photos in a row could not be embedded; check Immich and the machine-learning service`);
               }
@@ -168,6 +185,13 @@ export class EmbeddingBackfill {
     }
     if (this.shutdown.signal.aborted) return this.#finish('stopped', 'the server stopped');
     return this.#finish('stopped', this.stopRequested ? 'you stopped it' : 'it was cancelled');
+  }
+
+  // Photos done so far plus those still to try. Skipped photos stay missing,
+  // so they are taken off.
+  #count(spaceId) {
+    const job = this.job;
+    job.total = Math.max(job.done, job.done + this.store.countMissingEnriched(spaceId) - job.failed);
   }
 
   #finish(state, reason) {

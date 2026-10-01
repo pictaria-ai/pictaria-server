@@ -1432,15 +1432,25 @@
 
     // --- image embeddings (Settings → Enrich) ---
 
-    async function loadEmbeddingsStatus() {
+    // While a backfill runs, or right after Start or Stop, a failed status
+    // check (a restart, a dropped connection) is retried with backoff and
+    // said so, rather than leaving the panel on its last state. Sign-in
+    // problems and a server without the endpoint are not retried.
+    let embeddingsPoll = null, embeddingsRetryMs = 0, embeddingsWatching = false;
+
+    async function loadEmbeddingsStatus({ watch = false } = {}) {
       let status;
       try {
         const response = await fetch('/api/enrich/embeddings', { headers: headers() });
-        if (!response.ok) return; // server predates image embeddings
+        if (response.status === 401) { clearTimeout(embeddingsPoll); embeddingsWatching = false; showLogin(); return; }
+        if (response.status === 404) return; // server predates image embeddings
+        if (!response.ok) throw new Error(`HTTP ${response.status}`);
         status = await response.json();
       } catch {
+        if (watch || embeddingsWatching) retryEmbeddingsStatus();
         return;
       }
+      embeddingsRetryMs = 0;
       const { coverage, model, enriched } = status;
       const parts = [];
       if (enriched) {
@@ -1461,7 +1471,17 @@
       renderEmbeddingSets(status);
     }
 
-    let embeddingsPoll = null;
+    function retryEmbeddingsStatus() {
+      embeddingsWatching = true;
+      embeddingsRetryMs = Math.min(30000, embeddingsRetryMs * 2 || 2000);
+      const note = el('embeddingsBackfillNote');
+      note.classList.remove('ok');
+      note.classList.add('bad');
+      note.textContent = `Could not get progress from Pictaria Server. Trying again in ${embeddingsRetryMs / 1000} s…`;
+      clearTimeout(embeddingsPoll);
+      embeddingsPoll = setTimeout(() => { void loadEmbeddingsStatus(); }, embeddingsRetryMs);
+    }
+
     const plural = (n, word) => `${n.toLocaleString()} ${word}${n === 1 ? '' : 's'}`;
 
     function backfillSummary(job) {
@@ -1481,6 +1501,7 @@
     function renderEmbeddingsBackfill(status) {
       const box = el('embeddingsBackfill');
       clearTimeout(embeddingsPoll);
+      embeddingsWatching = Boolean(status.backfill?.running);
       if (!status.backfill) { box.hidden = true; return; } // server predates the backfill
       box.hidden = false;
       const job = status.backfill, missing = status.enriched?.missing ?? 0;
@@ -1559,7 +1580,7 @@
         el('embeddingsBackfillStop').disabled = false;
         return;
       }
-      await loadEmbeddingsStatus();
+      await loadEmbeddingsStatus({ watch: true });
     }
 
     el('embeddingsBackfillStart').addEventListener('click', () => {

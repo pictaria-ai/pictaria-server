@@ -79,12 +79,34 @@ test('image embeddings are configured in Settings → Enrich, tested with draft 
     await page.waitFor(`document.getElementById("embeddingsBackfillStart")?.textContent === "Embed 3 enriched photos"
       && !document.getElementById("embeddingsBackfillStart").disabled`);
     assert.match(await text('embeddingsCoverage'), /^ViT-B-32__openai: 0 of 3 enriched photos have embeddings\./);
+    // One status check fails mid-job (a restart, a dropped connection): the
+    // panel says so, keeps checking and catches up on its own.
+    ml.state.slowAfter = ml.state.requests.length + 1; // the calibration answers at once, each photo takes 1.5 s
+    ml.state.slowMs = 1500;
+    await page.evaluate(`(() => {
+      const realFetch = window.fetch;
+      let checks = 0;
+      window.failedStatusChecks = 0;
+      window.fetch = (url, options) => {
+        if (url === '/api/enrich/embeddings' && ++checks === 2) {
+          window.failedStatusChecks++;
+          return Promise.reject(new TypeError('Failed to fetch'));
+        }
+        return realFetch(url, options);
+      };
+    })()`);
     await page.evaluate('document.getElementById("embeddingsBackfillStart").click()');
+    await page.waitFor('document.getElementById("embeddingsBackfillNote").textContent.startsWith("Could not get progress from Pictaria Server.")');
+    assert.equal(await page.evaluate('document.getElementById("embeddingsBackfillNote").className'), 'save-note bad');
+    assert.equal(await page.evaluate('document.getElementById("embeddingsBackfillStop").hidden'), false, 'the job is still running');
     await page.waitFor('document.getElementById("embeddingsBackfillNote").textContent.includes("3 embedded")', { timeoutMs: 20000 });
+    ml.state.slowMs = 0;
+    assert.equal(await page.evaluate('window.failedStatusChecks'), 1);
     assert.equal(await page.evaluate('document.getElementById("embeddingsBackfillNote").className'), 'save-note ok');
     assert.match(await text('embeddingsBackfillNote'), /^3 embedded · finished /);
     assert.match(await text('embeddingsCoverage'), /^ViT-B-32__openai: 3 of 3 enriched photos have embeddings\./);
     assert.equal(await page.evaluate('document.getElementById("embeddingsBackfillStart").hidden'), true, 'nothing left to embed');
+    assert.equal(await page.evaluate('document.getElementById("embeddingsBackfillStop").hidden'), true);
     // Stored embedding sets (PIC-390).
     const rows = await page.evaluate('[...document.querySelectorAll("#embeddingsSets tbody tr")].map((row) => [...row.cells].map((cell) => cell.textContent))');
     assert.equal(rows.length, 1);

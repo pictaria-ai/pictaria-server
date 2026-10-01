@@ -104,6 +104,30 @@ test('an Enrich run pauses the backfill, which then continues without repeating 
   });
 });
 
+test('photos that move behind the cursor or become missing while Enrich runs are embedded before it finishes', async () => {
+  await withBackfill(async ({ repo, ml, service, backfill, downloads }) => {
+    for (const [i, id] of ['a1', 'a2', 'a3', 'a4', 'a5'].entries()) photo(repo, id, { day: 5 - i });
+    ml.state.delayMs = 150;
+    backfill.start();
+    await until(() => job(backfill).embedded === 1 && ml.state.inFlight === 1, { what: 'the second photo' });
+    const enrich = service.session({});
+    await until(() => job(backfill).state === 'waiting', { what: 'the backfill to wait' });
+    // Meanwhile Enrich refreshes the oldest photo's capture time from Immich, so
+    // it sorts ahead of the cursor, and enriches a new photo without an embedding.
+    repo.db.prepare("UPDATE assets SET file_created_at='2026-09-28T12:00:00.000Z' WHERE asset_id='a5'").run();
+    photo(repo, 'n1', { day: 29 });
+    await enrich.close({ cancelled: true });
+    await backfill.promise;
+    const done = job(backfill);
+    assert.deepEqual({ state: done.state, total: done.total, done: done.done, embedded: done.embedded },
+      { state: 'finished', total: 6, done: 6, embedded: 6 });
+    assert.deepEqual(vectors(repo), ['a1', 'a2', 'a3', 'a4', 'a5', 'n1']);
+    assert.deepEqual(backfill.status().enriched, { total: 6, current: 6, missing: 0 });
+    assert.deepEqual(downloads.slice(-2), ['n1', 'a5'], 'a second walk from the top finds them');
+    assert.equal(downloads.filter((id) => id === 'a5').length, 1);
+  }, { limits: { ...backfillLimits, pageSize: 2 } });
+});
+
 test('Stop keeps completed photos, writes nothing afterwards, and starting again continues', async () => {
   await withBackfill(async ({ repo, ml, backfill }) => {
     for (const [i, id] of ['a1', 'a2', 'a3', 'a4'].entries()) photo(repo, id, { day: 4 - i });
@@ -146,12 +170,13 @@ test('server shutdown cancels a backfill promptly and nothing is written afterwa
 });
 
 test('an unreadable preview is skipped; repeated failures stop the job with the reason', async () => {
-  await withBackfill(async ({ repo, backfill, immich }) => {
+  await withBackfill(async ({ repo, backfill, immich, downloads }) => {
     for (const [i, id] of ['a1', 'a2', 'a3'].entries()) photo(repo, id, { day: 3 - i });
     immich.fail.add('a2');
     backfill.start();
     await backfill.promise;
     assert.deepEqual({ state: job(backfill).state, embedded: job(backfill).embedded, failed: job(backfill).failed }, { state: 'finished', embedded: 2, failed: 1 });
+    assert.equal(downloads.filter((id) => id === 'a2').length, 1, 'a skipped photo is not retried within the job');
     // Immich unreachable for every preview: stop instead of walking the list.
     for (let i = 0; i < 12; i++) { photo(repo, `b${i}`, { day: 10 + i }); immich.fail.add(`b${i}`); }
     backfill.start();

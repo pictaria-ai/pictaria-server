@@ -1336,13 +1336,16 @@ photos** embeds the rest.
   preprocessing therefore starts a new set rather than mixing vectors.
 - Enrich goes first. When an Enrich run starts, the backfill's current request
   is aborted, and the job waits for the run to finish before it continues.
+- Before it reports **finished**, it goes through the list again from the
+  newest photo. A photo whose capture time changed in Immich meanwhile, or one
+  an Enrich run left without an embedding, is embedded too.
 - **Stop** keeps completed photos, and nothing is written afterwards. Pressing
   the button again continues with whatever is still missing, so a restart loses
   nothing.
 - It stops, with the reason, after three consecutive service failures, a
   database error, or ten photos in a row that could not be embedded (usually
   previews that could not be downloaded). A single photo that can't be embedded
-  is skipped.
+  is skipped, and tried again the next time you start it.
 - Immich's own machine-learning jobs share the container and may run more
   slowly meanwhile.
 

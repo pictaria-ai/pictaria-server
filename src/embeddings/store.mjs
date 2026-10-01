@@ -213,8 +213,9 @@ export class EmbeddingStore {
   }
 
   // Enriched photos without a current vector in this space, newest capture
-  // first, one page at a time. `after` is the last row of the previous page,
-  // so photos that could not be embedded are not offered again in one pass.
+  // first, one page at a time. `after` is the last row of the previous page.
+  // Capture times can change between pages, so a caller that must see every
+  // photo walks again from the top (EmbeddingBackfill does).
   missingEnriched(spaceId, { after = null, limit = 200 } = {}) {
     const rows = after
       ? this.db.prepare(`SELECT a.asset_id AS assetId, ${CAPTURE_ORDER} AS capturedAt ${ENRICHED} AND NOT ${HAS_CURRENT}
