@@ -36,7 +36,9 @@ export function findChrome() {
 // node:test stops running a test's after hooks at the first that throws.
 export function cleanupAfter(t) {
   const stops = [];
+  let ended = false;
   t.after(async () => {
+    ended = true;
     const errors = [];
     while (stops.length) {
       try {
@@ -51,7 +53,17 @@ export function cleanupAfter(t) {
   });
   // Accepts anything with stop(), or a cleanup function; returns it unchanged.
   return (resource) => {
-    stops.push(typeof resource === 'function' ? resource : () => resource.stop());
+    const stop = typeof resource === 'function' ? resource : () => resource.stop();
+    if (!ended) {
+      stops.push(stop);
+    } else {
+      // node:test keeps running a timed-out test's body, so a resource that
+      // was still starting arrives after cleanup began. Stop it now; the
+      // test has already ended, so a failure here is reported, not thrown.
+      Promise.resolve().then(stop).catch((error) => {
+        console.warn(`Browser test cleanup: could not stop a resource that started after its test ended: ${error?.stack ?? error}`);
+      });
+    }
     return resource;
   };
 }
