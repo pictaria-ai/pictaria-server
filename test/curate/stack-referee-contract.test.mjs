@@ -31,8 +31,8 @@ function setup(overrides = {}) {
   return { provider, calls, build };
 }
 
-test('production availability stays off until discovery, persistence and publication are integrated', () => {
-  assert.deepEqual(CURATE_AI_AVAILABILITY, { stack: false, keeper: false });
+test('production exposes the integrated Stack Referee but not the unfinished Photo Referee', () => {
+  assert.deepEqual(CURATE_AI_AVAILABILITY, { stack: true, keeper: false });
 });
 
 test('provider capability must be explicit, comparative and bound to the resolved model', () => {

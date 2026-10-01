@@ -7,6 +7,14 @@ All notable changes to Pictaria Server are documented here. This project follows
 
 ### Development
 
+- Made the optional Stack Referee available in Curate Preview settings after
+  initial real-photo evaluation of the registered Venice model. It defaults off
+  and checks uncertain stacks unless All stacks is selected. Explicit saved or
+  environment on preferences now start eligible background work, including with
+  no browser open. The ten-image model ceiling, bounded failures, saved partitions
+  and human decisions are unchanged; Photo Referee remains unavailable. See the
+  [evaluation limits and test rollout](docs/CURATE-STACK-REFEREE.md#test-instance-rollout).
+
 - Connected Stack Referee status to Curate cards, comparisons and background
   activity: named progress, quiet unavailable explanations and a current-result
   AI badge, without changing open photos or draft choices. Badge validity is
@@ -14,8 +22,7 @@ All notable changes to Pictaria Server are documented here. This project follows
   during Save & next, and turning the role off retains valid completed checks.
   Queued or just-accepted checks awaiting a rebuild do not show failure messages.
   The server resolves the previously evaluated Venice model at a ten-image ceiling;
-  unverified models/endpoints remain unavailable. Both referee availability
-  flags stay off pending real-provider and visual acceptance. See
+  unverified models/endpoints remain unavailable. See
   [Stack Referee implementation](docs/CURATE-STACK-REFEREE.md).
 
 - Added Pictaria embeddings to the Curate stacking lab. **Compute embeddings**

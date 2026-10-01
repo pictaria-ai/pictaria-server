@@ -9,6 +9,7 @@ import { CurateAiExecution } from '../../src/curate/ai-execution.mjs';
 import { CurateAiLifecycle, AI_SETTLE_MS } from '../../src/curate/ai-lifecycle.mjs';
 import { StackRefereeWorker, STACK_PREVIEW_PAUSE_MS } from '../../src/curate/stack-referee-worker.mjs';
 import { CURATE_AI_AVAILABILITY } from '../../src/curate/ai-policy.mjs';
+import { refereeCapability } from '../../src/curate/referee-capabilities.mjs';
 import { AiRequestScheduler } from '../../src/ai/scheduler.mjs';
 import { ImmichClient, ImmichApiError } from '../../src/immich.mjs';
 import { ResponseTooLargeError } from '../../src/fetchWithTimeout.mjs';
@@ -20,7 +21,7 @@ const png = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR
 const partition = (...groups) => ({ groups: groups.map(ids => ({ ids, reason: 'Same subject and composition.' })) });
 const deferred = () => Promise.withResolvers();
 
-async function fixture(work, { count = 4, capability = true, availability = { stack: true, keeper: false } } = {}) {
+async function fixture(work, { count = 4, capability = true, availability } = {}) {
   const dir = mkdtempSync(join(tmpdir(), 'pictaria-stack-worker-')), path = join(dir, 'enrichment.sqlite');
   let now = Date.now(), repo, curate, scheduler;
   const downloads = [], calls = [];
@@ -40,7 +41,7 @@ async function fixture(work, { count = 4, capability = true, availability = { st
     const execution = new CurateAiExecution({ attempts: repo.curate.aiAttempts, limits: repo.curate.aiLimits,
       getConfig: () => config, availability, scheduler, stopped: () => curate.closed });
     curate.aiLifecycle = new CurateAiLifecycle({ curate, execution, availability, now: () => now, resolveProvider: () => provider });
-    curate.stackReferee = new StackRefereeWorker(curate, { capability: () => cap });
+    curate.stackReferee = new StackRefereeWorker(curate, { capability: typeof capability === 'function' ? capability : () => cap });
   };
   initialize();
   const add = (id, seconds) => { repo.reviewListAdd([id], 'synthetic');
@@ -317,11 +318,29 @@ test('provider changes while queued are checked before downloads and do not crea
   assert.equal(f.repo.db.prepare('SELECT COUNT(*) n FROM curate_ai_inputs').get().n, 0);
 }));
 
-test('production availability still prevents discovery and calls', async () => fixture(async f => {
+test('production availability still requires an explicit Stack Referee preference', async () => fixture(async f => {
+  f.config.curateStackRefereeEnabled = false;
   await f.run(); f.advance(); await f.run();
   assert.equal(f.calls.length, 0); assert.equal(f.downloads.length, 0);
   assert.equal(f.curate.aiLifecycle.pending.size, 0);
 }, { availability: CURATE_AI_AVAILABILITY }));
+
+test('production role and capability gates admit only the registered route, then retain the split after restart', async () => fixture(async f => {
+  await f.run(); f.advance(); await f.run();
+  assert.equal(f.calls.length, 0); assert.equal(f.downloads.length, 0);
+  assert.equal(f.curate.stackReferee.status(f.curate.current.groups[0]).reason, 'unknown-capability');
+  Object.assign(f.provider, { providerName: 'venice', modelName: 'qwen3-vl-235b-a22b', baseUrl: 'https://api.venice.ai/api/v1' });
+  // Synthetic previews and model answers exercise the server's real capability
+  // and role gates, scheduler, preparation, validation, storage and rebuild path.
+  await f.run(); f.advance(); assert.equal((await f.run()).state, 'succeeded');
+  await f.curate.refresh();
+  assert.deepEqual(f.curate.current.groups.map(g => g.ids), [['a0', 'a2'], ['a1', 'a3']]);
+  assert.ok(f.curate.current.groups.every(g => f.curate.stackReferee.status(g).state === 'checked'));
+  await f.restart(); f.advance(); await f.run();
+  assert.equal(f.calls.length, 1);
+  assert.deepEqual(f.curate.current.groups.map(g => g.ids), [['a0', 'a2'], ['a1', 'a3']]);
+  assert.equal(f.repo.db.prepare('SELECT COUNT(*) n FROM asset_tags').get().n, 0);
+}, { capability: refereeCapability }));
 
 test('preview reads enforce streaming byte limits and abort signals, without an original or thumbnail fallback', async () => {
   const paths = [];
@@ -432,6 +451,7 @@ test('split children keep valid checks through sibling decisions and role-off', 
 }));
 
 test('disabled referee without saved advice stays off during unrelated or local changes', async () => fixture(async f => {
+  f.config.curateStackRefereeEnabled = false;
   await f.curate.refresh();
   const group = f.curate.current.groups[0];
   f.add('unrelated', 5 * 86400);

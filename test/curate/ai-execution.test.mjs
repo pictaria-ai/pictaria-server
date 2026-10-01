@@ -51,11 +51,12 @@ test('role gates cover all combinations independently of Enrich', async () => fi
 let counter = 0;
 
 test('server availability and mandatory admission fail closed before preparation', async () => fixture(async f => {
-  for (const options of [{ availability: undefined }, { admit: undefined },
+  for (const options of [{ availability: { stack: false } }, { availability: {} }, { admit: undefined },
     { admit: async () => true }, { stopped: () => true }]) {
     const state = (await f.execution(options).run(f.job())).state;
     assert.ok(['disabled', 'waiting', 'stopped'].includes(state));
   }
+  assert.equal((await f.execution({ availability: undefined }).run(f.job({ role: 'keeper' }))).state, 'disabled');
   assert.deepEqual(f.counts(), { preparations: 0, requests: 0, accepted: 0 });
 }));
 

@@ -11,7 +11,7 @@ export const STACK_PREVIEW_PAUSE_MS = 3 * 60_000;
 
 // Discovery/adaptation for one role. Capability must be supplied by the server,
 // never inferred from analyzeImages or accepted from a settings/API payload.
-// The production role remains unavailable pending capability/visual acceptance.
+// Role preference and registered model capability gate production requests.
 export class StackRefereeWorker {
   constructor(curate, { capability = () => null } = {}) {
     this.curate = curate;

@@ -3,7 +3,8 @@ import { enrichmentProviderConfiguration } from '../enrich/providers.mjs';
 // Server-owned evidence, not a vision-model catalog or a paid capability probe.
 // PIC-366 exercised this exact hosted model at ten images and rejected thirty.
 // Ten is our evaluated ceiling, not a claim about its absolute service maximum.
-// The new prompt/schema still needs acceptance before role activation.
+// PIC-370 also exercised the current prompt/schema on small real comparisons.
+// This entry is not a claim of universal grouping quality or provider support.
 const evaluated = Object.freeze({
   provider: 'venice', model: 'qwen3-vl-235b-a22b', comparative: true, maxImages: 10,
 });
