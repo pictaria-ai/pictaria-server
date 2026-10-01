@@ -7,6 +7,17 @@ All notable changes to Pictaria Server are documented here. This project follows
 
 ### Development
 
+- Connected Stack Referee status to Curate cards, comparisons and background
+  activity: named progress, quiet unavailable explanations and a current-result
+  AI badge, without changing open photos or draft choices. Badge validity is
+  scoped to the saved check: unrelated imports and decisions do not hide it
+  during Save & next, and turning the role off retains valid completed checks.
+  Queued or just-accepted checks awaiting a rebuild do not show failure messages.
+  The server resolves the previously evaluated Venice model at a ten-image ceiling;
+  unverified models/endpoints remain unavailable. Both referee availability
+  flags stay off pending real-provider and visual acceptance. See
+  [Stack Referee implementation](docs/CURATE-STACK-REFEREE.md).
+
 - Added Pictaria embeddings to the Curate stacking lab. **Compute embeddings**
   embeds the open group's photos that have none yet, as a bounded, cancellable
   pass through Immich's machine-learning service. It makes no AI provider

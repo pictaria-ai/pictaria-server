@@ -22,6 +22,7 @@ import { AiTagSyncService } from './enrich/aiTagSync.mjs';
 import { CaptionWritebackService } from './enrich/captionWriteback.mjs';
 import { RefereeService } from './enrich/refereeService.mjs';
 import { StackRefereeWorker } from './curate/stack-referee-worker.mjs';
+import { refereeCapability } from './curate/referee-capabilities.mjs';
 import { AiRequestScheduler } from './ai/scheduler.mjs';
 import { CurateAiExecution } from './curate/ai-execution.mjs';
 import { CurateAiLifecycle } from './curate/ai-lifecycle.mjs';
@@ -217,7 +218,7 @@ curate.ai = new CurateAiExecution({ attempts: repo.curate.aiAttempts, limits: re
   stopped: () => lifecycle.stopped, scheduler: aiScheduler });
 curate.aiLifecycle = new CurateAiLifecycle({ curate, execution: curate.ai,
   resolveProvider: () => createCurateAiProvider(config), availability: CURATE_AI_AVAILABILITY });
-curate.stackReferee = new StackRefereeWorker(curate);
+curate.stackReferee = new StackRefereeWorker(curate, { capability: refereeCapability });
 const embeddings = new EmbeddingService({ repo, config });
 const embeddingBackfill = new EmbeddingBackfill({ service: embeddings, immich,
   immichReady: () => missingImmichSettings(config).length === 0, log: (message) => console.log(`[Pictaria] ${message}`) });
