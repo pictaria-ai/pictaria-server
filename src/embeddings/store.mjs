@@ -43,6 +43,14 @@ CREATE INDEX IF NOT EXISTS idx_asset_embeddings_space ON asset_embeddings(space_
 
 // SQL predicate over asset_embeddings e joined to assets a.
 const CURRENT = 'a.missing_since IS NULL AND a.checksum IS e.source_checksum AND a.thumbhash IS e.source_thumbhash';
+// Enriched photos: a successful enrichment, still in Immich, not discarded.
+const ENRICHED = `FROM assets a JOIN latest_success ls ON ls.asset_id=a.asset_id
+  WHERE a.missing_since IS NULL AND a.enrich_discarded_at IS NULL`;
+// Correlated check that photo a has a current vector in space ?.
+const HAS_CURRENT = `EXISTS (SELECT 1 FROM asset_embeddings e WHERE e.asset_id=a.asset_id AND e.space_id=?
+  AND a.checksum IS e.source_checksum AND a.thumbhash IS e.source_thumbhash)`;
+// Newest capture first; photos without a capture time last.
+const CAPTURE_ORDER = `COALESCE(a.file_created_at, '')`;
 
 export const EMBEDDING_STORE_LIMITS = Object.freeze({
   // A service whose output changes on every run would otherwise add a space
@@ -50,6 +58,9 @@ export const EMBEDDING_STORE_LIMITS = Object.freeze({
   spacesPerModel: 8,
   lookupChunk: 500,
   coverageCacheMs: 15_000,
+  // Enriched-photo counts and the set list: short, so a new Enrich run or a
+  // finished backfill shows promptly, while Settings polls during a backfill.
+  statusCacheMs: 2_000,
 });
 
 export class EmbeddingStore {
@@ -183,6 +194,59 @@ export class EmbeddingStore {
       otherVectors: other,
     };
     this.coverageCache = { backend, model, at: this.now(), value };
+    return value;
+  }
+
+  // How many enriched photos have a current vector in the model's current
+  // space. Cached like coverage, since Settings polls while a backfill runs.
+  enrichedCoverage({ backend, model }) {
+    const cached = this.enrichedCache;
+    if (cached && cached.model === model && cached.backend === backend && this.now() - cached.at < this.limits.statusCacheMs) {
+      return cached.value;
+    }
+    const space = this.latestSpace({ backend, model });
+    const total = this.db.prepare(`SELECT COUNT(*) AS n ${ENRICHED}`).get().n;
+    const current = space ? this.db.prepare(`SELECT COUNT(*) AS n ${ENRICHED} AND ${HAS_CURRENT}`).get(space.id).n : 0;
+    const value = { total, current, missing: total - current };
+    this.enrichedCache = { backend, model, at: this.now(), value };
+    return value;
+  }
+
+  // Enriched photos without a current vector in this space, newest capture
+  // first, one page at a time. `after` is the last row of the previous page.
+  // Capture times can change between pages, so a caller that must see every
+  // photo walks again from the top (EmbeddingBackfill does).
+  missingEnriched(spaceId, { after = null, limit = 200 } = {}) {
+    const rows = after
+      ? this.db.prepare(`SELECT a.asset_id AS assetId, ${CAPTURE_ORDER} AS capturedAt ${ENRICHED} AND NOT ${HAS_CURRENT}
+          AND (${CAPTURE_ORDER}, a.asset_id) < (?, ?) ORDER BY ${CAPTURE_ORDER} DESC, a.asset_id DESC LIMIT ?`)
+        .all(spaceId, after.capturedAt, after.assetId, limit)
+      : this.db.prepare(`SELECT a.asset_id AS assetId, ${CAPTURE_ORDER} AS capturedAt ${ENRICHED} AND NOT ${HAS_CURRENT}
+          ORDER BY ${CAPTURE_ORDER} DESC, a.asset_id DESC LIMIT ?`).all(spaceId, limit);
+    return rows.map((row) => ({ assetId: row.assetId, capturedAt: row.capturedAt }));
+  }
+
+  countMissingEnriched(spaceId) {
+    return this.db.prepare(`SELECT COUNT(*) AS n ${ENRICHED} AND NOT ${HAS_CURRENT}`).get(spaceId).n;
+  }
+
+  // Every stored set with its photo counts, for Settings. A set in use is the
+  // selected model's latest; others are kept but never mixed with it.
+  sets({ backend, model }) {
+    const cached = this.setsCache;
+    if (cached && cached.model === model && cached.backend === backend && this.now() - cached.at < this.limits.statusCacheMs) {
+      return cached.value;
+    }
+    const inUse = this.latestSpace({ backend, model })?.id ?? null;
+    const value = this.db.prepare(`SELECT s.id, s.model, s.dims, s.created_at AS createdAt, s.verified_at AS verifiedAt,
+        COUNT(e.asset_id) AS vectors,
+        COALESCE(SUM(CASE WHEN a.asset_id IS NOT NULL AND ${CURRENT} THEN 1 ELSE 0 END), 0) AS current
+      FROM embedding_spaces s LEFT JOIN asset_embeddings e ON e.space_id=s.id LEFT JOIN assets a ON a.asset_id=e.asset_id
+      WHERE s.backend=? GROUP BY s.id ORDER BY s.id=? DESC, s.verified_at DESC, s.id DESC`).all(backend, inUse)
+      .map((row) => ({ ...row, inUse: row.id === inUse, latestForModel: false }))
+      .map((row, _, all) => ({ ...row, latestForModel: !all.some((other) => other.model === row.model && (other.verifiedAt > row.verifiedAt
+        || (other.verifiedAt === row.verifiedAt && other.id > row.id))) }));
+    this.setsCache = { backend, model, at: this.now(), value };
     return value;
   }
 }

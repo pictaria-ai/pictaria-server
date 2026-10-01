@@ -489,6 +489,16 @@ test('HTTP surface with a password set', async (t) => {
     const body = await unreachable.json();
     assert.equal(body.error.code, 'ml_unreachable');
     assert.doesNotMatch(JSON.stringify(body), /private-draft-path/);
+    // Embedding enriched photos: status, start and stop.
+    assert.deepEqual({ enriched: status.enriched, sets: status.sets, backfill: status.backfill },
+      { enriched: { total: 0, current: 0, missing: 0 }, sets: [], backfill: { state: 'idle', running: false } });
+    assert.equal((await fetch(`${url}/backfill`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' })).status, 401);
+    const refused = await fetch(`${url}/backfill`, { method: 'POST', headers, body: '{}' });
+    assert.equal(refused.status, 409);
+    assert.equal((await refused.json()).error.code, 'ml_off', 'the Image embeddings switch is off');
+    const stop = await fetch(`${url}/backfill/stop`, { method: 'POST', headers, body: '{}' });
+    assert.equal(stop.status, 200);
+    assert.deepEqual((await stop.json()).backfill, { state: 'idle', running: false });
   });
 
   await t.test('unified Activity API and bounded downloads require authentication', async () => {

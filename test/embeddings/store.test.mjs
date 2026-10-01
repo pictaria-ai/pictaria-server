@@ -200,3 +200,58 @@ test('currency is exact with bytes in hand and excludes deleted photos and corru
     assert.equal(store.vectors(space.id, ['a1']).size, 0);
   });
 });
+
+test('enriched coverage and the backfill worklist count only enriched photos still in Immich', () => {
+  withRepo((repo) => {
+    const store = repo.embeddings;
+    const enriched = (id, day) => {
+      repo.upsertAsset({ id, checksum: `sum-${id}`, thumbhash: `hash-${id}`, fileCreatedAt: `2026-09-${String(day).padStart(2, '0')}T12:00:00.000Z` });
+      repo.db.prepare('INSERT OR REPLACE INTO latest_success (asset_id, run_id) VALUES (?, 1)').run(id);
+    };
+    assert.deepEqual(store.enrichedCoverage({ backend, model }), { total: 0, current: 0, missing: 0 });
+    for (const [id, day] of [['e1', 5], ['e2', 3], ['e3', 4], ['e4', 1], ['e5', 2]]) enriched(id, day);
+    repo.upsertAsset({ id: 'plain', checksum: 'sum-plain', thumbhash: 'hash-plain' });
+    repo.upsertAsset({ id: 'undated', checksum: 'sum-undated', thumbhash: 'hash-undated' });
+    repo.db.prepare('INSERT INTO latest_success (asset_id, run_id) VALUES (?, 1)').run('undated');
+    const space = store.resolveSpace({ backend, model, calibrationVersion, calibration: wave(64) });
+    store.save({ assetId: 'e1', spaceId: space.id, source: store.sourceOf('e1'), imageSha256: 'f'.repeat(64), vector: wave(64, 1) });
+    store.save({ assetId: 'e2', spaceId: space.id, source: store.sourceOf('e2'), imageSha256: 'e'.repeat(64), vector: wave(64, 2) });
+    // e2 changes in Immich: its vector is out of date again.
+    repo.upsertAsset({ id: 'e2', checksum: 'sum-e2', thumbhash: 'edited', fileCreatedAt: '2026-09-03T12:00:00.000Z' });
+    store.enrichedCache = null;
+    assert.deepEqual(store.enrichedCoverage({ backend, model }), { total: 6, current: 1, missing: 5 });
+    assert.equal(store.countMissingEnriched(space.id), 5);
+    // Newest capture first, undated last, and paging never repeats a photo.
+    const seen = [];
+    let after = null;
+    for (;;) {
+      const page = store.missingEnriched(space.id, { after, limit: 2 });
+      if (!page.length) break;
+      seen.push(...page.map((row) => row.assetId));
+      after = page.at(-1);
+    }
+    assert.deepEqual(seen, ['e3', 'e2', 'e5', 'e4', 'undated']);
+  });
+});
+
+test('embedding sets list every stored set with its counts and which one is in use', () => {
+  withRepo((repo) => {
+    const store = repo.embeddings;
+    for (const id of ['a1', 'a2', 'a3']) addAsset(repo, id);
+    const older = store.resolveSpace({ backend, model, calibrationVersion, calibration: wave(64), now: '2026-09-27T00:00:00Z' });
+    store.save({ assetId: 'a1', spaceId: older.id, source: store.sourceOf('a1'), imageSha256: 'f'.repeat(64), vector: wave(64, 1) });
+    const other = store.resolveSpace({ backend, model: 'ViT-B-16-SigLIP2__webli', calibrationVersion, calibration: wave(96), now: '2026-09-28T00:00:00Z' });
+    store.save({ assetId: 'a2', spaceId: other.id, source: store.sourceOf('a2'), imageSha256: 'e'.repeat(64), vector: wave(96, 2) });
+    // The service's output for the same model changes: a newer set starts.
+    const newer = store.resolveSpace({ backend, model, calibrationVersion, calibration: wave(64, 2.5), now: '2026-09-29T00:00:00Z' });
+    assert.notEqual(newer.id, older.id);
+    for (const id of ['a1', 'a3']) store.save({ assetId: id, spaceId: newer.id, source: store.sourceOf(id), imageSha256: 'd'.repeat(64), vector: wave(64, 3) });
+    addAsset(repo, 'a3', { thumbhash: 'edited' });
+    const sets = store.sets({ backend, model });
+    assert.deepEqual(sets.map(({ model: name, dims, vectors, current, inUse, latestForModel }) => ({ name, dims, vectors, current, inUse, latestForModel })), [
+      { name: model, dims: 64, vectors: 2, current: 1, inUse: true, latestForModel: true },
+      { name: 'ViT-B-16-SigLIP2__webli', dims: 96, vectors: 1, current: 1, inUse: false, latestForModel: true },
+      { name: model, dims: 64, vectors: 1, current: 1, inUse: false, latestForModel: false },
+    ]);
+  });
+});
