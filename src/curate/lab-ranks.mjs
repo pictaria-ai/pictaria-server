@@ -61,8 +61,13 @@ export class LabRanks {
       for (const referenceId of value.references) {
         check();
         await emit({ type: 'progress', referenceId, completed, total: value.newSearches });
-        const pause = Math.max(0, search.nextAt - search.now());
-        if (pause) await this.wait(pause, deadline);
+        // Timers can end just before nextAt: Node truncates fractional delays
+        // (slow searches leave a fractional nextAt) and counts from cached loop
+        // time. Searching early is refused as a cooldown and stops the pass.
+        for (let pause; (pause = search.nextAt - search.now()) > 0;) {
+          await this.wait(Math.ceil(pause), deadline);
+          deadline.throwIfAborted();
+        }
         check();
         let result;
         try { result = await search.search(referenceId, { signal: deadline, owner }); }
