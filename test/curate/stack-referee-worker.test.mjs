@@ -7,7 +7,7 @@ import { Repository } from '../../src/enrich/repository.mjs';
 import { CurateService } from '../../src/curate/service.mjs';
 import { CurateAiExecution } from '../../src/curate/ai-execution.mjs';
 import { CurateAiLifecycle, AI_SETTLE_MS } from '../../src/curate/ai-lifecycle.mjs';
-import { StackRefereeWorker, STACK_PREVIEW_PAUSE_MS } from '../../src/curate/stack-referee-worker.mjs';
+import { StackRefereeWorker, STACK_PREVIEW_PAUSE_MS, STACK_MODEL_FAILURE_LIMIT } from '../../src/curate/stack-referee-worker.mjs';
 import { CURATE_AI_AVAILABILITY } from '../../src/curate/ai-policy.mjs';
 import { refereeCapability } from '../../src/curate/referee-capabilities.mjs';
 import { AiRequestScheduler } from '../../src/ai/scheduler.mjs';
@@ -122,6 +122,78 @@ test('one initial call plus one retry settles malformed partitions and never rep
   assert.equal(f.curate.stackReferee.status(f.curate.current.groups[0]).reason, 'invalid-answer');
   await f.restart(); f.advance(); await f.run(); assert.equal(f.calls.length, 2);
 }));
+
+for (const failure of ['provider-rejected', 'invalid-answer'])
+  test(`${failure} across distinct stacks pauses a whole backlog before queued requests and retries drain`, async () => fixture(async f => {
+    for (let i = 0; i < 40; i++) { f.add(`b${i}`, i * 600); f.add(`c${i}`, i * 600 + 1); }
+    if (failure === 'provider-rejected') f.provider.analyzeImages = async () => {
+      f.calls.push('rejected'); throw new ProviderRequestError('PRIVATE MODEL ERROR', { status: 400 });
+    };
+    else f.answer = partition(['p1'], ['p1', 'p2']);
+    await f.run(); f.advance();
+    for (let i = 0; i < STACK_MODEL_FAILURE_LIMIT; i++) assert.equal((await f.run()).reason, failure);
+    assert.ok(f.curate.aiLifecycle.pending.size <= 1, 'paused Stack Referee releases the shared queue slots');
+    assert.equal(f.curate.stackReferee.activity().reason, 'model-failures');
+    const untouched = f.curate.current.byMember.get('b39');
+    assert.deepEqual(f.curate.stackReferee.status(untouched), { state: 'paused', reason: 'model-failures', scope: 'configuration' });
+    for (let i = 0; i < 5; i++) { f.advance(24 * 60 * 60_000); await f.run(); }
+    assert.equal(f.calls.length, 3); assert.equal(f.downloads.length, 6, 'no preparation while paused');
+    const markers = () => f.repo.db.prepare("SELECT key,value FROM curate_meta WHERE key GLOB 'stack-model-failure:*'").all();
+    assert.equal(markers().length, 3);
+    assert.ok(markers().every(row => /^stack-model-failure:[a-f0-9]{64}:[a-f0-9]{64}$/.test(row.key) && row.value === 1));
+    assert.doesNotMatch(JSON.stringify(markers()), /PRIVATE|synthetic|http/);
+    f.config.curateStackRefereeEnabled = false; await f.run();
+    f.config.curateStackRefereeEnabled = true; f.config.curateStackRefereeScope = 'all';
+    f.immich.apiKey = 'ANOTHER IMMICH KEY'; await f.restart(); f.advance(); await f.run();
+    assert.equal(f.calls.length, 3, 'restart, time, scope, Immich and off/on do not reset the model pause');
+    const guard = f.repo.curate.aiLimits, ticket = guard.startProvider(aiBackendKey(f.provider));
+    assert.equal(ticket.state, 'started', 'Enrich and other users can still acquire the same provider');
+    guard.finish(ticket);
+    assert.equal(f.curate.stackReferee.activity().reason, 'model-failures', 'single-image success cannot clear this pause');
+    f.config.curateKeeperRefereeEnabled = true;
+    let keeperRan = false;
+    await f.curate.aiLifecycle.offer({ role: 'keeper', groupId: f.curate.current.byMember.get('b39').id,
+      contract: 'synthetic_keeper', prepare: () => ({}), submit: () => ({}), validate: () => ({}),
+      accept: () => { keeperRan = true; } });
+    f.advance(); await f.run();
+    assert.equal(keeperRan, true, 'the independent Photo Referee can use the shared queue and provider');
+    assert.equal(f.curate.stackReferee.activity().reason, 'model-failures', 'keeper success cannot clear a Stack Referee pause');
+    f.provider.modelName = 'another-model'; f.cap.model = 'another-model';
+    f.provider.analyzeImages = async () => { f.calls.push('valid'); return { normalizedOutput: partition(['p1', 'p2']) }; };
+    await f.run(); f.advance(); assert.equal((await f.run()).state, 'succeeded');
+    assert.equal(f.calls.length, 4); assert.equal(markers().length, 0);
+  }, { count: 0, availability: { stack: true, keeper: true } }));
+
+test('retries count one stack, a valid check resets the streak, and partial streaks survive restart', async () => fixture(async f => {
+  f.answer = partition(['p1'], ['p1', 'p2']);
+  await f.run(); f.advance(); await f.run(); f.advance(); await f.run();
+  assert.equal(f.calls.length, 2);
+  const count = () => f.repo.db.prepare("SELECT COUNT(*) n FROM curate_meta WHERE key GLOB 'stack-model-failure:*'").get().n;
+  assert.equal(count(), 1, 'the automatic retry is not another stack');
+  await f.restart(); assert.equal(count(), 1);
+  f.add('b0', 600); f.add('b1', 601); await f.run(); f.advance(); await f.run();
+  assert.equal(count(), 2);
+  f.answer = partition(['p1', 'p2']);
+  f.advance(); assert.equal((await f.run()).state, 'succeeded');
+  assert.equal(count(), 0, 'a successful retry is still a successful check');
+  f.add('c0', 1200); f.add('c1', 1201); f.answer = partition(['p1'], ['p1', 'p2']);
+  await f.run(); f.advance(); await f.run();
+  assert.equal(count(), 1, 'failures after success start a new streak');
+}, { count: 2 }));
+
+test('failure accounting uses the pinned model even when Settings changes during a request', async () => fixture(async f => {
+  f.answer = partition(['p1'], ['p1', 'p2']);
+  await f.run(); f.advance(); await f.run();
+  const response = deferred(); f.answer = response.promise;
+  f.advance(); const running = f.run();
+  while (f.calls.length < 2) await new Promise(resolve => setImmediate(resolve));
+  f.provider.modelName = 'new-model'; f.cap.model = 'new-model';
+  response.resolve(partition(['p1'], ['p1', 'p2']));
+  await running;
+  assert.equal(f.repo.db.prepare("SELECT COUNT(*) n FROM curate_meta WHERE key GLOB 'stack-model-failure:*'").get().n, 1,
+    'both failures belong to the old model and same stack');
+  assert.equal(f.curate.stackReferee.modelBlocked(f.provider), false);
+}, { count: 2 }));
 
 for (const [label, failure] of [
   ['missing preview', () => { throw new ImmichApiError('PRIVATE UPSTREAM DETAILS', 404); }],

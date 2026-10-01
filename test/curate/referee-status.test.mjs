@@ -41,6 +41,9 @@ test('configuration blockers appear at page level without giving every card a fa
   assert.equal(stackRefereePresentation(status), null);
   assert.equal(stackRefereePresentation(status, { page: true }).title, 'Stack Referee paused');
   assert.equal(groupPresentation({ stackReferee: { ...status, state: 'incomplete' }, similarity: { state: 'checked' } }).phase, null);
+  const failed = { ...status, reason: 'model-failures' };
+  assert.equal(stackRefereePresentation(failed), null);
+  assert.match(stackRefereePresentation(failed, { page: true }).detail, /Choose a vision model that compares multiple images/);
 });
 
 test('only current checked evidence earns an AI badge; working and incomplete states remain distinct', () => {

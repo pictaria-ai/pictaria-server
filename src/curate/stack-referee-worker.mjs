@@ -8,6 +8,8 @@ import { saveStackCheck, stackCheckCurrent } from './stack-referee-results.mjs';
 import { aiBackendKey } from './ai-limits.mjs';
 
 export const STACK_PREVIEW_PAUSE_MS = 3 * 60_000;
+export const STACK_MODEL_FAILURE_LIMIT = 3;
+const MODEL_FAILURE_PREFIX = 'stack-model-failure:';
 
 // Discovery/adaptation for one role. Capability must be supplied by the server,
 // never inferred from analyzeImages or accepted from a settings/API payload.
@@ -29,6 +31,39 @@ export class StackRefereeWorker {
     return { capability, key: fingerprint({ provider: enrichmentProviderConfiguration(provider), capability,
       immich: [this.curate.immich?.baseUrl, this.curate.immich?.apiKey] }) };
   }
+  modelFailurePrefix(provider) {
+    // Pin protection to the actual AI request configuration, not Immich,
+    // grouping settings or role toggles. Only opaque digests are persisted.
+    return MODEL_FAILURE_PREFIX + fingerprint({ provider: enrichmentProviderConfiguration(provider),
+      backend: aiBackendKey(provider), contract: STACK_REFEREE_CONTRACT, capability: this.capability(provider) }) + ':';
+  }
+  modelBlocked(provider) {
+    return this.curate.store.prepare('SELECT COUNT(*) n FROM curate_meta WHERE key GLOB ?')
+      .get(this.modelFailurePrefix(provider) + '*').n >= STACK_MODEL_FAILURE_LIMIT;
+  }
+  modelReady() {
+    try { return !this.modelBlocked(this.lifecycle.resolveProvider()); }
+    catch { return false; }
+  }
+  clearPendingChecks() {
+    // Release the shared pending slots for the independent Photo Referee.
+    // Ordinary discovery can offer eligible inputs after a model change.
+    for (const [key, job] of this.lifecycle.pending)
+      if (job.snapshot.role === 'stack') this.lifecycle.pending.delete(key);
+  }
+  observeAttempt(result, snapshot, prefix) {
+    if (!prefix || result.state !== 'failed' || !['provider-rejected', 'invalid-answer'].includes(result.reason)) return;
+    this.curate.store.repo.transaction(() => {
+      // At most three small integer markers, one per distinct membership.
+      // Retrying or revising the same members cannot inflate the streak.
+      this.curate.store.prepare('DELETE FROM curate_meta WHERE key GLOB ? AND key NOT GLOB ?')
+        .run(MODEL_FAILURE_PREFIX + '*', prefix + '*');
+      const count = this.curate.store.prepare('SELECT COUNT(*) n FROM curate_meta WHERE key GLOB ?').get(prefix + '*').n;
+      if (count < STACK_MODEL_FAILURE_LIMIT) this.curate.store.prepare('INSERT OR IGNORE INTO curate_meta VALUES(?,1)')
+        .run(prefix + fingerprint([...snapshot.ids].sort()));
+    });
+    if (!this.modelReady()) this.clearPendingChecks();
+  }
   selection(group) {
     const status = this.curate.refinement?.groupStatus(group);
     return selectStackReferee(this.curate.config, { memberCount: group.ids.length, pending: true,
@@ -38,6 +73,7 @@ export class StackRefereeWorker {
   }
   capture(group) { return this.lifecycle.inputs.capture({ role: 'stack', groupId: group.id, contract: STACK_REFEREE_CONTRACT }); }
   blockingStatus(provider) {
+    if (this.modelBlocked(provider)) return { state: 'paused', reason: 'model-failures', scope: 'configuration' };
     if (!this.previewsReady()) return { state: 'paused', reason: 'preview-cooldown' };
     const guard = this.curate.store.aiLimits.providerStatus(aiBackendKey(provider));
     if (guard.state === 'paused') return { state: 'paused', reason: `provider-${guard.reason}` };
@@ -92,7 +128,9 @@ export class StackRefereeWorker {
     return { state: 'waiting' };
   }
   async discover() {
-    if (!this.enabled() || !this.curate.current || !this.previewsReady()) return;
+    if (!this.enabled() || !this.curate.current) return;
+    if (!this.modelReady()) { this.clearPendingChecks(); return; }
+    if (!this.previewsReady()) return;
     const groups = this.curate.current.groups;
     if (!groups.length) return;
     const priorities = this.curate.refinement?.priorities() ?? new Map();
@@ -103,7 +141,7 @@ export class StackRefereeWorker {
     let slice = performance.now();
     for (const group of new Set([...preferred, ...batch])) {
       if (performance.now() - slice >= 4) { await setImmediate(); slice = performance.now(); }
-      if (!this.enabled() || !this.previewsReady()) return;
+      if (!this.enabled() || !this.previewsReady() || !this.modelReady()) return;
       if (!this.selection(group).selected || this.curate.refinement?.isFocused(group.ids)) continue;
       const captured = this.capture(group);
       if (captured.state !== 'captured') continue;
@@ -121,16 +159,17 @@ export class StackRefereeWorker {
     }
   }
   plan(group, priority) {
-    let validate, key, support, source, transient = false;
+    let validate, key, support, source, failurePrefix, transient = false;
     const sourceKey = () => fingerprint([this.curate.immich?.baseUrl, this.curate.immich?.apiKey]);
     return { role: 'stack', groupId: group.id, contract: STACK_REFEREE_CONTRACT, priority,
-      canStart: () => this.previewsReady(),
+      canStart: () => this.previewsReady() && this.modelReady(),
       isCurrent: () => source === undefined || source === sourceKey(),
       prepare: async (checkpoint, { snapshot, provider }) => {
         checkpoint();
         transient = false;
         source = sourceKey();
         const configuration = this.configuration(provider); key = configuration.key;
+        failurePrefix = this.modelFailurePrefix(provider);
         support = stackRefereeSupport(provider, configuration.capability, snapshot.ids.length);
         if (support.state !== 'ready') throw new Error('Unsupported Stack Referee input.');
         let images;
@@ -151,7 +190,12 @@ export class StackRefereeWorker {
         return request;
       },
       submit: prepared => prepared.submit(), validate: answer => validate(answer),
-      accept: (answer, snapshot) => saveStackCheck(this.curate.store, snapshot, answer),
+      accept: (answer, snapshot) => {
+        saveStackCheck(this.curate.store, snapshot, answer);
+        // Clear the streak in the same transaction as the successful check.
+        this.curate.store.prepare('DELETE FROM curate_meta WHERE key GLOB ?').run(MODEL_FAILURE_PREFIX + '*');
+      },
+      observeAttempt: (result, snapshot) => this.observeAttempt(result, snapshot, failurePrefix),
       finish: (result, snapshot) => {
         if (result.state !== 'failed' || !key || support?.state !== 'ready') return;
         this.curate.store.repo.transaction(() => {

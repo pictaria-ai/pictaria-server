@@ -6,6 +6,7 @@ const reasons = {
   'provider-configuration': 'Check the AI provider configuration in Settings.',
   'provider-interrupted': 'The previous AI request was interrupted. Verify the connection in Settings.',
   'configuration': 'Check the Curate AI provider configuration in Settings.',
+  'model-failures': 'The selected model repeatedly failed stack checks. Choose a vision model that compares multiple images in Settings.',
   'unknown-capability': 'Configure a Curate provider and multi-image vision model in Settings.',
   'unsupported-provider': 'This provider cannot compare stack photos.',
   'unsupported-size': 'This stack exceeds the automatic per-request image limit.',

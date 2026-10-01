@@ -398,6 +398,11 @@ Accepted advice includes compact provenance. No new database migration is
 needed. The server admits configured multi-image adapters with a ten-image
 request ceiling and the UI presents recorded progress, limitations and current
 AI checks.
+Repeated request rejection or invalid partitions on three distinct stacks
+without an accepted check pause only Stack Referee for that AI configuration.
+The small persisted streak survives restart and toggles; success clears it and
+a different AI configuration permits work within the existing attempt limits.
+Turning the role off still retains applicable completed grouping results.
 The Venice model has passed initial small-case real-provider/schema
 evaluation; other model choices are permitted without claiming that evidence.
 Controlled test-instance runtime acceptance remains separate; see the Stack

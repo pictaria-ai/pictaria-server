@@ -68,6 +68,10 @@ test('referee status updates cards and open comparisons without moving photos or
   await page.evaluate("window.refereeState={state:'incomplete',reason:'configuration',scope:'configuration'};window.refereeActivity={state:'paused',reason:'configuration',scope:'configuration'}");
   await page.waitFor("document.querySelector('#refinement').textContent.includes('Stack Referee paused') && document.querySelector('#comparison-similarity .why-trigger')?.getAttribute('aria-label').startsWith('Grouped with limited evidence')");
   assert.doesNotMatch(await page.evaluate('document.querySelector(".is-stack .similarity-indicator").title'), /Stack not AI checked/);
+  await page.evaluate("window.refereeState={state:'paused',reason:'model-failures',scope:'configuration'};window.refereeActivity={...window.refereeState}");
+  await page.waitFor("document.querySelector('#refinement').title.includes('Choose a vision model that compares multiple images')");
+  assert.match(await page.evaluate('document.querySelector("#refinement").textContent'), /Stack Referee paused/);
+  assert.doesNotMatch(await page.evaluate('document.querySelector(".is-stack .similarity-indicator").title'), /Stack Referee paused|Stack not AI checked/);
   await page.evaluate("window.refereeState={state:'updated'};window.refereeActivity={state:'idle'}");
   await page.waitFor('document.querySelector("#comparison-similarity .why-trigger")?.getAttribute("aria-label").startsWith("Grouped with limited evidence")');
   assert.deepEqual(await positions(), before);

@@ -93,6 +93,20 @@ Keep the existing byte limits, two-attempt bound, provider protection, exhaustiv
 partition validation and stale-result checks on every adapter. There is no paid
 capability probe or additional user capability override.
 
+If the model rejects requests or returns invalid partitions for **three distinct
+stacks without an accepted check between them**, Stack Referee pauses for that
+AI configuration. Retrying the same stack counts only once. The pause stops
+queued work and new preview preparation as well as submission; it does not
+pause Enrich, Photo Referee or the provider's other uses. A page-level message
+asks the user to choose a model that can compare multiple images.
+
+This pause has no timer or automatic recovery request. Restart, role/scope
+toggles and changes to Immich do not clear it. Selecting a different effective
+AI provider/model configuration permits work again, subject to the existing
+per-input attempt and photo limits. A successful Stack Referee check resets the
+failure streak. Preview errors and provider outages retain their separate
+existing handling; they do not count toward this model-failure streak.
+
 Settings displays the saved effective provider/model and comparison limit next
 to the Stack Referee switch, even before enabling it. Missing/invalid connection
 configuration is shown there and once at page level when enabled; it does not
@@ -168,6 +182,14 @@ reset an unchanged input's automatic allowance.
   settling window, two-attempt limit, upcoming-comparison priority and fairness.
 - Unconfigured/unsupported adapters and oversized scopes are rejected cheaply before
   preparation; their status is derived without a per-stack database record.
+- Model-failure protection observes each completed attempt before the lifecycle
+  admits another stack or retry. Waiting for a stack to exhaust its retries
+  would allow an entire backlog's first attempts to fail first. The existing
+  `curate_meta` table holds at most three integer markers with opaque hashes of
+  the pinned AI configuration and distinct membership; raw errors, credentials,
+  endpoints and photo IDs are not stored there. Successful acceptance clears
+  the streak in the same transaction as the saved check. No new schema, queue,
+  timer or repair workflow is introduced.
 - Unusable previews (including HTTP 403/404, excessive bytes or unsupported
   MIME) retain a compact terminal reason in the existing input JSON. Arbitrary
   adapter errors also stop rather than being assumed transient. Repeated
@@ -216,6 +238,9 @@ reset an unchanged input's automatic allowance.
   availability or separations withhold the badge; replaced memberships cannot
   inherit a new result. Switching the role off retains valid completed checks;
   unchecked groups stay off without changing their explanation during imports.
+  Off means stop future AI work, not undo completed grouping. An explicit reset
+  of pending AI grouping is a separate planned enhancement, not part of this
+  switch; human decisions remain authoritative in either case.
   Queued or just-accepted checks awaiting a rebuild use the neutral updated state,
   not a failure message. Actual input limits still report an incomplete check.
   Decided photos carry no pending-referee status.

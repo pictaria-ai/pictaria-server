@@ -7,6 +7,13 @@ All notable changes to Pictaria Server are documented here. This project follows
 
 ### Development
 
+- Stop Stack Referee background work when the selected model rejects requests
+  or returns invalid partitions for three distinct stacks without a successful
+  check between them. The pause survives restart and role toggles, appears once
+  at page level, and applies only to Stack Referee. A different AI configuration
+  permits new work within the existing limits. Turning the role off continues
+  to retain applicable completed splits and human decisions.
+
 - Made the optional Stack Referee available in Curate Preview settings after
   initial real-photo evaluation with Venice. It defaults off
   and checks uncertain stacks unless All stacks is selected. Explicit saved or
