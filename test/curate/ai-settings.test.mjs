@@ -20,8 +20,9 @@ function fixture(t, { state, env = {}, availability } = {}) {
 }
 const legacy = (overrides = {}) => ({ version: 7, credentialBindings: {}, ...overrides });
 
-test('fresh install defaults off, uncertain scope; API cannot activate unavailable roles, including null fallback', t => {
+test('API cannot activate unavailable roles, including null fallback', t => {
   const { store, config, persisted } = fixture(t, { env: { CURATE_KEEPER_REFEREE_ENABLED: 'true' },
+    availability: { stack: false, keeper: false },
     state: { version: 8, credentialBindings: {}, curate: { keeperRefereeEnabled: false } } });
   for (const key of ['stackRefereeEnabled', 'keeperRefereeEnabled']) {
     assert.equal(store.describe().curate[key].value, false);
@@ -39,6 +40,44 @@ test('fresh install defaults off, uncertain scope; API cannot activate unavailab
   assert.equal(fresh.config.curateKeeperRefereeEnabled, false);
   assert.equal(loadConfig({ CURATE_REFEREE_ENABLED: 'true' }).curateKeeperRefereeEnabled, false);
   assert.throws(() => store.update({ curate: { stackRefereeScope: 'typo' } }), /stackRefereeScope/);
+});
+
+test('production settings opt into Stack Referee only, preserving off defaults and explicit preferences across restart', t => {
+  const f = fixture(t);
+  let description = f.store.describe().curate;
+  assert.equal(description.stackRefereeEnabled.available, true);
+  assert.equal(description.stackRefereeEnabled.value, false);
+  assert.equal(description.stackRefereeEnabled.active, false);
+  assert.equal(description.stackRefereeScope.value, 'uncertain');
+  assert.equal(description.keeperRefereeEnabled.available, false);
+  f.store.update({ curate: { stackRefereeEnabled: true } });
+  const restarted = f.open();
+  description = restarted.store.describe().curate;
+  assert.equal(restarted.config.enrichEnabled, false);
+  assert.equal(description.stackRefereeEnabled.active, true);
+  assert.equal(description.keeperRefereeEnabled.active, false);
+  assert.equal(restarted.config.curateRefereeEnabled, false);
+  const before = f.persisted();
+  assert.throws(() => restarted.store.update({ curate: { keeperRefereeEnabled: true } }), /not available/);
+  assert.deepEqual(f.persisted(), before);
+  restarted.store.update({ curate: { burstGrouping: false } });
+  assert.equal(restarted.store.describe().curate.stackRefereeEnabled.active, false);
+  assert.equal(restarted.store.describe().curate.stackRefereeEnabled.value, true);
+  restarted.store.update({ curate: { burstGrouping: true, stackRefereeEnabled: false } });
+  assert.equal(f.open().store.describe().curate.stackRefereeEnabled.active, false);
+});
+
+test('Settings reports the effective Stack Referee model when following Enrich or overriding it', t => {
+  const f = fixture(t, { env: { DEFAULT_PROVIDER: 'venice', VENICE_API_KEY: 'PRIVATE KEY',
+    VENICE_MODEL: 'qwen3-vl-235b-a22b', OLLAMA_LOCAL_MODEL: 'local-vision' } });
+  const status = () => f.store.describe().curate.stackRefereeEnabled.modelStatus;
+  assert.equal(status().provider, 'venice'); assert.equal(status().maxImages, 10);
+  f.store.update({ curate: { refereeProvider: 'local_ollama', refereeModel: 'chosen-vision' } });
+  assert.deepEqual(status(), { state: 'configured', provider: 'local_ollama', model: 'chosen-vision', maxImages: 10 });
+  assert.equal(f.config.defaultProvider, 'venice');
+  assert.doesNotMatch(JSON.stringify(status()), /PRIVATE|localhost|127\.0/);
+  f.store.update({ curate: { refereeProvider: '', refereeModel: '' } });
+  assert.equal(status().model, 'qwen3-vl-235b-a22b');
 });
 
 test('upgrade snapshots effective legacy keeper preference once, without turning on Stack Referee', t => {

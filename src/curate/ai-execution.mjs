@@ -33,7 +33,7 @@ function failureReason(error, phase) {
   return 'request-failed';
 }
 
-// Shared execution boundary for the two future workers (still unavailable).
+// Shared execution boundary for the independent Curate referee roles.
 // It does not select jobs or provide retries. Optional limits are connected by
 // shared runtime owner. A scheduler-owned turn, or an explicit read-only admit
 // callback in isolated tests, gates preparation and dispatch. Repeated

@@ -14,7 +14,7 @@ test('roles are independent of each other and Enrich, gated by Stacks and real w
         curateStackRefereeEnabled: stack, curateKeeperRefereeEnabled: keeper };
       assert.equal(curateAiRoleEnabled(c, 'stack', available), stacks && stack);
       assert.equal(curateAiRoleEnabled(c, 'keeper', available), stacks && keeper);
-      assert.equal(curateAiRoleEnabled(c, 'stack'), false, 'unconnected roles cannot run');
+      assert.equal(curateAiRoleEnabled(c, 'stack'), stacks && stack, 'Stack Referee still requires both user switches');
       assert.equal(curateAiRoleEnabled(c, 'keeper'), false);
     }
   assert.equal(curateAiRoleEnabled(config, 'unknown', available), false);
@@ -27,7 +27,7 @@ test('both scopes exclude singles, decided photos, current advice and unsettled 
       [{ memberCount: 1 }, 'not-pending-stack'], [{ pending: false }, 'not-pending-stack'],
       [{ currentCheck: true }, 'current-check'], [{ deterministicSettled: false }, 'deterministic-pending'],
     ]) assert.deepEqual(selectStackReferee(c, { ...settled, ...change }, available), { selected: false, reason });
-    assert.equal(selectStackReferee(c, settled).selected, false);
+    assert.equal(selectStackReferee(c, settled).selected, true);
   }
   assert.deepEqual(selectStackReferee({ ...config, curateStackRefereeScope: 'typo' }, settled, available),
     { selected: false, reason: 'invalid-scope' });

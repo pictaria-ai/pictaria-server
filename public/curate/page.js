@@ -186,7 +186,7 @@ function showViewStatus(view) {
   const status = paused ? `Checks paused${progress}` : checking ? `Checking stacks${progress}`
     : metadata?.problem ? 'Photo information paused'
     : metadata?.state === 'refreshing' ? 'Refreshing photo information' : '';
-  const referee = stackRefereePresentation(view.stackRefereeActivity);
+  const referee = stackRefereePresentation(view.stackRefereeActivity, { page: true });
   el('refinement').textContent = [status, referee?.title].filter(Boolean).join(' · ');
   el('refinement').title = [paused ? refinement?.problem : metadata?.problem,
     checking ? 'Remaining checks across all pending photos, including outside this view. Includes queued and in-progress checks. Each check covers nearby photos that may form more than one stack.' : '',
