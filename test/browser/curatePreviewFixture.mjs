@@ -10,6 +10,10 @@ export async function curatePreviewFixture({ stackSize = 52, singles = 52, metad
   const dir = mkdtempSync(join(tmpdir(), 'curate-preview-'));
   const repo = new Repository(join(dir, 'enrichment.sqlite'));
   repo.initSchema();
+  // Tests keep writing through this connection after the server boots, and
+  // the server writes the same database. Wait out its brief write locks
+  // instead of failing with "database is locked".
+  repo.db.exec('PRAGMA busy_timeout = 5000');
   const assets = [],
     tags = new Map(),
     photoTags = new Map();

@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { launchChrome, findChrome } from './harness.mjs';
+import { cleanupAfter, launchChrome, findChrome } from './harness.mjs';
 import { curatePreviewFixture } from './curatePreviewFixture.mjs';
 
 // Isolate explicit lab reads from the now-independent standard Curate scheduler.
@@ -8,9 +8,9 @@ import { curatePreviewFixture } from './curatePreviewFixture.mjs';
 
 test('stacking lab shows complete partitions, focused dimming, evidence, reset and viewer without curation writes', { timeout: 60000 }, async (t) => {
   if (!findChrome()) return t.skip('Chrome required');
-  const fixture = await curatePreviewFixture({ stacking: false, stackSize: 3, singles: 52 });
-  const browser = await launchChrome(), page = await browser.newPage();
-  t.after(async () => { await browser.stop(); await fixture.stop(); });
+  const track = cleanupAfter(t);
+  const fixture = track(await curatePreviewFixture({ stacking: false, stackSize: 3, singles: 52 }));
+  const browser = track(await launchChrome()), page = await browser.newPage();
   fixture.repo.updateAssetVisuals(fixture.id(1), { thumbhash: Buffer.alloc(21, 0).toString('base64') });
   fixture.repo.updateAssetVisuals(fixture.id(2), { thumbhash: Buffer.alloc(21, 255).toString('base64') });
   fixture.repo.updateAssetVisuals(fixture.id(3), { thumbhash: Buffer.alloc(21, 0).toString('base64') });
@@ -162,9 +162,9 @@ test('stacking lab shows complete partitions, focused dimming, evidence, reset a
 
 test('similarity errors assign no ranks, back off, and clear when opening another experiment', { timeout: 60000 }, async t => {
   if (!findChrome()) return t.skip('Chrome required');
-  const fixture = await curatePreviewFixture({ stacking: false, stackSize: 2, singles: 1 });
-  const browser = await launchChrome(), page = await browser.newPage();
-  t.after(async () => { await browser.stop(); await fixture.stop(); });
+  const track = cleanupAfter(t);
+  const fixture = track(await curatePreviewFixture({ stacking: false, stackSize: 2, singles: 1 }));
+  const browser = track(await launchChrome()), page = await browser.newPage();
   const click = selector => page.evaluate(`document.querySelector(${JSON.stringify(selector)}).click()`);
   await page.navigate(`${fixture.base}/curate-stacking-lab.html`);
   await page.waitFor('document.querySelector(".gate-backdrop input")');
@@ -194,10 +194,11 @@ test('similarity errors assign no ranks, back off, and clear when opening anothe
 
 test('closing an in-flight ranking search cannot populate a newly opened experiment', { timeout: 60000 }, async t => {
   if (!findChrome()) return t.skip('Chrome required');
-  const fixture = await curatePreviewFixture({ stacking: false, stackSize: 2, singles: 1 });
-  const browser = await launchChrome(), page = await browser.newPage();
+  const track = cleanupAfter(t);
+  const fixture = track(await curatePreviewFixture({ stacking: false, stackSize: 2, singles: 1 }));
+  const browser = track(await launchChrome()), page = await browser.newPage();
   const entered = Promise.withResolvers(), release = Promise.withResolvers();
-  t.after(async () => { release.resolve(); await browser.stop(); await fixture.stop(); });
+  track(() => release.resolve());
   fixture.similarityResponses.set(fixture.id(1), async () => { entered.resolve(); await release.promise;
     return { status: 200, body: { assets: { items: fixture.assets.slice(0, 2) } } };
   });
@@ -218,9 +219,9 @@ test('closing an in-flight ranking search cannot populate a newly opened experim
 
 test('lab distinguishes empty, omitted and failed recognition; closing a refresh cannot update another experiment', { timeout: 60000 }, async t => {
   if (!findChrome()) return t.skip('Chrome required');
-  const fixture = await curatePreviewFixture({ stacking: false, stackSize: 4, singles: 1 });
-  const browser = await launchChrome(), page = await browser.newPage();
-  t.after(async () => { await browser.stop(); await fixture.stop(); });
+  const track = cleanupAfter(t);
+  const fixture = track(await curatePreviewFixture({ stacking: false, stackSize: 4, singles: 1 }));
+  const browser = track(await launchChrome()), page = await browser.newPage();
   fixture.assets[0].people = [{ id: 'person-a' }];
   delete fixture.assets[2].people;
   fixture.detailResponses.set(fixture.id(4), async () => ({ status: 404, body: {} }));
@@ -261,9 +262,9 @@ test('lab distinguishes empty, omitted and failed recognition; closing a refresh
 
 test('multi-reference ranks stream progress, preserve partial cancellation, and feed an explicit combined experiment', { timeout: 60000 }, async t => {
   if (!findChrome()) return t.skip('Chrome required');
-  const fixture = await curatePreviewFixture({ stacking: false, stackSize: 3, singles: 0, metadataReady: true });
-  const browser = await launchChrome(), page = await browser.newPage();
-  t.after(async () => { await browser.stop(); await fixture.stop(); });
+  const track = cleanupAfter(t);
+  const fixture = track(await curatePreviewFixture({ stacking: false, stackSize: 3, singles: 0, metadataReady: true }));
+  const browser = track(await launchChrome()), page = await browser.newPage();
   const click = selector => page.evaluate(`document.querySelector(${JSON.stringify(selector)}).click()`);
   for (const path of ['plan', 'run']) {
     const denied = await fetch(`${fixture.base}/api/review/curate/lab/ranks/${path}`, { method: 'POST',

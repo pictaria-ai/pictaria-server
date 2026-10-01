@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { launchChrome, findChrome } from './harness.mjs';
+import { cleanupAfter, launchChrome, findChrome } from './harness.mjs';
 import { curatePreviewFixture } from './curatePreviewFixture.mjs';
 
 test(
@@ -8,13 +8,10 @@ test(
   { timeout: 60000 },
   async (t) => {
     if (!findChrome()) return t.skip('Chrome required');
-    const fixture = await curatePreviewFixture({ stackSize: 4, singles: 1, metadataReady: true });
-    const browser = await launchChrome(),
+    const track = cleanupAfter(t);
+    const fixture = track(await curatePreviewFixture({ stackSize: 4, singles: 1, metadataReady: true }));
+    const browser = track(await launchChrome()),
       page = await browser.newPage();
-    t.after(async () => {
-      await browser.stop();
-      await fixture.stop();
-    });
     const click = (selector) => page.evaluate(`document.querySelector(${JSON.stringify(selector)}).click()`);
     const key = (key) => page.send('Input.dispatchKeyEvent', { type: 'keyDown', key });
     const operations = () => fixture.repo.db.prepare('SELECT COUNT(*) n FROM decision_operations').get().n;

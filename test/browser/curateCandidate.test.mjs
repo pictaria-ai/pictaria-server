@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { launchChrome, findChrome } from './harness.mjs';
+import { cleanupAfter, launchChrome, findChrome } from './harness.mjs';
 import { curatePreviewFixture } from './curatePreviewFixture.mjs';
 import { writeFileSync } from 'node:fs';
 import { join } from 'node:path';
@@ -8,12 +8,12 @@ import { join } from 'node:path';
 test('hash-supported stack updates automatically after closing, without changing an open selection',
   { timeout: 60000 }, async t => {
     if (!findChrome()) return t.skip('Chrome required');
+    const track = cleanupAfter(t);
     // Launch before the server can start the gated 15-second similarity request.
-    const browser = await launchChrome(), page = await browser.newPage();
-    t.after(() => browser.stop());
+    const browser = track(await launchChrome()), page = await browser.newPage();
     let release;
     const gate = new Promise(resolve => { release = resolve; });
-    const fixture = await curatePreviewFixture({ stackSize: 4, singles: 0, metadataReady: true,
+    const fixture = track(await curatePreviewFixture({ stackSize: 4, singles: 0, metadataReady: true,
       prepare(fixture) {
       for (let i = 0; i < 4; i++) {
         const id = fixture.id(i + 1), thumbhash = Buffer.alloc(21, 0).toString('base64');
@@ -26,8 +26,8 @@ test('hash-supported stack updates automatically after closing, without changing
       });
       }
       },
-    });
-    t.after(async () => { release(); await fixture.stop(); });
+    }));
+    track(() => release());
     const click = selector => page.evaluate(`document.querySelector(${JSON.stringify(selector)}).click()`);
     await page.navigate(`${fixture.base}/curate-preview.html`);
     await page.waitFor('document.querySelector(".gate-backdrop input")');
@@ -54,11 +54,11 @@ test('hash-supported stack updates automatically after closing, without changing
 test('candidate preview refines automatically, preserves selections, explains results and saves multiple keepers',
   { timeout: 60000 }, async t => {
     if (!findChrome()) return t.skip('Chrome required');
-    const browser = await launchChrome(), page = await browser.newPage();
-    t.after(() => browser.stop());
+    const track = cleanupAfter(t);
+    const browser = track(await launchChrome()), page = await browser.newPage();
     let release;
     const gate = new Promise(resolve => { release = resolve; });
-    const fixture = await curatePreviewFixture({ stackSize: 5, singles: 0, metadataReady: true,
+    const fixture = track(await curatePreviewFixture({ stackSize: 5, singles: 0, metadataReady: true,
       prepare(fixture) {
       const matrix = [[null,3,5,1,2], [2,null,1,3,4], [9,2,null,23,8], [1,3,5,null,2], [1,6,5,2,null]];
       for (let i = 0; i < 5; i++) {
@@ -72,8 +72,8 @@ test('candidate preview refines automatically, preserves selections, explains re
       });
       }
       },
-    });
-    t.after(async () => { release(); await fixture.stop(); });
+    }));
+    track(() => release());
     const click = selector => page.evaluate(`document.querySelector(${JSON.stringify(selector)}).click()`);
     await page.navigate(`${fixture.base}/curate-preview.html`);
     await page.waitFor('document.querySelector(".gate-backdrop input")');
@@ -131,10 +131,10 @@ test('candidate preview refines automatically, preserves selections, explains re
 test('background status markers and inline progress remain stable on desktop and mobile',
   { timeout: 60000 }, async t => {
     if (!findChrome()) return t.skip('Chrome required');
-    const browser = await launchChrome(), page = await browser.newPage();
-    t.after(() => browser.stop());
+    const track = cleanupAfter(t);
+    const browser = track(await launchChrome()), page = await browser.newPage();
     let release, first = true;
-    const fixture = await curatePreviewFixture({ stackSize: 3, singles: 1, metadataReady: true,
+    const fixture = track(await curatePreviewFixture({ stackSize: 3, singles: 1, metadataReady: true,
       prepare(fixture) {
         for (let i = 1; i <= 3; i++) fixture.similarityResponses.set(fixture.id(i), async () => {
           if (first) {
@@ -145,8 +145,8 @@ test('background status markers and inline progress remain stable on desktop and
           return { status: 200, body: { assets: { items: [] } } };
         });
       },
-    });
-    t.after(async () => { release?.(); await fixture.stop(); });
+    }));
+    track(() => release?.());
     const click = selector => page.evaluate(`document.querySelector(${JSON.stringify(selector)}).click()`);
     await page.navigate(`${fixture.base}/curate-preview.html`);
     await page.waitFor('document.querySelector(".gate-backdrop input")');
@@ -222,15 +222,15 @@ test('incomplete similarity checks stay usable with a quiet indicator and a spec
   { timeout: 40000 }, async t => {
     if (!findChrome()) return t.skip('Chrome required');
     let missing = true;
-    const fixture = await curatePreviewFixture({ stackSize: 3, singles: 0, metadataReady: true,
+    const track = cleanupAfter(t);
+    const fixture = track(await curatePreviewFixture({ stackSize: 3, singles: 0, metadataReady: true,
       prepare(f) {
         for (let n = 1; n <= 3; n++) f.similarityResponses.set(f.id(n), async () => missing && n === 1
           ? { status: 400, body: { message: `Asset ${f.id(1)} has no embedding private-upstream-detail` } }
           : { status: 200, body: { assets: { items: [1,2,3].map(i => ({ id: f.id(i), type: 'IMAGE' })) } } });
       },
-    });
-    const browser = await launchChrome(), page = await browser.newPage();
-    t.after(async () => { await browser.stop(); await fixture.stop(); });
+    }));
+    const browser = track(await launchChrome()), page = await browser.newPage();
     const click = selector => page.evaluate(`document.querySelector(${JSON.stringify(selector)}).click()`);
     await page.navigate(`${fixture.base}/curate-preview.html`);
     await page.waitFor('document.querySelector(".gate-backdrop input")');
