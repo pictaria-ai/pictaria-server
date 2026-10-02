@@ -12,7 +12,7 @@ import { CurateAiLifecycle, AI_SETTLE_MS } from '../../src/curate/ai-lifecycle.m
 import { AiRequestScheduler } from '../../src/ai/scheduler.mjs';
 import { refereeCapability } from '../../src/curate/referee-capabilities.mjs';
 import { CURATE_AI_AVAILABILITY } from '../../src/curate/ai-policy.mjs';
-import { PHOTO_REFEREE_ENVELOPE, planPhotoRefereeComparisons } from '../../src/curate/photo-referee-plan.mjs';
+import { PHOTO_REFEREE_ENVELOPE, layoutPhotoRefereeComparisons, planPhotoRefereeComparisons } from '../../src/curate/photo-referee-plan.mjs';
 import { PHOTO_REFEREE_CONTRACT, createPhotoRefereeRequest, collectPhotoRefereeComparisons } from '../../src/curate/photo-referee-contract.mjs';
 
 const inputKey = 'a'.repeat(64);
@@ -29,10 +29,14 @@ function setup(overrides = {}) {
     timeoutMs: 1000, apiKey: 'PRIVATE KEY',
     analyzeImages: async (images, options) => { calls.push({ images, options }); return { normalizedOutput: response() }; },
     ...overrides };
-  const plan = (images = photos(), { contextIds = [], ...options } = {}) => planPhotoRefereeComparisons({
-    orderedIds: images.map(p => p.assetId).filter(id => !contextIds.includes(id)), contextIds,
-    capability: refereeCapability(provider), renditions: images.map(p => ({ assetId: p.assetId, bytes: p.data.byteLength })), ...options,
-  });
+  const plan = (images = photos(), { contextIds = [], ...options } = {}) => {
+    const input = { orderedIds: images.map(p => p.assetId).filter(id => !contextIds.includes(id)), contextIds,
+      capability: refereeCapability(provider), ...options };
+    const layout = layoutPhotoRefereeComparisons(input);
+    const selected = new Set([...(layout.orderedIds ?? []), ...(layout.contextIds ?? [])]);
+    return planPhotoRefereeComparisons({ ...input, renditions: options.renditions ?? images.filter(p => selected.has(p.assetId))
+      .map(p => ({ assetId: p.assetId, bytes: p.data.byteLength })) });
+  };
   const build = (options = {}) => {
     const images = options.images ?? photos();
     return createPhotoRefereeRequest({ provider, plan: plan(images), images, inputKey, ...options });
@@ -73,31 +77,61 @@ test('unknown capability and malformed IDs or inventories never authorize reques
   assert.equal(f.calls.length, 0);
 });
 
-test('context stays read-only, bounded and included in every comparison budget', () => {
-  const f = setup(), images = photos(13), contextIds = images.slice(-2).map(p => p.assetId);
+test('whole-stack context stays read-only, bounded and included in the comparison budget', () => {
+  const f = setup(), images = photos(10), contextIds = images.slice(-2).map(p => p.assetId);
   const plan = f.plan(images, { contextIds });
-  assert.deepEqual(plan.requests.map(r => r.ids.length), [6, 5]);
+  assert.deepEqual(plan.requests.map(r => r.ids.length), [8]);
   for (const request of plan.requests) assert.deepEqual(request.contextIds, contextIds);
-  assert.equal(plan.submittedImages, 15);
-  assert.equal(plan.rawBytes, 15 * png.length);
+  assert.equal(plan.submittedImages, 10);
+  assert.equal(plan.rawBytes, 10 * png.length);
   assert.equal(f.plan(photos(3), { contextIds: photos(3).slice(1).map(p => p.assetId) }).state, 'manual-context');
   assert.equal(f.plan(photos(12), { contextIds: photos(12).slice(3).map(p => p.assetId) }).state, 'input-limit');
-  assert.equal(f.plan(images, { contextIds: images.slice(4).map(p => p.assetId) }).state, 'input-limit');
+  assert.equal(f.plan(photos(13), { contextIds: photos(13).slice(4).map(p => p.assetId) }).state, 'input-limit');
   const almostFull = photos(30);
-  assert.deepEqual(f.plan(almostFull, { contextIds: almostFull.slice(-2).map(p => p.assetId),
-    capability: { ...refereeCapability(f.provider), maxImages: 20 } }),
-    { state: 'input-limit', reason: 'too-many-images' }, 'repeated context counts towards all 30 image submissions');
+  const large = f.plan(almostFull, { contextIds: almostFull.slice(-2).map(p => p.assetId),
+    capability: { ...refereeCapability(f.provider), maxImages: 20 } });
+  assert.equal(large.state, 'ready'); assert.deepEqual(large.contextIds, []);
+  assert.deepEqual(large.requests.map(r => r.ids.length), [14, 14]);
 });
 
-test('aggregate bytes are limited across all comparisons, including repeated context', () => {
+test('aggregate bytes remain limited across comparisons, with omitted references excluded', () => {
   const f = setup(), { imageBytes, totalBytes } = PHOTO_REFEREE_ENVELOPE;
   const images = photos(13), inventory = images.map(p => ({ assetId: p.assetId, bytes: imageBytes }));
   assert.equal(f.plan(images.slice(0, 12), { renditions: inventory.slice(0, 12) }).rawBytes, totalBytes);
   assert.equal(f.plan(images, { renditions: inventory }).state, 'byte-limit');
-  const oversized = inventory.slice(0, 2); oversized[1].bytes++;
+  const oversized = inventory.slice(0, 2).map(r => ({ ...r })); oversized[1].bytes++;
   assert.equal(f.plan(images.slice(0, 2), { renditions: oversized }).state, 'byte-limit');
-  assert.equal(f.plan(images.slice(0, 12), { contextIds: [images[11].assetId], renditions: inventory.slice(0, 12) }).state,
-    'byte-limit', 'twelve unique renditions fit but repeated context takes the plan over 24 MiB');
+  const withoutReference = f.plan(images.slice(0, 12), { contextIds: [images[11].assetId], renditions: inventory.slice(0, 11) });
+  assert.equal(withoutReference.state, 'ready'); assert.equal(withoutReference.rawBytes, 11 * imageBytes);
+  assert.deepEqual(withoutReference.contextIds, []);
+  assert.throws(() => f.plan(images.slice(0, 12), { contextIds: [images[11].assetId], renditions: inventory.slice(0, 12) }),
+    'the final inventory must match selected members, not omitted references');
+});
+
+test('reference counts never change pending membership, request layout or admission under the ten-image ceiling', () => {
+  const { provider } = setup(), capability = refereeCapability(provider);
+  for (let n = 2; n <= 30; n++) {
+    const orderedIds = photos(n).map(p => p.assetId), baseline = layoutPhotoRefereeComparisons({ orderedIds, capability });
+    for (let c = 0; c <= 8; c++) {
+      const contextIds = Array.from({ length: c }, (_, i) => `reference-${i}`);
+      const layout = layoutPhotoRefereeComparisons({ orderedIds, contextIds, capability });
+      assert.equal(layout.state, 'ready');
+      assert.deepEqual(layout.requests.map(r => r.ids), baseline.requests.map(r => r.ids));
+      assert.deepEqual(layout.contextIds, contextIds.slice(0, Math.max(0, Math.min(2, 10 - n))));
+      assert.ok(layout.requests.every(r => r.ids.length + r.contextIds.length <= 10));
+      assert.ok(layout.submittedImages <= 30);
+    }
+  }
+});
+
+test('larger future request ceilings reserve reference byte capacity without reducing pending comparison coverage', () => {
+  const f = setup(), images = photos(14), contextIds = images.slice(-2).map(p => p.assetId);
+  const capability = { ...refereeCapability(f.provider), maxImages: 30 };
+  const layout = layoutPhotoRefereeComparisons({ orderedIds: images.slice(0, 12).map(p => p.assetId), contextIds, capability });
+  assert.deepEqual(layout.contextIds, []); assert.equal(layout.requests.length, 1);
+  const plan = f.plan(images, { contextIds, capability,
+    renditions: images.slice(0, 12).map(p => ({ assetId: p.assetId, bytes: PHOTO_REFEREE_ENVELOPE.imageBytes })) });
+  assert.equal(plan.state, 'ready'); assert.equal(plan.rawBytes, PHOTO_REFEREE_ENVELOPE.totalBytes);
 });
 
 test('request pins aliases, quality criteria, explicit recommendations and per-photo assessments', async () => {

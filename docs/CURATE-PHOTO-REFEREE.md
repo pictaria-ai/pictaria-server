@@ -50,10 +50,27 @@ contract has synthetic transport coverage, not new live model-quality evidence.
 
 ## Bounded comparisons
 
-`planPhotoRefereeComparisons` accepts chronological pending membership, at most
-eight already-kept references, an explicit provider/model-bound capability and
-a complete rendition-size inventory. It preserves pending order. At least two
-pending alternatives are required; a sole newcomer with context remains manual.
+`layoutPhotoRefereeComparisons` accepts chronological pending membership, up to
+eight nearby already-kept reference candidates in nearest-first order, and an
+explicit provider/model-bound capability. Pending photos determine the layout.
+Include at most **two** references, only using spare capacity in a single
+whole-stack request. Batched comparisons use no references. References never
+split a stack, increase the number of requests, or push a supported pending
+comparison over the image/byte envelope. With today's ten-image ceiling, eight
+pending photos can include two references, nine can include one, and ten include
+none. Larger stacks retain their pending-only batch layout.
+
+Reference capacity also reserves their maximum possible bytes within the
+aggregate limit; it does not require fetching unused previews to discover that
+they will not fit. The worker supplies this capacity to authoritative input
+capture, which derives the selected IDs from the repository. Omitted candidates
+are not downloaded, charged, assessed or included in saved applicability
+snapshots. The manual comparison's existing context display is unchanged.
+
+`planPhotoRefereeComparisons` then requires a complete rendition-size inventory
+for the selected pending photos and references. It preserves pending order.
+At least two pending alternatives are required; a sole newcomer with context
+remains manual.
 
 Use one whole-input comparison when it fits. Otherwise use at most three balanced
 chronological comparisons. With the current ten-image request ceiling, eleven
@@ -63,13 +80,12 @@ tournament or final winner cap is introduced. These are transport batches, not
 new visible stacks.
 
 The complete plan is limited to thirty submitted images, 2 MiB per rendition and
-24 MiB aggregate raw image bytes. Read-only context is repeated in each batch and
-counts each time toward the aggregate image/byte limits. It does not consume
-the actionable-photo churn allowance. If context leaves an unsupported layout
-or exceeds the plan limits, the comparison stays manual; it is not silently
-dropped. Missing sizes, unknown capability and unsupported layouts do not create
-a ready plan. The current capability resolver grants bounded attempts through
-the seven existing multi-image adapters; it is not a model-quality guarantee.
+24 MiB aggregate raw image bytes. Selected read-only context counts toward the
+single request's image/byte limits but not the actionable-photo churn allowance.
+Oversized pending scopes, missing sizes, unknown capability and unsupported
+pending layouts do not create a ready plan. The current capability resolver
+grants bounded attempts through the seven existing multi-image adapters; it is
+not a model-quality guarantee.
 
 `createPhotoRefereeRequest` requires that complete size-checked plan and one
 batch's prepared images. Actual image IDs, order and bytes must match the plan
@@ -121,9 +137,9 @@ finished-incomplete checks, supported scope skips and verified size exceptions
 retain `incomplete`, `scope-skipped` or `unchecked-size` coverage. Unknown
 capability, invalid configuration and shared provider protection still block.
 
-Each scheduled batch preflights the **full comparison's previews**, including
-repeated-context image/byte accounting. It retains only the current batch's
-bytes and compact hashes/sizes for the rest. This trades up to three preview
+Each scheduled batch preflights the **full comparison's selected previews**.
+References appear only in whole-stack requests. Preparation retains only the
+current batch's bytes and compact hashes/sizes for the rest. This trades up to three preview
 passes for bounded memory without a buffer pool, disk spool or recovery queue.
 A 30-photo comparison therefore reads up to 90 previews across its three initial
 requests; bounded retries repeat preparation. No originals, resizing or silent

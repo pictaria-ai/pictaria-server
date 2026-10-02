@@ -7,6 +7,17 @@ export const PHOTO_REFEREE_ENVELOPE = Object.freeze({
 
 const invalid = () => { throw new CurateError('Invalid Photo Referee comparison plan.', 'photo_referee_plan', 400); };
 
+// Optional references never consume capacity needed by pending photos. Reserve
+// their maximum bytes too, so including them cannot push a supported whole
+// comparison over the aggregate budget. Multi-request comparisons use none.
+export function photoRefereeContextLimit(memberCount, capability) {
+  if (!Number.isSafeInteger(memberCount) || memberCount < 2 ||
+      !Number.isSafeInteger(capability?.maxImages) || capability.maxImages < 2) return 0;
+  const capacity = Math.min(capability.maxImages, PHOTO_REFEREE_ENVELOPE.images,
+    Math.floor(PHOTO_REFEREE_ENVELOPE.totalBytes / PHOTO_REFEREE_ENVELOPE.imageBytes));
+  return Math.max(0, Math.min(2, capacity - memberCount));
+}
+
 // Transport planning only, not admission to background work. The role worker
 // supplies authoritative chronological membership, read-only kept context and
 // bounded rendition sizes. It must separately enforce readiness, settings,
@@ -17,13 +28,15 @@ export function layoutPhotoRefereeComparisons({ orderedIds, contextIds = [], cap
   validatePartition(allIds, [allIds]);
   if (orderedIds.length < 2) return { state: 'manual-context' };
   if (contextIds.length > PHOTO_REFEREE_ENVELOPE.context) return { state: 'input-limit', reason: 'too-much-context' };
-  if (allIds.length > PHOTO_REFEREE_ENVELOPE.images) return { state: 'input-limit', reason: 'too-many-images' };
+  if (orderedIds.length > PHOTO_REFEREE_ENVELOPE.images) return { state: 'input-limit', reason: 'too-many-images' };
   if (!capability || typeof capability.provider !== 'string' || !capability.provider.trim() ||
       typeof capability.model !== 'string' || !capability.model.trim() || capability.comparative !== true ||
       !Number.isSafeInteger(capability.maxImages) || capability.maxImages < 2)
     return { state: 'unknown-capability' };
-  const perRequest = Math.min(PHOTO_REFEREE_ENVELOPE.images, capability.maxImages) - contextIds.length;
-  if (perRequest < 2) return { state: 'manual-layout' };
+  // Candidates arrive in the repository's nearest-first order. Only selected
+  // references belong in the final plan, requests and rendition inventory.
+  contextIds = contextIds.slice(0, photoRefereeContextLimit(orderedIds.length, capability));
+  const perRequest = Math.min(PHOTO_REFEREE_ENVELOPE.images, capability.maxImages);
   const count = Math.ceil(orderedIds.length / perRequest);
   if (count > PHOTO_REFEREE_ENVELOPE.requests) return { state: 'request-limit' };
   const small = Math.floor(orderedIds.length / count), extra = orderedIds.length % count;
@@ -34,8 +47,8 @@ export function layoutPhotoRefereeComparisons({ orderedIds, contextIds = [], cap
     offset += ids.length;
     return { ids, contextIds: [...contextIds] };
   });
-  // Context is repeated in each comparison. It consumes the aggregate image
-  // and byte envelope each time, even though it is not a new actionable photo.
+  // Context exists only for a single whole-stack request. It consumes image
+  // and byte capacity, but is never a new actionable photo.
   const submittedImages = orderedIds.length + count * contextIds.length;
   if (submittedImages > PHOTO_REFEREE_ENVELOPE.images) return { state: 'input-limit', reason: 'too-many-images' };
   return { state: 'ready', orderedIds: [...orderedIds], contextIds: [...contextIds],

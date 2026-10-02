@@ -5,7 +5,7 @@ import { aiBackendKey } from './ai-limits.mjs';
 import { stackRefereeSupport } from './stack-referee-contract.mjs';
 import { transientStackPreviewFailure } from './stack-referee-images.mjs';
 import { PHOTO_REFEREE_CONTRACT, createPhotoRefereeRequest } from './photo-referee-contract.mjs';
-import { layoutPhotoRefereeComparisons } from './photo-referee-plan.mjs';
+import { layoutPhotoRefereeComparisons, photoRefereeContextLimit } from './photo-referee-plan.mjs';
 import { photoRefereeImages } from './photo-referee-images.mjs';
 import { readPhotoRefereeRecord, savePhotoRefereeAnswer, photoRefereeRecommendations } from './photo-referee-results.mjs';
 
@@ -52,8 +52,11 @@ export class PhotoRefereeWorker {
     if (!this.modelReady()) this.clearPending();
   }
   capture(group, photoIds) {
+    let contextLimit;
+    try { contextLimit = photoRefereeContextLimit(group.ids.length, this.capability(this.lifecycle.resolveProvider())); }
+    catch { return { state: 'configuration' }; }
     return this.lifecycle.inputs.capture({ role: 'keeper', groupId: group.id, contract: PHOTO_REFEREE_CONTRACT,
-      includeContext: true, ...(photoIds ? { photoIds } : {}) });
+      includeContext: true, contextLimit, ...(photoIds ? { photoIds } : {}) });
   }
   saved(group) {
     const current = this.curate.current?.byId.get(group.id);
@@ -144,6 +147,7 @@ export class PhotoRefereeWorker {
     const gate = this.gate(group);
     if (gate.state !== 'eligible') return gate;
     const captured = this.capture(group);
+    if (captured.state === 'configuration') return { state: 'paused', reason: 'configuration', scope: 'configuration' };
     if (captured.state !== 'captured') return { state: captured.state === 'stale' ? 'updated' : 'incomplete', reason: captured.reason ?? captured.state };
     try {
       const provider = this.lifecycle.resolveProvider(), { key } = this.configuration(provider);
@@ -196,6 +200,7 @@ export class PhotoRefereeWorker {
     const sourceKey = () => fingerprint([this.curate.immich?.baseUrl, this.curate.immich?.apiKey]);
     return { role: 'keeper', groupId: group.id, contract: PHOTO_REFEREE_CONTRACT, priority,
       photoIds: offeredLayout.requests[index].ids, includeContext: true,
+      contextLimit: photoRefereeContextLimit(group.ids.length, offeredLayout.capability),
       canStart: () => this.previewsReady() && this.modelReady() && this.gate(group).state === 'eligible',
       isCurrent: () => (source === undefined || source === sourceKey()) &&
         (coverage === undefined || this.gate(group).state === 'eligible'),

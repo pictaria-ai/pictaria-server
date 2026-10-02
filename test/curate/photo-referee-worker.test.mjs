@@ -260,31 +260,32 @@ test('bad batches of one comparison cannot count as three distinct model failure
   assert.equal(f.repo.db.prepare("SELECT COUNT(*) n FROM curate_meta WHERE key GLOB 'photo-model-failure:*'").get().n, 1);
 }, { count: 30 }));
 
-test('approved context is repeated but never recommended, charged, or overwritten', async () => fixture(async f => {
+test('selected whole-stack context is never recommended, charged, or overwritten', async () => fixture(async f => {
   f.add('kept', 0);
   f.repo.recordDecision({ assetIds: ['kept'], addTags: ['frame/eligible', 'frame/reviewed'], removeTags: [], action: 'approve' });
   await f.run(); f.advance(); await f.run(); await f.run();
-  assert.deepEqual(f.calls.map(c => c.images.length), [7, 6]);
+  assert.deepEqual(f.calls.map(c => c.images.length), [9]);
   assert.equal(f.advice.keeperIds.includes('kept'), false);
   assert.equal(f.repo.curate.photo('kept').state, 'approved');
   const record = readPhotoRefereeRecord(f.repo.curate, f.group.ids);
   assert.deepEqual(record.photoReferee.plan.contextIds, ['kept']);
-  assert.equal(record.photoReferee.plan.submittedImages, 13);
+  assert.equal(record.photoReferee.plan.submittedImages, 9);
   assert.equal(f.repo.db.prepare("SELECT COUNT(*) n FROM curate_advice_members WHERE asset_id='kept'").get().n, 0);
   await f.curate.refresh();
-  const snapshot = f.curate.aiLifecycle.inputs.capture({ role: 'keeper', groupId: f.group.id, contract: PHOTO_REFEREE_CONTRACT, photoIds: ['a00', 'a01'], includeContext: true });
+  const snapshot = f.curate.photoReferee.capture(f.group);
   assert.deepEqual(snapshot.snapshot.contextIds, ['kept']);
-}, { count: 11 }));
+}, { count: 8 }));
 
-test('context cannot be silently dropped to fit a full comparison, regardless of individual batch length', async () => fixture(async f => {
+test('thirty pending photos omit nearby context and retain three complete comparisons', async () => fixture(async f => {
   f.add('kept', 0);
   f.repo.recordDecision({ assetIds: ['kept'], addTags: ['frame/eligible', 'frame/reviewed'], removeTags: [], action: 'approve' });
   await f.curate.refresh();
-  const capture = f.curate.aiLifecycle.inputs.capture({ role: 'keeper', groupId: f.group.id, contract: PHOTO_REFEREE_CONTRACT,
-    photoIds: f.group.ids.slice(0, 10), includeContext: true });
-  assert.deepEqual(capture, { state: 'input-limit', reason: 'too-many-images', limit: 30 });
-  await f.run(); f.advance(); await f.run();
-  assert.equal(f.calls.length, 0); assert.equal(f.downloads.length, 0);
+  const capture = f.curate.photoReferee.capture(f.group, f.group.ids.slice(0, 10));
+  assert.equal(capture.state, 'captured'); assert.deepEqual(capture.snapshot.contextIds, []);
+  await f.run(); f.advance(); await f.run(); await f.run(); await f.run();
+  assert.deepEqual(f.calls.map(c => c.images.length), [10, 10, 10]);
+  assert.equal(f.advice.state, 'complete');
+  assert.equal(f.downloads.some(d => d.id === 'kept'), false);
 }, { count: 30 }));
 
 test('no submission while focused, and role-off during preflight stops before inference', async () => fixture(async f => {
@@ -357,4 +358,52 @@ test('shared approved context does not replace another stack’s record or consu
   assert.equal(f.advice.state, 'complete');
   assert.equal(f.repo.db.prepare("SELECT COUNT(*) n FROM curate_ai_photo_charges WHERE role='keeper'").get().n, 6,
     'only the six pending photos are charged; shared read-only context is exempt');
+}));
+
+for (const [count, expectedBatches, expectedReferences] of [
+  [6, [6], 2], [8, [8], 2], [9, [9], 1], [10, [10], 0],
+  [11, [6, 5], 0], [15, [8, 7], 0], [20, [10, 10], 0], [30, [10, 10, 10], 0],
+]) test(`${count} pending photos keep their comparison coverage after eight nearby photos are approved`, async () => fixture(async f => {
+  const references = Array.from({ length: 8 }, (_, i) => `kept${i}`);
+  for (let i = 0; i < references.length; i++) f.add(references[i], -100 + i);
+  f.repo.recordDecision({ assetIds: references, addTags: ['frame/eligible', 'frame/reviewed'], removeTags: [], action: 'approve' });
+  const selected = [...references].reverse().slice(0, expectedReferences);
+  f.download = id => {
+    assert.ok(!references.includes(id) || selected.includes(id), 'omitted reference previews must not be fetched');
+    return { data: png, contentType: 'image/png' };
+  };
+  await f.run(); assert.equal(f.curate.aiLifecycle.pending.size, expectedBatches.length);
+  assert.ok([...f.curate.aiLifecycle.pending.values()].every(job =>
+    JSON.stringify(job.snapshot.contextIds) === JSON.stringify(selected)), 'lifecycle charges and validates only selected context');
+  f.advance();
+  for (const _ of expectedBatches) assert.equal((await f.run()).state, 'succeeded');
+  const record = readPhotoRefereeRecord(f.repo.curate, f.group.ids), plan = record.photoReferee.plan;
+  assert.deepEqual(plan.requests.map(r => r.ids.length), expectedBatches);
+  assert.deepEqual(plan.contextIds, selected); assert.deepEqual(record.photoReferee.snapshot.contextIds, selected);
+  assert.deepEqual(f.calls.map(c => c.images.length), expectedBatches.map(n => n + expectedReferences));
+  assert.deepEqual(f.calls.map(c => c.prompt.jsonSchema.properties.groups.items.properties.keepers.items.enum.length), expectedBatches);
+  assert.equal(f.advice.state, 'complete'); assert.equal(f.advice.wholeGroupCompared, expectedBatches.length === 1);
+  assert.equal(f.repo.db.prepare("SELECT COUNT(*) n FROM curate_ai_photo_charges WHERE role='keeper'").get().n, count);
+  assert.ok(references.every(id => f.repo.curate.photo(id).state === 'approved'));
+  const calls = f.calls.length;
+  await f.restart(); await f.run(); f.advance(); await f.run();
+  assert.equal(f.calls.length, calls, 'restart reuses the plan with selected context');
+}, { count }));
+
+test('changes to a selected reference during inference still invalidate the paid answer', async () => fixture(async f => {
+  f.add('kept', -10);
+  f.repo.recordDecision({ assetIds: ['kept'], addTags: ['frame/eligible', 'frame/reviewed'], removeTags: [], action: 'approve' });
+  const deferred = Promise.withResolvers(); f.answer = () => deferred.promise;
+  await f.run(); f.advance(); const running = f.run(); await until(() => f.calls.length === 1);
+  assert.equal(f.calls[0].images.length, 9);
+  f.repo.upsertAsset({ id: 'kept', fileCreatedAt: new Date(1_700_000_000_000 - 10_000).toISOString(), checksum: 'changed' });
+  deferred.resolve(response(Array.from({ length: 9 }, (_, i) => `p${i + 1}`)));
+  assert.equal((await running).state, 'stale'); assert.equal(f.advice, null);
+}, { count: 8 }));
+
+test('invalid provider configuration still reports one configuration pause before reference capture', async () => fixture(async f => {
+  await f.curate.refresh();
+  f.curate.aiLifecycle.resolveProvider = () => { throw new Error('PRIVATE CONFIGURATION ERROR'); };
+  assert.deepEqual(f.curate.photoReferee.status(f.group), { state: 'paused', reason: 'configuration', scope: 'configuration' });
+  await f.run(); f.advance(); await f.run(); assert.equal(f.calls.length, 0); assert.equal(f.downloads.length, 0);
 }));

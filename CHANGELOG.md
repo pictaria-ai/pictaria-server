@@ -12,7 +12,9 @@ All notable changes to Pictaria Server are documented here. This project follows
   explicit zero/one/multiple recommendations, per-photo explanations and
   read-only already-kept context. Larger inputs use up to three balanced
   comparisons within the total image/byte limits; incomplete or mixed batch
-  results cannot become full-stack advice. Valid batches persist independently
+  results cannot become full-stack advice. Up to two nearby approved references
+  use spare capacity in whole-stack requests only; references never create
+  extra batches or crowd out pending photos. Valid batches persist independently
   through restart, with current-input guards and existing shared scheduling,
   attempt limits and provider protection. Photo Referee remains unavailable
   pending recommendation UI, grouping-correction publication and activation
