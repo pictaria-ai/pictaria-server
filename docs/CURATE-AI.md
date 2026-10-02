@@ -2,9 +2,12 @@
 
 ## Current implementation
 
-The reviewed human workflow and candidate stacking algorithm are available in
-[Curate Preview](CURATE-PREVIEW.md). Optional AI stack checking and keeper
-recommendations have not yet been connected to that workflow. The existing
+The reviewed human workflow, candidate stacking algorithm and optional Stack
+Referee are available in [Curate Preview](CURATE-PREVIEW.md). The
+[Photo Referee backend](CURATE-PHOTO-REFEREE.md) now supports validated
+zero/one/multiple recommendations, background discovery and durable partial
+results. Recommendation UI, grouping corrections and activation acceptance
+remain; Photo Referee is still unavailable. The existing
 `/curate.html` referee continues to use its released prompt and result format.
 That unchanged request/schema/normalization contract now lives in
 `src/enrich/referee-contract.mjs`, shared by the legacy worker and the offline
