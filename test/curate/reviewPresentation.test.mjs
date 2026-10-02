@@ -1,5 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
 import { comesAfter } from '../../public/curate/order.js';
 import { plainReasons } from '../../public/curate/explanation-copy.js';
 import { savedOutcome } from '../../public/curate/photos.js';
@@ -49,4 +50,14 @@ test('Why uses recorded supporting evidence, preserves uncertainty and avoids in
     }).every((s) => !s.includes('Taken within')),
     'partial previews cannot describe the whole span',
   );
+});
+
+test('every reason the stacking algorithm records has plain page wording', () => {
+  // Sentences recorded by candidate.mjs; an unmapped one would reach the page raw.
+  const source = readFileSync(new URL('../../src/curate/candidate.mjs', import.meta.url), 'utf8');
+  const recorded = [...new Set([...source.matchAll(/'([A-Z][^'\n]{20,}\.)'/g)].map(match => match[1]))];
+  assert.ok(recorded.length >= 20, `found ${recorded.length} reasons`);
+  for (const reason of recorded) {
+    assert.ok(!plainReasons({ reasons: [reason] }).includes(reason), `no page wording for: ${reason}`);
+  }
 });

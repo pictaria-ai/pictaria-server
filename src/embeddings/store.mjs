@@ -69,6 +69,9 @@ export class EmbeddingStore {
     this.limits = limits;
     this.now = now;
     this.coverageCache = null;
+    // Advanced by every write that can change which vectors are current
+    // (save and adopt), so Curate knows when to regroup.
+    this.revision = 0;
   }
 
   // Read-only: the stored space this calibration vector belongs to, if any.
@@ -136,6 +139,7 @@ export class EmbeddingStore {
     const result = this.db.prepare(`UPDATE asset_embeddings SET source_checksum=?, source_thumbhash=?
       WHERE asset_id=? AND space_id=? AND image_sha256=?`)
       .run(source.checksum ?? null, source.thumbhash ?? null, assetId, spaceId, imageSha256);
+    if (Number(result.changes) > 0) this.revision++;
     return Number(result.changes) > 0;
   }
 
@@ -153,6 +157,7 @@ export class EmbeddingStore {
         source_thumbhash=excluded.source_thumbhash, image_sha256=excluded.image_sha256,
         vector=excluded.vector, created_at=excluded.created_at`)
       .run(assetId, spaceId, source.checksum ?? null, source.thumbhash ?? null, imageSha256, encoded, now);
+    this.revision++;
   }
 
   // Current vectors for explicit photos in one space. Stale or missing photos
@@ -172,6 +177,22 @@ export class EmbeddingStore {
         const vector = decodeStoredVector(row.vector, row.dims);
         if (vector) found.set(row.asset_id, vector);
       }
+    }
+    return found;
+  }
+
+  // Identity of each photo's current vector (the exact preview hash and when
+  // it was stored), without reading the vectors. Curate compares these to
+  // know when a cached grouping saw different embeddings.
+  currentKeys(spaceId, assetIds) {
+    const found = new Map();
+    const ids = [...new Set(assetIds)];
+    for (let i = 0; i < ids.length; i += this.limits.lookupChunk) {
+      const chunk = ids.slice(i, i + this.limits.lookupChunk);
+      const rows = this.db.prepare(`SELECT e.asset_id, e.image_sha256, e.created_at FROM asset_embeddings e
+        JOIN assets a ON a.asset_id=e.asset_id
+        WHERE e.space_id=? AND e.asset_id IN (${chunk.map(() => '?').join(',')}) AND ${CURRENT}`).all(spaceId, ...chunk);
+      for (const row of rows) found.set(row.asset_id, `${row.image_sha256}:${row.created_at}`);
     }
     return found;
   }

@@ -7,6 +7,23 @@ All notable changes to Pictaria Server are documented here. This project follows
 
 ### Development
 
+- Curate Preview Stacks now use Pictaria image embeddings when Image embeddings
+  is on (candidate 4, PIC-392). For a pair of photos that both have an
+  embedding:
+  - very similar ones (0.90 or more) are stacked;
+  - clearly different ones (0.75 or less) are kept apart, unless they show the
+    same recognized people or have near-identical ThumbHashes;
+  - in between, matching people or a similar ThumbHash decide; otherwise the
+    stack stays uncertain for the Stack Referee or you.
+
+  Groups also join when their average similarity reaches 0.80, and such pairs
+  are not sent to Immich search. Replaying eight judged groups placed 81.6% of
+  photo pairs as judged, against 55.6% without other evidence.
+  **Use image embeddings in Stacks** in Settings → Curate is on by default;
+  turned off, or for photos without embeddings, grouping is exactly as before.
+  Settings version 10 adds the switch. See
+  [candidate 4](docs/CURATE-ALGORITHM.md#candidate-4-image-embeddings).
+
 - Stop Stack Referee background work when the selected model rejects requests
   or returns invalid partitions for three distinct stacks without a successful
   check between them. The pause survives restart and role toggles, appears once

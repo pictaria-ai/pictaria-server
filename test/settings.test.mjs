@@ -210,7 +210,7 @@ test('an existing settings file is loaded without being rewritten or gaining a s
   const dir = mkdtempSync(join(tmpdir(), 'pictaria-settings-'));
   try {
     const path = join(dir, 'settings.json');
-    const original = '{"version":9,"credentialBindings":{},"voice":{"openAiTtsVoice":"ash"}}\n';
+    const original = '{"version":10,"credentialBindings":{},"voice":{"openAiTtsVoice":"ash"}}\n';
     writeFileSync(path, original, { mode: 0o600 });
 
     const config = makeConfig();
@@ -318,6 +318,28 @@ test('the curate burst-grouping switch applies to live config and defaults on', 
     store.update({ curate: { burstGrouping: null } });
     assert.equal(config.curateBurstGrouping, true);
   });
+});
+
+test('the Stacks image-embeddings switch defaults on, applies live and says when it cannot take effect', () => {
+  withStore((store, config) => {
+    const field = () => store.describe().curate.embeddingStacks;
+    assert.equal(field().value, true);
+    assert.match(field().embeddingStatus.notice, /once Image embeddings is on/);
+    store.update({ enrich: { embeddingsEnabled: true, embeddingsUrl: 'http://immich-ml:3003' } });
+    assert.deepEqual(field().embeddingStatus, { usable: true, notice: '' });
+    store.update({ enrich: { embeddingsModel: 'ViT-B-16-SigLIP__webli' } });
+    assert.match(field().embeddingStatus.notice, /no calibrated stacking thresholds yet/);
+    store.update({ curate: { embeddingStacks: false } });
+    assert.equal(config.curateEmbeddingStacks, false);
+    store.update({ curate: { embeddingStacks: null } });
+    assert.equal(config.curateEmbeddingStacks, true);
+  });
+});
+
+test('CURATE_EMBEDDING_STACKS defaults on and can turn the switch off', async () => {
+  const { loadConfig } = await import('../src/config.mjs');
+  assert.equal(loadConfig({}).curateEmbeddingStacks, true);
+  assert.equal(loadConfig({ CURATE_EMBEDDING_STACKS: 'false' }).curateEmbeddingStacks, false);
 });
 
 test('the OpenAI key (server section) applies to both voice and cloud enrichment', () => {
@@ -1285,8 +1307,8 @@ test('unknown same-version fields fail with downgrade-safe guidance', () => {
   );
 });
 
-test('the persisted settings contract matches the frozen version 9 snapshot', () => {
-  const expected = JSON.parse(readFileSync(new URL('./fixtures/upgrades/settings-contract-v9.json', import.meta.url), 'utf8'));
+test('the persisted settings contract matches the frozen version 10 snapshot', () => {
+  const expected = JSON.parse(readFileSync(new URL('./fixtures/upgrades/settings-contract-v10.json', import.meta.url), 'utf8'));
   assert.deepEqual(settingsContract(), expected);
 });
 

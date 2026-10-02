@@ -94,6 +94,10 @@ export function loadConfig(env = process.env) {
     // On by default: Curate collapses same-moment photos into stacked cards.
     curateBurstGrouping:
       env.CURATE_BURST_GROUPING === undefined ? true : parseBoolean(env.CURATE_BURST_GROUPING),
+    // On by default: Curate Preview stacks also use Pictaria image embeddings,
+    // when Image embeddings is on and the model has calibrated thresholds.
+    curateEmbeddingStacks:
+      env.CURATE_EMBEDDING_STACKS === undefined ? true : parseBoolean(env.CURATE_EMBEDDING_STACKS),
     // Group referee (gold star): off by default — it sends grouped photos to
     // the chosen model whenever enrichment is idle. Provider/model empty =
     // the enrichment defaults; a smaller vision model works well here.

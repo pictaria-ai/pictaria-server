@@ -8,6 +8,11 @@ import { CurateError } from './contracts.mjs';
 import { CurateMetadataRefresher } from './metadata.mjs';
 import { StackingLab } from './lab.mjs';
 import { CurateSimilaritySearch } from './similarity.mjs';
+import { embeddingEvidence, stackEmbeddingPolicy } from './embedding-evidence.mjs';
+
+// Newly stored image embeddings regroup Curate at most this often, so a
+// backfill or Enrich run regroups in batches rather than once per photo.
+export const CURATE_EMBEDDING_RECHECK_MS = 30_000;
 
 export class CurateService {
   constructor({ repo, config = {}, immich = null, metadataOptions = {}, candidateOptions = {}, review = null }) {
@@ -26,9 +31,21 @@ export class CurateService {
     this.similarity = new CurateSimilaritySearch({ curate: this });
     this.lab = new StackingLab(this);
     this.candidateEnabled = candidateOptions.enabled === true;
+    this.embeddingRecheckMs = candidateOptions.embeddingRecheckMs ?? CURATE_EMBEDDING_RECHECK_MS;
+    this.embeddingState = null;
     this.refinement = this.candidateEnabled ? new CurateRefinement(this, candidateOptions) : null;
     if (this.candidateEnabled) this.repo.db.prepare(`INSERT OR IGNORE INTO curate_dirty(asset_id)
       SELECT asset_id FROM curate_photos WHERE json_type(evidence_json,'$.category') IS NULL`).run();
+  }
+  // Image embeddings in stacking (candidate-4): the active policy, or null,
+  // plus a marker that changes when it changes or a vector is stored or
+  // becomes current again. It is re-read at most every embeddingRecheckMs.
+  embeddings() {
+    const policy = this.candidateEnabled ? stackEmbeddingPolicy(this.config, this.repo.embeddings) : null;
+    if (!policy) return (this.embeddingState = { policy: null, marker: null, at: 0 });
+    const cached = this.embeddingState, now = Date.now();
+    if (cached?.policy?.key === policy.key && now - cached.at < this.embeddingRecheckMs) return cached;
+    return (this.embeddingState = { policy, marker: `${policy.key}:${this.repo.embeddings.revision}`, at: now });
   }
   async refresh() {
     if (this.closed) throw new CurateError('Curate is stopping.', 'curate_unavailable', 503);
@@ -40,6 +57,7 @@ export class CurateService {
       if (this.current?.generation !== this.store.generation() ||
           this.current.stacks !== (this.config.curateBurstGrouping !== false) ||
           this.current.evidenceRevision !== (this.refinement?.revision ?? 0) ||
+          this.current.embeddingMarker !== this.embeddings().marker ||
           this.repo.db.prepare('SELECT 1 FROM curate_dirty LIMIT 1').get()) return this.refresh();
       return this.current;
     }
@@ -59,21 +77,24 @@ export class CurateService {
     const stacks = this.config.curateBurstGrouping !== false;
     this.refinement?.settingsChanged();
     const evidenceRevision = this.refinement?.revision ?? 0;
+    const { policy: embeddingPolicy, marker: embeddingMarker } = this.embeddings();
     if (this.current?.generation === this.store.generation() && this.current.stacks === stacks &&
-        this.current.evidenceRevision === evidenceRevision) return this.current;
+        this.current.evidenceRevision === evidenceRevision && this.current.embeddingMarker === embeddingMarker) return this.current;
     let result;
     if (this.repo.databasePath === ':memory:') {
       // test-only SQLite cannot be shared with a read-only worker
       result = {
         generation: this.store.generation(),
-        ...(this.candidateEnabled ? settledCandidateGroups(this.store, { stacks, connection: this.refinement?.connection })
+        ...(this.candidateEnabled ? settledCandidateGroups(this.store, { stacks, connection: this.refinement?.connection,
+          embeddings: embeddingEvidence(this.repo.db, embeddingPolicy) })
           : groupPhotos(this.store.pending(), { stacks, separations: this.store.separations() })),
       };
       result = applyStackChecks(this.store, result, stacks);
     } else
       result = await new Promise((resolve, reject) => {
         const worker = new Worker(new URL('./worker.mjs', import.meta.url), {
-          workerData: { path: this.repo.databasePath, stacks, candidate: this.candidateEnabled, rankConnection: this.refinement?.connection },
+          workerData: { path: this.repo.databasePath, stacks, candidate: this.candidateEnabled, rankConnection: this.refinement?.connection,
+            embeddings: embeddingPolicy },
           // Server/test-runner flags (including --input-type) need not be valid worker flags.
           execArgv: [],
         });
@@ -104,7 +125,7 @@ export class CurateService {
     }
     const scopeByMember = new Map();
     for (const scope of result.scopes ?? []) for (const id of scope.ids) scopeByMember.set(id, scope);
-    this.current = { ...result, stacks, byId, byMember, scopeByMember, evidenceRevision };
+    this.current = { ...result, stacks, byId, byMember, scopeByMember, evidenceRevision, embeddingMarker };
     this.metrics.rebuildMs = performance.now() - start;
     return this.current;
   }

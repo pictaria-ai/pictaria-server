@@ -32,11 +32,15 @@ test('Curate settings enable Stack Referee independently, keep Photo Referee una
   assert.match(await page.evaluate('document.querySelector("#curate-stack-model").textContent'), /Venice.*qwen3-vl-235b-a22b.*10 photos/);
   assert.match(await page.evaluate('document.querySelector("#fields-curate").textContent'), /Not available in Curate Preview yet/);
   assert.equal(await page.evaluate(`${input('refereeEnabled')}.disabled`), true, 'legacy still requires Enrich');
+  // Image embeddings in Stacks (PIC-392): on by default, waiting for Image embeddings.
+  assert.equal(await page.evaluate(`${input('embeddingStacks')}.checked && !${input('embeddingStacks')}.disabled`), true);
+  assert.match(await page.evaluate('document.querySelector("#curate-state-embeddingStacks").textContent'), /once Image embeddings is on/);
   // Master toggle pauses both preferences without erasing them.
   await click('burstGrouping');
-  for (const key of ['stackRefereeEnabled', 'keeperRefereeEnabled']) {
+  for (const key of ['stackRefereeEnabled', 'keeperRefereeEnabled', 'embeddingStacks']) {
     assert.equal(await page.evaluate(`${input(key)}.checked && ${input(key)}.disabled`), true);
   }
+  assert.match(await page.evaluate('document.querySelector("#curate-state-embeddingStacks").textContent'), /Paused while Stacks is off/);
   assert.equal(await page.evaluate(`${input('refereeProvider')}.disabled`), true);
   await click('burstGrouping');
   // Both saved preferences can be turned off; only Stack Referee can be re-enabled.
@@ -46,8 +50,11 @@ test('Curate settings enable Stack Referee independently, keep Photo Referee una
   assert.equal(await page.evaluate(`${input('stackRefereeEnabled')}.checked`), true);
   await click('stackRefereeEnabled');
   assert.equal(await page.evaluate(`${input('stackRefereeScope')}.closest('.field').hidden`), true);
+  await click('embeddingStacks');
   await page.evaluate('document.querySelector("#save-curate").click()');
   await page.waitFor('document.querySelector("#note-curate").textContent.includes("Saved")');
+  assert.equal(await page.evaluate("fetch('/api/settings').then(r => r.json()).then(s => s.curate.embeddingStacks.value)"), false,
+    'the opt-out is saved');
   assert.equal(await page.evaluate(`${input('stackRefereeEnabled')}.disabled`), false);
   assert.equal(await page.evaluate(`${input('keeperRefereeEnabled')}.disabled`), true);
   assert.doesNotMatch(await page.evaluate('document.querySelector("#curate-state-stackRefereeEnabled").textContent'), /Your preference is saved/);
