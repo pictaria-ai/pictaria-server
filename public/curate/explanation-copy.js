@@ -44,6 +44,22 @@ const copy = new Map([
     'Distant ThumbHash values or missing search results alone are not evidence of a different subject.',
     'A different preview fingerprint or a missing search match alone does not establish a different subject.',
   ],
+  // Image embeddings (candidate-4).
+  ['Very similar Pictaria image embeddings support this composition.', 'Very similar image embeddings support this group.'],
+  [
+    'Moderately similar image embeddings, corroborated by the same people or a similar ThumbHash, support this composition.',
+    'Fairly similar embeddings, backed by matching people or previews, support this group.',
+  ],
+  ['Groups were joined on their average image embedding similarity.', 'Nearby groups were joined because they are similar on average.'],
+  [
+    'Image embeddings and the other evidence do not settle every pair here, so this composition stays uncertain.',
+    'Some photos are only fairly similar and nothing confirms it, so this group is uncertain.',
+  ],
+  ['Clearly different image embeddings separate photos taken at the same time.', 'Clearly different image embeddings keep some nearby photos apart.'],
+  [
+    'Distant ThumbHash values or missing search results alone are not evidence of a different subject; missing image embeddings are unknown.',
+    'A different preview fingerprint or a missing search match alone does not establish a different subject.',
+  ],
   [
     'Grouped by capture time; similarity not established.',
     'Taken close together, but similarity has not been established.',
