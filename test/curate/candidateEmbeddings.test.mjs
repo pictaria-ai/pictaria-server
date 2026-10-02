@@ -146,6 +146,27 @@ test('with mixed coverage, ranks of embedded pairs never settle them through ran
   assert.deepEqual(near, far, 'only the embedded pairs\' ranks changed');
 });
 
+test('two photos recovered by ranks keep an unresolved embedding relation between them uncertain', () => {
+  // 0-2 have no vectors and form a reciprocal-near core; 3 and 4 have vectors at 0.78.
+  const rows = ['0', '1', '2', '3', '4'].map(id => photo(id));
+  const emb = embeddings({ '3-4': 0.78 });
+  const scope = candidateGroups(rows, { embeddings: emb }).scopes[0];
+  const matrix = allRanks(rows, 0);
+  for (const added of ['3', '4']) Object.assign(matrix[added], { 0: 0, 1: 6, 2: 20 });
+  const result = candidateGroups(rows, { embeddings: emb, ranks: { [scope.id]: { rows: matrix } } });
+  assert.deepEqual(partition(result), [['0', '1', '2', '3', '4']]);
+  const [group] = result.groups;
+  assert.match(group.reasons.join(' '), /asymmetric search match/);
+  assert.equal(group.route, 'candidate-unconfirmed');
+  assert.match(group.reasons.join(' '), /stays uncertain/);
+  assert.equal(selectStackReferee({ curateBurstGrouping: true, curateStackRefereeEnabled: true },
+    { memberCount: 5, pending: true, deterministicSettled: true, route: group.route }, { stack: true, keeper: false }).reason,
+  'uncertain-composition');
+  // Settled by embeddings instead, the same recovery is supported.
+  const settled = candidateGroups(rows, { embeddings: embeddings({ '3-4': 0.95 }), ranks: { [scope.id]: { rows: matrix } } });
+  assert.equal(settled.groups[0].route, 'candidate-supported');
+});
+
 test('without embeddings the result is exactly candidate-3; the policy keys the scope', () => {
   const rows = [photo('1', { thumbhash: hash(0) }), photo('2', { thumbhash: hash(20) }), photo('3', { thumbhash: hash(200) })];
   const plain = candidateGroups(rows);

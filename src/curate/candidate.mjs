@@ -259,6 +259,9 @@ export function candidateGroups(rows, { stacks = true, separations = [], ranks =
     }
     for (const { members: g, recovered, joined, provisional } of retained) {
       const pairs = g.flatMap((p, i) => g.slice(i + 1).map(q => at(p, q)));
+      // An embedded relation that nothing settled keeps the whole group
+      // uncertain, however its photos were joined (rank recovery included).
+      const uncertain = provisional || pairs.some(p => p.undecided);
       const why = [...reasons];
       if (provisional) why.push('Provisional time group: similarity evidence is pending or incomplete.',
         'Saved human separations and supported people differences were respected.');
@@ -280,7 +283,7 @@ export function candidateGroups(rows, { stacks = true, separations = [], ranks =
       if (g.some(p => labels.has(p.id))) why.push('Saved human separations were respected.');
       why.push(embeddings ? 'Distant ThumbHash values or missing search results alone are not evidence of a different subject; missing image embeddings are unknown.'
         : 'Distant ThumbHash values or missing search results alone are not evidence of a different subject.');
-      emit(g, provisional ? 'candidate-unconfirmed' : g.length > 1 ? 'candidate-supported' : 'single', why);
+      emit(g, uncertain ? 'candidate-unconfirmed' : g.length > 1 ? 'candidate-supported' : 'single', why);
     }
   }
   groups.sort((a, b) => (a.capturedMs ?? Infinity) - (b.capturedMs ?? Infinity) || a.ids[0].localeCompare(b.ids[0]));

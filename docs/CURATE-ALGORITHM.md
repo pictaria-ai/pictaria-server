@@ -131,7 +131,7 @@ similar **≥ 0.90**, clearly different **≤ 0.75**, and group average **≥ 0.
 | Middle band | Supports the pair only with independent corroboration: the same recognized people, a matching One/Couple category, or a ThumbHash within 0.15. Otherwise the pair stays uncertain. |
 | Search ranks | Not used for pairs with embeddings, and such pairs are never searched. Rank recovery counts votes only from core members without an embedding relation, and needs every embedded relation to be supported already. Immich's smart search uses a similar model and ranks same-moment photos close within a time candidate, which would undo the embedding verdicts. |
 | Group average | After cores, and rank recovery for photos without embeddings, two groups merge when every cross pair has embeddings, none conflicts, and their average similarity is ≥ 0.80. The closest pair of groups merges first. At least one side has two or more photos. |
-| Uncertain | Remaining uncertain pairs join provisionally, like candidate 3's unknown pairs. The stack stays in the Stack Referee's uncertain scope. |
+| Uncertain | Remaining uncertain pairs join provisionally, like candidate 3's unknown pairs. Any group that still contains an unresolved embedded pair is uncertain, however its photos were joined, including by rank recovery. It stays in the Stack Referee's uncertain scope. |
 
 **Evidence.** The owner's eight judged lab groups were replayed with
 anonymized similarities only, without ThumbHash or people data (see
