@@ -2,14 +2,14 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { launchChrome, findChrome } from './harness.mjs';
+import { cleanupAfter, launchChrome, findChrome } from './harness.mjs';
 import { curatePreviewFixture } from './curatePreviewFixture.mjs';
 
 test('referee status updates cards and open comparisons without moving photos or changing drafts', { timeout: 60000 }, async t => {
   if (!findChrome()) return t.skip('Chrome required');
-  const fixture = await curatePreviewFixture({ stackSize: 4, singles: 1, metadataReady: true });
-  const browser = await launchChrome(), page = await browser.newPage();
-  t.after(async () => { await browser.stop(); await fixture.stop(); });
+  const track = cleanupAfter(t);
+  const fixture = track(await curatePreviewFixture({ stackSize: 4, singles: 1, metadataReady: true }));
+  const browser = track(await launchChrome()), page = await browser.newPage();
   const click = selector => page.evaluate(`document.querySelector(${JSON.stringify(selector)}).click()`);
   await page.navigate(`${fixture.base}/curate-preview.html`);
   await page.waitFor('document.querySelector(".gate-backdrop input")');
