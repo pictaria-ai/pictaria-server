@@ -106,16 +106,18 @@ export function createPhotoRefereeRequest({ provider, plan, requestIndex = 0, im
   if (!same(images.map(image => image?.assetId), ids)) reject('membership');
   const aliases = ids.map((_, i) => `p${i + 1}`);
   const prompt = requestPrompt(aliases, aliases.slice(0, request.ids.length), aliases.slice(request.ids.length));
-  const sizes = new Map(checked.renditions.map(r => [r.assetId, r.bytes]));
+  const inventory = new Map(checked.renditions.map(r => [r.assetId, r]));
   const renditions = [];
   const prepared = images.map((image, i) => {
     const mimeType = typeof image.mimeType === 'string' ? image.mimeType.toLowerCase().split(';')[0].trim() : '';
-    if (!(image.data instanceof Uint8Array) || image.data.byteLength !== sizes.get(image.assetId) ||
+    if (!(image.data instanceof Uint8Array) || image.data.byteLength !== inventory.get(image.assetId).bytes ||
         !['image/jpeg', 'image/png', 'image/webp'].includes(mimeType) ||
         (provider.providerName === 'local_lmstudio' && mimeType === 'image/webp')) reject('rendition');
     const data = Buffer.from(image.data);
+    const sha256 = createHash('sha256').update(data).digest('hex'), expected = inventory.get(image.assetId);
+    if (expected.sha256 && (expected.sha256 !== sha256 || expected.mimeType !== mimeType)) reject('rendition');
     renditions.push({ id: ids[i], alias: aliases[i], mimeType, bytes: data.byteLength,
-      sha256: createHash('sha256').update(data).digest('hex') });
+      sha256 });
     return { data, mimeType };
   });
   const identity = () => fingerprint({ ...enrichmentProviderConfiguration(provider), timeoutMs: provider.timeoutMs ?? null });

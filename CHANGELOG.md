@@ -7,13 +7,16 @@ All notable changes to Pictaria Server are documented here. This project follows
 
 ### Development
 
-- Added the Photo Referee request/result contract and bounded comparison planner
+- Added the Photo Referee contract, bounded comparison planner and background worker
   (PIC-116). Retain the released quality criteria within each subject, with
   explicit zero/one/multiple recommendations, per-photo explanations and
   read-only already-kept context. Larger inputs use up to three balanced
   comparisons within the total image/byte limits; incomplete or mixed batch
-  results cannot become full-stack advice. Photo Referee remains unavailable
-  pending worker, persistence and UI integration. See the
+  results cannot become full-stack advice. Valid batches persist independently
+  through restart, with current-input guards and existing shared scheduling,
+  attempt limits and provider protection. Photo Referee remains unavailable
+  pending recommendation UI, grouping-correction publication and activation
+  acceptance. See the
   [implementation boundary](docs/CURATE-PHOTO-REFEREE.md).
 
 - Stop Stack Referee background work when the selected model rejects requests

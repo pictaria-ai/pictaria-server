@@ -11,7 +11,7 @@ const invalid = () => { throw new CurateError('Invalid Photo Referee comparison 
 // supplies authoritative chronological membership, read-only kept context and
 // bounded rendition sizes. It must separately enforce readiness, settings,
 // current inputs, attempt/photo limits and shared-provider protection.
-export function planPhotoRefereeComparisons({ orderedIds, contextIds = [], capability, renditions } = {}) {
+export function layoutPhotoRefereeComparisons({ orderedIds, contextIds = [], capability } = {}) {
   if (!Array.isArray(orderedIds) || !Array.isArray(contextIds)) invalid();
   const allIds = [...orderedIds, ...contextIds];
   validatePartition(allIds, [allIds]);
@@ -38,19 +38,30 @@ export function planPhotoRefereeComparisons({ orderedIds, contextIds = [], capab
   // and byte envelope each time, even though it is not a new actionable photo.
   const submittedImages = orderedIds.length + count * contextIds.length;
   if (submittedImages > PHOTO_REFEREE_ENVELOPE.images) return { state: 'input-limit', reason: 'too-many-images' };
+  return { state: 'ready', orderedIds: [...orderedIds], contextIds: [...contextIds],
+    capability: { provider: capability.provider, model: capability.model, comparative: true, maxImages: capability.maxImages },
+    requests, coverage: count === 1 ? 'whole-group' : 'within-batches', submittedImages };
+}
+
+export function planPhotoRefereeComparisons({ renditions, ...input } = {}) {
+  const layout = layoutPhotoRefereeComparisons(input);
+  if (layout.state !== 'ready') return layout;
+  const { orderedIds, contextIds, requests } = layout, allIds = [...orderedIds, ...contextIds];
   if (!Array.isArray(renditions) || renditions.length !== allIds.length) invalid();
   validatePartition(allIds, [renditions.map(r => r?.assetId)]);
-  const byId = new Map(renditions.map(r => [r.assetId, r.bytes]));
-  if (allIds.some(id => !Number.isSafeInteger(byId.get(id)) || byId.get(id) <= 0))
+  const byId = new Map(renditions.map(r => [r.assetId, r]));
+  if (allIds.some(id => !Number.isSafeInteger(byId.get(id).bytes) || byId.get(id).bytes <= 0))
     return { state: 'unavailable-image' };
-  const rawBytes = requests.reduce((sum, r) => sum + [...r.ids, ...r.contextIds].reduce((n, id) => n + byId.get(id), 0), 0);
-  if (allIds.some(id => byId.get(id) > PHOTO_REFEREE_ENVELOPE.imageBytes) || rawBytes > PHOTO_REFEREE_ENVELOPE.totalBytes)
+  if (renditions.some(r => r.sha256 !== undefined && (!/^[a-f0-9]{64}$/.test(r.sha256) ||
+      !['image/jpeg', 'image/png', 'image/webp'].includes(r.mimeType)))) invalid();
+  const rawBytes = requests.reduce((sum, r) => sum + [...r.ids, ...r.contextIds].reduce((n, id) => n + byId.get(id).bytes, 0), 0);
+  if (allIds.some(id => byId.get(id).bytes > PHOTO_REFEREE_ENVELOPE.imageBytes) || rawBytes > PHOTO_REFEREE_ENVELOPE.totalBytes)
     return { state: 'byte-limit' };
   const plan = {
-    state: 'ready', orderedIds: [...orderedIds], contextIds: [...contextIds],
-    capability: { provider: capability.provider, model: capability.model, comparative: true, maxImages: capability.maxImages },
-    renditions: allIds.map(assetId => ({ assetId, bytes: byId.get(assetId) })),
-    requests, coverage: count === 1 ? 'whole-group' : 'within-batches', submittedImages, rawBytes,
+    ...layout, renditions: allIds.map(assetId => {
+      const r = byId.get(assetId);
+      return { assetId, bytes: r.bytes, ...(r.sha256 === undefined ? {} : { sha256: r.sha256, mimeType: r.mimeType }) };
+    }), rawBytes,
   };
   return { ...plan, planKey: fingerprint(plan) };
 }

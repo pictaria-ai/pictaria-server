@@ -42,7 +42,11 @@ export class CurateAiInputs {
         new Set(actionable).size !== actionable.length || actionable.some(id => !group.ids.includes(id)) ||
         (role === 'stack' && !same(actionable, group.ids)))
       throw new TypeError('Invalid Curate AI actionable batch.');
-    const contextIds = includeContext ? this.store.context(group.ids).ids.slice(0, Math.min(8, CURATE_AI_MAX_IMAGES - actionable.length)) : [];
+    const contextIds = includeContext ? this.store.context(group.ids).ids.slice(0, 8) : [];
+    // All batches share the same full comparison/context envelope. Do not
+    // silently drop already-kept references merely to fit a smaller request.
+    if (group.ids.length + contextIds.length > CURATE_AI_MAX_IMAGES)
+      return { state: 'input-limit', reason: 'too-many-images', limit: CURATE_AI_MAX_IMAGES };
     const snapshot = { role, contract, groupId, ids: [...group.ids], actionable: [...actionable], contextIds };
     // Capture only from a fully rebuilt projection. Later checks below are
     // scope-specific, so unrelated imports need not discard a paid result.
@@ -159,7 +163,8 @@ export class CurateAiInputs {
       const advice = this.store.prepare(`SELECT a.* FROM curate_advice a JOIN curate_advice_members m
         ON m.role=a.role AND m.input_key=a.input_key WHERE m.asset_id=?`).all(id);
       for (const row of advice) {
-        const members = JSON.parse(row.json).ids;
+        const record = JSON.parse(row.json), members = record.ids;
+        if (record.photoReferee && this.current(record.photoReferee.snapshot)) return true;
         if (this.store.advice(row.role, members, row.schema_version)) return true;
       }
     }

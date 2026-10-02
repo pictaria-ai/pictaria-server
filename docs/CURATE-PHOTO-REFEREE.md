@@ -7,15 +7,16 @@ decision marks a photo Yes, Skip, Fav or No.
 
 ## Current delivery
 
-PIC-116's first slice adds a production request/result contract and a bounded
-comparison planner. **Photo Referee remains unavailable in Settings.** This
-slice does not add a background worker, fetch photos, persist recommendations,
-change grouping, launch model requests from the application, or change the
-released `/curate.html` referee.
+PIC-116 adds the request/result contract, bounded comparison planner, background
+worker and saved-result/API integration. **Photo Referee remains unavailable in
+Settings.** Server availability still prevents its requests, regardless of the
+saved preference. Tests explicitly enable the worker with synthetic transports.
+The released `/curate.html` referee is unchanged.
 
-The new modules can be exercised through the existing executor/lifecycle with
-synthetic transports. Worker discovery, saved results, recommendation UI and
-controlled test-instance acceptance are the next slices, before activation.
+Recommendation UI, publication of whole-input grouping corrections and
+controlled test-instance acceptance remain before activation. This increment
+stores proposed partitions but does not publish them as new stacks or change
+human choices.
 
 ## Quality baseline and response
 
@@ -41,7 +42,7 @@ The deliberate differences are:
   `id`, `eyes_closed` and `reason` for every submitted photo, including context.
 
 Requests use positional aliases and image bytes, with no asset IDs, captions,
-tags or recognized-person metadata in the prompt. The worker will supply the
+tags or recognized-person metadata in the prompt. The worker supplies the
 authoritative context membership; it is not a client-controlled exemption.
 Per-photo text and group reasons remain untrusted text for escaped rendering.
 These are model instructions, not guarantees of visual judgment. This adapted
@@ -104,37 +105,81 @@ to change photos. The worker and decision service must still verify current
 membership, input revisions, coverage, settings and human intent. The collector
 does not itself save, publish or apply anything.
 
-## Integration still required
+## Background worker and saved results
 
 The pipeline is deterministic grouping (including optional Pictaria embeddings),
 then optional Stack Referee, then optional Photo Referee, then human decisions.
 PIC-392 owns embedding evidence and resulting grouping. This contract consumes
 membership and never computes embedding similarity or reimplements stacking.
 
-Before activation, the Photo Referee worker must:
+Discovery runs in the existing background tick, without browser demand or an
+active Enrich run. It rotates through at most 32 groups plus bounded attention
+priorities, then offers individual comparisons to the shared lifecycle. Queued
+jobs contain identities and callbacks, never image buffers. A focused comparison
+defers new work. Deterministic checks and an enabled Stack Referee must settle;
+finished-incomplete checks, supported scope skips and verified size exceptions
+retain `incomplete`, `scope-skipped` or `unchecked-size` coverage. Unknown
+capability, invalid configuration and shared provider protection still block.
 
-1. Discover eligible pending stacks after deterministic work and any enabled
-   Stack Referee check settle. Still-pending work waits. Finished-incomplete
-   checks, supported scope skips and verified size exceptions retain their
-   honest coverage instead of being reported as successful AI checks.
-2. Build the full bounded rendition inventory inside controlled preparation;
-   do not download a backlog or retain image buffers in queued jobs. Construct
-   each request using its authoritative lifecycle snapshot and pinned provider.
-   The planner is not permission to bypass role/provider gates or byte limits.
-3. Use the existing shared scheduler, two-attempt limit, per-photo allowance,
-   provider guards, settling/coalescing and current-input checks. Recheck
-   applicability before dispatch and inside acceptance. Late embeddings that
-   change membership must invalidate old recommendations through that boundary.
-4. Save valid advice/provenance through existing Curate records. A whole-input
-   mixed response may propose a grouping correction at the stable-view boundary;
-   reuse its complete recommendations without recursively launching referees.
-5. Show recommendations separately from human outcomes. Preselect only untouched
-   drafts, preserve all accepted recommendations, and keep manual review usable.
-6. Validate background operation, restart/attempt persistence, provider failures
-   and actual UI behavior before enabling the role. Keep legacy-referee removal
-   and default-page cutover with PIC-372.
+Each scheduled batch preflights the **full comparison's previews**, including
+repeated-context image/byte accounting. It retains only the current batch's
+bytes and compact hashes/sizes for the rest. This trades up to three preview
+passes for bounded memory without a buffer pool, disk spool or recovery queue.
+A 30-photo comparison therefore reads up to 90 previews across its three initial
+requests; bounded retries repeat preparation. No originals, resizing or silent
+thumbnail fallback are used. Each preflight has a 30-second deadline, and the
+real Immich client limits response bytes while streaming. Same-size changed
+images are detected by hashes, not merely by their byte lengths.
+
+One batch consumes one shared scheduler turn. Existing settling, two attempts
+per exact input, actionable-photo churn limits and provider guards apply.
+Temporary preview failures get at most two preparations per input and a shared
+three-minute role pause; permanent/unusable previews settle immediately. Three
+distinct comparisons with model rejection or malformed answers pause Photo
+Referee for that model configuration. Multiple batches of one stack count as
+one comparison for this pause. A successful accepted recommendation clears the
+streak; Stack Referee and Enrich remain independent. Protection survives restart
+and role toggles.
+
+Validated batches occupy one versioned `curate_advice` record for the pending
+scope, capped at 64 KiB. Shared approved context is not indexed as owned
+membership. The record contains the plan, applicability snapshot, validated
+answers and compact provenance; it contains no image buffers, credentials,
+connection URLs or raw provider envelopes. Partial advice has no fabricated
+generic/global result. Its applicable input accounting remains protected from
+retention cleanup.
+
+Acceptance rechecks all source members, human state, availability, context,
+nearby changes and the grouping boundary inside the executor transaction.
+Adding a photo or changing a human decision during inference discards the stale
+answer. Role-off stops new work but allows an already-paid, still-applicable
+answer to be saved. Completed advice is reused across restart and model-setting
+changes. Partial advice resumes only missing batches with the same configuration
+and full rendition plan; changed configuration or bytes leave it inspectable
+but incomplete, without automatically replaying accepted comparisons.
+
+The page API adds `photoRefereeActivity` and compact per-group `photoReferee`
+status. Comparisons add `photoRecommendations`, projecting coverage, current
+recommendations, per-photo assessments and valid partitions without internal
+snapshots or hashes. Decided photos receive no recommendation payload. Pending
+prerequisites disable structural full-set application. These fields do not grant
+decision authority, change stable view membership, or overwrite draft choices.
+
+## Integration still required
+
+Before activation:
+
+1. Publish complete whole-input grouping corrections at the stable-view boundary
+   and reuse their per-partition recommendations without recursive referee work.
+   Partial or mixed batch results must not fabricate a global partition.
+2. Connect visible Photo Referee states, recommendation markers and explanations.
+   Preselect only untouched drafts, preserve all accepted recommendations and
+   human edits, and bind any advice action to current applicability and intent.
+3. Run UI and controlled test-instance acceptance with the configured provider.
+   Synthetic worker tests do not establish model quality or live performance.
+   Keep legacy-referee removal and default-page cutover with PIC-372.
 
 The [shared AI guide](CURATE-AI.md) and
 [Stack Referee guide](CURATE-STACK-REFEREE.md) describe the existing runtime.
 No new queue, repair mechanism, database migration or provider transport is
-introduced by this contract slice.
+introduced by this increment.

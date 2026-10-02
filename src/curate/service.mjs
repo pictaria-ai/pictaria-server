@@ -201,6 +201,7 @@ export class CurateService {
       metadata: this.metadata.status(),
       refinement,
       stackRefereeActivity: this.stackReferee?.activity() ?? null,
+      photoRefereeActivity: this.photoReferee?.activity() ?? null,
       updatesAvailable:
         view.generation !== this.store.generation() ||
         Boolean(refinement?.ready) ||
@@ -209,6 +210,7 @@ export class CurateService {
       groups: groups.map((g) => ({ id: g.id, memberCount: g.ids.length, route: g.route,
           similarity: view.section === 'decided' ? null : this.refinement?.groupStatus(g) ?? null,
           stackReferee: view.section === 'decided' ? null : this.stackReferee?.status(g) ?? null,
+          photoReferee: view.section === 'decided' ? null : this.photoReferee?.status(g) ?? null,
           photos: this.store.covers(g.ids.slice(0, 3)) })),
       nextOffset: offset + limit < view.total ? offset + limit : null,
     };
@@ -244,6 +246,8 @@ export class CurateService {
       algorithm: view.method,
       similarity: this.refinement?.groupStatus(group) ?? null,
       stackReferee: reviewState === 'decided' ? null : this.stackReferee?.status(group) ?? null,
+      photoReferee: reviewState === 'decided' ? null : this.photoReferee?.status(group) ?? null,
+      photoRecommendations: reviewState === 'decided' ? null : this.photoReferee?.recommendations(group) ?? null,
       // Reasons use the applicable current calculation. Old view membership is
       // never replaced by a newer machine proposal when a comparison opens.
       reasons: this.current?.byId.get(groupId)?.reasons ?? ['Membership preserved from the opened Curate view.'],
@@ -341,11 +345,12 @@ export class CurateService {
     if (this.backgroundWork || this.closed) return;
     this.backgroundWork = (async () => {
       this.metadata.settingsChanged();
-      if (!this.refinement?.enabled() && !this.metadata.demanded() && !this.stackReferee?.enabled() && !this.aiLifecycle?.pending.size && !this.aiLifecycle?.active) return;
+      if (!this.refinement?.enabled() && !this.metadata.demanded() && !this.stackReferee?.enabled() && !this.photoReferee?.enabled() && !this.aiLifecycle?.pending.size && !this.aiLifecycle?.active) return;
       await this.refresh();
       this.metadata.wake();
       await this.refinement?.tick();
       await this.stackReferee?.discover();
+      await this.photoReferee?.discover();
       this.aiLifecycle?.tick();
       if (Date.now() >= (this.nextAiMaintenance ?? 0)) {
         this.aiLifecycle?.maintain();
