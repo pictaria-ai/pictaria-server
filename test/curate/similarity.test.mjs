@@ -235,6 +235,29 @@ test('cancel between rank requests stops the pass; one lane is reserved even whi
   assert.equal(calls.length, 1); assert.equal(search.owner, null);
 });
 
+// Real timers truncate fractional delays and can end just before nextAt; a
+// pass that searched then would be refused as a cooldown and stop.
+test('slow-host pacing survives timers that truncate fractional delays', async t => {
+  let elapsed = 0;
+  const { curate, calls, advance } = setup(t, () => { elapsed += 2500.5; return { assets: { items: [item('a')] } }; },
+    { elapsedNow: () => elapsed });
+  const body = rankView(curate, ['a', 'b', 'c']), waits = [];
+  curate.lab.ranks.wait = async ms => { waits.push(ms); advance(Math.trunc(ms)); };
+  const { events } = await rankPass(curate, body);
+  assert.equal(calls.length, 3); assert.equal(events.at(-1).stopped, false);
+  assert.ok(events.filter(e => e.type === 'row').every(e => e.row.state === 'complete'));
+  assert.deepEqual(waits, [2501, 2501]);
+});
+
+test('rank pacing waits again when a timer ends before the next search is allowed', async t => {
+  const { curate, calls, advance } = setup(t, () => ({ assets: { items: [item('a')] } }));
+  const body = rankView(curate, ['a', 'b', 'c']), waits = [];
+  curate.lab.ranks.wait = async ms => { advance(waits.length ? ms : ms - 1); waits.push(ms); };
+  const { events } = await rankPass(curate, body);
+  assert.equal(calls.length, 3); assert.equal(events.at(-1).stopped, false);
+  assert.deepEqual(waits, [limits.minIntervalMs, 1, limits.minIntervalMs]);
+});
+
 test('rank failure stops without retry and changed connection cannot leak mixed-library evidence', async t => {
   const { curate, calls, advance, client, search } = setup(t, (_args, n) => {
     if (n === 2) throw Error('private backend error');

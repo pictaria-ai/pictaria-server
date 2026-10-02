@@ -422,6 +422,12 @@ All notable changes to Pictaria Server are documented here. This project follows
 
 ### Fixed
 
+- The stacking lab's **Check selected group** pass no longer stops early with
+  "Please wait 1 seconds before another similarity search." Its wait between
+  searches could end a fraction of a millisecond before the next search was
+  allowed, most often after an Immich search took two seconds or more. The
+  pass now waits until the search is allowed.
+
 - Immich metadata ingestion now clears cached thumbnail and duplicate-group
   fields when Immich explicitly returns `null`, preventing stale grouping evidence.
   Fields absent from a partial response still preserve their cached values.
