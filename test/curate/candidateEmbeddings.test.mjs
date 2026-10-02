@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { candidateGroups, CANDIDATE_METHOD, EMBEDDING_CANDIDATE_METHOD } from '../../src/curate/candidate.mjs';
+import { selectStackReferee } from '../../src/curate/ai-policy.mjs';
 
 // candidate-4 (PIC-392): Pictaria image embeddings as stacking evidence.
 const hash = n => Buffer.alloc(21, n).toString('base64');
@@ -123,6 +124,26 @@ test('photos without an embedding keep candidate-3 evidence and searches', () =>
   assert.deepEqual(partition(ranked), [['1', '2', '3']]);
   assert.equal(ranked.groups[0].route, 'candidate-supported');
   assert.match(reasons(ranked), /Reciprocal nearby Immich search ranks/);
+});
+
+test('with mixed coverage, ranks of embedded pairs never settle them through rank recovery', () => {
+  // Photo 2 has no vector; 3 is in the middle band with 0 and 1 and nothing corroborates it.
+  const rows = ['0', '1', '2', '3'].map(id => photo(id));
+  const emb = embeddings({ '0-1': 0.95, '0-3': 0.78, '1-3': 0.78 });
+  const scope = candidateGroups(rows, { embeddings: emb }).scopes[0];
+  assert.deepEqual(scope.referenceIds, ['0', '1', '2', '3'], 'photo 2 and its neighbors are searched');
+  const outcome = embeddedRanks => {
+    const matrix = allRanks(rows, 0);
+    for (const [a, b] of [['0', '3'], ['1', '3']]) { matrix[a][b] = embeddedRanks; matrix[b][a] = embeddedRanks; }
+    const result = candidateGroups(rows, { embeddings: emb, ranks: { [scope.id]: { rows: matrix } } });
+    const group = result.groups.find(g => g.ids.includes('3'));
+    const selection = selectStackReferee({ curateBurstGrouping: true, curateStackRefereeEnabled: true },
+      { memberCount: group.ids.length, pending: true, deterministicSettled: true, route: group.route }, { stack: true, keeper: false });
+    return { ids: [...group.ids].sort(), route: group.route, selection: selection.reason };
+  };
+  const far = outcome(20), near = outcome(0);
+  assert.deepEqual(far, { ids: ['0', '1', '2', '3'], route: 'candidate-unconfirmed', selection: 'uncertain-composition' });
+  assert.deepEqual(near, far, 'only the embedded pairs\' ranks changed');
 });
 
 test('without embeddings the result is exactly candidate-3; the policy keys the scope', () => {

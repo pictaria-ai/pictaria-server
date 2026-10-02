@@ -206,12 +206,17 @@ export function candidateGroups(rows, { stacks = true, separations = [], ranks =
       const p = item.core[0];
       const compatible = ({ core, additions }) =>
         [...core, ...additions].every(q => !at(p, q).conflict && !at(p, q).peopleConflict);
-      // Rank recovery only where a photo lacks embeddings with the core.
-      const ranked = cores.filter(target => complete && target.core.length >= 3 && compatible(target) &&
-        target.core.some(q => at(p, q).similarity == null) &&
-        target.core.filter(q => near(q, p)).length >= Math.ceil(target.core.length * 0.75) &&
-        target.core.some(q => near(p, q)) &&
-        target.core.filter(q => near(p, q, limits.moderateOutside)).length >= Math.ceil(target.core.length * 0.5));
+      // Ranks vote only where the photo has no embedding with that core
+      // member, and every embedded relation must already be supported by
+      // embeddings: ranks never settle an embedded pair (candidate-4).
+      const ranked = cores.filter(target => {
+        if (!complete || target.core.length < 3 || !compatible(target)) return false;
+        if (target.core.some(q => at(p, q).similarity != null && !at(p, q).supported)) return false;
+        const voters = target.core.filter(q => at(p, q).similarity == null);
+        return voters.length > 0 && voters.filter(q => near(q, p)).length >= Math.ceil(voters.length * 0.75) &&
+          voters.some(q => near(p, q)) &&
+          voters.filter(q => near(p, q, limits.moderateOutside)).length >= Math.ceil(voters.length * 0.5);
+      });
       // Competing valid cores are ambiguous; do not pick an arbitrary one.
       if (ranked.length === 1) { ranked[0].additions.push(p); attached.add(p.id); }
     }

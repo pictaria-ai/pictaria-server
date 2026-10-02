@@ -33,12 +33,13 @@ async function setup(t, { n = 3, config = {} } = {}) {
   t.after(async () => { await curate.close(); repo.close(); rmSync(dir, { recursive: true, force: true }); });
   const space = repo.embeddings.resolveSpace({ backend: EMBEDDING_BACKEND, model: 'ViT-B-32__openai',
     calibrationVersion: CALIBRATION_VERSION, calibration: [1, 0, 0, 0] });
+  const preview = (id, vector) => createHash('sha256').update(`${id}:${vector}`).digest('hex');
   const embed = (id, vector) => repo.embeddings.save({ assetId: id, spaceId: space.id, source: repo.embeddings.sourceOf(id),
-    imageSha256: createHash('sha256').update(`${id}:${vector}`).digest('hex'), vector });
+    imageSha256: preview(id, vector), vector });
   const searchAll = async () => {
     for (let i = 0; i < 8; i++) { await curate.refinement.tick(); now += 5000; await curate.refresh(); }
   };
-  return { repo, curate, config: settings, ids, calls, space, embed, searchAll };
+  return { repo, curate, config: settings, ids, calls, space, embed, preview, searchAll };
 }
 // Unit vectors: A·B = 0.95 (very similar); C is clearly different from both.
 const A = [1, 0, 0, 0], B = [0.95, Math.sqrt(1 - 0.95 ** 2), 0, 0], C = [0.5, 0, Math.sqrt(0.75), 0];
@@ -75,6 +76,25 @@ test('an embedding that arrives later re-checks a settled time window without ne
   assert.deepEqual(sizes(await s.curate.openView()), [2, 1], 'p2 is now clearly different');
   await s.searchAll();
   assert.equal(s.calls.length, searched, 'saved search evidence is reused');
+});
+
+test('a vector that becomes current again regroups a window settled while it was out of date', async t => {
+  const s = await setup(t, { n: 2 });
+  s.embed('p0', A); s.embed('p1', C);
+  assert.deepEqual(sizes(await s.curate.openView()), [1, 1]);
+  // An edit in Immich makes p1's vector out of date: candidate-3 rules and searches apply.
+  s.repo.db.prepare("UPDATE assets SET checksum='sum-p1-edited' WHERE asset_id='p1'").run();
+  await s.curate.openView();
+  await s.searchAll();
+  assert.deepEqual(sizes(await s.curate.openView()), [2], 'reciprocal ranks group the pair');
+  assert.equal(s.curate.refinement.saved.settled.size, 1);
+  const searched = s.calls.length;
+  // Same preview bytes under the new identity: Enrich adopts the vector again.
+  assert.equal(s.repo.embeddings.adopt({ assetId: 'p1', spaceId: s.space.id, source: s.repo.embeddings.sourceOf('p1'),
+    imageSha256: s.preview('p1', C) }), true);
+  assert.deepEqual(sizes(await s.curate.openView()), [1, 1], 'clearly different again');
+  await s.searchAll();
+  assert.equal(s.calls.length, searched);
 });
 
 test('an uncalibrated model, Image embeddings off or no stored set keep candidate-3', async t => {

@@ -38,14 +38,14 @@ export class CurateService {
       SELECT asset_id FROM curate_photos WHERE json_type(evidence_json,'$.category') IS NULL`).run();
   }
   // Image embeddings in stacking (candidate-4): the active policy, or null,
-  // plus a marker that changes when it or the stored vectors change. The
-  // vectors are re-read at most every embeddingRecheckMs.
+  // plus a marker that changes when it changes or a vector is stored or
+  // becomes current again. It is re-read at most every embeddingRecheckMs.
   embeddings() {
     const policy = this.candidateEnabled ? stackEmbeddingPolicy(this.config, this.repo.embeddings) : null;
     if (!policy) return (this.embeddingState = { policy: null, marker: null, at: 0 });
     const cached = this.embeddingState, now = Date.now();
     if (cached?.policy?.key === policy.key && now - cached.at < this.embeddingRecheckMs) return cached;
-    return (this.embeddingState = { policy, marker: `${policy.key}:${this.repo.embeddings.spaceRevision(policy.spaceId)}`, at: now });
+    return (this.embeddingState = { policy, marker: `${policy.key}:${this.repo.embeddings.revision}`, at: now });
   }
   async refresh() {
     if (this.closed) throw new CurateError('Curate is stopping.', 'curate_unavailable', 503);

@@ -69,6 +69,9 @@ export class EmbeddingStore {
     this.limits = limits;
     this.now = now;
     this.coverageCache = null;
+    // Advanced by every write that can change which vectors are current
+    // (save and adopt), so Curate knows when to regroup.
+    this.revision = 0;
   }
 
   // Read-only: the stored space this calibration vector belongs to, if any.
@@ -136,6 +139,7 @@ export class EmbeddingStore {
     const result = this.db.prepare(`UPDATE asset_embeddings SET source_checksum=?, source_thumbhash=?
       WHERE asset_id=? AND space_id=? AND image_sha256=?`)
       .run(source.checksum ?? null, source.thumbhash ?? null, assetId, spaceId, imageSha256);
+    if (Number(result.changes) > 0) this.revision++;
     return Number(result.changes) > 0;
   }
 
@@ -153,6 +157,7 @@ export class EmbeddingStore {
         source_thumbhash=excluded.source_thumbhash, image_sha256=excluded.image_sha256,
         vector=excluded.vector, created_at=excluded.created_at`)
       .run(assetId, spaceId, source.checksum ?? null, source.thumbhash ?? null, imageSha256, encoded, now);
+    this.revision++;
   }
 
   // Current vectors for explicit photos in one space. Stale or missing photos
@@ -190,12 +195,6 @@ export class EmbeddingStore {
       for (const row of rows) found.set(row.asset_id, `${row.image_sha256}:${row.created_at}`);
     }
     return found;
-  }
-
-  // Changes whenever a vector in the space is stored or replaced.
-  spaceRevision(spaceId) {
-    const row = this.db.prepare('SELECT COUNT(*) AS n, MAX(created_at) AS at FROM asset_embeddings WHERE space_id=?').get(spaceId);
-    return `${row.n}:${row.at ?? ''}`;
   }
 
   // Status-line counts; cached briefly because the Enrich page polls.

@@ -129,7 +129,7 @@ similar **≥ 0.90**, clearly different **≤ 0.75**, and group average **≥ 0.
 | Very similar (≥ 0.90) | Supports the pair, like a close ThumbHash or reciprocal ranks. An uncorroborated recognition difference does not block it. |
 | Clearly different (≤ 0.75) | Separates the pair, even against close-ThumbHash support. The exceptions are both photos showing the same recognized people, or a very close ThumbHash (≤ 0.025). |
 | Middle band | Supports the pair only with independent corroboration: the same recognized people, a matching One/Couple category, or a ThumbHash within 0.15. Otherwise the pair stays uncertain. |
-| Search ranks | Not used for pairs with embeddings, and such pairs are never searched. Immich's smart search uses a similar model and ranks same-moment photos close within a time candidate, which would undo the embedding verdicts. |
+| Search ranks | Not used for pairs with embeddings, and such pairs are never searched. Rank recovery counts votes only from core members without an embedding relation, and needs every embedded relation to be supported already. Immich's smart search uses a similar model and ranks same-moment photos close within a time candidate, which would undo the embedding verdicts. |
 | Group average | After cores, and rank recovery for photos without embeddings, two groups merge when every cross pair has embeddings, none conflicts, and their average similarity is ≥ 0.80. The closest pair of groups merges first. At least one side has two or more photos. |
 | Uncertain | Remaining uncertain pairs join provisionally, like candidate 3's unknown pairs. The stack stays in the Stack Referee's uncertain scope. |
 
@@ -155,8 +155,9 @@ Two kinds of judged stack remain hard for embeddings alone:
   evidence.
 - A saved grouping records its members' vector identities, and is recomputed
   without new searches when one of them changes.
-- Newly stored vectors regroup Curate at most every 30 seconds. Open comparisons
-  and human decisions stay as they are.
+- A vector that is stored, or that becomes current again, regroups Curate at
+  most every 30 seconds. Open comparisons and human decisions stay as they
+  are.
 
 ## Automatic searches and stable views
 
