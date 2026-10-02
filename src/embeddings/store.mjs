@@ -176,6 +176,28 @@ export class EmbeddingStore {
     return found;
   }
 
+  // Identity of each photo's current vector (the exact preview hash and when
+  // it was stored), without reading the vectors. Curate compares these to
+  // know when a cached grouping saw different embeddings.
+  currentKeys(spaceId, assetIds) {
+    const found = new Map();
+    const ids = [...new Set(assetIds)];
+    for (let i = 0; i < ids.length; i += this.limits.lookupChunk) {
+      const chunk = ids.slice(i, i + this.limits.lookupChunk);
+      const rows = this.db.prepare(`SELECT e.asset_id, e.image_sha256, e.created_at FROM asset_embeddings e
+        JOIN assets a ON a.asset_id=e.asset_id
+        WHERE e.space_id=? AND e.asset_id IN (${chunk.map(() => '?').join(',')}) AND ${CURRENT}`).all(spaceId, ...chunk);
+      for (const row of rows) found.set(row.asset_id, `${row.image_sha256}:${row.created_at}`);
+    }
+    return found;
+  }
+
+  // Changes whenever a vector in the space is stored or replaced.
+  spaceRevision(spaceId) {
+    const row = this.db.prepare('SELECT COUNT(*) AS n, MAX(created_at) AS at FROM asset_embeddings WHERE space_id=?').get(spaceId);
+    return `${row.n}:${row.at ?? ''}`;
+  }
+
   // Status-line counts; cached briefly because the Enrich page polls.
   coverage({ backend, model }) {
     const cached = this.coverageCache;

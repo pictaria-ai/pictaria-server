@@ -242,7 +242,7 @@ test('contract 13 upgrade snapshots version 6 settings and history before adopti
     inventory.upgrade.stateVersion = 13; writeFileSync(config.persistentState.inventoryPath, JSON.stringify(inventory));
     const upgraded = await openInstallation(config, 'verify');
     assert.equal(upgraded.inventory.upgrade.stateVersion, 27);
-    assert.equal(JSON.parse(readFileSync(config.settingsPath, 'utf8')).version, 9);
+    assert.equal(JSON.parse(readFileSync(config.settingsPath, 'utf8')).version, 10);
     assert.equal(config.enrichHistoryRuns, 100); assert.equal(config.enrichHistoryLogs, 100);
     const snapshotDir = join(config.backup.dir, upgraded.inventory.upgrade.recoveryPoint.snapshotName);
     assert.equal(JSON.parse(readFileSync(join(snapshotDir, 'settings.json'), 'utf8')).version, 6);
@@ -522,7 +522,7 @@ test('contract 26 snapshots schema 21 and settings v8 before adding image embedd
       assert.equal(prior.prepare("SELECT name FROM sqlite_master WHERE name='asset_embeddings'").get(), undefined);
     } finally { prior.close(); }
     assert.equal(JSON.parse(readFileSync(join(recovery, 'settings.json'), 'utf8')).version, 8);
-    assert.equal(JSON.parse(readFileSync(config.settingsPath, 'utf8')).version, 9);
+    assert.equal(JSON.parse(readFileSync(config.settingsPath, 'utf8')).version, 10);
     assert.equal(config.enrichEmbeddings?.enabled ?? false, false, 'upgrading never turns embeddings on');
     // The upgrade adds empty tables only: it never calls a model or backfills.
     assert.equal(upgraded.enrichment.db.prepare('SELECT COUNT(*) AS n FROM asset_embeddings').get().n, 0);

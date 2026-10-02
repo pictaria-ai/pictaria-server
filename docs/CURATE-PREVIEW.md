@@ -333,7 +333,9 @@ test-instance rollout; synthetic tests exercise these states without live calls.
   to 50 active corrections; `?id=…` reads current state. The metadata retry route
   takes a saved comparison ID and bounded offset, never arbitrary client IDs.
 - Provider and saved settings defaults are unchanged. Preview grouping now uses
-  candidate 3; the released page and strict lab controls keep their existing rules.
+  candidate 3, or [candidate 4](CURATE-ALGORITHM.md#candidate-4-image-embeddings)
+  when image embeddings are available; the released page and strict lab controls
+  keep their existing rules.
 - Enrichment schema **15** / persistent-state contract **18** adds optional
   correction-action metadata without rewriting existing partitions or decisions.
   The action is saved atomically with the separation; exact retries must preserve

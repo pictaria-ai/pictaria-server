@@ -50,6 +50,7 @@ services:
       # Unlike ${VAR:-default}, ${VAR-default} preserves an explicitly blank
       # value. Blank means false here, matching the native configuration path.
       CURATE_BURST_GROUPING: ${CURATE_BURST_GROUPING-true}
+      CURATE_EMBEDDING_STACKS: ${CURATE_EMBEDDING_STACKS-true}
       REFEREE_GROUP_BUDGET_MB: ${REFEREE_GROUP_BUDGET_MB:-96}
       OPENAI_API_KEY: ${OPENAI_API_KEY:-}
       DEFAULT_PROVIDER: ${DEFAULT_PROVIDER:-cloud_openai}

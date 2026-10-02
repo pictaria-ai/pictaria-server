@@ -5,25 +5,31 @@ import { rankReader } from './rank-store.mjs';
 
 // Completed composition is disposable cached work, not human history. Retain its
 // original boundaries while decisions only subtract members. Never reinterpret
-// original-cohort outside ranks against a smaller pending set.
-export function settledCandidateGroups(store, { stacks, connection }) {
+// original-cohort outside ranks against a smaller pending set. With image
+// embeddings (`embeddings`, candidate-4), a saved grouping also needs the same
+// embedding policy and member vectors it was computed with.
+export function settledCandidateGroups(store, { stacks, connection, embeddings = null }) {
   const rows = store.candidateRows(), pending = new Map(rows.map(p => [p.id, p]));
   const retained = new Map(), owner = new Map(), invalid = new Set();
   if (stacks && connection) {
+    // Search evidence is saved under candidate-3's method whether or not
+    // embeddings are used; the scope ID and settled signature tell them apart.
     const saved = store.prepare(`SELECT DISTINCT e.scope_id,json_extract(e.json,'$.settled') settled
       FROM curate_photos p JOIN curate_rank_members m ON m.asset_id=p.asset_id
       JOIN curate_rank_evidence e ON e.scope_id=m.scope_id
-      WHERE p.state='undecided' AND e.connection_key=? AND e.method=?`).iterate(connection, CANDIDATE_METHOD);
-    for (const record of saved) {
-      if (!record.settled) continue;
-      const value = JSON.parse(record.settled);
+      WHERE p.state='undecided' AND e.connection_key=? AND e.method=?`).all(connection, CANDIDATE_METHOD)
+      .filter(record => record.settled).map(record => ({ scopeId: record.scope_id, value: JSON.parse(record.settled) }));
+    embeddings?.loadKeys([...new Set(saved.flatMap(({ value }) => value.members.map(m => m[0])))]);
+    for (const { scopeId, value } of saved) {
+      if ((embeddings ? embeddings.signature(value.members.map(m => m[0])) : undefined) !== value.embeddings)
+        invalid.add(scopeId);
       for (const [id, input, availability, separation] of value.members) {
         const photo = store.photo(id);
         if (!photo || photo.inputKey !== input || photo.availability !== availability || store.separationKey(id) !== separation)
-          invalid.add(record.scope_id);
-        if (pending.has(id)) owner.set(id, record.scope_id);
+          invalid.add(scopeId);
+        if (pending.has(id)) owner.set(id, scopeId);
       }
-      retained.set(record.scope_id, value);
+      retained.set(scopeId, value);
     }
   }
   // Current time candidates may span several older candidates after decisions.
@@ -43,7 +49,7 @@ export function settledCandidateGroups(store, { stacks, connection }) {
     for (const id of linked) if (!invalid.has(id)) { invalid.add(id); affected.push(id); }
   const preserved = new Set([...retained.keys()].filter(id => !invalid.has(id)));
   const result = candidateGroups(rows.filter(p => !preserved.has(owner.get(p.id))), {
-    stacks, separations: store.separations(), ranks: rankReader(store.db, connection),
+    stacks, separations: store.separations(), ranks: rankReader(store.db, connection), embeddings,
   });
   for (const id of preserved) {
     const saved = retained.get(id), ids = saved.members.map(m => m[0]).filter(id => pending.has(id));
@@ -51,12 +57,13 @@ export function settledCandidateGroups(store, { stacks, connection }) {
       const members = group.ids.filter(id => pending.has(id));
       if (!members.length) continue;
       result.groups.push({ ...group, ids: members,
-        id: members.length === group.ids.length ? group.id : members.length === 1 ? `single:${CANDIDATE_METHOD}:${members[0]}`
-          : fingerprint({ method: CANDIDATE_METHOD, ids: members, route: group.route }),
+        id: members.length === group.ids.length ? group.id : members.length === 1 ? `single:${result.method}:${members[0]}`
+          : fingerprint({ method: result.method, ids: members, route: group.route }),
         capturedMs: pending.get(members[0]).time });
     }
     result.scopes.push({ id, ids, referenceIds: saved.referenceIds.filter(id => pending.has(id)),
-      materialKeys: ids.map(id => pending.get(id).materialKey), needsRanks: false });
+      materialKeys: ids.map(id => pending.get(id).materialKey), needsRanks: false,
+      ...(saved.embeddings ? { embeddingKey: saved.embeddings } : {}) });
   }
   result.groups.sort((a,b) => (a.capturedMs ?? Infinity) - (b.capturedMs ?? Infinity) || a.ids[0].localeCompare(b.ids[0]));
   result.metrics.photos = rows.length;
@@ -79,6 +86,7 @@ export async function rememberSettledGroups(store, saved, current, now) {
     if (!saved.save({ id: scope.id, ...record, settled: {
       members: photos.map(p => [p.id, p.inputKey, p.availability, store.separationKey(p.id)]),
       referenceIds: scope.referenceIds, groups,
+      ...(scope.embeddingKey ? { embeddings: scope.embeddingKey } : {}),
     } }, now)) limited = true;
     if (performance.now() - slice >= 4) { await setImmediate(); slice = performance.now(); }
   }
