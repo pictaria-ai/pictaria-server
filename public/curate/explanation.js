@@ -1,4 +1,5 @@
 import { node, badgeNode } from './photos.js';
+import { photoAdviceSummary } from './photo-advice.js';
 import { evidenceRows, algorithmLabel, MARKS, HOW_STACKS_WORK } from './explanation-copy.js';
 
 const STEP_ICONS = { done: '✓', running: '', queued: '', unsure: '?', limited: 'i', skipped: '–', off: '–' };
@@ -62,6 +63,15 @@ export function explanation(comparison, prefix, status = null) {
     rows.append(row);
   }
   panel.append(rows);
+  const advice = comparison.photoRecommendations;
+  if (advice) {
+    const section = node('section', undefined, 'why-photo-advice');
+    section.append(node('strong', 'Photo Referee'), node('p', photoAdviceSummary(advice)));
+    for (const reason of new Set((advice.batches ?? []).filter(b => b.status === 'valid')
+      .flatMap(b => b.groups ?? []).map(g => g.reason).filter(Boolean))) section.append(node('p', reason));
+    if (advice.provider || advice.model) section.append(node('small', [advice.provider, advice.model].filter(Boolean).join(' · '), 'p-muted'));
+    panel.append(section);
+  }
   if (status?.updated) panel.append(node('p', UPDATED_NOTE, 'why-updated'));
   const footer = node('p', `${algorithmLabel(comparison)} · `, 'p-muted why-algorithm');
   const docs = node('a', 'How stacks work');

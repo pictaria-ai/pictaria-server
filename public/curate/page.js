@@ -3,7 +3,8 @@ import { comesAfter } from './order.js';
 import { explanation } from './explanation.js';
 import { PreviewImages } from './preview-images.js';
 import { node, thumbnail, photoCard, groupCard, savedOutcome, outcomeLabel, badgeNode, activityIndicator } from './photos.js';
-import { refereeActivity } from './referee-status.js';
+import { refereeActivity, photoRefereeActivity } from './referee-status.js';
+import { initialPhotoChoices, photoAssessment, photoAdviceSummary } from './photo-advice.js';
 import { stackStatus, statusCounts, mergeStatus, BADGE_WORDS } from './stack-status.js';
 
 const el = (id) => document.getElementById(id);
@@ -22,7 +23,7 @@ const state = {
   next: null,
   loading: false,
   comparison: null,
-  outcomes: {}, batchPhotos: new Set(), draftTouched: false,
+  outcomes: {}, batchPhotos: new Set(), draftTouched: false, draftSuggested: false,
   busy: false,
   undo: null,
   syncId: null,
@@ -187,11 +188,13 @@ function showViewStatus(view) {
   const paused = refinement?.state === 'paused' || refinement?.state === 'limited';
   const remaining = refinement?.remainingGroups ?? 0;
   const referee = refereeActivity(view.stackRefereeActivity);
+  const photoReferee = photoRefereeActivity(view.photoRefereeActivity);
+  const activities = [referee, photoReferee].filter(Boolean);
   // Words for page-level work that needs attention, then counts for the stacks
   // loaded here with the cards' icons. Library-wide progress is the tooltip.
   const notices = [paused ? 'Checks paused' : '',
     metadata?.problem ? 'Photo information paused' : metadata?.state === 'refreshing' ? 'Refreshing photo information' : '',
-    referee?.phase === 'attention' ? referee.title : ''].filter(Boolean);
+    ...activities.filter(a => a.phase === 'attention').map(a => a.title)].filter(Boolean);
   const counts = Object.entries(state.section === 'decided' ? {} : statusCounts(state.groups)).filter(([, n]) => n > 0);
   const summary = el('refinement'), signature = JSON.stringify([notices, counts]);
   if (summary.dataset.signature !== signature) {
@@ -205,15 +208,15 @@ function showViewStatus(view) {
       return item;
     })].flatMap((item, i) => i ? [' · ', item] : [item]));
   }
-  summary.title = [paused ? refinement?.problem : metadata?.problem, referee?.phase === 'attention' ? referee.detail : '',
+  summary.title = [paused ? refinement?.problem : metadata?.problem, ...activities.filter(a => a.phase === 'attention').map(a => a.detail),
     counts.length ? 'Counts cover the stacks loaded on this page.' : ''].filter(Boolean).join(' ');
-  const phase = paused || referee?.phase === 'attention' ? 'attention'
-    : refinement?.state === 'searching' || metadata?.state === 'refreshing' || referee?.phase === 'running' ? 'running'
-      : remaining > 0 || referee?.phase === 'queued' ? 'queued' : null;
+  const phase = paused || activities.some(a => a.phase === 'attention') ? 'attention'
+    : refinement?.state === 'searching' || metadata?.state === 'refreshing' || activities.some(a => a.phase === 'running') ? 'running'
+      : remaining > 0 || activities.some(a => a.phase === 'queued') ? 'queued' : null;
   const title = [paused ? refinement?.problem || 'Stack checks are paused.' : '',
     remaining > 0 ? `Checking stacks · ${remaining.toLocaleString()} remaining across all pending photos, including outside this view. Includes queued and in-progress checks. Each check covers nearby photos that may form more than one stack.` : '',
     metadata?.state === 'refreshing' ? 'Refreshing photo information.' : '',
-    referee ? `${referee.title}. ${referee.detail}` : ''].filter(Boolean).join(' ') || 'Checking pending stacks in the background';
+    ...activities.map(a => `${a.title}. ${a.detail}`)].filter(Boolean).join(' ') || 'Checking pending stacks in the background';
   const slot = el('check-activity');
   if (slot.firstChild?.dataset.phase !== (phase ?? undefined)) slot.replaceChildren(...(phase ? [activityIndicator(phase, title)] : []));
   else if (phase) slot.firstChild.title = slot.firstChild.ariaLabel = title;
@@ -235,6 +238,10 @@ function showComparisonStatus(patch = {}) {
   mergeStatus(c, statuses);
   const status = stackStatus(comparisonGroup(), { decided: state.section === 'decided' });
   const signature = JSON.stringify([c.id, status]);
+  const summary = el('photo-advice-summary');
+  summary.textContent = photoAdviceSummary(c.photoRecommendations) ||
+    (c.photoReferee?.state === 'complete' && !c.updated ? 'Photo Referee suggestions are ready. Reopen this comparison to see them; your draft stays unchanged.' : '');
+  summary.hidden = !summary.textContent;
   if (c.ids.length === 1) {
     const target = el('photo-reason');
     if (target.dataset.status !== signature) {
@@ -287,7 +294,7 @@ async function compare(group) {
   state.batchPhotos.clear();
   if (!keepPhoto) state.comparison = null;
   state.outcomes = {};
-  state.draftTouched = false;
+  state.draftTouched = false; state.draftSuggested = false;
   state.openFailed = false;
   failedPreviews = new Set();
   el('preview-errors').hidden = true;
@@ -323,8 +330,9 @@ async function compare(group) {
     if (generation !== state.dialogGeneration || !(single ? el('photo-view') : el('comparison')).open) return;
     state.comparison = comparison;
     showComparisonStatus();
-    state.outcomes = comparison.oversized ? {} : Object.fromEntries(comparison.photos.map(photo =>
-      [photo.id, savedOutcome(photo) || 'reviewed']));
+    state.outcomes = comparison.oversized ? {} : initialPhotoChoices(comparison, { decided: state.section === 'decided' });
+    state.draftSuggested = state.section === 'pending' && !comparison.updated && comparison.photoRecommendations?.canApplyAll === true &&
+      Object.values(state.outcomes).includes('approve');
     state.photoList = [...comparison.photos, ...comparison.context];
     el('comparison-state').textContent = comparison.oversized
       ? 'This group exceeds the 1,000-photo decision limit. Only the first 50 previews are shown; decisions are disabled. Turn off stacks in Settings to review these photos individually.'
@@ -337,6 +345,7 @@ async function compare(group) {
       ...comparison.photos.map((photo, index) =>
         photoCard(photo, {
           label: `Photo ${index + 1}`, suggested: suggested.has(photo.id),
+          assessment: photoAssessment(comparison.photoRecommendations, photo.id),
           selected: () => state.batchPhotos.has(photo.id),
           select: (selected) => {
             selected ? state.batchPhotos.add(photo.id) : state.batchPhotos.delete(photo.id);
@@ -409,7 +418,12 @@ function renderPhoto(photo, preview) {
   el('photo-caption').textContent = photo.caption || '';
   el('photo-date').textContent = photo.capturedAt ? new Date(photo.capturedAt).toLocaleString() : '';
   el('photo-score').textContent = Number.isFinite(photo.frameScore) ? `Enrichment score: ${photo.frameScore.toFixed(2)}` : '';
-  el('photo-model').hidden = true;
+  const assessment = photoAssessment(state.comparison?.photoRecommendations, photo.id);
+  const advice = state.comparison?.photoRecommendations;
+  el('photo-model').hidden = !assessment;
+  el('photo-model').textContent = assessment ? `Photo Referee · ${assessment.suggested ? 'Suggested keeper' : 'Not suggested'}${advice.model ? ` · ${advice.model}` : ''}` : '';
+  el('photo-assessment').hidden = !assessment;
+  el('photo-assessment').textContent = assessment?.reason ?? '';
   el('photo-image-error').hidden = preview.ok;
   el('photo-tags').replaceChildren(...(photo.tags || []).map((tag) => node('span', tag)));
   const references = state.viewerMode === 'single' ? state.comparison.context : [];
@@ -987,10 +1001,10 @@ document.addEventListener('keydown', (event) => {
     event.preventDefault(); photos[index + (key === 'arrowleft' ? -1 : 1)]?.focus();
   } else if (key === 'enter' && event.target === focused) {
     // Enter on an image/button retains its native behavior; only the explicitly
-    // focused card with an explicitly marked draft can invoke save-and-next.
+    // focused card with a marked draft or a suggested Yes can invoke save-and-next.
     // Automatic initial focus must never turn a stray Enter into a Skip-all save.
     event.preventDefault();
-    if (state.draftTouched) run(() => saveComparison(true));
+    if (state.draftTouched || state.draftSuggested) run(() => saveComparison(true));
   }
 });
 window.addEventListener('pagehide', () => client.channel?.close());

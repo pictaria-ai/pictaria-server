@@ -19,7 +19,7 @@ const DETAILS = {
   checked: 'Pictaria’s checks settled this grouping.',
   apart: 'Kept apart from photos taken at the same time.',
 };
-const APART = new Set(['embedding-apart', 'people-apart', 'rank-contrast', 'saved-split']);
+const APART = new Set(['embedding-apart', 'people-apart', 'rank-contrast', 'saved-split', 'photo-split']);
 // candidate-unconfirmed, or standard-1's time stacks without candidate stacking.
 const UNSURE_ROUTES = new Set(['candidate-unconfirmed', 'uncertain']);
 const LIMITED = new Set(['incomplete', 'paused', 'limited', 'unavailable']);
@@ -74,14 +74,17 @@ function aiStep(group) {
 export function keeperCount(group) {
   if (group?.photoReferee?.state !== 'complete') return null;
   const n = group.photoReferee.keepers ?? group.photoRecommendations?.keeperIds?.length;
-  return Number.isInteger(n) && n >= 0 ? n : null;
+  return Number.isInteger(n) && n >= 0 && !(n === 0 && group.photoReferee.canApplyAll === false) ? n : null;
 }
 function keeperStep(group) {
   const r = group.photoReferee;
   switch (r?.state) {
     case 'complete': {
       const n = keeperCount(group);
-      return step('Keepers', 'done', n === null ? 'done' : n ? `${n} suggested` : 'none suggested');
+      return step('Keepers', 'done', n === null ? (r.canApplyAll === false ? 'review manually' : 'done') : n ? `${n} suggested` : 'none suggested',
+        r.unavailableReason ? 'Stack checking is not ready; review the suggestions manually.'
+          : r.canApplyAll === false ? 'Separate comparisons found different subjects; review the suggestions manually.'
+          : r.coverage === 'within-batches' ? 'Compared in separate batches, not against every photo in this stack.' : undefined);
     }
     case 'checking': return step('Keepers', 'running', 'running');
     case 'waiting': return step('Keepers', 'queued', r.reason === 'stack-pending' ? 'waits for the AI check'

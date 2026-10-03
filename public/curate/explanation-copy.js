@@ -22,6 +22,7 @@ const ROWS = {
   'people-apart': ['apart', 'People', 'Different people from some nearby photos'],
   'rank-contrast': ['apart', 'Searches', 'Immich searches separate some nearby photos'],
   'saved-split': ['apart', 'Your split', 'Your earlier split applies'],
+  'photo-split': ['apart', 'Photo Referee', 'Separated different subjects while suggesting photos'],
   unlinked: ['info', 'Grouping', 'Nothing linked it to the nearby photos'],
   alone: ['info', 'Taken', 'No other pending photo close in time'],
   'stacks-off': ['info', 'Stacks', 'Turned off in Settings'],

@@ -27,7 +27,11 @@ const short = {
   'invalid-answer': 'the model gave no valid answer',
   'attempts-finished': 'the allowed attempts are used up',
   'photo-limit': 'the request allowance for these photos is used up',
-  'comparison-changed': 'the AI settings changed',
+  'comparison-changed': 'the comparison inputs or AI settings changed',
+  'request-limit': 'too many comparisons for the automatic limit',
+  'dense-neighborhood': 'too many nearby photos for automatic comparison',
+  'provider-rejected': 'the provider could not complete the comparison',
+  'rendition': 'the previews could not be used',
 };
 
 // Explicit server state only; unknown reasons stay generic.
@@ -50,4 +54,13 @@ export function refereeActivity(status) {
   if (['paused', 'incomplete'].includes(status.state)) return { title: 'Stack Referee paused', phase: 'attention',
     detail: `${reasons[status.reason] ?? 'The Stack Referee could not finish its checks.'} You can still curate these photos.` };
   return null;
+}
+
+export function photoRefereeActivity(status) {
+  const presentation = refereeActivity(status);
+  if (!presentation) return null;
+  return { ...presentation, title: presentation.title.replace('Stack Referee', 'Photo Referee'),
+    detail: status.state === 'checking' ? 'The AI is comparing photos to suggest which ones to keep.'
+      : status.reason === 'model-failures' ? 'The selected model repeatedly failed photo comparisons. Choose another multi-image vision model in Settings. You can still curate.'
+        : presentation.detail.replaceAll('Stack Referee', 'Photo Referee').replaceAll('stack checks', 'photo comparisons') };
 }

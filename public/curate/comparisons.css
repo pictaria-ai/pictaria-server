@@ -743,6 +743,9 @@ dialog::backdrop {
 .photo-card:focus-visible, .photo-card:focus-within { outline: 3px solid var(--p-accent); outline-offset: 2px; }
 .photo-label, .draft-outcome { display: block; color: var(--p-muted); font-size: 11px; margin: 3px 0 6px; }
 .draft-outcome { margin: 7px 0 0; }
+.photo-advice { display: block; color: var(--p-muted); font-size: 11px; margin-top: 5px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+#photo-advice-summary { font-size: 12px; margin: 6px 0 10px; }
+#photo-assessment { white-space: pre-wrap; }
 .comparison-keys { font-size: 11px; margin: 0 0 12px; }
 .save-actions { display: flex; gap: 8px; flex-shrink: 0; margin-left: auto; }
 #photo-outcome { font-size: 14px; font-weight: 600; }

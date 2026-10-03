@@ -329,7 +329,14 @@ keepers, with a count when more than one, a **Keepers** step in the strip, and
 stars on the suggested photos in the open stack. The page reads a group's
 `photoReferee` status (with `keepers` once complete) and the comparison's
 `photoRecommendations.keeperIds`. A keeper star does not imply that the Stack
-Referee ran.
+Referee ran. The lightbox shows per-photo reasons, and Why records batch
+coverage and the provider/model. Complete applicable recommendations seed a new
+untouched draft with Yes for suggested photos and Skip for the rest. Save still
+confirms the human's choices; status polls never overwrite an open draft.
+Partial/mixed batches stay manual. Whole-input Photo Referee splits appear only
+when the view refreshes and reuse their suggestions without another AI call.
+See the [Photo Referee guide](CURATE-PHOTO-REFEREE.md).
+
 Stack Referee is available as an opt-in, off by default, using the configured
 shared Curate provider/model and a ten-photo per-request ceiling. Photo Referee
 remains unavailable. See the

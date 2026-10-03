@@ -23,7 +23,7 @@ export const outcomeLabel = (value) => choices.find(([key]) => key === value)?.[
 export function photoCard(
   photo,
   { readOnly = false, label = 'Photo', outcome = () => 'reviewed', change, open,
-    selected = () => false, select, imageState = () => {}, suggested = false },
+    selected = () => false, select, imageState = () => {}, suggested = false, assessment = null },
 ) {
   const card = node('article', undefined, 'photo-card');
   card.dataset.photoId = photo.id;
@@ -59,6 +59,11 @@ export function photoCard(
       actions.append(button);
     }
     info.append(node('small', label, 'photo-label'), actions, node('small', '', 'draft-outcome'));
+    if (assessment) {
+      const reason = node('small', `Photo Referee: ${assessment.reason}`, 'photo-advice');
+      reason.title = reason.textContent;
+      info.append(reason);
+    }
   }
   const imageError = node('span', 'Preview unavailable. Try opening it in Immich.', 'p-muted');
   imageError.hidden = true;

@@ -7,6 +7,15 @@ All notable changes to Pictaria Server are documented here. This project follows
 
 ### Development
 
+- Connect Photo Referee recommendations to Curate Preview (PIC-116), using the
+  shared PIC-371 gold stars and Why panel. Show per-photo reasons, zero/multiple
+  suggestions, batch coverage and independent background activity. Complete
+  applicable advice seeds a new draft; Save still confirms human choices, and
+  live updates preserve open drafts. Whole-input splits appear at the next view
+  refresh and reuse per-group advice without recursive AI calls. Partial batches
+  stay manual. Photo Referee remains unavailable pending combined review and
+  controlled activation acceptance.
+
 - Added the Photo Referee contract, bounded comparison planner and background worker
   (PIC-116). Retain the released quality criteria within each subject, with
   explicit zero/one/multiple recommendations, per-photo explanations and
