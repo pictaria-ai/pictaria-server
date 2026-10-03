@@ -120,11 +120,14 @@ search draft has not been applied.
   the status badge, with its word, sits beside the checkbox controls.
 - In a comparison, focus a photo using **Left/Right** or **1–9**, then use
   **Y / S / F / N** to mark its draft outcome. **Enter** on the focused card
-  saves the comparison and continues **after at least one explicit draft choice**
-  (including Skip). Initial focus or checking boxes alone does not enable this
-  shortcut. The Save buttons still allow an intentional Skip-all. Enter on a
-  button or image retains its normal action. Modified/repeated keys, inputs, reference photos and uncertain
-  actions cannot invoke these shortcuts.
+  saves the comparison and continues after **at least one explicit draft choice**
+  (including Skip), or when complete, applicable Photo Referee advice has seeded
+  **suggested Yes choices**. In that case, Enter on the initially focused card
+  confirms the suggested draft. An untouched all-Skip draft, including one with
+  no suggested keepers, cannot be saved by Enter; initial focus or checking boxes
+  alone does not enable it. The Save buttons still allow an intentional Skip-all.
+  Enter on a button or image retains its normal action. Modified/repeated keys,
+  inputs, reference photos and uncertain actions cannot invoke these shortcuts.
 - Comparisons with more than ten photos open in a compact grid; **Compact grid**
   can be turned off for larger images. Equal-height image areas keep decision
   buttons aligned across different aspect ratios; photos are resized without cropping.

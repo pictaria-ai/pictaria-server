@@ -47,6 +47,7 @@ for (const keepers of [[], ['p2', 'p4']]) test(`Photo Referee UI: ${keepers.leng
   const text = selector => page.evaluate(`document.querySelector(${JSON.stringify(selector)}).textContent`);
   const outcomes = () => page.evaluate('[...document.querySelectorAll("#photos [data-choice][aria-pressed=true]")].map(b=>b.dataset.choice)');
   const operations = () => fixture.repo.db.prepare('SELECT COUNT(*) n FROM decision_operations').get().n;
+  const originalTags = fixture.repo.loadAssetTagsFor([1, 2, 3, 4].map(fixture.id));
   await page.navigate(`${fixture.base}/curate-preview.html`);
   await page.waitFor('document.querySelector(".gate-backdrop input")');
   await page.evaluate('document.querySelector(".gate-backdrop input").value="smoke-secret";document.querySelector(".gate-backdrop button").click()');
@@ -97,6 +98,63 @@ for (const keepers of [[], ['p2', 'p4']]) test(`Photo Referee UI: ${keepers.leng
   assert.equal(tags[fixture.id(4)].includes('frame/eligible'), keepers.length > 0);
   assert.equal(fixture.repo.curate.photo(fixture.contextId).state, 'approved');
   await click('#undo');
-  await page.waitFor('document.querySelector(".is-stack") && !document.querySelector("#refresh").disabled');
-  assert.ok([1, 2, 3, 4].every(n => fixture.repo.curate.photo(fixture.id(n)).state === 'undecided'));
+  await page.waitFor('document.querySelector(".is-stack") && !document.querySelector("#refresh").disabled && document.querySelector("#receipt-text").textContent.startsWith("Undid choices")');
+  assert.equal(operations(), 2);
+  // Undo commits tags immediately; the derived Curate projection can lag.
+  assert.deepEqual(fixture.repo.loadAssetTagsFor([1, 2, 3, 4].map(fixture.id)), originalTags);
 });
+
+for (const keepers of [[], ['p2', 'p4']]) test(
+  keepers.length ? 'Photo Referee Enter confirms the suggested draft and advances'
+    : 'Photo Referee Enter leaves an untouched all-Skip draft unsaved',
+  { timeout: 60000 }, async t => {
+    if (!findChrome()) return t.skip('Chrome required');
+    const track = cleanupAfter(t);
+    const fixture = track(await curatePreviewFixture({ stackSize: 4, singles: 1, metadataReady: true,
+      prepare: data => seedAdvice(data, keepers) }));
+    const browser = track(await launchChrome()), page = await browser.newPage();
+    const click = selector => page.evaluate(`document.querySelector(${JSON.stringify(selector)}).click()`);
+    const enter = async (autoRepeat = false) => {
+      await page.send('Input.dispatchKeyEvent', { type: 'keyDown', key: 'Enter', autoRepeat });
+      await page.send('Input.dispatchKeyEvent', { type: 'keyUp', key: 'Enter' });
+    };
+    const operations = () => fixture.repo.db.prepare('SELECT COUNT(*) n FROM decision_operations').get().n;
+    await page.navigate(`${fixture.base}/curate-preview.html`);
+    await page.waitFor('document.querySelector(".gate-backdrop input")');
+    await page.evaluate('document.querySelector(".gate-backdrop input").value="smoke-secret";document.querySelector(".gate-backdrop button").click()');
+    await page.waitFor('document.querySelector(".is-stack") && document.querySelector(".is-stack").dataset.badge!=="checking" && !document.querySelector("#refresh").disabled', { timeoutMs: 35000 });
+    await click('.is-stack .cover');
+    await page.waitFor('document.querySelectorAll("#photos .photo-card").length===4 && !document.querySelector("#apply-next").disabled');
+    assert.equal(await page.evaluate('document.activeElement===document.querySelector("#photos .photo-card")'), true,
+      'opening the comparison automatically focuses its first card');
+    assert.equal(operations(), 0);
+    assert.deepEqual(await page.evaluate('[...document.querySelectorAll("#photos [data-choice][aria-pressed=true]")].map(b=>b.dataset.choice)'),
+      keepers.length ? ['reviewed', 'approve', 'reviewed', 'approve'] : Array(4).fill('reviewed'));
+    await page.evaluate(`window.issuedDecisions=0;const nativeFetch=window.fetch;
+      window.fetch=(...args)=>{if(String(args[0]).endsWith('/operations'))window.issuedDecisions++;return nativeFetch(...args);}`);
+    await enter(true);
+    assert.equal(await page.evaluate('window.issuedDecisions'), 0, 'held Enter never confirms a draft');
+    await enter();
+    if (!keepers.length) {
+      await click('#select-all');
+      await page.evaluate('document.querySelector("#photos .photo-card").focus()');
+      await enter();
+      assert.equal(await page.evaluate('window.issuedDecisions'), 0, 'zero recommendations and checked boxes do not express save intent');
+      assert.equal(operations(), 0);
+      assert.equal(await page.evaluate('document.querySelector("#comparison").open'), true);
+      assert.ok([1, 2, 3, 4].every(n => fixture.repo.curate.photo(fixture.id(n)).state === 'undecided'));
+    } else {
+      await page.waitFor(`document.querySelector('#photo-view').open && document.querySelector('#photo-large').src.includes('${fixture.id(1001)}') && document.querySelector('#photo-loading').hidden && !document.querySelector('#refresh').disabled`);
+      assert.equal(await page.evaluate('window.issuedDecisions'), 1);
+      assert.equal(operations(), 1);
+      assert.equal(await page.evaluate('document.querySelector("#comparison").open'), false);
+      const tags = fixture.repo.loadAssetTagsFor([1, 2, 3, 4].map(fixture.id));
+      for (const n of [1, 2, 3, 4]) {
+        assert.equal(tags[fixture.id(n)].includes('frame/eligible'), n === 2 || n === 4);
+        assert.equal(tags[fixture.id(n)].includes('frame/reviewed'), n === 1 || n === 3);
+      }
+      assert.equal(fixture.repo.curate.photo(fixture.id(1001)).state, 'undecided', 'continuation does not decide the next photo');
+    }
+    assert.equal(fixture.repo.curate.photo(fixture.contextId).state, 'approved');
+  },
+);
