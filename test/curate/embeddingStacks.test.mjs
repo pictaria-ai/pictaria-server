@@ -51,6 +51,14 @@ test('Curate Preview stacks with image embeddings and searches nothing for embed
   const view = await s.curate.openView();
   assert.equal(s.curate.current.method, 'candidate-4');
   assert.deepEqual(sizes(view), [2, 1]);
+  // Status for the page (PIC-371): what kept the single apart, and its neighbors.
+  const single = view.groups.find(g => g.memberCount === 1), pair = view.groups.find(g => g.memberCount === 2);
+  assert.deepEqual(single.reasons, ['embedding-apart']);
+  assert.equal(pair.reasons, undefined, 'stacks do not repeat their reasons on every status poll');
+  const brief = ({ route, nearby, reasons }) => ({ route, nearby, reasons });
+  assert.deepEqual(brief(s.curate.comparison(view.viewId, single.id)), { route: 'single', nearby: 2, reasons: ['embedding-apart'] });
+  assert.deepEqual(brief(s.curate.comparison(view.viewId, pair.id)),
+    { route: 'candidate-supported', nearby: 1, reasons: ['embedding-near', 'embedding-apart'] });
   await s.searchAll();
   assert.equal(s.calls.length, 0, 'no Immich searches');
 
