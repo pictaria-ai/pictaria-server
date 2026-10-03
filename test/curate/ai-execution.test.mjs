@@ -56,7 +56,7 @@ test('server availability and mandatory admission fail closed before preparation
     const state = (await f.execution(options).run(f.job())).state;
     assert.ok(['disabled', 'waiting', 'stopped'].includes(state));
   }
-  assert.equal((await f.execution({ availability: undefined }).run(f.job({ role: 'keeper' }))).state, 'disabled');
+  assert.equal((await f.execution({ availability: { keeper: false } }).run(f.job({ role: 'keeper' }))).state, 'disabled');
   assert.deepEqual(f.counts(), { preparations: 0, requests: 0, accepted: 0 });
 }));
 

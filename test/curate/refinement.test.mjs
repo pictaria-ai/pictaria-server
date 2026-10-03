@@ -125,7 +125,7 @@ test('completed rank contrast separates hash-matched compositions, preserving th
   assert.equal(comparison.ids.length, 6);
   const refreshed = await s.curate.openView({ replacesViewId: view.viewId });
   assert.deepEqual(refreshed.groups.map(g => g.memberCount), [3,3,3]);
-  assert.match(s.curate.comparison(refreshed.viewId, refreshed.groups[0].id).reasons.join(' '), /contrast outweighs/);
+  assert.match(s.curate.comparison(refreshed.viewId, refreshed.groups[0].id).reasons.join(' '), /\brank-contrast\b/);
   s.advance(5000); await s.refine.tick(); assert.equal(s.calls.length, 6);
 });
 

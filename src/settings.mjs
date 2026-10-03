@@ -1,6 +1,7 @@
 import { isDeepStrictEqual } from 'node:util';
 import { join } from 'node:path';
 import { stackRefereeModelStatus } from './curate/referee-capabilities.mjs';
+import { STACK_EMBEDDING_THRESHOLDS } from './curate/embedding-evidence.mjs';
 import { CURATE_AI_AVAILABILITY, STACK_REFEREE_SCOPES, curateAiRoleEnabled } from './curate/ai-policy.mjs';
 
 import { writePrivateFileAtomicSync } from './atomicFile.mjs';
@@ -518,6 +519,19 @@ const BACKUP_FIELDS = {
   keep: { env: 'BACKUP_KEEP', label: 'Backups to keep', number: { min: 1, max: 60 } },
 };
 
+// Whether Stacks can use image embeddings with the saved Enrich settings. A
+// stored set is also needed; until one exists, stacking simply has no vectors.
+function embeddingStackStatus(config) {
+  if (config.enrichEmbeddings?.enabled !== true) {
+    return { usable: false, notice: 'Takes effect once Image embeddings is on in Settings → Enrich.' };
+  }
+  const model = normalizeEmbeddingModel(config.enrichEmbeddings.model);
+  if (!STACK_EMBEDDING_THRESHOLDS[model]) {
+    return { usable: false, notice: `${model} has no calibrated stacking thresholds yet, so Stacks don't use its embeddings. Calibrated: ${Object.keys(STACK_EMBEDDING_THRESHOLDS).join(', ')}.` };
+  }
+  return { usable: true, notice: '' };
+}
+
 const CURATE_FIELDS = {
   burstGrouping: {
     env: 'CURATE_BURST_GROUPING',
@@ -526,6 +540,15 @@ const CURATE_FIELDS = {
     read: (config) => config.curateBurstGrouping,
     apply: (config, value) => {
       config.curateBurstGrouping = Boolean(value);
+    },
+  },
+  embeddingStacks: {
+    env: 'CURATE_EMBEDDING_STACKS',
+    label: 'Use image embeddings in Stacks',
+    boolean: true,
+    read: (config) => config.curateEmbeddingStacks !== false,
+    apply: (config, value) => {
+      config.curateEmbeddingStacks = Boolean(value);
     },
   },
   stackRefereeEnabled: {
@@ -611,7 +634,7 @@ const SECTIONS = {
 
 const PROTOTYPE_SPECIAL_KEYS = new Set(['__proto__', 'prototype', 'constructor']);
 
-export const SETTINGS_VERSION = 9;
+export const SETTINGS_VERSION = 10;
 
 // Only credentials whose destination authority can vary belong here. Fixed
 // public APIs (OpenAI, ElevenLabs, Geoapify) do not need a stored binding.
@@ -734,6 +757,8 @@ const SETTINGS_MIGRATIONS = new Map([
   [7, (state) => ({ ...structuredClone(state), version: 8 })],
   // Adds the optional image-embedding fields; absent values keep env/defaults.
   [8, (state) => ({ ...structuredClone(state), version: 9 })],
+  // Version 10 adds curate.embeddingStacks (PIC-392); nothing to convert.
+  [9, (state) => ({ ...structuredClone(state), version: 10 })],
 ]);
 
 // The persisted contract intentionally excludes labels and help copy: those
@@ -894,6 +919,7 @@ export class SettingsStore {
       }
     }
     result.curate.stackRefereeEnabled.modelStatus = stackRefereeModelStatus(this.config);
+    result.curate.embeddingStacks.embeddingStatus = embeddingStackStatus(this.config);
     return result;
   }
 

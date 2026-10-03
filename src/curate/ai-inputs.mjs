@@ -166,7 +166,8 @@ export class CurateAiInputs {
         ON m.role=a.role AND m.input_key=a.input_key WHERE m.asset_id=?`).all(id);
       for (const row of advice) {
         const record = JSON.parse(row.json), members = record.ids;
-        if (record.photoReferee && this.current(record.photoReferee.snapshot)) return true;
+        if (record.photoReferee && (this.current(record.photoReferee.snapshot) ||
+          this.curate.photoReferee?.saved(this.curate.current?.byMember.get(id) ?? { ids: [] }))) return true;
         if (this.store.advice(row.role, members, row.schema_version)) return true;
       }
     }

@@ -22,7 +22,7 @@ const response = (ids, keepers = [ids[0]], groups = [{ ids, keepers, reason: 'Sa
   photos: ids.map(id => ({ id, eyes_closed: 'unsure', reason: 'Visible quality assessment.' })) });
 const until = async predicate => { for (let i = 0; i < 1000 && !predicate(); i++) await new Promise(r => setTimeout(r, 2)); assert.ok(predicate()); };
 
-async function fixture(work, { count = 4, availability = { stack: true, keeper: true }, capability = refereeCapability } = {}) {
+async function fixture(work, { count = 4, availability = CURATE_AI_AVAILABILITY, capability = refereeCapability } = {}) {
   const dir = mkdtempSync(join(tmpdir(), 'pictaria-photo-worker-')), path = join(dir, 'enrichment.sqlite');
   let repo, curate, scheduler, now = Date.now();
   const calls = [], downloads = [];
@@ -78,14 +78,20 @@ for (const keepers of [[], ['p2'], ['p1', 'p3', 'p4']]) test(`background saves $
   assert.equal(page.groups[0].photoReferee.state, 'complete');
   const comparison = f.curate.comparison(page.viewId, page.groups[0].id);
   assert.deepEqual(comparison.photoRecommendations.keeperIds, f.advice.keeperIds);
-  assert.doesNotMatch(JSON.stringify(comparison.photoRecommendations), /requestKey|inputKey|PRIVATE|synthetic/);
+  assert.doesNotMatch(JSON.stringify(comparison.photoRecommendations), /requestKey|inputKey|PRIVATE|http:/);
   f.config.curateKeeperRefereeEnabled = false; await f.run(); assert.equal(f.advice.state, 'complete');
 }));
 
-test('default server availability keeps the connected worker inert', async () => fixture(async f => {
+test('production availability requires opt-in, then permits background Photo Referee work independently', async () => fixture(async f => {
+  f.config.curateKeeperRefereeEnabled = false;
   await f.run(); f.advance(); await f.run(); assert.equal(f.calls.length, 0); assert.equal(f.downloads.length, 0);
   assert.deepEqual(f.curate.photoReferee.activity(), { state: 'off' });
-}, { availability: CURATE_AI_AVAILABILITY }));
+  f.config.curateKeeperRefereeEnabled = true;
+  await f.run(); assert.equal(f.curate.aiLifecycle.pending.size, 1);
+  f.advance(); assert.equal((await f.run()).state, 'succeeded');
+  assert.equal(f.calls.length, 1); assert.equal(f.advice.state, 'complete');
+  assert.equal(f.config.enrichEnabled, false); assert.equal(f.config.curateStackRefereeEnabled, false);
+}));
 
 test('thirty photos get three scheduled requests, durable partial progress, and no global partition', async () => fixture(async f => {
   await f.run(); assert.equal(f.curate.aiLifecycle.pending.size, 3);
@@ -125,17 +131,41 @@ test('mixed batch withholds global application and does not schedule a tournamen
   await f.run(); f.advance(); await f.run(); assert.equal(f.calls.length, 2);
 }, { count: 11 }));
 
-test('whole-input mixed recommendations are retained for the later stable-view/UI integration', async () => fixture(async f => {
+test('whole-input mixed recommendations publish at the next view and reuse advice without recursive calls', async () => fixture(async f => {
   f.answer = () => response(['p1', 'p2', 'p3', 'p4'], [], [
     { ids: ['p1', 'p3'], keepers: ['p3'], reason: 'First subject.' },
     { ids: ['p2', 'p4'], keepers: ['p2', 'p4'], reason: 'Second subject.' },
   ]);
   const page = await f.curate.openView();
   await f.run(); f.advance(); await f.run(); await f.curate.refresh();
-  assert.deepEqual(f.advice.partition.map(g => g.ids), [['a00', 'a02'], ['a01', 'a03']]);
+  assert.deepEqual(f.advice.partition.map(g => g.ids), [['a00', 'a02']]);
   assert.equal(f.curate.page(page.viewId).groups[0].memberCount, 4);
   assert.equal(f.curate.page(page.viewId).updatesAvailable, true);
-  assert.equal(f.curate.current.groups.length, 1, 'publishing Photo Referee splits is intentionally not activated in this backend increment');
+  assert.deepEqual(f.curate.current.groups.map(g => g.ids), [['a00', 'a02'], ['a01', 'a03']]);
+  assert.equal(f.curate.page(page.viewId).groups[0].photoReferee.state, 'updated');
+  const next = await f.curate.openView();
+  assert.deepEqual(next.groups.map(g => g.photoReferee.keepers), [1, 2]);
+  assert.deepEqual(next.groups.map(g => f.curate.comparison(next.viewId, g.id).photoRecommendations.keeperIds), [['a02'], ['a01', 'a03']]);
+  await f.restart(); await f.run(); f.advance(); await f.run();
+  assert.equal(f.calls.length, 1, 'no recursive Photo Referee call on split children');
+  f.advance(31 * 60_000);
+  const oldInputs = f.repo.db.prepare("SELECT COUNT(*) n FROM curate_ai_inputs WHERE role='keeper'").get().n;
+  f.curate.aiLifecycle.inputs.prune();
+  assert.equal(f.repo.db.prepare("SELECT COUNT(*) n FROM curate_ai_inputs WHERE role='keeper'").get().n, oldInputs,
+    'retention preserves accounting for usable child recommendations');
+  f.config.curateBurstGrouping = false; await f.curate.refresh();
+  assert.ok(f.curate.current.groups.every(g => g.ids.length === 1 && !g.photoPartition));
+  f.config.curateBurstGrouping = true; await f.curate.refresh();
+  assert.deepEqual(f.curate.current.groups.map(g => g.ids), [['a00', 'a02'], ['a01', 'a03']]);
+  f.config.curateStackRefereeEnabled = true; f.config.curateStackRefereeScope = 'all';
+  await f.run(); f.advance(); await f.run();
+  assert.equal(f.calls.length, 1, 'no recursive Stack Referee on Photo Referee partitions');
+  assert.equal(f.curate.stackReferee.status(f.group).reason, 'photo-referee-partition');
+  f.repo.recordDecision({ assetIds: ['a00', 'a02'], addTags: ['frame/eligible', 'frame/reviewed'], removeTags: [], action: 'approve' });
+  await f.curate.refresh();
+  assert.deepEqual(f.curate.photoReferee.recommendations(f.curate.current.groups[0]).keeperIds, ['a01', 'a03'],
+    'deciding one child preserves its sibling’s recommendations');
+  await f.run(); f.advance(); await f.run(); assert.equal(f.calls.length, 1);
 }));
 
 test('deterministic work and enabled Stack Referee must settle before Photo Referee discovery', async () => fixture(async f => {
@@ -406,4 +436,42 @@ test('invalid provider configuration still reports one configuration pause befor
   f.curate.aiLifecycle.resolveProvider = () => { throw new Error('PRIVATE CONFIGURATION ERROR'); };
   assert.deepEqual(f.curate.photoReferee.status(f.group), { state: 'paused', reason: 'configuration', scope: 'configuration' });
   await f.run(); f.advance(); await f.run(); assert.equal(f.calls.length, 0); assert.equal(f.downloads.length, 0);
+}));
+
+for (const change of ['new-member', 'source', 'context', 'decision']) test(`published Photo Referee split handles ${change} without stale child advice`, async () => fixture(async f => {
+  if (change === 'context') {
+    f.add('reference', -10);
+    f.repo.recordDecision({ assetIds: ['reference'], addTags: ['frame/eligible'], removeTags: [], action: 'approve' });
+  }
+  f.answer = (_images, prompt) => {
+    const ids = prompt.jsonSchema.properties.photos.items.properties.id.enum;
+    return response(ids, [], [{ ids: [ids[0], ids[1], ...ids.slice(4)], keepers: [ids[0]], reason: 'First subject.' },
+      { ids: [ids[2], ids[3]], keepers: [ids[2]], reason: 'Second subject.' }]);
+  };
+  await f.run(); f.advance(); await f.run(); await f.curate.refresh();
+  assert.deepEqual(f.curate.current.groups.map(g => g.ids), [['a00', 'a01'], ['a02', 'a03']]);
+  assert.deepEqual(f.advice.keeperIds, ['a00']);
+  if (change === 'new-member') f.add('new', 2);
+  if (change === 'source') f.repo.upsertAsset({ id: 'a02', checksum: 'changed' });
+  if (change === 'context') f.repo.recordDecision({ assetIds: ['reference'], addTags: ['frame/never-show'], removeTags: ['frame/eligible'], action: 'reject' });
+  if (change === 'decision') f.repo.recordDecision({ assetIds: ['a00'], addTags: ['frame/eligible'], removeTags: [], action: 'approve' });
+  assert.equal(f.advice, null, 'before the rebuild, source and human applicability is still checked');
+  await f.curate.refresh();
+  if (change === 'decision') {
+    assert.deepEqual(f.curate.current.groups.map(g => g.ids), [['a01'], ['a02', 'a03']], 'deciding one photo does not undo its grouping split');
+    assert.deepEqual(f.curate.photoReferee.recommendations(f.curate.current.groups[1]).keeperIds, ['a02']);
+  } else assert.ok(f.curate.current.groups.every(g => !g.photoPartition), 'stale partitions cannot restrain a new comparison');
+}));
+
+test('a separate read-only reference subject does not split or relabel the pending comparison', async () => fixture(async f => {
+  f.add('reference', -10);
+  f.repo.recordDecision({ assetIds: ['reference'], addTags: ['frame/eligible'], removeTags: [], action: 'approve' });
+  f.answer = () => response(['p1', 'p2', 'p3', 'p4', 'p5'], [], [
+    { ids: ['p1', 'p2', 'p3', 'p4'], keepers: ['p3'], reason: 'Pending subject.' },
+    { ids: ['p5'], keepers: [], reason: 'Reference only.' },
+  ]);
+  await f.run(); f.advance(); await f.run(); await f.curate.refresh();
+  assert.equal(f.curate.current.groups.length, 1); assert.equal(f.group.photoPartition, undefined);
+  assert.deepEqual(f.advice.keeperIds, ['a02']);
+  assert.ok(f.advice.batches[0].assessments.every(p => p.id !== 'reference'));
 }));

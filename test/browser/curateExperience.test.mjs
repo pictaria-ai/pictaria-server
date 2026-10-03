@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { launchChrome, findChrome } from './harness.mjs';
+import { cleanupAfter, launchChrome, findChrome } from './harness.mjs';
 import { curatePreviewFixture } from './curatePreviewFixture.mjs';
 
 test(
@@ -10,13 +10,10 @@ test(
   { timeout: 60000 },
   async (t) => {
     if (!findChrome()) return t.skip('Chrome required');
-    const fixture = await curatePreviewFixture({ stackSize: 3, singles: 3 }),
-      browser = await launchChrome(),
+    const track = cleanupAfter(t);
+    const fixture = track(await curatePreviewFixture({ stackSize: 3, singles: 3 })),
+      browser = track(await launchChrome()),
       page = await browser.newPage();
-    t.after(async () => {
-      await browser.stop();
-      await fixture.stop();
-    });
     const click = (selector) => page.evaluate(`document.querySelector(${JSON.stringify(selector)}).click()`);
     const wait = (expression) => page.waitFor(expression);
     const key = async (key, more = {}) =>
@@ -204,13 +201,10 @@ test(
   { timeout: 45000 },
   async (t) => {
     if (!findChrome()) return t.skip('Chrome required');
-    const fixture = await curatePreviewFixture({ stackSize: 1, singles: 0, metadataReady: true }),
-      browser = await launchChrome(),
+    const track = cleanupAfter(t);
+    const fixture = track(await curatePreviewFixture({ stackSize: 1, singles: 0, metadataReady: true })),
+      browser = track(await launchChrome()),
       page = await browser.newPage();
-    t.after(async () => {
-      await browser.stop();
-      await fixture.stop();
-    });
     const click = (selector) => page.evaluate(`document.querySelector(${JSON.stringify(selector)}).click()`);
     await page.navigate(`${fixture.base}/curate-preview.html`);
     await page.waitFor('document.querySelector(".gate-backdrop input")');
@@ -254,18 +248,15 @@ test(
   { timeout: 45000 },
   async (t) => {
     if (!findChrome()) return t.skip('Chrome required');
-    const fixture = await curatePreviewFixture({ stackSize: 0, singles: 51 }),
-      browser = await launchChrome(),
+    const track = cleanupAfter(t);
+    const fixture = track(await curatePreviewFixture({ stackSize: 0, singles: 51 })),
+      browser = track(await launchChrome()),
       page = await browser.newPage();
     fixture.add(2001, 51 * 600 + 1, 'last-stack-1'); // candidate merges with final single
     // This test exercises navigation, not an initial metadata refresh racing Save.
     // Material-input conflicts are covered separately; settle this fixture first.
     for (const asset of fixture.assets) fixture.repo.curate.mergeMetadataAsset({
       ...asset, tags: asset.id === fixture.contextId ? [{ id: 'frame/eligible', value: 'frame/eligible' }] : [],
-    });
-    t.after(async () => {
-      await browser.stop();
-      await fixture.stop();
     });
     await page.navigate(`${fixture.base}/curate-preview.html`);
     await page.waitFor('document.querySelector(".gate-backdrop input")');

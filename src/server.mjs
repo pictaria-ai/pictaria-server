@@ -212,8 +212,8 @@ const aiTagSync = new AiTagSyncService({ repo, immich, review, tagWrites, config
 const aiScheduler = new AiRequestScheduler();
 const aiConnections = new AiConnections({ limits: repo.curate.aiLimits, scheduler: aiScheduler,
   getConfig: () => config, stopped: () => lifecycle.stopped });
-// One shared executor for both forthcoming roles. Availability remains false;
-// role adapters and the durable recovery/retention lifecycle precede activation.
+// Both optional roles share scheduling, execution and durable recovery/retention.
+// Saved preferences and the lifecycle gates still control which work can start.
 curate.ai = new CurateAiExecution({ attempts: repo.curate.aiAttempts, limits: repo.curate.aiLimits,
   getConfig: () => config, availability: CURATE_AI_AVAILABILITY,
   stopped: () => lifecycle.stopped, scheduler: aiScheduler });

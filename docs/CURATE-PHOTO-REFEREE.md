@@ -8,15 +8,22 @@ decision marks a photo Yes, Skip, Fav or No.
 ## Current delivery
 
 PIC-116 adds the request/result contract, bounded comparison planner, background
-worker and saved-result/API integration. **Photo Referee remains unavailable in
-Settings.** Server availability still prevents its requests, regardless of the
-saved preference. Tests explicitly enable the worker with synthetic transports.
-The released `/curate.html` referee is unchanged.
+worker, saved-result/API integration, recommendation UI and whole-input
+partition publication. **Photo Referee is available in Settings → Curate.**
+It defaults off on fresh installs and requires Stacks to be on. It does not
+require Enrich or Stack Referee. The released `/curate.html` referee is unchanged.
 
-Recommendation UI, publication of whole-input grouping corrections and
-controlled test-instance acceptance remain before activation. This increment
-stores proposed partitions but does not publish them as new stacks or change
-human choices.
+Existing saved or environment preferences are honored. In particular, the
+settings v8 upgrade may already have copied an effective legacy referee on
+preference into Photo Referee. That preference can now start eligible background
+work after an update, even without a browser open. Saved Settings overrides win
+over environment values. Check the effective switch before a controlled install;
+no new migration resets the person's choice.
+
+Controlled test-instance acceptance remains before release. The UI consumes
+PIC-371's shared badges rather than introducing another status scheme. Synthetic
+tests cover the production availability gates, saved-result UI and transports;
+they do not establish real-provider quality or runtime acceptance.
 
 ## Quality baseline and response
 
@@ -176,24 +183,84 @@ but incomplete, without automatically replaying accepted comparisons.
 
 The page API adds `photoRefereeActivity` and compact per-group `photoReferee`
 status. Comparisons add `photoRecommendations`, projecting coverage, current
-recommendations, per-photo assessments and valid partitions without internal
-snapshots or hashes. Decided photos receive no recommendation payload. Pending
+recommendations, per-photo assessments and valid partitions with the saved provider/model name but without internal
+snapshots, connection details or hashes. Decided photos receive no recommendation payload. Pending
 prerequisites disable structural full-set application. These fields do not grant
-decision authority, change stable view membership, or overwrite draft choices.
+decision authority or overwrite open memberships and draft choices.
 
-## Integration still required
+## Recommendations in Curate Preview
 
-Before activation:
+The PIC-371 grouping badge remains independent of the Photo Referee. Complete
+advice supplies a gold star with the number suggested. A valid empty set reads
+“none suggested”; missing, invalid or mixed batch output never means none.
+The Why panel includes the comparison coverage, concise group reasons and
+saved provider/model. Every inspected valid batch provides per-photo reasons;
+the lightbox shows the full assessment. Model text is rendered as text.
 
-1. Publish complete whole-input grouping corrections at the stable-view boundary
-   and reuse their per-partition recommendations without recursive referee work.
-   Partial or mixed batch results must not fabricate a global partition.
-2. Connect visible Photo Referee states, recommendation markers and explanations.
-   Preselect only untouched drafts, preserve all accepted recommendations and
-   human edits, and bind any advice action to current applicability and intent.
-3. Run UI and controlled test-instance acceptance with the configured provider.
-   Synthetic worker tests do not establish model quality or live performance.
-   Keep legacy-referee removal and default-page cutover with PIC-372.
+Opening a new pending comparison seeds an untouched draft only when its advice
+is complete and applicable: suggested photos start at **Yes**, the others at
+**Skip**. Saved human outcomes take precedence. Partial/mixed batches and advice
+awaiting a prerequisite are inspectable but do not seed choices. Recommendations
+arriving while a comparison is open never change its draft; the page says to
+reopen it to inspect them. Zero suggestions never silently reject any photo.
+
+**Save** and **Save & next** remain explicit human confirmation of the displayed
+four-way outcomes, using the existing comparison-material, human-state and
+idempotent operation guards. There is no automatic advice-application endpoint
+or new decision mode. People can change any suggestion to Yes, Skip, Fav or No,
+including preserving several suggestions or none. Enter can confirm a draft
+with suggested Yes choices; an untouched all-Skip draft still needs an explicit
+button click or mark. Undo uses the existing decision operation.
+
+## Publishing Photo Referee splits
+
+A complete whole-input response can split an existing deterministic/Stack
+Referee group at the next stable-view refresh. It never joins groups, publishes
+transport batches as stacks, or includes reference-only groups. Each resulting
+group reads its own keeper set and assessments from the original accepted
+comparison. Neither referee recursively evaluates these children. A Photo
+Referee split is explained as such; it does not claim the Stack Referee ran.
+
+Saved partition evidence checks every original member's source, availability
+and human separation, plus the selected references. A new member joining the
+source group or changed evidence invalidates the partition. Human decisions
+may subtract members without undoing the split; recommendations on an untouched
+sibling remain useful. Recommendations require unchanged human state on their
+own pending members. A partially decided child falls back to manual review
+rather than manufacturing a new keeper judgment. The original paid input
+accounting remains protected while its recommendations are usable.
+
+Existing open comparisons retain their membership and drafts and report that
+a newer grouping is ready. Partial or mixed batch results never publish a
+global partition. Off stops new calls and does not erase accepted results.
+
+## Test-instance rollout
+
+1. Before installing, turn **Photo Referee** off in Settings → Curate if it is
+   already checked. Older builds permit saving an off preference even while
+   the worker is unavailable. Use the normal backup/update process. For an
+   isolated preview test, leave **Current-page AI referee** off as well.
+2. After installing, confirm the effective Curate provider/model and that Photo
+   Referee is available but still off. Inspect the existing pending groups and
+   decisions. No new enrichment or embedding backfill is needed.
+3. With Stacks on, enable **Photo Referee**. First test with Stack Referee off,
+   then with it on if testing the full pipeline. Photo Referee runs after
+   deterministic grouping and any enabled Stack Referee checks settle. Work
+   covers eligible pending stacks throughout the library, not only visible
+   cards; no open browser is required. Observe activity, gold stars/counts,
+   reasons, draft suggestions and labeled batch/incomplete coverage in
+   `/curate-preview.html`.
+4. After a few results, turn Photo Referee off. New preparation, submission and
+   retries stop; an already-submitted valid response may still finish. This
+   is an observed session, not an exact request cap. Record requests including
+   automatic retries, and confirm accepted results remain available. An open
+   draft and human decisions must remain unchanged until an explicit Save.
+5. Check restart reuse, then manually exercise Save and Undo as desired. Report
+   the exact commit and configured provider/model with any unexpected behavior.
+   Keep photos, raw model responses, identities and credentials private.
+
+These checks are still required for runtime acceptance. Legacy-referee removal
+and default-page cutover remain PIC-372 work; this build keeps the preview page.
 
 The [shared AI guide](CURATE-AI.md) and
 [Stack Referee guide](CURATE-STACK-REFEREE.md) describe the existing runtime.

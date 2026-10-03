@@ -3,7 +3,9 @@ import { DatabaseSync } from 'node:sqlite';
 import { CurateRepository } from './repository.mjs';
 import { groupPhotos } from './grouping.mjs';
 import { settledCandidateGroups } from './settled-groups.mjs';
+import { embeddingEvidence } from './embedding-evidence.mjs';
 import { applyStackChecks } from './stack-referee-results.mjs';
+import { applyPhotoPartitions } from './photo-referee-groups.mjs';
 
 // Read-only worker: source/projection writes stay on the server's existing
 // SQLite connection. One short WAL read snapshot gives the rebuild coherent
@@ -16,9 +18,10 @@ try {
     rows = workerData.candidate ? null : store.pending(),
     separations = store.separations();
   const deterministic = workerData.candidate
-    ? settledCandidateGroups(store, { stacks: workerData.stacks, connection: workerData.rankConnection })
+    ? settledCandidateGroups(store, { stacks: workerData.stacks, connection: workerData.rankConnection,
+      embeddings: embeddingEvidence(db, workerData.embeddings ?? null) })
     : groupPhotos(rows, { stacks: workerData.stacks, separations });
-  const result = applyStackChecks(store, deterministic, workerData.stacks);
+  const result = applyPhotoPartitions(store, applyStackChecks(store, deterministic, workerData.stacks), workerData.stacks);
   db.exec('COMMIT');
   parentPort.postMessage({ generation, ...result });
 } finally {

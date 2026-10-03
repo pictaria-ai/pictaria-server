@@ -7,14 +7,15 @@ import { transientStackPreviewFailure } from './stack-referee-images.mjs';
 import { PHOTO_REFEREE_CONTRACT, createPhotoRefereeRequest } from './photo-referee-contract.mjs';
 import { layoutPhotoRefereeComparisons, photoRefereeContextLimit } from './photo-referee-plan.mjs';
 import { photoRefereeImages } from './photo-referee-images.mjs';
+import { photoPartitionAdviceCurrent } from './photo-referee-groups.mjs';
 import { readPhotoRefereeRecord, savePhotoRefereeAnswer, photoRefereeRecommendations } from './photo-referee-results.mjs';
 
 export const PHOTO_PREVIEW_PAUSE_MS = 3 * 60_000;
 export const PHOTO_MODEL_FAILURE_LIMIT = 3;
 const MODEL_FAILURE_PREFIX = 'photo-model-failure:';
 
-// Runtime integration stays behind server availability until recommendation UI
-// and whole-input grouping corrections have passed their acceptance work.
+// The available worker still requires the user's Photo Referee preference and
+// Stacks, then the shared lifecycle's readiness, scheduling and budget gates.
 export class PhotoRefereeWorker {
   constructor(curate, { capability = () => null } = {}) {
     this.curate = curate; this.lifecycle = curate.aiLifecycle; this.capability = capability; this.cursor = 0;
@@ -61,22 +62,27 @@ export class PhotoRefereeWorker {
   saved(group) {
     const current = this.curate.current?.byId.get(group.id);
     if (!current || fingerprint(current.ids) !== fingerprint(group.ids)) return null;
-    const record = readPhotoRefereeRecord(this.curate.store, group.ids);
-    return record && this.lifecycle.inputs.current(record.photoReferee.snapshot) ? record : null;
+    const record = readPhotoRefereeRecord(this.curate.store, group.ids, { subset: Boolean(current.photoPartition) });
+    return record && (current.photoPartition
+      ? photoPartitionAdviceCurrent(this.curate.store, record, group.ids)
+      : this.lifecycle.inputs.current(record.photoReferee.snapshot)) ? record : null;
   }
   recommendations(group) {
     const record = this.saved(group);
     // Results remain inspectable after role-off. A newly pending prerequisite
     // must not expose an apply-all promise from earlier advice.
     if (!record) return null;
-    const result = photoRefereeRecommendations(record);
-    if (this.gate(group).state !== 'eligible') result.canApplyAll = false;
+    const result = photoRefereeRecommendations(record, group.ids);
+    if (!result) return null;
+    const gate = this.gate(group);
+    if (gate.state !== 'eligible') { result.canApplyAll = false; result.noneRecommended = false; result.unavailableReason = gate.reason; }
     return result;
   }
   gate(group) {
     group = this.curate.current?.byId.get(group.id) ?? group;
     if (['waiting', 'checking', 'updated'].includes(this.curate.refinement?.groupStatus(group)?.state))
       return { state: 'waiting', reason: 'deterministic-pending' };
+    if (group.photoPartition) return { state: 'eligible', checkCoverage: group.photoPartition.checkCoverage };
     if (!this.lifecycle.enabled('stack')) return { state: 'eligible', checkCoverage: 'off' };
     const check = this.curate.stackReferee?.status(group);
     if (check?.state === 'checked') return { state: 'eligible', checkCoverage: 'checked' };
@@ -138,10 +144,12 @@ export class PhotoRefereeWorker {
     return null;
   }
   status(group) {
-    const saved = this.saved(group), advice = saved && photoRefereeRecommendations(saved);
-    if (advice?.state === 'complete') return { state: 'complete', coverage: advice.coverage,
-      checkCoverage: advice.checkCoverage, completed: advice.batches.length, total: advice.batches.length };
+    const saved = this.saved(group), advice = saved && this.recommendations(group);
+    if (advice?.state === 'complete') return { state: 'complete', keepers: advice.keeperIds.length, canApplyAll: advice.canApplyAll, coverage: advice.coverage,
+      checkCoverage: advice.checkCoverage, ...(advice.unavailableReason ? { unavailableReason: advice.unavailableReason } : {}),
+      completed: advice.batches.length, total: advice.batches.length };
     if (!this.enabled()) return { state: 'off' };
+    if (this.curate.current?.byId.get(group.id)?.photoPartition) return { state: 'incomplete', reason: 'comparison-changed' };
     if (!this.curate.current?.byId.has(group.id)) return { state: 'updated' };
     if (group.ids.length < 2) return { state: 'skipped', reason: 'not-pending-stack' };
     const gate = this.gate(group);
@@ -178,7 +186,7 @@ export class PhotoRefereeWorker {
     for (const group of new Set([...preferred, ...batch])) {
       if (performance.now() - slice >= 4) { await setImmediate(); slice = performance.now(); }
       if (!this.enabled() || !this.modelReady() || !this.previewsReady()) return;
-      if (group.ids.length < 2 || this.gate(group).state !== 'eligible' || this.curate.refinement?.isFocused(group.ids)) continue;
+      if (group.photoPartition || group.ids.length < 2 || this.gate(group).state !== 'eligible' || this.curate.refinement?.isFocused(group.ids)) continue;
       const captured = this.capture(group);
       if (captured.state !== 'captured') continue;
       const saved = this.saved(group);

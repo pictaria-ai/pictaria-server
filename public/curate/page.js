@@ -2,8 +2,10 @@ import { CurateClient, request, decisionSummary } from './client.js';
 import { comesAfter } from './order.js';
 import { explanation } from './explanation.js';
 import { PreviewImages } from './preview-images.js';
-import { node, thumbnail, photoCard, groupCard, savedOutcome, outcomeLabel, groupSimilarity, similarityDetail, similarityIndicator, groupPresentation, statusIndicator } from './photos.js';
-import { stackRefereePresentation } from './referee-status.js';
+import { node, thumbnail, photoCard, groupCard, savedOutcome, outcomeLabel, badgeNode, activityIndicator } from './photos.js';
+import { refereeActivity, photoRefereeActivity } from './referee-status.js';
+import { initialPhotoChoices, photoAssessment, photoAdviceSummary } from './photo-advice.js';
+import { stackStatus, statusCounts, mergeStatus, BADGE_WORDS } from './stack-status.js';
 
 const el = (id) => document.getElementById(id);
 const client = new CurateClient();
@@ -21,7 +23,7 @@ const state = {
   next: null,
   loading: false,
   comparison: null,
-  outcomes: {}, batchPhotos: new Set(), draftTouched: false,
+  outcomes: {}, batchPhotos: new Set(), draftTouched: false, draftSuggested: false,
   busy: false,
   undo: null,
   syncId: null,
@@ -179,72 +181,89 @@ function showViewStatus(view) {
   const metadata = view.metadata;
   if (state.view?.viewId === view.viewId) state.view.metadata = metadata;
   if (state.comparison) el('metadata-retry').hidden = !metadata?.problem;
+  for (const group of view.groups) {
+    cards.get(group.id)?.updateStatus(group);
+    if (state.comparison?.groupId === group.id) showComparisonStatus(group);
+  }
   const paused = refinement?.state === 'paused' || refinement?.state === 'limited';
   const remaining = refinement?.remainingGroups ?? 0;
-  const checking = remaining > 0;
-  const progress = checking ? ` · ${remaining.toLocaleString()} remaining` : '';
-  const status = paused ? `Checks paused${progress}` : checking ? `Checking stacks${progress}`
-    : metadata?.problem ? 'Photo information paused'
-    : metadata?.state === 'refreshing' ? 'Refreshing photo information' : '';
-  const referee = stackRefereePresentation(view.stackRefereeActivity, { page: true });
-  el('refinement').textContent = [status, referee?.title].filter(Boolean).join(' · ');
-  el('refinement').title = [paused ? refinement?.problem : metadata?.problem,
-    checking ? 'Remaining checks across all pending photos, including outside this view. Includes queued and in-progress checks. Each check covers nearby photos that may form more than one stack.' : '',
-    referee?.detail ?? '',
-  ].filter(Boolean).join(' ');
-  const activity = paused ? { state: 'paused' } : refinement?.state === 'searching' || metadata?.state === 'refreshing'
-    ? { state: 'checking' } : checking ? { state: 'waiting' } : null;
-  const indicator = similarityIndicator(activity, { warning: paused }) ?? (referee ? statusIndicator(referee) : null);
-  if (indicator) {
-    indicator.title = indicator.ariaLabel = el('refinement').title || (paused ? 'Stack checks paused' : 'Checking pending stacks in the background');
+  const referee = refereeActivity(view.stackRefereeActivity);
+  const photoReferee = photoRefereeActivity(view.photoRefereeActivity);
+  const activities = [referee, photoReferee].filter(Boolean);
+  // Words for page-level work that needs attention, then counts for the stacks
+  // loaded here with the cards' icons. Library-wide progress is the tooltip.
+  const notices = [paused ? 'Checks paused' : '',
+    metadata?.problem ? 'Photo information paused' : metadata?.state === 'refreshing' ? 'Refreshing photo information' : '',
+    ...activities.filter(a => a.phase === 'attention').map(a => a.title)].filter(Boolean);
+  const counts = Object.entries(state.section === 'decided' ? {} : statusCounts(state.groups)).filter(([, n]) => n > 0);
+  const summary = el('refinement'), signature = JSON.stringify([notices, counts]);
+  if (summary.dataset.signature !== signature) {
+    summary.dataset.signature = signature;
+    summary.replaceChildren(...[...notices.map(text => node('span', text, 'status-notice')), ...counts.map(([badge, n]) => {
+      const item = node('span', undefined, 'status-count'), icon = badgeNode({ badge, word: BADGE_WORDS[badge] });
+      for (const name of ['role', 'aria-label', 'title']) icon.removeAttribute(name);
+      icon.setAttribute('aria-hidden', 'true');
+      item.dataset.badge = badge;
+      item.append(icon, `${n.toLocaleString()} ${BADGE_WORDS[badge].toLowerCase()}`);
+      return item;
+    })].flatMap((item, i) => i ? [' · ', item] : [item]));
   }
+  summary.title = [paused ? refinement?.problem : metadata?.problem, ...activities.filter(a => a.phase === 'attention').map(a => a.detail),
+    counts.length ? 'Counts cover the stacks loaded on this page.' : ''].filter(Boolean).join(' ');
+  const phase = paused || activities.some(a => a.phase === 'attention') ? 'attention'
+    : refinement?.state === 'searching' || metadata?.state === 'refreshing' || activities.some(a => a.phase === 'running') ? 'running'
+      : remaining > 0 || activities.some(a => a.phase === 'queued') ? 'queued' : null;
+  const title = [paused ? refinement?.problem || 'Stack checks are paused.' : '',
+    remaining > 0 ? `Checking stacks · ${remaining.toLocaleString()} remaining across all pending photos, including outside this view. Includes queued and in-progress checks. Each check covers nearby photos that may form more than one stack.` : '',
+    metadata?.state === 'refreshing' ? 'Refreshing photo information.' : '',
+    ...activities.map(a => `${a.title}. ${a.detail}`)].filter(Boolean).join(' ') || 'Checking pending stacks in the background';
   const slot = el('check-activity');
-  if (slot.firstChild?.dataset.phase !== indicator?.dataset.phase) slot.replaceChildren(...(indicator ? [indicator] : []));
-  else if (indicator) slot.firstChild.title = slot.firstChild.ariaLabel = indicator.title;
-  for (const group of view.groups) {
-    cards.get(group.id)?.updateSimilarity(group.similarity, group.stackReferee);
-    if (state.comparison?.groupId === group.id) showComparisonSimilarity(group.similarity, group.stackReferee);
-  }
+  if (slot.firstChild?.dataset.phase !== (phase ?? undefined)) slot.replaceChildren(...(phase ? [activityIndicator(phase, title)] : []));
+  else if (phase) slot.firstChild.title = slot.firstChild.ariaLabel = title;
   scheduleUpdates();
 }
-function showComparisonSimilarity(status, referee = state.comparison?.stackReferee) {
-  if (state.comparison) {
-    state.comparison.similarity = status;
-    state.comparison.stackReferee = referee;
+function comparisonGroup() {
+  const c = state.comparison;
+  return c && { memberCount: c.ids.length, route: c.route ?? state.groups.find(group => group.id === c.groupId)?.route,
+    similarity: c.similarity, stackReferee: c.stackReferee, photoReferee: c.photoReferee,
+    photoRecommendations: c.photoRecommendations, reasons: c.reasons, updated: c.updated };
+}
+// Live status for the open comparison. A machine update is for the next view,
+// not an instruction to abandon an inspected comparison: its photos and drafts
+// stay put, and real scope/input conflicts still use the Save guards.
+function showComparisonStatus(patch = {}) {
+  const c = state.comparison;
+  if (!c) return;
+  const { reasons, ...statuses } = patch; // The comparison keeps the reasons it opened with.
+  mergeStatus(c, statuses);
+  const status = stackStatus(comparisonGroup(), { decided: state.section === 'decided' });
+  const signature = JSON.stringify([c.id, status]);
+  const summary = el('photo-advice-summary');
+  summary.textContent = photoAdviceSummary(c.photoRecommendations) ||
+    (c.photoReferee?.state === 'complete' && !c.updated ? 'Photo Referee suggestions are ready. Reopen this comparison to see them; your draft stays unchanged.' : '');
+  summary.hidden = !summary.textContent;
+  if (c.ids.length === 1) {
+    const target = el('photo-reason');
+    if (target.dataset.status !== signature) {
+      target.dataset.status = signature;
+      target.replaceChildren(explanation(c, 'single-reason', status));
+    }
   }
-  // A machine update is for the next view, not an instruction to abandon an
-  // inspected comparison. Real scope/input conflicts still use the Save guards.
-  if (status?.state === 'updated') status = null;
-  else status = groupSimilarity(state.groups.find(group => group.id === state.comparison?.groupId), status);
-  const presentation = groupPresentation({ similarity: status, stackReferee: referee });
-  const hasReferee = Boolean(stackRefereePresentation(referee));
-  const title = presentation.title;
-  const working = ['waiting', 'checking'].includes(presentation.phase);
-  const detail = [presentation.detail, hasReferee && similarityDetail(status) ? `Earlier grouping: ${similarityDetail(status)}` : '', working
-    ? 'This stack may change after checking. You can still choose which photos to keep.'
-    : !hasReferee && (status?.uncertain || ['incomplete', 'paused', 'limited', 'unavailable'].includes(status?.state))
-      ? 'You can still choose which photos to keep.' : ''].filter(Boolean).join(' ');
-  for (const id of ['comparison-similarity','photo-similarity']) {
+  for (const id of ['comparison-similarity', 'photo-similarity']) {
     const target = el(id);
-    target.hidden = (!title && !(state.comparison?.ids.length > 1)) || (id === 'photo-similarity' && state.viewerMode === 'single');
-    const signature = JSON.stringify([state.comparison?.id, status, referee]);
-    if (target.dataset.status === signature) continue;
+    target.hidden = c.ids.length < 2 || (id === 'photo-similarity' && state.viewerMode === 'single');
+    if (target.hidden || target.dataset.status === signature) continue;
     target.dataset.status = signature;
     if (id === 'comparison-similarity') {
-      target.replaceChildren(explanation(state.comparison, 'stack-reason', title ? {
-        title, detail, indicator: statusIndicator(presentation),
-      } : null));
+      target.replaceChildren(explanation(c, 'stack-reason', status));
       continue;
     }
     const copy = node('div'), heading = node('div', undefined, 'check-heading');
-    heading.append(node('strong', title || 'Stack comparison'));
-    if (state.comparison?.ids.length > 1)
-      heading.append(explanation(state.comparison, 'photo-stack-reason', title ? { title, detail } : null));
+    heading.append(explanation(c, 'photo-stack-reason', status));
     copy.append(heading);
-    if (detail) copy.append(node('p', detail));
-    const indicator = statusIndicator(presentation);
-    target.replaceChildren(...(indicator ? [indicator] : []), copy);
-    target.classList.toggle('check-pending', working);
+    if (status?.detail) copy.append(node('p', status.detail));
+    target.replaceChildren(copy);
+    target.classList.toggle('check-pending', status?.badge === 'checking');
   }
 }
 async function more() {
@@ -275,7 +294,7 @@ async function compare(group) {
   state.batchPhotos.clear();
   if (!keepPhoto) state.comparison = null;
   state.outcomes = {};
-  state.draftTouched = false;
+  state.draftTouched = false; state.draftSuggested = false;
   state.openFailed = false;
   failedPreviews = new Set();
   el('preview-errors').hidden = true;
@@ -299,12 +318,21 @@ async function compare(group) {
   try {
     const comparison = await client.comparison(state.view.viewId, group.id);
     if (generation !== state.dialogGeneration) return;
+    // Start from the card's statuses for these photos, so a newer grouping
+    // keeps the verdict the card showed.
+    const card = state.groups.find(g => g.id === group.id);
+    if (card) {
+      const opened = { similarity: comparison.similarity, stackReferee: comparison.stackReferee, photoReferee: comparison.photoReferee };
+      Object.assign(comparison, { similarity: card.similarity, stackReferee: card.stackReferee, photoReferee: card.photoReferee });
+      mergeStatus(comparison, opened);
+    }
     const preview = single ? await previews.get(comparison.photos[0].id).promise : null;
     if (generation !== state.dialogGeneration || !(single ? el('photo-view') : el('comparison')).open) return;
     state.comparison = comparison;
-    showComparisonSimilarity(comparison.similarity);
-    state.outcomes = comparison.oversized ? {} : Object.fromEntries(comparison.photos.map(photo =>
-      [photo.id, savedOutcome(photo) || 'reviewed']));
+    showComparisonStatus();
+    state.outcomes = comparison.oversized ? {} : initialPhotoChoices(comparison, { decided: state.section === 'decided' });
+    state.draftSuggested = state.section === 'pending' && !comparison.updated && comparison.photoRecommendations?.canApplyAll === true &&
+      Object.values(state.outcomes).includes('approve');
     state.photoList = [...comparison.photos, ...comparison.context];
     el('comparison-state').textContent = comparison.oversized
       ? 'This group exceeds the 1,000-photo decision limit. Only the first 50 previews are shown; decisions are disabled. Turn off stacks in Settings to review these photos individually.'
@@ -312,10 +340,12 @@ async function compare(group) {
         ? 'Some photo information is awaiting refresh. You can still make a manual choice; changed inputs will require a refresh before saving.'
         : '';
     el('metadata-retry').hidden = !state.view.metadata?.problem;
+    const suggested = new Set(comparison.photoRecommendations?.keeperIds ?? []);
     el('photos').replaceChildren(
       ...comparison.photos.map((photo, index) =>
         photoCard(photo, {
-          label: `Photo ${index + 1}`,
+          label: `Photo ${index + 1}`, suggested: suggested.has(photo.id),
+          assessment: photoAssessment(comparison.photoRecommendations, photo.id),
           selected: () => state.batchPhotos.has(photo.id),
           select: (selected) => {
             selected ? state.batchPhotos.add(photo.id) : state.batchPhotos.delete(photo.id);
@@ -388,7 +418,12 @@ function renderPhoto(photo, preview) {
   el('photo-caption').textContent = photo.caption || '';
   el('photo-date').textContent = photo.capturedAt ? new Date(photo.capturedAt).toLocaleString() : '';
   el('photo-score').textContent = Number.isFinite(photo.frameScore) ? `Enrichment score: ${photo.frameScore.toFixed(2)}` : '';
-  el('photo-model').hidden = true;
+  const assessment = photoAssessment(state.comparison?.photoRecommendations, photo.id);
+  const advice = state.comparison?.photoRecommendations;
+  el('photo-model').hidden = !assessment;
+  el('photo-model').textContent = assessment ? `Photo Referee · ${assessment.suggested ? 'Suggested keeper' : 'Not suggested'}${advice.model ? ` · ${advice.model}` : ''}` : '';
+  el('photo-assessment').hidden = !assessment;
+  el('photo-assessment').textContent = assessment?.reason ?? '';
   el('photo-image-error').hidden = preview.ok;
   el('photo-tags').replaceChildren(...(photo.tags || []).map((tag) => node('span', tag)));
   const references = state.viewerMode === 'single' ? state.comparison.context : [];
@@ -406,7 +441,7 @@ function renderPhoto(photo, preview) {
   el('photo-next').disabled = state.photoIndex >= state.photoList.length - 1;
   if (!el('photo-view').open) el('photo-view').showModal();
   syncViewer();
-  showComparisonSimilarity(state.comparison?.similarity);
+  showComparisonStatus();
   fullCaption(photo);
   const list = state.viewerMode === 'single' ? state.groups : state.photoList;
   const index = state.viewerMode === 'single'
@@ -453,10 +488,6 @@ function syncViewer() {
   el('photo-readonly').textContent = photo?.state === 'approved' ? 'Already kept · reference only' : 'Decision unavailable for this comparison';
   el('back-pending-photo').hidden = !single || actionable;
   el('photo-reason').hidden = !single || !actionable || state.section === 'decided';
-  if (state.comparison && el('photo-reason').dataset.comparison !== state.comparison.id) {
-    el('photo-reason').dataset.comparison = state.comparison.id;
-    el('photo-reason').replaceChildren(explanation(state.comparison, 'single-reason'));
-  }
   el('photo-outcome').textContent = single || !actionable
     ? `Current: ${outcomeLabel(savedOutcome(photo))}`
     : `Draft: ${outcomeLabel(state.outcomes[photo.id])} · not saved`;
@@ -970,10 +1001,10 @@ document.addEventListener('keydown', (event) => {
     event.preventDefault(); photos[index + (key === 'arrowleft' ? -1 : 1)]?.focus();
   } else if (key === 'enter' && event.target === focused) {
     // Enter on an image/button retains its native behavior; only the explicitly
-    // focused card with an explicitly marked draft can invoke save-and-next.
+    // focused card with a marked draft or a suggested Yes can invoke save-and-next.
     // Automatic initial focus must never turn a stray Enter into a Skip-all save.
     event.preventDefault();
-    if (state.draftTouched) run(() => saveComparison(true));
+    if (state.draftTouched || state.draftSuggested) run(() => saveComparison(true));
   }
 });
 window.addEventListener('pagehide', () => client.channel?.close());

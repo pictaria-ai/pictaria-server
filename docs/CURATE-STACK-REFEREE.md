@@ -15,7 +15,8 @@ partitions and publishes them through normal grouping rebuilds and stable views.
 The Stack Referee is now available as an **opt-in** in Settings → Curate,
 off by default with **Uncertain stacks** as its default scope. The server
 supplies the bounded adapter policy below; Curate displays recorded
-states and accepted checks. **Photo Referee remains unavailable.** Turning on
+states and accepted checks. The [Photo Referee](CURATE-PHOTO-REFEREE.md) is a
+separate optional step. Turning on
 Stack Referee starts background work on eligible pending stacks throughout the
 library, even with no Curate page open. It is not limited to visible stacks.
 
@@ -221,16 +222,20 @@ reset an unchanged input's automatic allowance.
 - The deterministic cache retains its own pre-AI groups. It must never learn an
   AI partition as deterministic evidence. Open views retain their original
   membership; the new composition is published for the existing refresh/update
-  path. Cards/comparisons expose a separate `stackReferee` status. A current check
-  displays a small **AI** badge with **AI checked** hover text, including split
-  singles. Queued/running work uses a spinner naming the Stack Referee; temporary
-  pauses and finished incomplete checks use a quiet information icon. Unsupported
-  models/sizes, preparation failures and provider pauses have distinct plain
-  explanations. They do not block human choices or pretend a check succeeded.
+  path. Cards/comparisons expose a separate `stackReferee` status, recording
+  whether the answer divided the photos it compared. A current check shows the
+  [**AI checked**](CURATE-PREVIEW.md#stack-status) badge; a single photo split
+  off by the check shows **Kept apart**. A confirmed stack that decisions shrink
+  to one photo was not split, so that photo has no badge. Queued/running work shows **Checking**.
+  A pause or a finished incomplete check reads in the AI check step, for example
+  "not possible, 34 photos is over the 10-photo limit", and makes a supported
+  stack **Not fully checked**. Unsupported models/sizes, preparation failures and
+  provider pauses have distinct plain explanations. They do not block human
+  choices or pretend a check succeeded.
 - Status polling also reports queued/active referee work outside the visible
   page, through the existing header activity slot. This reports admitted work,
-  not an invented remaining-library total. Cards use their existing date/progress
-  line, so statuses do not grow them. Open comparisons keep photos and drafts
+  not an invented remaining-library total. Cards keep their date and change only
+  the badge and chip, so statuses do not grow them. Open comparisons keep photos and drafts
   while their status changes. Badge applicability checks the saved check's own
   member signatures (including split siblings) and pending nearby source changes,
   rather than the library-wide rebuild generation. Unrelated imports or decisions
@@ -244,10 +249,10 @@ reset an unchanged input's automatic allowance.
   Queued or just-accepted checks awaiting a rebuild use the neutral updated state,
   not a failure message. Actual input limits still report an incomplete check.
   Decided photos carry no pending-referee status.
-- **Why?** retains the deterministic explanation and adds the applicable model
-  reason as plain text. A current checked grouping no longer says that no AI
-  check occurred. A changed grouping falls back to the saved-view explanation.
-  The Photo Referee star and recommendations remain a separate implementation.
+- **Why?** retains the deterministic explanation, shows the AI check as its own
+  step, and adds the applicable model reason as a plain-text evidence row. A
+  changed grouping falls back to the saved-view explanation. The Photo Referee
+  star and recommendations remain a separate implementation (PIC-116).
 
 ## Initial activation evidence and limits
 
@@ -283,8 +288,9 @@ Runtime acceptance remains separate from the standalone calls. Use a reviewed
 build and the installation's existing backup/upgrade procedure. Record the
 source commit and effective provider/model; do not change credentials or the
 request policy. Confirm Stack Referee is off before the update if the
-installation previously stored an explicit on preference. Photo Referee must
-remain off/unavailable; no Enrich run or embedding backfill is needed for this
+installation previously stored an explicit on preference. Keep Photo Referee
+off when testing Stack Referee alone; the [Photo Referee rollout](CURATE-PHOTO-REFEREE.md#test-instance-rollout)
+also covers testing both. No Enrich run or embedding backfill is needed for this
 check.
 
 1. With Stack Referee still off, record the current pending groups, decisions,

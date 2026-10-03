@@ -13,14 +13,13 @@ PIC-382 adds [candidate stacking algorithm 3](CURATE-ALGORITHM.md): wider time
 candidates, contextual people signals, positive ThumbHash and reciprocal search
 ranks. Repeated searches that strongly favor two separate subgroups can now
 override a misleading ThumbHash match. The linked document owns exact rules,
-bounds and version history. Open **Why?** or the small similarity-status icon beside
-the comparison checkbox controls for a concise explanation. It appears on
-hover, keyboard focus or tap without moving the photos. One expanded explanation
-combines check limitations, plain-language grouping reasons and useful specifics,
-without a nested Technical details dropdown or duplicate raw wording. Recorded
-reasons without a plain-language translation remain visible. A small muted footer
-identifies the algorithm version for troubleshooting.
-The stack lightbox exposes the same explanation through **Why?**.
+bounds and version history. Every stack shows one [status badge](#stack-status);
+open it beside the comparison checkbox controls, or **Why?** for a single photo,
+for a concise explanation. It appears on hover, keyboard focus or tap without
+moving the photos. Recorded reasons without a plain-language translation remain
+visible. A small muted footer identifies the algorithm version and links to
+[How stacks work](CURATE-ALGORITHM.md#how-stacks-work).
+The stack lightbox exposes the same explanation through its badge.
 
 The current `/curate.html` remains the default during this staging step. The
 preview now includes **Pending** and **Decided**; **More → Production Curate**
@@ -76,10 +75,9 @@ search draft has not been applied.
 - Cards show a cover, up to three member thumbnails, available caption, capture date/time and stack size. Filenames are omitted.
   Captions are limited to one line with an ellipsis so decision buttons stay
   aligned. Hover for the full caption, or open the lightbox to read it.
-  Waiting/checking progress temporarily replaces the capture date on its existing
-  line. The date returns when checking stops, including incomplete or inconclusive
-  outcomes; those details remain on the status icon and in the comparison.
-  Long progress text is shortened with an ellipsis rather than enlarging the card.
+  The capture date stays on its line while checks run; the cover's status badge
+  and chip change instead (see [Stack status](#stack-status)), without enlarging
+  the card.
   **Yes / Skip / Fav / No** are direct actions for single photos: Yes keeps a
   photo, Skip marks it reviewed without keeping it, Fav keeps it as a favorite,
   and No marks it Never show. None of these deletes the photo. Click the image for
@@ -119,14 +117,17 @@ search draft has not been applied.
   Refresh and Undo remain available. Undo after continuation refreshes the grid.
   **Save & next** remains the primary button for every combination of outcomes,
   including Skip-all. The compact header reads **Compare stack · N photos**;
-  the check-status icon sits beside the checkbox controls.
+  the status badge, with its word, sits beside the checkbox controls.
 - In a comparison, focus a photo using **Left/Right** or **1–9**, then use
   **Y / S / F / N** to mark its draft outcome. **Enter** on the focused card
-  saves the comparison and continues **after at least one explicit draft choice**
-  (including Skip). Initial focus or checking boxes alone does not enable this
-  shortcut. The Save buttons still allow an intentional Skip-all. Enter on a
-  button or image retains its normal action. Modified/repeated keys, inputs, reference photos and uncertain
-  actions cannot invoke these shortcuts.
+  saves the comparison and continues after **at least one explicit draft choice**
+  (including Skip), or when complete, applicable Photo Referee advice has seeded
+  **suggested Yes choices**. In that case, Enter on the initially focused card
+  confirms the suggested draft. An untouched all-Skip draft, including one with
+  no suggested keepers, cannot be saved by Enter; initial focus or checking boxes
+  alone does not enable it. The Save buttons still allow an intentional Skip-all.
+  Enter on a button or image retains its normal action. Modified/repeated keys,
+  inputs, reference photos and uncertain actions cannot invoke these shortcuts.
 - Comparisons with more than ten photos open in a compact grid; **Compact grid**
   can be turned off for larger images. Equal-height image areas keep decision
   buttons aligned across different aspect ratios; photos are resized without cropping.
@@ -157,7 +158,7 @@ search draft has not been applied.
   these references as sidebar thumbnails, with a return button to the pending photo.
 - Stacks are a comparison aid. Choose any number of keepers without editing the
   stack first. There are no Remove from stack, Split into singles or Stack
-  corrections controls. The status icon opens a read-only explanation overlay,
+  corrections controls. The status badge opens a read-only explanation overlay,
   available on hover, focus or tap. Escape dismisses the overlay
   before closing the comparison.
   Saved separations from earlier preview builds remain respected; removing these
@@ -187,29 +188,27 @@ search draft has not been applied.
   retried without repeating the human decision or invoking AI.
 
 **Load more** only displays additional results; it is no longer needed to get
-those photos checked. The count distinguishes stacks and single photos. A small
-spinner beside **Refresh** indicates background activity across the pending queue;
-**Checking stacks · N remaining** appears beside the count without shifting the photo grid.
-This is the overall pending-check queue, including photos outside the current
-page or filters and while browsing Decided. It includes queued and in-progress
-checks; finished incomplete checks leave the remaining count. Each check covers a nearby
-group that may form several stacks, so it is not a count of final stack cards.
-Paused work has an attention indicator. Completed checks are quiet on cards; the
-comparison still exposes their status and explanation.
+those photos checked. The count distinguishes stacks and single photos. Beside
+it, counts of the loaded stacks that are checking, unsure or not fully checked
+use the cards' icons, without shifting the photo grid. A small spinner beside
+**Refresh** indicates background activity across the pending queue; its tooltip
+reads **Checking stacks · N remaining**. This is the overall pending-check queue,
+including photos outside the current page or filters and while browsing Decided.
+It includes queued and in-progress checks; finished incomplete checks leave the
+remaining count. Each check covers a nearby group that may form several stacks,
+so it is not a count of final stack cards. Paused work has an attention
+indicator and a word in the header.
 
-Cards and comparisons use three simple presentations:
+Cards and comparisons use the [stack status](#stack-status) badges: **Checking**
+while work is queued or running (reduced-motion preferences stop the spinner),
+**Checked** once settled, **Unsure** for inconclusive checks and **Not fully
+checked** for incomplete, unavailable or processing-limited ones. Ordinary
+completion does not certify a perfect stack. Hover explains the specific cause;
+comparisons expose the same explanation through **Why?**, available on hover,
+keyboard focus or tap. Successful but inconclusive searches remain
+distinguishable from failed searches in the explanation.
 
-- **Working:** a spinner labeled **Checking similarity**, with a queued label or
-  progress count where available. Reduced-motion preferences stop the animation.
-- **Ready:** no extra icon. Ordinary completion does not certify a perfect stack.
-  **Why?** remains available in the comparison, including when no search was needed.
-- **Limited evidence:** one muted **i** labeled **Grouped with limited evidence**.
-  This covers incomplete, unavailable, inconclusive and processing-limited checks.
-  Hover explains the specific cause; comparisons expose the same explanation through
-  **Why?**, available on hover, keyboard focus or tap. Successful but inconclusive
-  searches remain distinguishable from failed searches in the explanation.
-
-The open comparison keeps the small indicator or **Why?** at the right of its
+The open comparison keeps the badge, with its word, at the right of its
 checkbox controls. The stack lightbox uses the same labels and reasons. Manual
 choices remain available in every status. Per-stack limitations do not use an
 amber warning; the header retains that treatment for overall paused work.
@@ -231,8 +230,7 @@ Checks that leave grouping unchanged do not request a new view. Results are appl
 pass, never one search at a time. Missing targets and successful empty results
 remain unknown unless repeated subgroup evidence resolves the relationship.
 Successful searches with inconclusive results keep the compatible time grouping
-provisional, labeled **Grouped with limited evidence**. Failed or unavailable
-searches do not fragment it.
+provisional, labeled **Unsure**. Failed or unavailable searches do not fragment it.
 Completed evidence is saved, so inactivity and server restarts do not repeat
 unchanged checks. Finished incomplete checks retain their safe reason and
 established grouping; interrupted in-flight work can repeat. Changes to photos,
@@ -280,30 +278,73 @@ and explains that turning stacks off allows individual review. It never saves a
 page-sized subset as though it were the whole stack. Known thumbnail failures
 block Save until the previews can be retried.
 
-### Referee indicators
+### Stack status
 
-The Stack Referee presentation is connected: a small **AI** badge means
-**AI checked** for a successfully checked current grouping. Its waiting/running
-spinner names the Stack Referee; unavailable results and temporary pauses use
-a quiet information icon. The existing header activity slot also reports
-admitted referee work outside the visible page. Open comparisons retain their
-photos and draft choices as status updates arrive.
+PIC-371 gives every stack one grouping badge, with the same words on the card,
+the open stack, **Why?** and the page header. When several apply, the first in
+this list wins:
 
-The separate Photo Referee will add a gold **★**
-for recommendations, with stars on the recommended photos and
-a recommendation count in the hover text. Either indicator can appear without
-the other; a keeper star does not imply that the Stack Referee ran.
+| Badge | Meaning |
+| --- | --- |
+| **Checking** (spinner) | Similarity checks or the Stack Referee are queued or running. The stack may still change; you can curate it now. |
+| **AI checked** (✓ AI) | The Stack Referee confirmed this grouping or split it from a larger one. |
+| **Unsure** (?) | The evidence was inconclusive. The Stack Referee or you decide. |
+| **Not fully checked** (i) | A limit applied: too many photos for the AI check or for automatic comparison, or a similarity check that could not finish. |
+| **Checked** (✓) | The default: Pictaria's checks settled the grouping. |
 
-These badges must describe the current membership and applicable inputs. Changed
-photos or invalidated results must not retain a successful AI badge. A successful
-Stack Referee check can replace the limited-evidence icon when it resolves the
-grouping uncertainty; earlier evidence remains in **Why?**. Queued/running AI work
-uses a spinner naming the step. Unavailable AI results leave manual curation
-available with a quiet explanation rather than a permanent spinner. Recorded
-model reasons appear as plain text alongside deterministic evidence in **Why?**.
-Stack Referee is available as an opt-in, off by default, using the configured
-shared Curate provider/model and a ten-photo per-request ceiling. Photo Referee
-remains unavailable. See the
+A single photo shows **Kept apart** (≠) only when clearly different embeddings,
+different people, contrasting Immich searches, the Stack Referee or an earlier
+split separated it from photos taken at the same time; plain single photos have
+no badge. There is no badge for human corrections, because Curate Preview has
+had no split controls since PIC-384; an earlier saved split still applies and
+appears in **Why?** as "Your earlier split applies". Decided photos show their
+decision only.
+
+The badge's icon sits at the top right of the cover and its word in the cover
+chip, for example "Unsure · 9 photos", so color is never the only signal. The
+capture date stays put while checks run. When a newer grouping supersedes a
+card on screen, from similarity checks, the Stack Referee or a new photo nearby,
+the card and any open comparison keep a settled verdict such as **AI checked**,
+gain an accent outline, and **Why?** says "A newer grouping is ready; it appears
+when Curate refreshes." Work that produced the newer grouping no longer shows as
+**Checking**. The page adopts it at the next idle moment, as before.
+
+**Why?** repeats the badge as a verdict, then shows:
+
+- a **Grouping → AI check** strip, each step with its state and, where a check
+  could not run, why: for example "AI check: not possible, 34 photos is over
+  the 30-photo limit". Configuration problems read as off here and are reported
+  once in the page header;
+- short **evidence rows**, strongest first: ✓ supports, ? unsure, ✗ keeps photos
+  apart and · background, such as "✓ Embeddings · Very similar" or
+  "· Taken · Within 4 seconds". A Stack Referee reason appears as plain text.
+
+The page header counts the **loaded** stacks that are checking, unsure or not
+fully checked, with the cards' icons, for example "12 checking · 6 unsure".
+Paused work and photo-information problems stay as words there. Library-wide
+progress, including checks outside the view, is in the activity spinner's
+tooltip. These badges describe the current membership and applicable inputs:
+changed photos or invalidated results never keep an AI badge, and open
+comparisons retain their photos and draft choices as status updates arrive.
+
+The Photo Referee (PIC-116) adds a gold **★** beside any badge when it suggests
+keepers, with a count when more than one, a **Keepers** step in the strip, and
+stars on the suggested photos in the open stack. The page reads a group's
+`photoReferee` status (with `keepers` once complete) and the comparison's
+`photoRecommendations.keeperIds`. A keeper star does not imply that the Stack
+Referee ran. The lightbox shows per-photo reasons, and Why records batch
+coverage and the provider/model. Complete applicable recommendations seed a new
+untouched draft with Yes for suggested photos and Skip for the rest. Save still
+confirms the human's choices; status polls never overwrite an open draft.
+Partial/mixed batches stay manual. Whole-input Photo Referee splits appear only
+when the view refreshes and reuse their suggestions without another AI call.
+See the [Photo Referee guide](CURATE-PHOTO-REFEREE.md).
+
+Both referees are available as independent options, off by default on fresh
+installs, using the configured shared Curate provider/model and a ten-photo
+per-request ceiling. Saved on preferences are honored after upgrade; Photo
+Referee may already have an on preference inherited from the legacy referee.
+See the
 [Stack Referee guide](CURATE-STACK-REFEREE.md) for initial evaluation limits and
 test-instance rollout; synthetic tests exercise these states without live calls.
 
@@ -333,7 +374,9 @@ test-instance rollout; synthetic tests exercise these states without live calls.
   to 50 active corrections; `?id=…` reads current state. The metadata retry route
   takes a saved comparison ID and bounded offset, never arbitrary client IDs.
 - Provider and saved settings defaults are unchanged. Preview grouping now uses
-  candidate 3; the released page and strict lab controls keep their existing rules.
+  candidate 3, or [candidate 4](CURATE-ALGORITHM.md#candidate-4-image-embeddings)
+  when image embeddings are available; the released page and strict lab controls
+  keep their existing rules.
 - Enrichment schema **15** / persistent-state contract **18** adds optional
   correction-action metadata without rewriting existing partitions or decisions.
   The action is saved atomically with the separation; exact retries must preserve

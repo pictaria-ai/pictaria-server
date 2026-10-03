@@ -852,6 +852,7 @@
       ],
       curate: [
         { key: 'burstGrouping', type: 'switch', desc: 'Groups similar photos using capture time and available photo information, so you can compare them together. Turn off to review photos individually.' },
+        { key: 'embeddingStacks', type: 'switch', desc: 'Also compares photos taken close together using the image embeddings from Settings → Enrich → Image embeddings: very similar photos are stacked and clearly different ones are kept apart, without waiting for Immich searches. Photos without an embedding are grouped as before. On by default; turn off to group exactly as before.', docs: 'https://github.com/pictaria-ai/pictaria-server/blob/main/docs/CURATE-ALGORITHM.md#candidate-4-image-embeddings' },
         { division: 'Curate Preview AI', divisionDesc: 'Optional help with grouping and choosing photos. These controls become available as each referee is connected to the preview.' },
         { key: 'stackRefereeEnabled', type: 'switch', desc: 'Checks whether photos belong together and splits different subjects into separate stacks. Uses the shared Curate model below; choose a vision model that can compare multiple images. Runs across eligible pending stacks, even with Curate closed.' },
         { key: 'stackRefereeScope', type: 'select', labels: { uncertain: 'Uncertain stacks (recommended)', all: 'All stacks' }, desc: 'Uncertain stacks: check compositions that remain unresolved after similarity checks finish. All stacks: also check supported compositions; uses more AI calls. Applies to pending stacks without a current AI check.' },
@@ -1410,6 +1411,21 @@
         note.textContent = !stacks ? 'Paused while Stacks is off. Your choices are preserved.'
           : unavailable ? meta.availabilityNotice
           : legacyPaused ? 'Paused while Enrich is off.' : '';
+        note.hidden = !note.textContent;
+      }
+      const embeddingInput = el('f2-curate-embeddingStacks');
+      if (embeddingInput) {
+        const field = embeddingInput.closest('.field');
+        embeddingInput.disabled = !stacks;
+        field.classList.toggle('curate-disabled', !stacks);
+        let note = field.querySelector('.curate-state-note');
+        if (!note) {
+          note = document.createElement('p'); note.className = 'setting-desc curate-state-note';
+          note.id = 'curate-state-embeddingStacks'; embeddingInput.setAttribute('aria-describedby', note.id);
+          field.append(note);
+        }
+        note.textContent = !stacks ? 'Paused while Stacks is off. Your choice is preserved.'
+          : embeddingInput.checked ? curateSettings.embeddingStacks?.embeddingStatus?.notice ?? '' : '';
         note.hidden = !note.textContent;
       }
       const input = el('f2-curate-stackRefereeEnabled');
