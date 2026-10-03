@@ -67,11 +67,12 @@ export function applyStackChecks(store, result, stacks = true) {
       const selected = new Set(group.ids);
       const parts = record.result.groups.map(part => ({ ids: part.ids.filter(id => selected.has(id)), reason: part.reason }))
         .filter(part => part.ids.length);
+      // Each part keeps the deterministic reasons; the model's reason, and
+      // whether it split this group, stay with the check (stack-status.js).
       const checked = parts.map(part => ({ ...group, ids: part.ids,
         id: same(part.ids, group.ids) ? group.id : fingerprint({ method: result.method, check: row.input_key, ids: part.ids }),
         capturedMs: store.photo(part.ids[0]).time,
-        reasons: [...(group.reasons ?? []), part.reason],
-        stackCheck: { state: 'checked', inputKey: row.input_key, reason: part.reason },
+        stackCheck: { state: 'checked', inputKey: row.input_key, reason: part.reason, split: parts.length > 1 },
       }));
       replacements.set(group.id, checked);
     }

@@ -31,7 +31,7 @@ test('owner table: keep the incomplete pass stable; completed contrasts split de
   const full = retainedEvidence([...observedRanks.slice(0, 8), [null,null,null,null,null,null,1,2,null]], ids);
   const result = evaluate(photos, full);
   assert.deepEqual(partition(result), blocks);
-  assert.match(result.groups[0].reasons.join(' '), /contrast outweighs ThumbHash/);
+  assert.match(result.groups[0].reasons.join(' '), /\brank-contrast\b/);
   assert.deepEqual(evaluate([...photos].reverse(), full), result);
 
   // Hypothetical completion B: successful but empty row 9. The two other

@@ -3,9 +3,9 @@ import assert from 'node:assert/strict';
 import { createProvider } from '../../src/enrich/providers.mjs';
 import { refereeCapability, stackRefereeModelStatus } from '../../src/curate/referee-capabilities.mjs';
 import { stackRefereeSupport } from '../../src/curate/stack-referee-contract.mjs';
-import { stackRefereePresentation } from '../../public/curate/referee-status.js';
-import { groupPresentation } from '../../public/curate/photos.js';
-import { plainReasons, groupingAlgorithmLabel } from '../../public/curate/explanation-copy.js';
+import { refereeActivity } from '../../public/curate/referee-status.js';
+import { stackStatus } from '../../public/curate/stack-status.js';
+import { evidenceRows, algorithmLabel } from '../../public/curate/explanation-copy.js';
 
 test('all existing multi-image adapters admit the selected model with a conservative limit, without probing', () => {
   for (const name of ['cloud_openai', 'openrouter', 'venice', 'local_lmstudio', 'local_ollama', 'cloud_ollama', 'openai_compatible']) {
@@ -38,37 +38,39 @@ test('Settings resolves the actual shared model without returning credentials or
 
 test('configuration blockers appear at page level without giving every card a failure badge', () => {
   const status = { state: 'paused', reason: 'configuration', scope: 'configuration' };
-  assert.equal(stackRefereePresentation(status), null);
-  assert.equal(stackRefereePresentation(status, { page: true }).title, 'Stack Referee paused');
-  assert.equal(groupPresentation({ stackReferee: { ...status, state: 'incomplete' }, similarity: { state: 'checked' } }).phase, null);
-  const failed = { ...status, reason: 'model-failures' };
-  assert.equal(stackRefereePresentation(failed), null);
-  assert.match(stackRefereePresentation(failed, { page: true }).detail, /Choose a vision model that compares multiple images/);
+  assert.equal(refereeActivity(status).title, 'Stack Referee paused');
+  const stack = { memberCount: 3, route: 'candidate-supported', similarity: { state: 'checked' } };
+  assert.equal(stackStatus({ ...stack, stackReferee: { ...status, state: 'incomplete' } }).badge, 'checked');
+  assert.deepEqual(stackStatus({ ...stack, stackReferee: status }).steps[1],
+    { name: 'AI check', state: 'off', text: 'paused, check the AI provider in Settings' });
+  assert.match(refereeActivity({ ...status, reason: 'model-failures' }).detail, /Choose a vision model that compares multiple images/);
 });
 
 test('only current checked evidence earns an AI badge; working and incomplete states remain distinct', () => {
-  const group = { similarity: { state: 'checked', uncertain: true } };
-  assert.equal(groupPresentation(group).phase, 'limited');
-  assert.equal(groupPresentation({ ...group, stackReferee: { state: 'checked' } }).phase, 'ai-checked');
-  assert.equal(groupPresentation({ ...group, stackReferee: { state: 'checking' } }).title, 'Stack Referee checking');
-  assert.equal(groupPresentation({ ...group, stackReferee: { state: 'waiting' } }).phase, 'waiting');
+  const group = { memberCount: 3, route: 'candidate-unconfirmed', similarity: { state: 'checked', uncertain: true } };
+  assert.equal(stackStatus(group).badge, 'unsure');
+  assert.equal(stackStatus({ ...group, stackReferee: { state: 'checked' } }).badge, 'ai-checked');
+  assert.equal(stackStatus({ ...group, stackReferee: { state: 'checking' } }).badge, 'checking');
+  assert.equal(stackStatus({ ...group, stackReferee: { state: 'waiting' } }).steps[1].text, 'queued');
   for (const state of ['off', 'skipped', 'updated', 'unexpected'])
-    assert.equal(groupPresentation({ ...group, stackReferee: { state } }).phase, 'limited');
-  for (const reason of ['unknown-capability', 'unsupported-size', 'invalid-answer', 'preparation-failed', 'photo-limit']) {
-    const status = stackRefereePresentation({ state: 'incomplete', reason });
-    assert.equal(status.phase, 'limited'); assert.match(status.detail, /still curate/);
+    assert.equal(stackStatus({ ...group, stackReferee: { state } }).badge, 'unsure');
+  const supported = { ...group, route: 'candidate-supported', similarity: { state: 'checked' } };
+  for (const reason of ['unsupported-size', 'invalid-answer', 'preparation-failed', 'photo-limit']) {
+    const status = stackStatus({ ...supported, stackReferee: { state: 'incomplete', reason } });
+    assert.equal(status.badge, 'partial'); assert.match(status.detail, /still choose/);
+    assert.match(status.steps[1].text, /^not possible, /);
   }
-  assert.equal(stackRefereePresentation({ state: 'paused', reason: 'preview-cooldown' }).phase, 'limited');
-  assert.doesNotMatch(stackRefereePresentation({ state: 'incomplete', reason: 'PRIVATE RAW ERROR' }).detail, /PRIVATE/);
+  assert.equal(stackStatus({ ...supported, stackReferee: { state: 'paused', reason: 'preview-cooldown' } }).badge, 'partial');
+  assert.doesNotMatch(stackStatus({ ...supported, stackReferee: { state: 'incomplete', reason: 'PRIVATE RAW ERROR' } }).steps[1].text, /PRIVATE/);
 });
 
 test('Why distinguishes AI checks from deterministic evidence and preserves the model reason as text', () => {
-  const group = { algorithm: 'candidate-6', reasons: ['Close ThumbHash descriptors support visual similarity.'] };
-  assert.match(groupingAlgorithmLabel(group), /no AI stack check/);
-  const checked = { ...group, stackReferee: { state: 'checked', reason: '<img src=x onerror=alert(1)>' } };
-  assert.match(groupingAlgorithmLabel(checked), /Stack Referee checked/);
-  assert.deepEqual(plainReasons(checked), ['Similar-looking previews (ThumbHash) support this group.', '<img src=x onerror=alert(1)>']);
+  const group = { algorithm: 'candidate-6', ids: ['a', 'b'], reasons: ['thumbhash'] };
+  assert.equal(algorithmLabel(group), 'Algorithm 6');
+  const checked = { ...group, stackReferee: { state: 'checked', reason: '<img src=x onerror=alert(1)>', split: false } };
+  assert.deepEqual(evidenceRows(checked).map(row => row.value), ['<img src=x onerror=alert(1)>', 'Look alike (ThumbHash)']);
+  assert.equal(stackStatus({ memberCount: 2, route: 'candidate-unconfirmed', ...checked }).steps[1].text, 'confirmed');
   const updated = { ...checked, stackReferee: { ...checked.stackReferee, state: 'updated' } };
-  assert.equal(groupingAlgorithmLabel(updated), 'Grouping from this saved view');
-  assert.equal(plainReasons(updated).length, 1);
+  assert.equal(algorithmLabel(updated), 'Grouping from this saved view');
+  assert.equal(evidenceRows(updated).length, 1);
 });

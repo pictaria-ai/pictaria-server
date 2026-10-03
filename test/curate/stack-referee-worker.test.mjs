@@ -70,6 +70,9 @@ test('background worker checks without browser demand or Enrich, publishes non-c
   await f.curate.refresh();
   assert.deepEqual(f.curate.current.groups.map(g => g.ids), [['a0', 'a2'], ['a1', 'a3']]);
   assert.ok(f.curate.current.groups.every(g => g.stackCheck.state === 'checked'));
+  // The page names the split; the model's reason stays with the check, out of the recorded codes.
+  assert.ok(f.curate.current.groups.every(g => g.stackCheck.split === true && g.stackCheck.reason === 'Same subject and composition.'));
+  assert.ok(f.curate.current.groups.every(g => !g.reasons.includes('Same subject and composition.')));
   assert.equal(f.calls.length, 1); assert.equal(f.downloads.length, 4);
   assert.ok(f.downloads.every(d => d.size === 'preview' && d.options.maxBytes <= 2 * 1024 * 1024 && d.options.signal));
   assert.equal(f.repo.db.prepare("SELECT COUNT(*) n FROM asset_tags").get().n, 0);
@@ -310,7 +313,9 @@ test('shutdown aborting an in-flight Immich download records neither a failure n
 for (const supported of [false, true]) test(`${supported ? 'confirmed small' : 'unknown'} capability is derived without records or preparation`, async () => fixture(async f => {
   if (supported) f.cap.maxImages = 2;
   await f.run(); f.advance(); await f.run();
-  assert.equal(f.curate.stackReferee.status(f.curate.current.groups[0]).reason, supported ? 'unsupported-size' : 'unknown-capability');
+  const status = f.curate.stackReferee.status(f.curate.current.groups[0]);
+  assert.equal(status.reason, supported ? 'unsupported-size' : 'unknown-capability');
+  assert.equal(status.limit, supported ? 2 : undefined, 'the AI check step can name the photo limit');
   await f.restart(); await f.run(); assert.equal(f.downloads.length, 0); assert.equal(f.calls.length, 0);
   assert.equal(f.repo.db.prepare('SELECT COUNT(*) n FROM curate_ai_inputs').get().n, 0);
   f.cap = { provider: f.provider.providerName, model: f.provider.modelName, comparative: true, maxImages: 30 };
@@ -357,6 +362,7 @@ test('a keep-together answer is still a completed check and does not repeat on s
   f.answer = partition(['p1', 'p2', 'p3', 'p4']);
   await f.run(); f.advance(); await f.run(); await f.curate.refresh();
   assert.equal(f.curate.current.groups.length, 1);
+  assert.equal(f.curate.current.groups[0].stackCheck.split, false);
   f.config.curateStackRefereeScope = 'all'; await f.run();
   f.config.curateStackRefereeEnabled = false; await f.run();
   f.config.curateStackRefereeEnabled = true; f.advance(); await f.run();

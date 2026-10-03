@@ -7,6 +7,25 @@ All notable changes to Pictaria Server are documented here. This project follows
 
 ### Development
 
+- Curate Preview gives every stack one status badge, the same on the card, the
+  open stack, **Why?** and the page header (PIC-371). Highest first:
+  **Checking**, **AI checked**, **Unsure**, **Not fully checked**, then
+  **Checked** as the default. A single photo shows **Kept apart** only when
+  embeddings, people, Immich searches, the Stack Referee or an earlier split
+  separated it from photos taken at the same time. The card keeps its date while
+  checks run, and its chip names the badge, such as "Unsure · 9 photos".
+  **Why?** repeats the badge as a verdict, adds a Grouping → AI check step strip
+  that says why a check could not run (for example "34 photos is over the
+  30-photo limit"), and lists short evidence rows marked ✓ supports, ? unsure,
+  ✗ keeps apart or · background. Rules that never change moved to
+  [How stacks work](docs/CURATE-ALGORITHM.md#how-stacks-work). The header counts
+  the loaded stacks that are checking, unsure or not fully checked; library-wide
+  progress moved to the activity spinner's tooltip. Stacking now records short
+  reason codes instead of English sentences, with a new code for different
+  people; groupings saved earlier keep their sentences and show the same rows.
+  Membership is unchanged. The Photo Referee's gold ★ and Keepers step appear
+  once PIC-116 supplies keeper advice.
+
 - Curate Preview Stacks now use Pictaria image embeddings when Image embeddings
   is on (candidate 4, PIC-392). For a pair of photos that both have an
   embedding:
