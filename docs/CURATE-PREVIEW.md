@@ -299,10 +299,12 @@ decision only.
 
 The badge's icon sits at the top right of the cover and its word in the cover
 chip, for example "Unsure · 9 photos", so color is never the only signal. The
-capture date stays put while checks run. When checks produce a newer grouping
-for a card on screen, the card keeps its badge, gains an accent outline, and
-**Why?** says "A newer grouping is ready; it appears when Curate refreshes."
-The page adopts it at the next idle moment, as before.
+capture date stays put while checks run. When a newer grouping supersedes a
+card on screen, from similarity checks, the Stack Referee or a new photo nearby,
+the card and any open comparison keep a settled verdict such as **AI checked**,
+gain an accent outline, and **Why?** says "A newer grouping is ready; it appears
+when Curate refreshes." Work that produced the newer grouping no longer shows as
+**Checking**. The page adopts it at the next idle moment, as before.
 
 **Why?** repeats the badge as a verdict, then shows:
 

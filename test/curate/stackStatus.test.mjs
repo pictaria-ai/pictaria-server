@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { stackStatus, statusCounts, keeperCount, BADGE_WORDS } from '../../public/curate/stack-status.js';
+import { stackStatus, statusCounts, keeperCount, mergeStatus, BADGE_WORDS } from '../../public/curate/stack-status.js';
 import { evidenceRows } from '../../public/curate/explanation-copy.js';
 import { candidateGroups } from '../../src/curate/candidate.mjs';
 import { REASON } from '../../src/curate/reasons.mjs';
@@ -37,7 +37,14 @@ test('single photos are Kept apart only when actively separated; plain singles h
     assert.equal(single([code]), 'apart', code);
   // Saved before reason codes, and split off by the Stack Referee.
   assert.equal(single(['Clearly different image embeddings separate photos taken at the same time.']), 'apart');
-  assert.equal(single([REASON.unlinked], { stackReferee: { state: 'checked', reason: 'A solo portrait.' } }), 'apart');
+  assert.equal(single([REASON.unlinked], { stackReferee: { state: 'checked', reason: 'A solo portrait.', split: true } }), 'apart');
+  // A confirmed stack that decisions shrank to one photo was not split.
+  const confirmed = { state: 'checked', reason: 'The same couple.', split: false };
+  assert.equal(single([REASON.alone], { stackReferee: confirmed }), null);
+  assert.deepEqual(evidenceRows({ ids: ['1'], reasons: [REASON.alone], stackReferee: confirmed })[0],
+    { mark: 'info', signal: 'AI check', value: 'Grouped it with nearby photos: The same couple.' });
+  assert.deepEqual(evidenceRows({ ids: ['1'], reasons: [], stackReferee: { ...confirmed, split: true } })[0],
+    { mark: 'apart', signal: 'AI check', value: 'Split it from nearby photos: The same couple.' });
   assert.equal(single([REASON.unlinked], { similarity: { state: 'checking' } }), 'checking', 'a single being checked may still join a stack');
   assert.deepEqual(stackStatus({ memberCount: 1, route: 'single', reasons: [REASON.peopleApart] }).steps, [], 'no process strip for singles');
 });
@@ -62,6 +69,26 @@ test('a checking limit is a Grouping step when the strip shows, and an evidence 
   const comparison = { ids: ['1', '2', '3'], reasons: [REASON.budget, REASON.savedSplit] };
   assert.deepEqual(evidenceRows(comparison, { steps: true }).map(row => row.signal), ['Your split']);
   assert.deepEqual(evidenceRows(comparison).map(row => row.signal), ['Grouping', 'Your split']);
+});
+
+test('a newer grouping keeps the shown verdict, while finished work stops counting as checking', () => {
+  const updated = { similarity: { state: 'updated', pending: true }, stackReferee: { state: 'updated' } };
+  // An AI-checked stack keeps its badge when a nearby photo arrives.
+  const checked = mergeStatus(stack({ route: 'candidate-unconfirmed', stackReferee: { state: 'checked', split: false } }), updated);
+  assert.deepEqual([stackStatus(checked).badge, stackStatus(checked).updated], ['ai-checked', true]);
+  assert.equal(stackStatus(checked).steps[1].text, 'confirmed');
+  // Checks that produced the newer grouping have finished.
+  const working = mergeStatus(stack({ route: 'candidate-unconfirmed', similarity: { state: 'checking', done: 2, total: 4 } }), updated);
+  assert.deepEqual([stackStatus(working).badge, stackStatus(working).updated], ['unsure', true]);
+  // A Stack Referee split waiting for the next rebuild reports only through its own role.
+  const splitting = mergeStatus(stack({ route: 'candidate-unconfirmed', stackReferee: { state: 'checking' } }),
+    { similarity: null, stackReferee: { state: 'updated' } });
+  assert.deepEqual([stackStatus(splitting).badge, stackStatus(splitting).updated], ['unsure', true]);
+  // Current again: the note goes, and statuses apply as reported.
+  const current = mergeStatus(checked, { similarity: { state: 'checked' }, stackReferee: { state: 'checked', split: false } });
+  assert.equal(stackStatus(current).updated, false);
+  assert.equal(mergeStatus(stack(), { photoReferee: { state: 'updated' } }).updated, true);
+  assert.deepEqual(mergeStatus({ reasons: ['alone'] }, { similarity: null }).reasons, ['alone'], 'absent reasons are kept');
 });
 
 test('an updated grouping keeps the shown badge and adds a note, never a badge of its own', () => {

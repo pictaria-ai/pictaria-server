@@ -303,7 +303,7 @@ button {
 .card-meta { min-width: 0; height: 20px; line-height: 20px; }
 .card-meta small { display: block; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
 .card-meta small[hidden] { display: none; }
-.group-card[data-similarity='updated'] {
+.group-card[data-updated] {
   border-color: var(--p-accent);
 }
 .load-row {

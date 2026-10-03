@@ -16,6 +16,8 @@ import { ResponseTooLargeError } from '../../src/fetchWithTimeout.mjs';
 import { stackRefereeImages } from '../../src/curate/stack-referee-images.mjs';
 import { aiBackendKey } from '../../src/curate/ai-limits.mjs';
 import { ProviderRequestError } from '../../src/enrich/providers.mjs';
+import { stackStatus } from '../../public/curate/stack-status.js';
+import { evidenceRows } from '../../public/curate/explanation-copy.js';
 
 const png = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=', 'base64');
 const partition = (...groups) => ({ groups: groups.map(ids => ({ ids, reason: 'Same subject and composition.' })) });
@@ -357,6 +359,36 @@ test('changed source identity invalidates a saved check even when membership is 
   f.repo.upsertAsset({ id: 'a0', fileCreatedAt: new Date(1_700_000_000_000).toISOString(), checksum: 'changed' });
   await f.curate.refresh(); assert.ok(f.curate.current.groups.every(g => !g.stackCheck));
 }));
+
+// PIC-371: a single photo shows Kept apart only when the answer divided the
+// photos it compared, not when decisions shrink a confirmed stack.
+const pageStatus = (f, group) => stackStatus({ memberCount: group.ids.length, route: group.route, reasons: group.reasons,
+  stackReferee: f.curate.stackReferee.status(group) });
+test('a confirmed stack that decisions shrink to one photo is not kept apart; a split-off photo is', async () => {
+  await fixture(async f => {
+    f.answer = partition(['p1', 'p2', 'p3', 'p4']);
+    await f.run(); f.advance(); await f.run(); await f.curate.refresh();
+    f.repo.recordDecision({ assetIds: ['a0', 'a1', 'a2'], addTags: ['frame/eligible', 'frame/reviewed'], removeTags: [], action: 'approve' });
+    await f.curate.refresh();
+    const [left] = f.curate.current.groups;
+    assert.deepEqual(left.ids, ['a3']);
+    assert.deepEqual(f.curate.stackReferee.status(left), { state: 'checked', inputKey: left.stackCheck.inputKey,
+      reason: 'Same subject and composition.', split: false });
+    assert.equal(pageStatus(f, left).badge, null);
+    assert.equal(evidenceRows({ ids: left.ids, reasons: left.reasons, stackReferee: left.stackCheck })[0].value,
+      'Grouped it with nearby photos: Same subject and composition.');
+  });
+  await fixture(async f => {
+    f.answer = partition(['p1'], ['p2', 'p3', 'p4']);
+    await f.run(); f.advance(); await f.run(); await f.curate.refresh();
+    const single = f.curate.current.groups.find(g => g.ids.length === 1);
+    assert.equal(pageStatus(f, single).badge, 'apart');
+    assert.equal(pageStatus(f, f.curate.current.groups.find(g => g.ids.length === 3)).badge, 'ai-checked');
+    f.repo.recordDecision({ assetIds: ['a1', 'a2', 'a3'], addTags: ['frame/eligible', 'frame/reviewed'], removeTags: [], action: 'approve' });
+    await f.curate.refresh();
+    assert.equal(pageStatus(f, f.curate.current.groups[0]).badge, 'apart', 'decisions cannot undo a split');
+  });
+});
 
 test('a keep-together answer is still a completed check and does not repeat on scope or role toggles', async () => fixture(async f => {
   f.answer = partition(['p1', 'p2', 'p3', 'p4']);

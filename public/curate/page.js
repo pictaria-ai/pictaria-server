@@ -4,7 +4,7 @@ import { explanation } from './explanation.js';
 import { PreviewImages } from './preview-images.js';
 import { node, thumbnail, photoCard, groupCard, savedOutcome, outcomeLabel, badgeNode, activityIndicator } from './photos.js';
 import { refereeActivity } from './referee-status.js';
-import { stackStatus, statusCounts, BADGE_WORDS } from './stack-status.js';
+import { stackStatus, statusCounts, mergeStatus, BADGE_WORDS } from './stack-status.js';
 
 const el = (id) => document.getElementById(id);
 const client = new CurateClient();
@@ -223,7 +223,7 @@ function comparisonGroup() {
   const c = state.comparison;
   return c && { memberCount: c.ids.length, route: c.route ?? state.groups.find(group => group.id === c.groupId)?.route,
     similarity: c.similarity, stackReferee: c.stackReferee, photoReferee: c.photoReferee,
-    photoRecommendations: c.photoRecommendations, reasons: c.reasons };
+    photoRecommendations: c.photoRecommendations, reasons: c.reasons, updated: c.updated };
 }
 // Live status for the open comparison. A machine update is for the next view,
 // not an instruction to abandon an inspected comparison: its photos and drafts
@@ -231,7 +231,8 @@ function comparisonGroup() {
 function showComparisonStatus(patch = {}) {
   const c = state.comparison;
   if (!c) return;
-  for (const key of ['similarity', 'stackReferee', 'photoReferee']) if (Object.hasOwn(patch, key)) c[key] = patch[key];
+  const { reasons, ...statuses } = patch; // The comparison keeps the reasons it opened with.
+  mergeStatus(c, statuses);
   const status = stackStatus(comparisonGroup(), { decided: state.section === 'decided' });
   const signature = JSON.stringify([c.id, status]);
   if (c.ids.length === 1) {
@@ -310,6 +311,14 @@ async function compare(group) {
   try {
     const comparison = await client.comparison(state.view.viewId, group.id);
     if (generation !== state.dialogGeneration) return;
+    // Start from the card's statuses for these photos, so a newer grouping
+    // keeps the verdict the card showed.
+    const card = state.groups.find(g => g.id === group.id);
+    if (card) {
+      const opened = { similarity: comparison.similarity, stackReferee: comparison.stackReferee, photoReferee: comparison.photoReferee };
+      Object.assign(comparison, { similarity: card.similarity, stackReferee: card.stackReferee, photoReferee: card.photoReferee });
+      mergeStatus(comparison, opened);
+    }
     const preview = single ? await previews.get(comparison.photos[0].id).promise : null;
     if (generation !== state.dialogGeneration || !(single ? el('photo-view') : el('comparison')).open) return;
     state.comparison = comparison;

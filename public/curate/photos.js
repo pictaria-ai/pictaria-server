@@ -1,4 +1,4 @@
-import { stackStatus } from './stack-status.js';
+import { stackStatus, mergeStatus } from './stack-status.js';
 
 export function node(tag, text, className) {
   const element = document.createElement(tag);
@@ -173,8 +173,7 @@ export function groupCard(group, open, { decide, select, selected = false, decid
   // Status refreshes in place: the badge, star and chip words change, while
   // the date, the chip's position and the card's size stay put.
   card.updateStatus = (patch = {}) => {
-    for (const key of ['similarity', 'stackReferee', 'photoReferee', 'reasons'])
-      if (Object.hasOwn(patch, key)) group[key] = patch[key];
+    mergeStatus(group, patch);
     const status = stackStatus(group, { decided });
     const count = group.memberCount > 1 ? `${group.memberCount} photos` : 'Single photo';
     chip.hidden = decided;
@@ -187,7 +186,8 @@ export function groupCard(group, open, { decide, select, selected = false, decid
       marker.replaceChildren(...[badge, star].filter(Boolean));
     }
     card.dataset.badge = status?.badge ?? '';
-    card.dataset.similarity = group.similarity?.state ?? '';
+    card.dataset.similarity = status?.updated ? 'updated' : group.similarity?.state ?? '';
+    card.toggleAttribute('data-updated', Boolean(status?.updated));
   };
   card.updateStatus();
   cover.onclick = () => open(group);

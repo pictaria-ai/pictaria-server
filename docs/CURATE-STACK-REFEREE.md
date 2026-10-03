@@ -222,9 +222,10 @@ reset an unchanged input's automatic allowance.
   AI partition as deterministic evidence. Open views retain their original
   membership; the new composition is published for the existing refresh/update
   path. Cards/comparisons expose a separate `stackReferee` status, recording
-  whether the check split its group. A current check shows the
+  whether the answer divided the photos it compared. A current check shows the
   [**AI checked**](CURATE-PREVIEW.md#stack-status) badge; a single photo split
-  off by the check shows **Kept apart**. Queued/running work shows **Checking**.
+  off by the check shows **Kept apart**. A confirmed stack that decisions shrink
+  to one photo was not split, so that photo has no badge. Queued/running work shows **Checking**.
   A pause or a finished incomplete check reads in the AI check step, for example
   "not possible, 34 photos is over the 10-photo limit", and makes a supported
   stack **Not fully checked**. Unsupported models/sizes, preparation failures and

@@ -101,8 +101,10 @@ export function stackStatus(group, { decided = false } = {}) {
   const unsure = UNSURE_ROUTES.has(group.route) || group.similarity?.state === 'checked' && group.similarity.uncertain === true;
   let badge;
   if ([similarity, referee].some(phase => phase === 'running' || phase === 'queued')) badge = 'checking';
-  // A checked single is a part of a Stack Referee split.
-  else if (single) badge = referee === 'done' || reasonCodes(group.reasons).codes.some(code => APART.has(code)) ? 'apart' : null;
+  // Only an answer that divided the photos keeps a single apart: decisions can
+  // shrink a confirmed stack to one photo.
+  else if (single) badge = referee === 'done' && group.stackReferee.split === true ||
+    reasonCodes(group.reasons).codes.some(code => APART.has(code)) ? 'apart' : null;
   else if (referee === 'done') badge = 'ai-checked';
   else if (unsure) badge = 'unsure';
   else if (group.route === 'manual-budget' || similarity === 'limited' || referee === 'limited') badge = 'partial';
@@ -113,8 +115,26 @@ export function stackStatus(group, { decided = false } = {}) {
     detail: badge === 'checking' && single ? 'Checks are running, so this photo may join a stack.' : DETAILS[badge] ?? '',
     steps: single ? [] : [groupingStep({ ...group, memberCount: count }, unsure), aiStep({ ...group, memberCount: count }),
       keeperStep(group)].filter(Boolean),
-    keepers, updated: group.similarity?.state === 'updated',
+    keepers, updated: group.updated === true || STATUS_KEYS.some(key => group[key]?.state === 'updated'),
   };
+}
+
+// Merge polled statuses into the shown group (a card's, or the open
+// comparison's). "updated" means a newer grouping supersedes the shown photos:
+// the shown badge keeps a settled verdict, such as AI checked or a finished
+// check, until the view adopts the new grouping, while finished work stops
+// counting as checking. Any of the three roles can report it.
+const STATUS_KEYS = ['similarity', 'stackReferee', 'photoReferee'];
+const settled = value => Boolean(value) && !['waiting', 'checking', 'updated'].includes(value.state) && !value.checking;
+export function mergeStatus(target, patch) {
+  const keys = STATUS_KEYS.filter(key => Object.hasOwn(patch, key));
+  for (const key of keys) {
+    if (patch[key]?.state === 'updated' && settled(target[key])) continue;
+    target[key] = patch[key];
+  }
+  if (keys.length) target.updated = keys.some(key => patch[key]?.state === 'updated');
+  if (Object.hasOwn(patch, 'reasons')) target.reasons = patch.reasons;
+  return target;
 }
 
 // Page-header counts over the loaded cards, with the cards' icons.

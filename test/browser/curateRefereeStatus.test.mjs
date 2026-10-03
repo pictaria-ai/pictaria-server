@@ -18,6 +18,7 @@ test('referee status updates cards and open comparisons without moving photos or
   // Synthetic API states only: the saved role preference stays off. The worker
   // suite separately exercises the real status, persistence and stale guards.
   await page.evaluate(`window.refereeState={state:'waiting'};window.refereeActivity={state:'waiting',queued:1};
+    window.similarityState={state:'checked',uncertain:true};
     const nativeFetch=fetch;window.fetch=async(...args)=>{
       const response=await nativeFetch(...args), url=String(args[0]);
       if(!response.ok || !url.includes('/api/review/curate/')) return response;
@@ -25,9 +26,9 @@ test('referee status updates cards and open comparisons without moving photos or
       if(body.groups){
         body.updatesAvailable=false;body.refinement={state:'idle',remainingGroups:0};
         body.stackRefereeActivity=window.refereeActivity;
-        for(const group of body.groups)if(group.memberCount>1){group.similarity={state:'checked',uncertain:true};group.stackReferee=window.refereeState;}
+        for(const group of body.groups)if(group.memberCount>1){group.similarity=window.similarityState;group.stackReferee=window.refereeState;}
       }
-      if(url.endsWith('/comparisons')){body.similarity={state:'checked',uncertain:true};body.stackReferee=window.refereeState;}
+      if(url.endsWith('/comparisons')){body.similarity=window.similarityState;body.stackReferee=window.refereeState;}
       return new Response(JSON.stringify(body),{status:response.status,headers:{'content-type':'application/json'}});
     };`);
   await click('#refresh');
@@ -64,8 +65,32 @@ test('referee status updates cards and open comparisons without moving photos or
     writeFileSync(join(process.env.PICTARIA_TEST_SCREENSHOTS, 'curate-referee-checked.png'), Buffer.from(data, 'base64'));
   }
   await click('#comparison-similarity .why-trigger');
+  // A nearby arrival supersedes the shown grouping: both the card and the open
+  // comparison keep the verdict for the photos they show, with a note.
+  const updated = () => page.waitFor(`document.querySelector('.is-stack')?.hasAttribute('data-updated') &&
+    document.querySelector('#stack-reason .why-updated')`);
+  await page.evaluate("window.similarityState={state:'updated',pending:true};window.refereeState={state:'updated'}");
+  await updated();
+  assert.equal(await page.evaluate('document.querySelector(".is-stack").dataset.badge'), 'ai-checked');
+  assert.equal(await page.evaluate('document.querySelector("#comparison-similarity .stack-badge").dataset.badge'), 'ai-checked');
+  assert.match(await page.evaluate('document.querySelector("#stack-reason .why-steps").textContent'), /AI check: confirmed/);
+  assert.equal(await page.evaluate(`(()=>{const probe=document.createElement('span');probe.style.color='var(--p-accent)';
+    document.body.append(probe);const accent=getComputedStyle(probe).color;probe.remove();
+    return getComputedStyle(document.querySelector('.is-stack')).borderTopColor===accent;})()`), true, 'the card gains the accent outline');
+  assert.deepEqual(await positions(), before);
+  // Current again: the note goes. Then a Stack Referee split completes while
+  // the comparison stays open; finished work stops counting as checking.
+  await page.evaluate("window.similarityState={state:'checked',uncertain:true};window.refereeState={state:'checking'}");
+  await phase('checking');
+  assert.equal(await page.evaluate('document.querySelector(".is-stack").hasAttribute("data-updated")'), false);
+  await page.evaluate("window.refereeState={state:'updated'}");
+  await updated();
+  assert.equal(await page.evaluate('document.querySelector("#comparison-similarity .stack-badge").dataset.badge'), 'unsure');
+  assert.equal(await page.evaluate('document.querySelector(".is-stack").dataset.badge'), 'unsure');
+  assert.equal(await page.evaluate('document.querySelector("#photos [data-choice=approve]").getAttribute("aria-pressed")'), 'true', 'drafts stay');
   await page.evaluate("window.refereeState={state:'incomplete',reason:'unsupported-size',limit:2}");
   await phase('unsure');
+  await page.waitFor('!document.querySelector(".is-stack").hasAttribute("data-updated")');
   await click('#comparison-similarity .why-trigger');
   assert.match(await page.evaluate('document.querySelector("#stack-reason").textContent'), /AI check: not possible, 4 photos is over the 2-photo limit/);
   assert.doesNotMatch(await page.evaluate('document.querySelector("#stack-reason").textContent'), /AI checked|Same composition/);

@@ -82,9 +82,13 @@ export function evidenceRows(comparison, { steps = false } = {}) {
   const check = comparison.stackReferee?.state === 'checked' ? comparison.stackReferee : null;
   const said = typeof check?.reason === 'string' ? check.reason.trim() : '';
   const rows = [];
-  // The model's reason is plain text, rendered with textContent.
-  if (check) rows.push(single ? { mark: 'apart', signal: 'AI check', value: `Split it from nearby photos${said ? `: ${said}` : ''}` }
-    : { mark: 'support', signal: 'AI check', value: check.split ? `Split from a larger stack${said ? `: ${said}` : ''}` : said || 'Confirmed this stack' });
+  // The model's reason is plain text, rendered with textContent. A single
+  // photo is only split off when the answer divided the photos it compared;
+  // otherwise it was checked together with photos decided since.
+  const also = said ? `: ${said}` : '';
+  if (check) rows.push(single ? check.split === true ? { mark: 'apart', signal: 'AI check', value: `Split it from nearby photos${also}` }
+    : { mark: 'info', signal: 'AI check', value: `Grouped it with nearby photos${also}` }
+    : { mark: 'support', signal: 'AI check', value: check.split ? `Split from a larger stack${also}` : said || 'Confirmed this stack' });
   const recorded = codes.map(code => {
     const [mark, signal, value] = ROWS[code];
     return check && code === 'provisional' ? { mark: 'info', signal, value: 'Grouped for now before the AI check' } : { mark, signal, value };
@@ -105,7 +109,7 @@ export function evidenceRows(comparison, { steps = false } = {}) {
 }
 
 export function algorithmLabel(comparison) {
-  if (comparison.stackReferee?.state === 'updated' || !/^candidate-\d+$/.test(comparison.algorithm))
-    return 'Grouping from this saved view';
+  if (comparison.stackReferee?.state === 'updated' || !/^candidate-\d+$/.test(comparison.algorithm) ||
+      reasonCodes(comparison.reasons).codes.includes('preserved')) return 'Grouping from this saved view';
   return `Algorithm ${comparison.algorithm.split('-')[1]}`;
 }
