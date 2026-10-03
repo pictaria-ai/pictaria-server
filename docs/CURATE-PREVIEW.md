@@ -340,9 +340,11 @@ Partial/mixed batches stay manual. Whole-input Photo Referee splits appear only
 when the view refreshes and reuse their suggestions without another AI call.
 See the [Photo Referee guide](CURATE-PHOTO-REFEREE.md).
 
-Stack Referee is available as an opt-in, off by default, using the configured
-shared Curate provider/model and a ten-photo per-request ceiling. Photo Referee
-remains unavailable. See the
+Both referees are available as independent options, off by default on fresh
+installs, using the configured shared Curate provider/model and a ten-photo
+per-request ceiling. Saved on preferences are honored after upgrade; Photo
+Referee may already have an on preference inherited from the legacy referee.
+See the
 [Stack Referee guide](CURATE-STACK-REFEREE.md) for initial evaluation limits and
 test-instance rollout; synthetic tests exercise these states without live calls.
 

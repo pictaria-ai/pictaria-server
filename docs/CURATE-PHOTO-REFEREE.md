@@ -9,15 +9,21 @@ decision marks a photo Yes, Skip, Fav or No.
 
 PIC-116 adds the request/result contract, bounded comparison planner, background
 worker, saved-result/API integration, recommendation UI and whole-input
-partition publication. **Photo Referee remains unavailable in
-Settings.** Server availability still prevents its requests, regardless of the
-saved preference. Tests explicitly enable the worker with synthetic transports.
-The released `/curate.html` referee is unchanged.
+partition publication. **Photo Referee is available in Settings → Curate.**
+It defaults off on fresh installs and requires Stacks to be on. It does not
+require Enrich or Stack Referee. The released `/curate.html` referee is unchanged.
 
-Controlled test-instance acceptance remains before activation. The UI consumes
-PIC-371's shared badges rather than introducing another status scheme. Tests
-seed validated results and use synthetic transports; this work makes no live
-provider calls.
+Existing saved or environment preferences are honored. In particular, the
+settings v8 upgrade may already have copied an effective legacy referee on
+preference into Photo Referee. That preference can now start eligible background
+work after an update, even without a browser open. Saved Settings overrides win
+over environment values. Check the effective switch before a controlled install;
+no new migration resets the person's choice.
+
+Controlled test-instance acceptance remains before release. The UI consumes
+PIC-371's shared badges rather than introducing another status scheme. Synthetic
+tests cover the production availability gates, saved-result UI and transports;
+they do not establish real-provider quality or runtime acceptance.
 
 ## Quality baseline and response
 
@@ -228,13 +234,33 @@ Existing open comparisons retain their membership and drafts and report that
 a newer grouping is ready. Partial or mixed batch results never publish a
 global partition. Off stops new calls and does not erase accepted results.
 
-## Integration still required
+## Test-instance rollout
 
-Before activation, review the combined backend, PIC-371 badge and recommendation
-changes, then run controlled test-instance acceptance with the configured
-provider. Synthetic worker/browser tests do not establish model quality or
-live performance. Keep legacy-referee removal and default-page cutover with
-PIC-372.
+1. Before installing, turn **Photo Referee** off in Settings → Curate if it is
+   already checked. Older builds permit saving an off preference even while
+   the worker is unavailable. Use the normal backup/update process. For an
+   isolated preview test, leave **Current-page AI referee** off as well.
+2. After installing, confirm the effective Curate provider/model and that Photo
+   Referee is available but still off. Inspect the existing pending groups and
+   decisions. No new enrichment or embedding backfill is needed.
+3. With Stacks on, enable **Photo Referee**. First test with Stack Referee off,
+   then with it on if testing the full pipeline. Photo Referee runs after
+   deterministic grouping and any enabled Stack Referee checks settle. Work
+   covers eligible pending stacks throughout the library, not only visible
+   cards; no open browser is required. Observe activity, gold stars/counts,
+   reasons, draft suggestions and labeled batch/incomplete coverage in
+   `/curate-preview.html`.
+4. After a few results, turn Photo Referee off. New preparation, submission and
+   retries stop; an already-submitted valid response may still finish. This
+   is an observed session, not an exact request cap. Record requests including
+   automatic retries, and confirm accepted results remain available. An open
+   draft and human decisions must remain unchanged until an explicit Save.
+5. Check restart reuse, then manually exercise Save and Undo as desired. Report
+   the exact commit and configured provider/model with any unexpected behavior.
+   Keep photos, raw model responses, identities and credentials private.
+
+These checks are still required for runtime acceptance. Legacy-referee removal
+and default-page cutover remain PIC-372 work; this build keeps the preview page.
 
 The [shared AI guide](CURATE-AI.md) and
 [Stack Referee guide](CURATE-STACK-REFEREE.md) describe the existing runtime.

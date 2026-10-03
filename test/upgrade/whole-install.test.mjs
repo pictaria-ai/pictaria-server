@@ -702,7 +702,8 @@ test('contract 22 recovery point preserves legacy referee preferences before set
     const upgraded = await openInstallation(config, 'verify');
     assert.equal(config.curateKeeperRefereeEnabled, true);
     assert.equal(config.curateStackRefereeEnabled, false);
-    assert.equal(upgraded.settings.describe().curate.keeperRefereeEnabled.active, false);
+    assert.equal(upgraded.settings.describe().curate.keeperRefereeEnabled.active, true,
+      'the available worker honors the migrated effective preference');
     assert.deepEqual(semanticSnapshot(upgraded), before, 'no decisions or records change');
     const snapshotDir = join(config.backup.dir, upgraded.inventory.upgrade.recoveryPoint.snapshotName);
     assert.deepEqual(JSON.parse(readFileSync(join(snapshotDir, 'settings.json'), 'utf8')), settings);

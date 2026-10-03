@@ -22,7 +22,7 @@ const response = (ids, keepers = [ids[0]], groups = [{ ids, keepers, reason: 'Sa
   photos: ids.map(id => ({ id, eyes_closed: 'unsure', reason: 'Visible quality assessment.' })) });
 const until = async predicate => { for (let i = 0; i < 1000 && !predicate(); i++) await new Promise(r => setTimeout(r, 2)); assert.ok(predicate()); };
 
-async function fixture(work, { count = 4, availability = { stack: true, keeper: true }, capability = refereeCapability } = {}) {
+async function fixture(work, { count = 4, availability = CURATE_AI_AVAILABILITY, capability = refereeCapability } = {}) {
   const dir = mkdtempSync(join(tmpdir(), 'pictaria-photo-worker-')), path = join(dir, 'enrichment.sqlite');
   let repo, curate, scheduler, now = Date.now();
   const calls = [], downloads = [];
@@ -82,10 +82,16 @@ for (const keepers of [[], ['p2'], ['p1', 'p3', 'p4']]) test(`background saves $
   f.config.curateKeeperRefereeEnabled = false; await f.run(); assert.equal(f.advice.state, 'complete');
 }));
 
-test('default server availability keeps the connected worker inert', async () => fixture(async f => {
+test('production availability requires opt-in, then permits background Photo Referee work independently', async () => fixture(async f => {
+  f.config.curateKeeperRefereeEnabled = false;
   await f.run(); f.advance(); await f.run(); assert.equal(f.calls.length, 0); assert.equal(f.downloads.length, 0);
   assert.deepEqual(f.curate.photoReferee.activity(), { state: 'off' });
-}, { availability: CURATE_AI_AVAILABILITY }));
+  f.config.curateKeeperRefereeEnabled = true;
+  await f.run(); assert.equal(f.curate.aiLifecycle.pending.size, 1);
+  f.advance(); assert.equal((await f.run()).state, 'succeeded');
+  assert.equal(f.calls.length, 1); assert.equal(f.advice.state, 'complete');
+  assert.equal(f.config.enrichEnabled, false); assert.equal(f.config.curateStackRefereeEnabled, false);
+}));
 
 test('thirty photos get three scheduled requests, durable partial progress, and no global partition', async () => fixture(async f => {
   await f.run(); assert.equal(f.curate.aiLifecycle.pending.size, 3);

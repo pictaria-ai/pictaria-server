@@ -44,8 +44,8 @@ function setup(overrides = {}) {
   return { provider, calls, plan, build };
 }
 
-test('new contract does not enable Photo Referee or replace the released request', () => {
-  assert.deepEqual(CURATE_AI_AVAILABILITY, { stack: true, keeper: false });
+test('production exposes the integrated Photo Referee', () => {
+  assert.equal(CURATE_AI_AVAILABILITY.keeper, true);
 });
 
 test('balances chronological comparisons without dropping a singleton remainder', () => {

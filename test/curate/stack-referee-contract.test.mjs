@@ -32,8 +32,8 @@ function setup(overrides = {}) {
   return { provider, calls, build };
 }
 
-test('production exposes the integrated Stack Referee but not the unfinished Photo Referee', () => {
-  assert.deepEqual(CURATE_AI_AVAILABILITY, { stack: true, keeper: false });
+test('production exposes both integrated referee roles', () => {
+  assert.deepEqual(CURATE_AI_AVAILABILITY, { stack: true, keeper: true });
 });
 
 test('provider capability must be explicit, comparative and bound to the resolved model', () => {

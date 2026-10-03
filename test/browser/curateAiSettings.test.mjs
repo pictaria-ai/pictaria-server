@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { bootServer, findChrome, launchChrome, startFakeImmich } from './harness.mjs';
 
-test('Curate settings enable Stack Referee independently, keep Photo Referee unavailable, and fit desktop and phone', { timeout: 60000 }, async t => {
+test('Curate settings enable either referee independently and fit desktop and phone', { timeout: 60000 }, async t => {
   if (!findChrome()) return t.skip('Chrome required');
   const dir = mkdtempSync(join(tmpdir(), 'curate-ai-browser-'));
   let server, browser, immich;
@@ -30,7 +30,8 @@ test('Curate settings enable Stack Referee independently, keep Photo Referee una
   assert.equal(await page.evaluate(`${input('stackRefereeScope')}.disabled`), false);
   assert.equal(await page.evaluate(`${input('stackRefereeScope')}.value`), 'uncertain');
   assert.match(await page.evaluate('document.querySelector("#curate-stack-model").textContent'), /Venice.*qwen3-vl-235b-a22b.*10 photos/);
-  assert.match(await page.evaluate('document.querySelector("#fields-curate").textContent'), /Not available in Curate Preview yet/);
+  assert.doesNotMatch(await page.evaluate('document.querySelector("#fields-curate").textContent'), /Not available in Curate Preview yet/);
+  assert.equal(await page.evaluate(`${input('keeperRefereeEnabled')}.checked && !${input('keeperRefereeEnabled')}.disabled`), true);
   assert.equal(await page.evaluate(`${input('refereeEnabled')}.disabled`), true, 'legacy still requires Enrich');
   // Image embeddings in Stacks (PIC-392): on by default, waiting for Image embeddings.
   assert.equal(await page.evaluate(`${input('embeddingStacks')}.checked && !${input('embeddingStacks')}.disabled`), true);
@@ -43,7 +44,7 @@ test('Curate settings enable Stack Referee independently, keep Photo Referee una
   assert.match(await page.evaluate('document.querySelector("#curate-state-embeddingStacks").textContent'), /Paused while Stacks is off/);
   assert.equal(await page.evaluate(`${input('refereeProvider')}.disabled`), true);
   await click('burstGrouping');
-  // Both saved preferences can be turned off; only Stack Referee can be re-enabled.
+  // Both saved preferences can be turned off and re-enabled independently.
   await click('stackRefereeEnabled'); await click('keeperRefereeEnabled');
   assert.equal(await page.evaluate(`${input('stackRefereeEnabled')}.disabled`), false, 'unsaved opt-out can be reversed');
   await click('stackRefereeEnabled');
@@ -56,10 +57,14 @@ test('Curate settings enable Stack Referee independently, keep Photo Referee una
   assert.equal(await page.evaluate("fetch('/api/settings').then(r => r.json()).then(s => s.curate.embeddingStacks.value)"), false,
     'the opt-out is saved');
   assert.equal(await page.evaluate(`${input('stackRefereeEnabled')}.disabled`), false);
-  assert.equal(await page.evaluate(`${input('keeperRefereeEnabled')}.disabled`), true);
+  assert.equal(await page.evaluate(`${input('keeperRefereeEnabled')}.disabled`), false);
   assert.doesNotMatch(await page.evaluate('document.querySelector("#curate-state-stackRefereeEnabled").textContent'), /Your preference is saved/);
-  const result = await page.evaluate(`fetch('/api/settings',{method:'PATCH',headers:{'Content-Type':'application/json'},body:JSON.stringify({curate:{keeperRefereeEnabled:true}})}).then(r=>r.status)`);
-  assert.equal(result, 400, 'the server also rejects unavailable activation');
+  await click('keeperRefereeEnabled');
+  await page.evaluate('document.querySelector("#save-curate").click()');
+  await page.waitFor('document.querySelector("#note-curate").textContent.includes("Saved")');
+  const active = await page.evaluate("fetch('/api/settings').then(r => r.json()).then(s => [s.curate.stackRefereeEnabled.active,s.curate.keeperRefereeEnabled.active])");
+  assert.deepEqual(active, [false, true], 'Photo Referee works without Stack Referee or Enrich');
+  await click('keeperRefereeEnabled');
 
   // Exercise the real Settings API; no simulated availability response.
   await click('stackRefereeEnabled');
@@ -71,7 +76,7 @@ test('Curate settings enable Stack Referee independently, keep Photo Referee una
   await click('burstGrouping'); await click('burstGrouping');
   assert.equal(await page.evaluate(`${input('stackRefereeScope')}.value`), 'all');
   assert.equal(await page.evaluate(`${input('keeperRefereeEnabled')}.checked`), false);
-  assert.equal(await page.evaluate(`${input('keeperRefereeEnabled')}.disabled`), true);
+  assert.equal(await page.evaluate(`${input('keeperRefereeEnabled')}.disabled`), false);
   assert.equal(await page.evaluate("document.querySelector('#f2-enrich-enabled').checked"), false, 'new roles are independent of Enrich');
   await page.evaluate('document.querySelector("#save-curate").click()');
   await page.waitFor('document.querySelector("#note-curate").textContent.includes("Saved")');
@@ -79,7 +84,7 @@ test('Curate settings enable Stack Referee independently, keep Photo Referee una
   await page.waitFor(`${input('stackRefereeEnabled')} && ${input('stackRefereeEnabled')}.checked`);
   assert.equal(await page.evaluate(`${input('stackRefereeScope')}.value`), 'all');
   assert.equal(await page.evaluate(`${input('stackRefereeEnabled')}.disabled`), false);
-  assert.equal(await page.evaluate(`${input('keeperRefereeEnabled')}.disabled`), true);
+  assert.equal(await page.evaluate(`${input('keeperRefereeEnabled')}.disabled`), false);
   assert.match(await page.evaluate('document.querySelector("#curate-stack-model").textContent'), /OpenAI.*my-vision-model.*10 photos/);
   assert.doesNotMatch(await page.evaluate('document.querySelector("#curate-stack-model").textContent'), /Save to apply|Venice|not supported/);
   for (const [name, width, height] of [['desktop', 1400, 1100], ['phone', 390, 844]]) {

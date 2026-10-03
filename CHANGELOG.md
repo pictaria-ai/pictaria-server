@@ -7,14 +7,20 @@ All notable changes to Pictaria Server are documented here. This project follows
 
 ### Development
 
+- Make Photo Referee available in Curate Preview Settings for combined testing
+  (PIC-116). It defaults off on fresh installs; existing saved or migrated on
+  preferences are honored. It runs independently of Enrich and Stack Referee,
+  using the configured Curate provider/model after required checks settle.
+  Review the effective preference before installing a controlled test build.
+  See the [rollout guide](docs/CURATE-PHOTO-REFEREE.md#test-instance-rollout).
+
 - Connect Photo Referee recommendations to Curate Preview (PIC-116), using the
   shared PIC-371 gold stars and Why panel. Show per-photo reasons, zero/multiple
   suggestions, batch coverage and independent background activity. Complete
   applicable advice seeds a new draft; Save still confirms human choices, and
   live updates preserve open drafts. Whole-input splits appear at the next view
   refresh and reuse per-group advice without recursive AI calls. Partial batches
-  stay manual. Photo Referee remains unavailable pending combined review and
-  controlled activation acceptance.
+  stay manual. Controlled test-instance acceptance remains before release.
 
 - Added the Photo Referee contract, bounded comparison planner and background worker
   (PIC-116). Retain the released quality criteria within each subject, with
@@ -25,9 +31,8 @@ All notable changes to Pictaria Server are documented here. This project follows
   use spare capacity in whole-stack requests only; references never create
   extra batches or crowd out pending photos. Valid batches persist independently
   through restart, with current-input guards and existing shared scheduling,
-  attempt limits and provider protection. Photo Referee remains unavailable
-  pending recommendation UI, grouping-correction publication and activation
-  acceptance. See the
+  attempt limits and provider protection. Recommendation UI and grouping
+  corrections are now connected; controlled runtime acceptance remains. See the
   [implementation boundary](docs/CURATE-PHOTO-REFEREE.md).
 - Curate Preview gives every stack one status badge, the same on the card, the
   open stack, **Why?** and the page header (PIC-371). Highest first:

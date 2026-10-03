@@ -15,7 +15,8 @@ partitions and publishes them through normal grouping rebuilds and stable views.
 The Stack Referee is now available as an **opt-in** in Settings → Curate,
 off by default with **Uncertain stacks** as its default scope. The server
 supplies the bounded adapter policy below; Curate displays recorded
-states and accepted checks. **Photo Referee remains unavailable.** Turning on
+states and accepted checks. The [Photo Referee](CURATE-PHOTO-REFEREE.md) is a
+separate optional step. Turning on
 Stack Referee starts background work on eligible pending stacks throughout the
 library, even with no Curate page open. It is not limited to visible stacks.
 
@@ -287,8 +288,9 @@ Runtime acceptance remains separate from the standalone calls. Use a reviewed
 build and the installation's existing backup/upgrade procedure. Record the
 source commit and effective provider/model; do not change credentials or the
 request policy. Confirm Stack Referee is off before the update if the
-installation previously stored an explicit on preference. Photo Referee must
-remain off/unavailable; no Enrich run or embedding backfill is needed for this
+installation previously stored an explicit on preference. Keep Photo Referee
+off when testing Stack Referee alone; the [Photo Referee rollout](CURATE-PHOTO-REFEREE.md#test-instance-rollout)
+also covers testing both. No Enrich run or embedding backfill is needed for this
 check.
 
 1. With Stack Referee still off, record the current pending groups, decisions,

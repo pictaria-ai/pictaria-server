@@ -15,7 +15,7 @@ test('roles are independent of each other and Enrich, gated by Stacks and real w
       assert.equal(curateAiRoleEnabled(c, 'stack', available), stacks && stack);
       assert.equal(curateAiRoleEnabled(c, 'keeper', available), stacks && keeper);
       assert.equal(curateAiRoleEnabled(c, 'stack'), stacks && stack, 'Stack Referee still requires both user switches');
-      assert.equal(curateAiRoleEnabled(c, 'keeper'), false);
+      assert.equal(curateAiRoleEnabled(c, 'keeper'), stacks && keeper, 'Photo Referee still requires both user switches');
     }
   assert.equal(curateAiRoleEnabled(config, 'unknown', available), false);
 });

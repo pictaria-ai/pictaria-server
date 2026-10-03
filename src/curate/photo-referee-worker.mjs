@@ -14,8 +14,8 @@ export const PHOTO_PREVIEW_PAUSE_MS = 3 * 60_000;
 export const PHOTO_MODEL_FAILURE_LIMIT = 3;
 const MODEL_FAILURE_PREFIX = 'photo-model-failure:';
 
-// Runtime integration stays behind server availability until the combined
-// recommendation UI and grouping corrections pass activation acceptance.
+// The available worker still requires the user's Photo Referee preference and
+// Stacks, then the shared lifecycle's readiness, scheduling and budget gates.
 export class PhotoRefereeWorker {
   constructor(curate, { capability = () => null } = {}) {
     this.curate = curate; this.lifecycle = curate.aiLifecycle; this.capability = capability; this.cursor = 0;
