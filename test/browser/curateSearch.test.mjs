@@ -1,12 +1,12 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { launchChrome, findChrome } from './harness.mjs';
+import { cleanupAfter, launchChrome, findChrome } from './harness.mjs';
 import { curatePreviewFixture } from './curatePreviewFixture.mjs';
 
 async function setup(t) {
-  const fixture = await curatePreviewFixture({ stackSize: 0, singles: 12, metadataReady: true });
-  const browser = await launchChrome(), page = await browser.newPage();
-  t.after(async () => { await browser.stop(); await fixture.stop(); });
+  const track = cleanupAfter(t);
+  const fixture = track(await curatePreviewFixture({ stackSize: 0, singles: 12, metadataReady: true }));
+  const browser = track(await launchChrome()), page = await browser.newPage();
   await page.navigate(`${fixture.base}/curate-preview.html`);
   await page.waitFor('document.querySelector(".gate-backdrop input")');
   await page.evaluate('document.querySelector(".gate-backdrop input").value="smoke-secret";document.querySelector(".gate-backdrop button").click()');

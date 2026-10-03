@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { launchChrome, findChrome } from './harness.mjs';
+import { cleanupAfter, launchChrome, findChrome } from './harness.mjs';
 import { curatePreviewFixture } from './curatePreviewFixture.mjs';
 import { startFakeMl } from '../embeddings/fakeMl.mjs';
 import { encodePng } from '../../src/embeddings/calibration.mjs';
@@ -12,18 +12,19 @@ const VECTORS = [basis(0), mix([0.97, basis(0)], [Math.sqrt(1 - 0.97 ** 2), basi
 
 test('the lab computes Pictaria embeddings on request and uses them in both experiment modes', { timeout: 90000 }, async (t) => {
   if (!findChrome()) return t.skip('Chrome required');
+  const track = cleanupAfter(t);
   const ml = await startFakeMl();
+  track(() => ml.close());
   const colors = new Map();
   const thumbnail = (id) => {
     if (!colors.has(id)) colors.set(id, colors.size);
     return encodePng(1, 1, Buffer.from([40 * colors.get(id), 90, 160]));
   };
-  const fixture = await curatePreviewFixture({ stacking: false, stackSize: 3, singles: 0, metadataReady: true,
-    env: { IMMICH_ML_URL: ml.url }, thumbnail });
+  const fixture = track(await curatePreviewFixture({ stacking: false, stackSize: 3, singles: 0, metadataReady: true,
+    env: { IMMICH_ML_URL: ml.url }, thumbnail }));
   const byBytes = new Map([1, 2, 3].map((n, i) => [thumbnail(fixture.id(n)).toString('base64'), VECTORS[i]]));
   ml.state.vectorFor = (bytes) => byBytes.get(bytes.toString('base64')) ?? null;
-  const browser = await launchChrome(), page = await browser.newPage();
-  t.after(async () => { await browser.stop(); await fixture.stop(); await ml.close(); });
+  const browser = track(await launchChrome()), page = await browser.newPage();
   for (const path of ['plan', 'run']) {
     const denied = await fetch(`${fixture.base}/api/review/curate/lab/embeddings/${path}`, { method: 'POST',
       headers: { 'content-type': 'application/json' }, body: '{}' });

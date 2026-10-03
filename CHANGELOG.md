@@ -20,6 +20,41 @@ All notable changes to Pictaria Server are documented here. This project follows
   pending recommendation UI, grouping-correction publication and activation
   acceptance. See the
   [implementation boundary](docs/CURATE-PHOTO-REFEREE.md).
+- Curate Preview gives every stack one status badge, the same on the card, the
+  open stack, **Why?** and the page header (PIC-371). Highest first:
+  **Checking**, **AI checked**, **Unsure**, **Not fully checked**, then
+  **Checked** as the default. A single photo shows **Kept apart** only when
+  embeddings, people, Immich searches, the Stack Referee or an earlier split
+  separated it from photos taken at the same time. The card keeps its date while
+  checks run, and its chip names the badge, such as "Unsure · 9 photos".
+  **Why?** repeats the badge as a verdict, adds a Grouping → AI check step strip
+  that says why a check could not run (for example "34 photos is over the
+  30-photo limit"), and lists short evidence rows marked ✓ supports, ? unsure,
+  ✗ keeps apart or · background. Rules that never change moved to
+  [How stacks work](docs/CURATE-ALGORITHM.md#how-stacks-work). The header counts
+  the loaded stacks that are checking, unsure or not fully checked; library-wide
+  progress moved to the activity spinner's tooltip. Stacking now records short
+  reason codes instead of English sentences, with a new code for different
+  people; groupings saved earlier keep their sentences and show the same rows.
+  Membership is unchanged. The Photo Referee's gold ★ and Keepers step appear
+  once PIC-116 supplies keeper advice.
+
+- Curate Preview Stacks now use Pictaria image embeddings when Image embeddings
+  is on (candidate 4, PIC-392). For a pair of photos that both have an
+  embedding:
+  - very similar ones (0.90 or more) are stacked;
+  - clearly different ones (0.75 or less) are kept apart, unless they show the
+    same recognized people or have near-identical ThumbHashes;
+  - in between, matching people or a similar ThumbHash decide; otherwise the
+    stack stays uncertain for the Stack Referee or you.
+
+  Groups also join when their average similarity reaches 0.80, and such pairs
+  are not sent to Immich search. Replaying eight judged groups placed 81.6% of
+  photo pairs as judged, against 55.6% without other evidence.
+  **Use image embeddings in Stacks** in Settings → Curate is on by default;
+  turned off, or for photos without embeddings, grouping is exactly as before.
+  Settings version 10 adds the switch. See
+  [candidate 4](docs/CURATE-ALGORITHM.md#candidate-4-image-embeddings).
 
 - Stop Stack Referee background work when the selected model rejects requests
   or returns invalid partitions for three distinct stacks without a successful

@@ -1,20 +1,14 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { launchChrome, findChrome } from './harness.mjs';
+import { cleanupAfter, launchChrome, findChrome } from './harness.mjs';
 import { curatePreviewFixture } from './curatePreviewFixture.mjs';
 
 async function open(t, singles) {
-  const fixture = await curatePreviewFixture({ stackSize: 0, singles });
-  // Fixture writes use a second connection while the server builds view leases.
-  // Wait for its short transactions when the full suite runs under load.
-  fixture.repo.db.exec('PRAGMA busy_timeout = 5000');
+  const track = cleanupAfter(t);
+  const fixture = track(await curatePreviewFixture({ stackSize: 0, singles }));
   for (const asset of fixture.assets) fixture.repo.curate.mergeMetadataAsset({ ...asset, tags: [] });
-  const browser = await launchChrome(),
+  const browser = track(await launchChrome()),
     page = await browser.newPage();
-  t.after(async () => {
-    await browser.stop();
-    await fixture.stop();
-  });
   await page.navigate(`${fixture.base}/curate-preview.html`);
   await page.waitFor('document.querySelector(".gate-backdrop input")');
   await page.evaluate(

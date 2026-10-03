@@ -2,17 +2,14 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { launchChrome, findChrome } from './harness.mjs';
+import { cleanupAfter, launchChrome, findChrome } from './harness.mjs';
 import { curatePreviewFixture } from './curatePreviewFixture.mjs';
 
 async function setup(t, options) {
-  const fixture = await curatePreviewFixture({ stackSize: 4, singles: 2, metadataReady: true, ...options });
-  const browser = await launchChrome(),
+  const track = cleanupAfter(t);
+  const fixture = track(await curatePreviewFixture({ stackSize: 4, singles: 2, metadataReady: true, ...options }));
+  const browser = track(await launchChrome()),
     page = await browser.newPage();
-  t.after(async () => {
-    await browser.stop();
-    await fixture.stop();
-  });
   const click = (selector) => page.evaluate(`document.querySelector(${JSON.stringify(selector)}).click()`);
   const key = (key) => page.send('Input.dispatchKeyEvent', { type: 'keyDown', key });
   const ready = () => page.waitFor('!document.querySelector("#refresh").disabled');

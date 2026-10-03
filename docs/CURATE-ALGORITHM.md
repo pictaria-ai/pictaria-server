@@ -1,9 +1,11 @@
 # Curate stacking algorithm
 
-**Status: candidate 3, in Curate Preview only (PIC-382 / PIC-380).** These are
-starting rules for evaluation, not calibrated accuracy claims or the released
-Curate algorithm. The implementation identifier is `candidate-3`. The current
-`/curate.html` and its AI referee are unchanged.
+**Status: candidate 3, or candidate 4 when image embeddings are available, in
+Curate Preview only (PIC-382 / PIC-380 / PIC-392).** These are starting rules
+for evaluation, not calibrated accuracy claims or the released Curate algorithm.
+The implementation identifiers are `candidate-3` and
+[`candidate-4`](#candidate-4-image-embeddings). The current `/curate.html` and
+its AI referee are unchanged.
 
 ## What a stack means
 
@@ -29,6 +31,32 @@ Human separations always win. No AI calls are made by this candidate algorithm.
 The optional Stack Referee and Photo Referee remain separate future integrations.
 “Supported” below describes this rule's evidence, **not** an AI check or permission
 to bypass one. The preview's keeper decisions are still entirely human.
+
+## How stacks work
+
+These rules hold for every grouping, so **Why?** in Curate Preview links here
+instead of repeating them:
+
+- **Time first.** Only photos taken close together are compared: each photo
+  within 90 seconds of the previous one, and at most 3 minutes from the first.
+  A photo with no capture time stays single.
+- **Missing evidence is unknown.** A different-looking ThumbHash, a missing
+  search match or a missing image embedding does not prove a different subject.
+  Photos with unknown evidence stay together for now, and the stack is marked
+  **Unsure**.
+- **Separations win.** Clearly different image embeddings, supported people
+  differences, contrasting Immich searches and your earlier splits keep photos
+  apart, and a stack never joins across them.
+- **Limits are stated.** More than 40 photos taken together, or too much work
+  for one rebuild, are grouped by time only and marked **Not fully checked**.
+- **AI checks are separate.** The optional Stack Referee checks uncertain stacks,
+  or every stack if you choose, after these rules; a stack it checked shows
+  **AI checked**. Keeper choices stay yours.
+
+Each grouping records short reason codes (`src/curate/reasons.mjs`) that the
+page words as evidence rows. A code keeps its meaning; a changed meaning gets a
+new code. Groupings saved before codes keep their sentences, which the page
+translates to the same rows.
 
 ## Candidate 3: precise rules
 
@@ -58,7 +86,8 @@ background grouping worker; the page renders immutable views of its output.
 These bounds intentionally do not reproduce the older foundation's out-of-window
 checksum/duplicate lookback. Candidate 3 uses one time-bounded composition scope.
 Scene tags, descriptions, detected-face counts, direct embeddings and AI judgments
-are not inputs in this version. The stricter **Same recognized people** lab
+are not inputs to candidate 3; [candidate 4](#candidate-4-image-embeddings) adds
+Pictaria image embeddings. The stricter **Same recognized people** lab
 checkbox remains an independent experimental rule, not the preview's policy.
 
 ### Why the asymmetric rule exists
@@ -103,6 +132,58 @@ This complements the five-photo landscape regression above: one unevenly ranked
 member does not make two independently supported subgroups, so the existing
 recovery remains available. Human separations and exact-rendition safeguards
 remain intact.
+
+## Candidate 4: image embeddings
+
+Candidate 4 (PIC-392) is candidate 3 plus Pictaria's own
+[image embeddings](ENRICH.md#image-embeddings). It applies when four things
+hold: Image embeddings is on, **Use image embeddings in Stacks** in
+Settings → Curate is on (the default), the selected model has calibrated
+thresholds, and a stored set exists for it. Otherwise the preview uses
+candidate 3 exactly, with the same IDs and saved search evidence. The policy
+and thresholds live in `src/curate/embedding-evidence.mjs`; the membership
+rules are in `src/curate/candidate.mjs`.
+
+Thresholds are per model and come from judged stacking-lab groups (PIC-381).
+Only `ViT-B-32__openai` is calibrated. Its cosine similarity bands are: very
+similar **≥ 0.90**, clearly different **≤ 0.75**, and group average **≥ 0.80**.
+
+| Rule | Candidate 4 |
+| --- | --- |
+| Which pairs | Pairs where both photos have a current vector in the set in use. Other pairs follow candidate 3, including searches. Out-of-date or other-model vectors are unknown. |
+| Strong separations | Human separations and supported people conflicts still win. Exact renditions still support a pair. |
+| Very similar (≥ 0.90) | Supports the pair, like a close ThumbHash or reciprocal ranks. An uncorroborated recognition difference does not block it. |
+| Clearly different (≤ 0.75) | Separates the pair, even against close-ThumbHash support. The exceptions are both photos showing the same recognized people, or a very close ThumbHash (≤ 0.025). |
+| Middle band | Supports the pair only with independent corroboration: the same recognized people, a matching One/Couple category, or a ThumbHash within 0.15. Otherwise the pair stays uncertain. |
+| Search ranks | Not used for pairs with embeddings, and such pairs are never searched. Rank recovery counts votes only from core members without an embedding relation, and needs every embedded relation to be supported already. Immich's smart search uses a similar model and ranks same-moment photos close within a time candidate, which would undo the embedding verdicts. |
+| Group average | After cores, and rank recovery for photos without embeddings, two groups merge when every cross pair has embeddings, none conflicts, and their average similarity is ≥ 0.80. The closest pair of groups merges first. At least one side has two or more photos. |
+| Uncertain | Remaining uncertain pairs join provisionally, like candidate 3's unknown pairs. Any group that still contains an unresolved embedded pair is uncertain, however its photos were joined, including by rank recovery. It stays in the Stack Referee's uncertain scope. |
+
+**Evidence.** The owner's eight judged lab groups were replayed with
+anonymized similarities only, without ThumbHash or people data (see
+`test/fixtures/curate/judged-embedding-groups.json`):
+
+- Candidate 4 placed 81.6% of photo pairs as judged and left 2 of 14 stacks
+  uncertain.
+- Candidate 3 without other evidence placed 55.6%.
+- The result does not depend on Immich ranks. Letting ranks decide the middle
+  band fell to 55.6% when same-moment photos ranked close.
+
+Two kinds of judged stack remain hard for embeddings alone:
+
+- similar-looking separate stacks (group 6);
+- a varied single stack with pairs below 0.75 (group 7).
+
+**Storage and stability.**
+
+- Saved search evidence stays under candidate 3's method. A candidate-4 scope ID
+  includes the embedding policy, so turning embeddings on or off uses separate
+  evidence.
+- A saved grouping records its members' vector identities, and is recomputed
+  without new searches when one of them changes.
+- A vector that is stored, or that becomes current again, regroups Curate at
+  most every 30 seconds. Open comparisons and human decisions stay as they
+  are.
 
 ## Automatic searches and stable views
 
@@ -227,14 +308,14 @@ provisional; a failed pass finishes with **Similarity not fully checked**. Succe
 leave membership uncertain say **Check complete · similarity uncertain**, retain
 the provisional grouping, and do not automatically retry or fragment it. An
 unconfigured or unavailable search service also leaves time groups provisional.
-Photo cards show a muted spinner for queued work, a blue spinner while checking,
-an amber **!** for incomplete or unavailable checks, and a muted **i** for
-successfully completed but inconclusive checks. Neither status blocks curation. Completed
-supported work is quiet on cards. The open comparison retains the complete
+Photo cards show one [status badge](CURATE-PREVIEW.md#stack-status) (PIC-371):
+**Checking** while queued or running, **Unsure** for inconclusive checks,
+**Not fully checked** for incomplete or limited ones, and **Checked** once
+settled. No status blocks curation. The open comparison retains the complete
 status and explanation, including when no search was needed; unconfigured checks
 are not shown as completed. Text/accessible labels accompany color and animation;
-reduced-motion preferences disable spinning. Updated views with pending checks
-keep a pending indicator, rather than claiming completion.
+reduced-motion preferences disable spinning. A card whose newer grouping is
+ready keeps its badge and gains an outline, rather than claiming completion.
 
 `refinement.metrics` on the groups/status response exposes only in-memory
 aggregate measurements since service start: search attempts/completions, cache
@@ -244,9 +325,11 @@ retry delays). Search measurements include the shared lab lane; direct lab-cache
 reads do not increment `cacheHits`. No photo IDs or responses are included.
 These are diagnostic counters, not persistent performance history or a new UI.
 
-The page shows global background progress beside the stack/single-photo counts
-in a reserved status row, plus an activity spinner beside Refresh. After work
-finishes, the header stays quiet even when some checks finished incomplete.
+The page shows counts of the loaded stacks that are checking, unsure or not
+fully checked beside the stack/single-photo counts in a reserved status row,
+plus an activity spinner beside Refresh whose tooltip gives global background
+progress. After work finishes, the spinner stays quiet even when some checks
+finished incomplete.
 An affected card and its comparison’s Why explanation retain the status and
 reason, and make clear that human choices are available. There is no repair action
 or next-retry time. Cards still show their own status and highlight changed grouping.
@@ -265,7 +348,7 @@ existing membership checks require a refresh in that case. Human decisions,
 revisions, whole-group application and Undo keep their existing contracts. No
 ranking changes human tags by itself. See [preview behavior](CURATE-PREVIEW.md).
 
-**Why?** beside the similarity status shows the rules that supported the current
+**Why?**, opened from the status badge, shows the recorded evidence for the current
 comparison, with its algorithm version. Hover, focus or tap opens a read-only
 overlay without reflowing the photos. If the opened view predates the applicable calculation,
 the explanation says membership was preserved rather than inventing historical
@@ -307,6 +390,8 @@ and decision contract, not create a permanent second Curate pipeline.
 | `candidate-3` review UX follow-up | 2026-09-22 | Automatically adopt complete snapshots at idle boundaries; freeze open comparisons and selections, preserve browsing position, and retain explicit Refresh for recovery. Remove manual stack-management controls; existing saved separations remain respected. No membership-rule or search-threshold change. | PIC-384 |
 | `candidate-3` background processing | 2026-09-23 | Process all pending candidates without browser demand; persist complete evidence, drain bounded active slots and retry failures with backoff. Compact global progress, Pending label and direct stack opening. Membership rules and search limits are unchanged. | PIC-385 |
 | `candidate-3` bounded checks | 2026-09-23 | One retry during a pass, then settle an incomplete check as usable for human curation. Preserve only finished outcomes, with distinct incomplete/inconclusive indicators. Supersedes the draft deferred-recovery queue. No grouping or search-limit change. | PIC-387 |
+| `candidate-4` | 2026-10-01 | Pictaria image embeddings decide pairs where both photos have one. ≥ 0.90 supports a pair and ≤ 0.75 separates it; a middle-band pair needs corroborating people or ThumbHash, or it stays uncertain. Groups merge on a 0.80 average, and embedded pairs are not searched. Judged-group replay: 81.6% of pairs as judged, against 55.6% for candidate 3 without other evidence. Turned off, or without embeddings, the result is candidate 3. | PIC-392 |
+| `candidate-4` reason codes | 2026-10-02 | Record short reason codes instead of English sentences, and name what separated photos: clearly different embeddings, different people (new), contrasting searches or a saved split that applies within the time candidate. Rules that never change are documented under [How stacks work](#how-stacks-work) instead of recorded. Stack Referee checks record whether they split a group. No membership, threshold or search change. | PIC-371 |
 
 When membership rules, thresholds or interpretation of signals change, increment
 the implementation identifier and add a row describing the behavioral change and
