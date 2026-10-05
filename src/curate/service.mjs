@@ -2,7 +2,6 @@ import { reviewConfig } from '../enrich/reviewBuckets.mjs';
 import { Worker } from 'node:worker_threads';
 import { groupPhotos } from './grouping.mjs';
 import { applyStackChecks } from './stack-referee-results.mjs';
-import { applyPhotoPartitions } from './photo-referee-groups.mjs';
 import { settledCandidateGroups, rememberSettledGroups } from './settled-groups.mjs';
 import { CurateRefinement } from './refinement.mjs';
 import { CurateError } from './contracts.mjs';
@@ -91,7 +90,7 @@ export class CurateService {
           embeddings: embeddingEvidence(this.repo.db, embeddingPolicy) })
           : groupPhotos(this.store.pending(), { stacks, separations: this.store.separations() })),
       };
-      result = applyPhotoPartitions(this.store, applyStackChecks(this.store, result, stacks), stacks);
+      result = applyStackChecks(this.store, result, stacks);
     } else
       result = await new Promise((resolve, reject) => {
         const worker = new Worker(new URL('./worker.mjs', import.meta.url), {

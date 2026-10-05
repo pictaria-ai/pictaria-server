@@ -8,8 +8,9 @@ decision marks a photo Yes, Skip, Fav or No.
 ## Current delivery
 
 PIC-116 adds the request/result contract, bounded comparison planner, background
-worker, saved-result/API integration, recommendation UI and whole-input
-partition publication. **Photo Referee is available in Settings → Curate.**
+worker, saved-result/API integration and recommendation UI. It never changes
+stack membership; deterministic grouping and the optional Stack Referee own that.
+**Photo Referee is available in Settings → Curate.**
 It defaults off on fresh installs and requires Stacks to be on. It does not
 require Enrich or Stack Referee. The released `/curate.html` referee is unchanged.
 
@@ -27,26 +28,34 @@ they do not establish real-provider quality or runtime acceptance.
 
 ## Quality baseline and response
 
-`curate_photo_referee_v1` preserves the owner-accepted released quality criteria
-within each subject: sharp people, open eyes and natural expressions, then
+Prompt revision 2 of `curate_photo_referee_v1` preserves the owner-accepted
+released quality criteria within each subject: sharp people, open eyes and natural expressions, then
 sharpness, composition and overall appeal. Every photo receives a short visible
 assessment and a closed-eyes observation, with `unsure` for absent, obscured or
 small faces. The released legacy contract remains unchanged.
 
 The deliberate differences are:
 
-- Zero, one or multiple recommendations are explicit. There is no fixed
-  best-one-or-two cap. A valid empty keeper set means **None recommended**;
-  a missing field, failed request or invalid response never means that.
-- Clearly different subjects receive an exhaustive, disjoint partition.
-  People do not outrank unrelated scenery. Re-framing, modest zoom, expressions,
-  orientation and quality differences alone do not require a split.
+- **Usually recommend one** strong representative of these already-grouped
+  alternatives. An additional photo must be independently good and materially
+  different from every other recommendation: a distinctly worthwhile expression,
+  moment, subject or composition. Minor pose, smile, crop, zoom, orientation or
+  quality changes alone do not qualify. Each additional recommendation's photo
+  assessment explains its distinct value. This is guidance, not a hard count cap.
+- Zero, one or multiple recommendations remain explicit. A valid empty keeper
+  set means **None recommended**; a missing field, failed request or invalid
+  response never means that. Human reviewers may always choose several photos.
+- Stack membership is fixed before this role runs. Even when different subjects
+  remain, Photo Referee only recommends photos; it cannot split or merge stacks.
+  People do not automatically outrank unrelated scenery.
 - Already-kept photos are read-only context. They can inform the comparison but
   cannot appear in the actionable recommendation set. An existing human choice
   is never reopened or demoted.
-- There are no model ranks to repair or default. Each group supplies `ids`,
-  `keepers` and a concise `reason`. A separate exhaustive `photos` array supplies
-  `id`, `eyes_closed` and `reason` for every submitted photo, including context.
+- There are no model ranks to repair or default. The existing response envelope
+  contains exactly one group with all submitted `ids`, actionable `keepers` and
+  a concise `reason`. New multi-group answers are rejected. A separate exhaustive
+  `photos` array supplies `id`, `eyes_closed` and `reason` for every submitted
+  photo, including context. Context membership is not a claim of shared subject.
 
 Requests use positional aliases and image bytes, with no asset IDs, captions,
 tags or recognized-person metadata in the prompt. The worker supplies the
@@ -113,15 +122,17 @@ attempt or per-photo allowances.
 
 `collectPhotoRefereeComparisons` accepts the validated results in plan order.
 It revalidates membership, assessments and context exclusions, and checks the
-plan/batch identity. Missing results remain unavailable; malformed or mismatched
-ones remain invalid. Valid recommendations from other batches remain inspectable.
+plan/batch identity and prompt revision. Missing results remain unavailable;
+malformed or mismatched ones remain invalid. Valid recommendations from other
+batches remain inspectable. It never returns a grouping partition.
 
-A whole-input response can supply a complete partition and all its per-group
-recommendations. Separate comparisons cannot establish a global partition or
-promise cross-batch duplicate elimination. Their recommendation union is complete
-only when every batch is valid and none reports mixed subjects. No accepted
-recommendation is discarded to make one global winner. An incomplete or mixed
-batch plan withholds full-stack advice application and launches no extra AI round.
+A whole-input response supplies advice for the existing stack. For separate
+comparisons, the recommendation union is complete only when every batch is valid.
+Each comparison generally recommends one; a large stack may therefore receive
+several suggestions from different batches. This does not promise cross-batch
+duplicate elimination or launch an extra AI round. No accepted recommendation is
+silently discarded to impose a global winner. Incomplete comparisons stay manual.
+Historical mixed-subject batches also retain their existing manual-only guard.
 
 The collector's `canApplyAll` means **structurally complete advice**, not authority
 to change photos. The worker and decision service must still verify current
@@ -183,9 +194,9 @@ but incomplete, without automatically replaying accepted comparisons.
 
 The page API adds `photoRefereeActivity` and compact per-group `photoReferee`
 status. Comparisons add `photoRecommendations`, projecting coverage, current
-recommendations, per-photo assessments and valid partitions with the saved provider/model name but without internal
-snapshots, connection details or hashes. Decided photos receive no recommendation payload. Pending
-prerequisites disable structural full-set application. These fields do not grant
+recommendations and per-photo assessments with the saved provider/model name but
+without internal snapshots, connection details or hashes. Decided photos receive
+no recommendation payload. Pending prerequisites disable structural full-set application. These fields do not grant
 decision authority or overwrite open memberships and draft choices.
 
 ## Recommendations in Curate Preview
@@ -216,8 +227,9 @@ Undo also restores the applicability of already accepted recommendations when
 the original photo, context and comparison evidence still matches. The gold
 stars and suggested choices return with the restored stack; there is no new
 Photo Referee call or preview download just to undo Save. This works with the
-role off and through restart, for whole comparisons, split children and saved
-batches. An incomplete comparison resumes only its missing batches.
+role off and through restart, for whole comparisons and saved batches. An
+incomplete comparison resumes only its missing batches under the same prompt
+revision and configuration.
 
 The decision receipt's private before-state records the prior human signature.
 Successful Undo checks the restored tags and renews only accepted advice in the
@@ -228,27 +240,27 @@ human decisions are not forgiven by Undo. Older receipts without this
 before-state still undo human choices but cannot renew advice applicability;
 no database migration or repair queue is added.
 
-## Publishing Photo Referee splits
+## Stack ownership and earlier saved results
 
-A complete whole-input response can split an existing deterministic/Stack
-Referee group at the next stable-view refresh. It never joins groups, publishes
-transport batches as stacks, or includes reference-only groups. Each resulting
-group reads its own keeper set and assessments from the original accepted
-comparison. Neither referee recursively evaluates these children. A Photo
-Referee split is explained as such; it does not claim the Stack Referee ran.
+Deterministic grouping and the optional **Stack Referee** alone determine stack
+membership. **Photo Referee** recommends within that membership. Both inline and
+background grouping ignore Photo Referee partitions, including saved answers
+from earlier preview builds. Previously split pending photos follow the upstream
+grouping on the next fresh view. Human decisions and open view snapshots are not
+rewritten. A singleton is not submitted to the Photo Referee.
 
-Saved partition evidence checks every original member's source, availability
-and human separation, plus the selected references. A new member joining the
-source group or changed evidence invalidates the partition. Human decisions
-may subtract members without undoing the split; recommendations on an untouched
-sibling remain useful. Recommendations require unchanged human state on their
-own pending members. A partially decided child falls back to manual review
-rather than manufacturing a new keeper judgment. The original paid input
-accounting remains protected while its recommendations are usable.
+Completed applicable advice from the older prompt remains readable and usable
+on its original input, including all its saved recommendations. The upgrade does
+not trim recommendations or automatically pay to judge them again. Historical
+subject groups are only retained as explanation data; they never publish stacks
+or provide advice for an arbitrary subset. Normal source, membership, context,
+human-state and enabled-check guards continue to apply.
 
-Existing open comparisons retain their membership and drafts and report that
-a newer grouping is ready. Partial or mixed batch results never publish a
-global partition. Off stops new calls and does not erase accepted results.
+The prompt revision is saved in provenance and in the comparison configuration
+key, independently of the unchanged storage envelope. New comparisons use the
+more selective prompt. An incomplete comparison from an older prompt stays
+inspectable/manual rather than mixing old and new prompt batches. Existing
+attempt and per-photo limits are unchanged. No schema migration is needed.
 
 ## Test-instance rollout
 
@@ -264,8 +276,8 @@ global partition. Off stops new calls and does not erase accepted results.
    deterministic grouping and any enabled Stack Referee checks settle. Work
    covers eligible pending stacks throughout the library, not only visible
    cards; no open browser is required. Observe activity, gold stars/counts,
-   reasons, draft suggestions and labeled batch/incomplete coverage in
-   `/curate-preview.html`.
+   reasons, draft suggestions, unchanged stack membership and labeled
+   batch/incomplete coverage in `/curate-preview.html`.
 4. After a few results, turn Photo Referee off. New preparation, submission and
    retries stop; an already-submitted valid response may still finish. This
    is an observed session, not an exact request cap. Record requests including

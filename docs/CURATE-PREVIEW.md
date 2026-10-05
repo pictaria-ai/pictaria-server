@@ -341,9 +341,12 @@ Referee ran. The lightbox shows per-photo reasons, and Why records batch
 coverage and the provider/model. Complete applicable recommendations seed a new
 untouched draft with Yes for suggested photos and Skip for the rest. Save still
 confirms the human's choices; status polls never overwrite an open draft.
-Partial/mixed batches stay manual. Whole-input Photo Referee splits appear only
-when the view refreshes and reuse their suggestions without another AI call.
-See the [Photo Referee guide](CURATE-PHOTO-REFEREE.md).
+Partial comparisons and historical mixed batches stay manual. Photo Referee
+never changes stack membership. New comparisons usually suggest one strong
+representative; additional suggestions must have distinct worthwhile value.
+Earlier saved advice remains usable without automatic re-evaluation. The
+[Photo Referee guide](CURATE-PHOTO-REFEREE.md) explains upgrade behavior and
+batch limitations.
 
 Both referees are available as independent options, off by default on fresh
 installs, using the configured shared Curate provider/model and a ten-photo

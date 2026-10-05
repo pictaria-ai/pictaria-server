@@ -65,7 +65,6 @@ export class StackRefereeWorker {
     if (!this.modelReady()) this.clearPendingChecks();
   }
   selection(group) {
-    if (group.photoPartition || this.curate.current?.byId.get(group.id)?.photoPartition) return { selected: false, reason: 'photo-referee-partition' };
     const status = this.curate.refinement?.groupStatus(group);
     return selectStackReferee(this.curate.config, { memberCount: group.ids.length, pending: true,
       deterministicSettled: !['waiting', 'checking', 'updated'].includes(status?.state),

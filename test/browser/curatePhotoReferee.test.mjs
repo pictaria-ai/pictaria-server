@@ -13,7 +13,7 @@ import { savePhotoRefereeAnswer } from '../../src/curate/photo-referee-results.m
 
 // Persist through the real validator and API projection, without enabling a
 // live provider. The browser then reads exactly the production response shape.
-async function seedAdvice({ repo, assets, contextId }, keepers) {
+async function seedAdvice({ repo, assets, contextId }, keepers, legacyGrouped = false) {
   for (const asset of assets) {
     asset.thumbhash = Buffer.alloc(21, 0).toString('base64');
     repo.updateAssetVisuals(asset.id, { thumbhash: asset.thumbhash });
@@ -33,15 +33,25 @@ async function seedAdvice({ repo, assets, contextId }, keepers) {
     const ids = ['p1', 'p2', 'p3', 'p4'];
     const answer = request.validate({ groups: [{ ids, keepers, reason: 'Alternatives of the same subject.' }],
       photos: ids.map(id => ({ id, eyes_closed: 'unsure', reason: id === 'p2' ? '<img src=x onerror=alert(1)> Natural expression.' : 'A clear view of the subject.' })) });
+    if (legacyGrouped) {
+      // Previously accepted subject groups must not split this stack on upgrade.
+      delete answer.provenance.promptRevision;
+      const [a, b, c, d] = group.ids;
+      answer.result.groups = [
+        { ids: [a, b], keepers: [b], reason: 'First subject.' },
+        { ids: [c], keepers: [], reason: 'Poor quality.' },
+        { ids: [d], keepers: [d], reason: 'Another subject.' },
+      ];
+    }
     repo.transaction(() => savePhotoRefereeAnswer(repo.curate, snapshot, plan, answer, { configurationKey: 'synthetic', checkCoverage: 'off' }));
   } finally { await curate.close(); }
 }
 
-for (const keepers of [[], ['p2', 'p4']]) test(`Photo Referee UI: ${keepers.length} saved recommendations, human changes and Undo`, { timeout: 60000 }, async t => {
+for (const { keepers, legacyGrouped } of [{ keepers: [] }, { keepers: ['p2', 'p4'] }, { keepers: ['p2', 'p4'], legacyGrouped: true }]) test(`Photo Referee UI: ${keepers.length} ${legacyGrouped ? 'historically grouped' : 'saved'} recommendations, human changes and Undo`, { timeout: 60000 }, async t => {
   if (!findChrome()) return t.skip('Chrome required');
   const track = cleanupAfter(t);
   const fixture = track(await curatePreviewFixture({ stackSize: 4, singles: 1, metadataReady: true,
-    prepare: data => seedAdvice(data, keepers) }));
+    prepare: data => seedAdvice(data, keepers, legacyGrouped) }));
   const browser = track(await launchChrome()), page = await browser.newPage();
   const click = selector => page.evaluate(`document.querySelector(${JSON.stringify(selector)}).click()`);
   const text = selector => page.evaluate(`document.querySelector(${JSON.stringify(selector)}).textContent`);
@@ -52,6 +62,9 @@ for (const keepers of [[], ['p2', 'p4']]) test(`Photo Referee UI: ${keepers.leng
   await page.waitFor('document.querySelector(".gate-backdrop input")');
   await page.evaluate('document.querySelector(".gate-backdrop input").value="smoke-secret";document.querySelector(".gate-backdrop button").click()');
   await page.waitFor('document.querySelector(".is-stack") && document.querySelector(".is-stack").dataset.badge!=="checking" && !document.querySelector("#refresh").disabled', { timeoutMs: 35000 });
+  assert.equal(await page.evaluate('document.querySelectorAll(".is-stack").length'), 1);
+  assert.equal(await page.evaluate('document.querySelectorAll(".group-card:not(.is-stack)").length'), 1,
+    'Photo Referee must not create additional singles');
   assert.equal(await page.evaluate('document.querySelector(".is-stack .keeper-star")?.textContent ?? null'), keepers.length ? '★2' : null);
   await page.evaluate(`const fetchBefore=fetch; window.fetch=async(...a)=>{const r=await fetchBefore(...a);if(String(a[0]).endsWith('/comparisons'))window.__comparison=await r.clone().json();return r;}`);
   await click('.is-stack .cover');
@@ -74,7 +87,9 @@ for (const keepers of [[], ['p2', 'p4']]) test(`Photo Referee UI: ${keepers.leng
   const edited = await outcomes();
   await page.evaluate(`window.__statusPolls=0;const original=fetch;window.fetch=async(...args)=>{
     const response=await original(...args);
-    if(String(args[0]).includes('/groups/status')) window.__statusPolls++;
+    if(String(args[0]).includes('/groups/status')) {
+      window.__statusPolls++; window.__lastStatus=await response.clone().json();
+    }
     return response;
   }`);
   await page.waitFor('window.__statusPolls>0');
@@ -102,6 +117,11 @@ for (const keepers of [[], ['p2', 'p4']]) test(`Photo Referee UI: ${keepers.leng
   assert.equal(operations(), 2);
   // Undo commits tags immediately; the derived Curate projection can lag.
   assert.deepEqual(fixture.repo.loadAssetTagsFor([1, 2, 3, 4].map(fixture.id)), originalTags);
+  assert.equal(await page.evaluate('document.querySelector(".is-stack .keeper-star")?.textContent ?? null'), keepers.length ? '★2' : null);
+  // Advice survives immediately; wait for a fresh poll confirming that normal
+  // deterministic prerequisites have settled before expecting preselection.
+  await page.evaluate('window.__lastStatus=null');
+  await page.waitFor('window.__lastStatus?.groups?.some(g=>g.memberCount===4 && g.photoReferee?.canApplyAll) && !document.querySelector("#refresh").disabled');
   await click('.is-stack .cover');
   await page.waitFor('document.querySelectorAll("#photos .photo-card").length===4 && !document.querySelector("#apply").disabled');
   assert.match(await text('#photo-advice-summary'), keepers.length ? /2 suggested/ : /none suggested/,

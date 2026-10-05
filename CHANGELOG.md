@@ -7,6 +7,15 @@ All notable changes to Pictaria Server are documented here. This project follows
 
 ### Development
 
+- Limit Photo Referee to recommendations within existing stacks (PIC-116).
+  Only deterministic grouping and Stack Referee can change membership; earlier
+  Photo Referee splits no longer affect fresh views. The revised prompt usually
+  recommends one strong representative and asks for additional photos only when
+  they offer materially different, worthwhile value. Zero/multiple suggestions
+  and all human choices remain supported. Completed applicable advice is reused;
+  the update does not automatically pay to rejudge it. Older incomplete
+  comparisons remain manual rather than mixing prompt revisions.
+
 - Keep Curate Preview usable when its saved view expires after 30 minutes
   (PIC-116). An idle page renews automatically, preserving loaded cards and
   scroll position where possible. Open drafts and checked selections wait until
@@ -15,9 +24,9 @@ All notable changes to Pictaria Server are documented here. This project follows
 
 - Preserve accepted Photo Referee recommendations when a Curate Save is undone
   (PIC-116). Undo restores the existing stars and suggestions without another
-  model call when the comparison inputs still match, including split stacks
-  and completed batches. Changed evidence and in-flight answers retain their
-  existing stale-input protections.
+  model call when the comparison inputs still match, including completed batches.
+  Changed evidence and in-flight answers retain their existing stale-input
+  protections.
 
 - Make Photo Referee available in Curate Preview Settings for combined testing
   (PIC-116). It defaults off on fresh installs; existing saved or migrated on
@@ -30,9 +39,8 @@ All notable changes to Pictaria Server are documented here. This project follows
   shared PIC-371 gold stars and Why panel. Show per-photo reasons, zero/multiple
   suggestions, batch coverage and independent background activity. Complete
   applicable advice seeds a new draft; Save still confirms human choices, and
-  live updates preserve open drafts. Whole-input splits appear at the next view
-  refresh and reuse per-group advice without recursive AI calls. Partial batches
-  stay manual. Controlled test-instance acceptance remains before release.
+  live updates preserve open drafts. Photo Referee does not change stack
+  membership. Partial batches stay manual. Controlled test-instance acceptance remains before release.
 
 - Added the Photo Referee contract, bounded comparison planner and background worker
   (PIC-116). Retain the released quality criteria within each subject, with
@@ -43,8 +51,7 @@ All notable changes to Pictaria Server are documented here. This project follows
   use spare capacity in whole-stack requests only; references never create
   extra batches or crowd out pending photos. Valid batches persist independently
   through restart, with current-input guards and existing shared scheduling,
-  attempt limits and provider protection. Recommendation UI and grouping
-  corrections are now connected; controlled runtime acceptance remains. See the
+  attempt limits and provider protection. Recommendation UI is now connected; controlled runtime acceptance remains. See the
   [implementation boundary](docs/CURATE-PHOTO-REFEREE.md).
 - Curate Preview gives every stack one status badge, the same on the card, the
   open stack, **Why?** and the page header (PIC-371). Highest first:

@@ -64,7 +64,7 @@ export function photoRefereeRecommendations(record, ids = record.ids) {
   const { plan, answers, checkCoverage } = record.photoReferee;
   const result = collectPhotoRefereeComparisons(plan, answers);
   const selected = new Set(ids), subset = !same(ids, record.ids);
-  if (subset && (!result.wholeGroupCompared || !result.partition?.some(part => same(part.ids.filter(id => record.ids.includes(id)), ids)))) return null;
+  if (subset) return null;
   const groups = values => values.map(part => ({ ...part, ids: part.ids.filter(id => selected.has(id)),
     keepers: part.keepers.filter(id => selected.has(id)) })).filter(part => part.ids.length);
   const keeperIds = result.keeperIds.filter(id => selected.has(id));

@@ -21,7 +21,7 @@ export const REASON = Object.freeze({
   peopleApart: 'people-apart', // Supported people differences keep nearby photos apart.
   rankContrast: 'rank-contrast', // Repeated searches favor separate subgroups.
   savedSplit: 'saved-split', // A saved human separation keeps nearby photos apart.
-  photoSplit: 'photo-split', // A whole-input Photo Referee comparison separated subjects.
+  photoSplit: 'photo-split', // Historical preview reason; Photo Referee no longer changes membership.
   budget: 'budget', // Over the automatic checking limits: grouped by time only.
   preserved: 'preserved', // Membership kept from the opened view; reasons unavailable.
 });
