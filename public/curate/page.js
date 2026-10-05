@@ -27,7 +27,7 @@ const state = {
   busy: false,
   undo: null,
   syncId: null,
-  updateStatus: null, autoUpdateFailed: false,
+  updateStatus: null, autoUpdateFailed: false, viewExpired: false,
   photoIndex: 0,
   photoList: [],
   dialogGeneration: 0,
@@ -144,6 +144,7 @@ async function refresh({ automatic = false, keepLightbox = false } = {}) {
       view.groups.push(...page.groups); view.nextOffset = page.nextOffset;
     }
     state.autoUpdateFailed = false;
+    state.viewExpired = false;
     state.selected.clear(); state.removed.clear();
     state.view = view;
     state.groups = view.groups;
@@ -710,17 +711,18 @@ function canUpdate() {
     !document.activeElement?.matches('input:not([type=checkbox]),select,textarea,[contenteditable=true]');
 }
 function updateHint() {
-  const available = state.autoUpdateFailed || Boolean(state.updateStatus?.updatesAvailable);
+  const available = state.autoUpdateFailed || state.viewExpired || Boolean(state.updateStatus?.updatesAvailable);
   el('updates').hidden = !available;
   el('updates-copy').textContent = state.autoUpdateFailed ? 'Refresh to load updates'
+    : state.viewExpired ? 'Photo view will refresh when you finish reviewing'
     : state.updateStatus?.refinement?.ready ? 'Updated stacks available' : 'Photo updates available';
   el('refresh').classList.toggle('updates-ready', available);
   el('refresh').title = available ? 'Load the latest photos and completed grouping checks' : 'Refresh photos';
 }
 function scheduleUpdates() {
   clearTimeout(updateTimer);
-  if (!state.updateStatus?.updatesAvailable || state.autoUpdateFailed || !canUpdate() ||
-      state.updateStatus.metadata?.state === 'refreshing') return;
+  if ((!state.viewExpired && !state.updateStatus?.updatesAvailable) || state.autoUpdateFailed || !canUpdate() ||
+      (!state.viewExpired && state.updateStatus?.metadata?.state === 'refreshing')) return;
   const wait = Math.max(0, lastInteraction + 1200 - Date.now(), lastAutomatic + 5000 - Date.now());
   updateTimer = setTimeout(() => {
     if (!canUpdate()) return;
@@ -1017,9 +1019,10 @@ let polling = false;
 setInterval(async () => {
   if (document.hidden || polling || state.loading || state.busy) return;
   polling = true;
+  let polledViewId = null;
   try {
     if (state.view) {
-      const id = state.view.viewId;
+      const id = polledViewId = state.view.viewId;
       // Keep the visible cards (or the opened comparison) current, in a bounded
       // 50-card read. Only status changes; memberships and selections stay put.
       const index = state.comparison && (el('comparison').open || el('photo-view').open)
@@ -1029,6 +1032,7 @@ setInterval(async () => {
         visibleGroupIds: [...visibleCards].slice(0, 50),
         comparisonGroupId: (el('comparison').open || el('photo-view').open) ? state.comparison?.groupId ?? null : null,
       });
+      polledViewId = null;
       if (state.view?.viewId === id) showViewStatus(status);
     }
     if (state.syncId) {
@@ -1053,13 +1057,13 @@ setInterval(async () => {
       syncViewer();
     }
   } catch (e) {
-    if (e.code === 'curate_expired') {
-      el('updates').hidden = false;
-      el('updates-copy').textContent = 'This view expired. Refresh to continue.';
-      state.autoUpdateFailed = true;
-      clearTimeout(updateTimer);
-      el('refresh').classList.add('updates-ready');
-      recovery();
+    if (e.code === 'curate_expired' && polledViewId && state.view?.viewId === polledViewId) {
+      // Expected lease expiry is not a failed replacement. Renew at the same
+      // safe idle boundary as grouping updates, preserving drafts/selections.
+      // A late error for a replaced view (or an old receipt) cannot lock cards.
+      state.viewExpired = true;
+      updateHint();
+      scheduleUpdates();
     }
   } finally {
     polling = false;

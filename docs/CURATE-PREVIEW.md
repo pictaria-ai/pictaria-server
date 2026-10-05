@@ -244,8 +244,13 @@ Closing a comparison allows updates to appear. The open comparison does not
 show a routine close-to-refresh notice; its Why explanation remains available,
 and real save-conflict guards remain. Its membership and keeper draft
 never change underneath the user. Automatic updates retain the number of loaded
-pages where possible and anchor the scroll position to a surviving card. A failed
-update stops automatic replacement and asks for **Refresh**, disabling decisions
+pages where possible and anchor the scroll position to a surviving card. The saved
+view expires after 30 minutes; the page renews it at the same safe browsing pause,
+even when no grouping updates are waiting. Open drafts and checked selections
+remain intact until closed or cleared, with a brief notice that the view will
+refresh when reviewing finishes. An expiry response for an older, replaced view
+does not affect the current view. Comparison and save expiry guards still apply.
+A failed update stops automatic replacement and asks for **Refresh**, disabling decisions
 until the view is reconciled. A failed similarity search gets one retry within the current pass. If it fails
 again, that candidate finishes with limited evidence and leaves the pending
 count. Its existing grouping remains usable, and human decisions work normally.

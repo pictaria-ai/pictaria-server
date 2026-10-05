@@ -7,6 +7,12 @@ All notable changes to Pictaria Server are documented here. This project follows
 
 ### Development
 
+- Keep Curate Preview usable when its saved view expires after 30 minutes
+  (PIC-116). An idle page renews automatically, preserving loaded cards and
+  scroll position where possible. Open drafts and checked selections wait until
+  reviewing finishes. Late expiry responses for a replaced view no longer
+  disable the current page.
+
 - Preserve accepted Photo Referee recommendations when a Curate Save is undone
   (PIC-116). Undo restores the existing stars and suggestions without another
   model call when the comparison inputs still match, including split stacks
