@@ -27,7 +27,7 @@ export function savePhotoRefereeAnswer(store, snapshot, plan, answer, { configur
       !same(snapshot.contextIds, plan.contextIds) || answer.provenance.inputKey !== snapshot.inputKey)
     throw new Error('Photo Referee answer does not match the current comparison.');
   const previous = readPhotoRefereeRecord(store, snapshot.ids);
-  const reusable = previous?.photoReferee.snapshot.material === snapshot.material &&
+  const reusable = (previous?.photoReferee.restoredMaterial ?? previous?.photoReferee.snapshot.material) === snapshot.material &&
     previous.photoReferee.snapshot.groupId === snapshot.groupId;
   if (reusable && (previous.photoReferee.plan.planKey !== plan.planKey ||
       previous.photoReferee.configurationKey !== configurationKey))

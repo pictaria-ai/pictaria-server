@@ -102,6 +102,11 @@ for (const keepers of [[], ['p2', 'p4']]) test(`Photo Referee UI: ${keepers.leng
   assert.equal(operations(), 2);
   // Undo commits tags immediately; the derived Curate projection can lag.
   assert.deepEqual(fixture.repo.loadAssetTagsFor([1, 2, 3, 4].map(fixture.id)), originalTags);
+  await click('.is-stack .cover');
+  await page.waitFor('document.querySelectorAll("#photos .photo-card").length===4 && !document.querySelector("#apply").disabled');
+  assert.match(await text('#photo-advice-summary'), keepers.length ? /2 suggested/ : /none suggested/,
+    'Undo retains accepted advice with background inference disabled');
+  assert.deepEqual(await outcomes(), keepers.length ? ['reviewed', 'approve', 'reviewed', 'approve'] : Array(4).fill('reviewed'));
 });
 
 for (const keepers of [[], ['p2', 'p4']]) test(
@@ -131,7 +136,8 @@ for (const keepers of [[], ['p2', 'p4']]) test(
     assert.deepEqual(await page.evaluate('[...document.querySelectorAll("#photos [data-choice][aria-pressed=true]")].map(b=>b.dataset.choice)'),
       keepers.length ? ['reviewed', 'approve', 'reviewed', 'approve'] : Array(4).fill('reviewed'));
     await page.evaluate(`window.issuedDecisions=0;const nativeFetch=window.fetch;
-      window.fetch=(...args)=>{if(String(args[0]).endsWith('/operations'))window.issuedDecisions++;return nativeFetch(...args);}`);
+      window.fetch=async(...args)=>{if(String(args[0]).endsWith('/operations'))window.issuedDecisions++;
+        const r=await nativeFetch(...args);if(String(args[0]).endsWith('/comparisons'))window.__comparison=await r.clone().json();return r;}`);
     await enter(true);
     assert.equal(await page.evaluate('window.issuedDecisions'), 0, 'held Enter never confirms a draft');
     await enter();
@@ -154,6 +160,18 @@ for (const keepers of [[], ['p2', 'p4']]) test(
         assert.equal(tags[fixture.id(n)].includes('frame/reviewed'), n === 1 || n === 3);
       }
       assert.equal(fixture.repo.curate.photo(fixture.id(1001)).state, 'undecided', 'continuation does not decide the next photo');
+      await page.send('Input.dispatchKeyEvent', { type: 'keyDown', key: 'z', code: 'KeyZ' });
+      await page.send('Input.dispatchKeyEvent', { type: 'keyUp', key: 'z', code: 'KeyZ' });
+      await page.waitFor('document.querySelector(".is-stack") && !document.querySelector("#refresh").disabled && document.querySelector("#receipt-text").textContent.startsWith("Undid choices")');
+      assert.equal(operations(), 2);
+      assert.equal(await page.evaluate('document.querySelector(".is-stack .keeper-star")?.textContent'), '★2');
+      // The retained star is immediate. Normal deterministic prerequisite work
+      // can still gate preselection; restoring advice must not bypass it.
+      await page.waitFor('document.querySelector(".is-stack").dataset.badge!=="checking" && !document.querySelector("#refresh").disabled');
+      await click('.is-stack .cover');
+      await page.waitFor('document.querySelectorAll("#photos .photo-card").length===4 && !document.querySelector("#apply-next").disabled');
+      assert.deepEqual(await page.evaluate('[...document.querySelectorAll("#photos [data-choice][aria-pressed=true]")].map(b=>b.dataset.choice)'),
+        ['reviewed', 'approve', 'reviewed', 'approve'], await page.evaluate('JSON.stringify({updated:__comparison.updated,photoReferee:__comparison.photoReferee,advice:__comparison.photoRecommendations,similarity:__comparison.similarity})'));
     }
     assert.equal(fixture.repo.curate.photo(fixture.contextId).state, 'approved');
   },

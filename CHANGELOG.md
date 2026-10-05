@@ -7,6 +7,12 @@ All notable changes to Pictaria Server are documented here. This project follows
 
 ### Development
 
+- Preserve accepted Photo Referee recommendations when a Curate Save is undone
+  (PIC-116). Undo restores the existing stars and suggestions without another
+  model call when the comparison inputs still match, including split stacks
+  and completed batches. Changed evidence and in-flight answers retain their
+  existing stale-input protections.
+
 - Make Photo Referee available in Curate Preview Settings for combined testing
   (PIC-116). It defaults off on fresh installs; existing saved or migrated on
   preferences are honored. It runs independently of Enrich and Stack Referee,

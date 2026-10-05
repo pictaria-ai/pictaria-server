@@ -7,7 +7,7 @@ import { transientStackPreviewFailure } from './stack-referee-images.mjs';
 import { PHOTO_REFEREE_CONTRACT, createPhotoRefereeRequest } from './photo-referee-contract.mjs';
 import { layoutPhotoRefereeComparisons, photoRefereeContextLimit } from './photo-referee-plan.mjs';
 import { photoRefereeImages } from './photo-referee-images.mjs';
-import { photoPartitionAdviceCurrent } from './photo-referee-groups.mjs';
+import { photoPartitionAdviceCurrent, photoPartitionMembersCurrent } from './photo-referee-groups.mjs';
 import { readPhotoRefereeRecord, savePhotoRefereeAnswer, photoRefereeRecommendations } from './photo-referee-results.mjs';
 
 export const PHOTO_PREVIEW_PAUSE_MS = 3 * 60_000;
@@ -65,7 +65,47 @@ export class PhotoRefereeWorker {
     const record = readPhotoRefereeRecord(this.curate.store, group.ids, { subset: Boolean(current.photoPartition) });
     return record && (current.photoPartition
       ? photoPartitionAdviceCurrent(this.curate.store, record, group.ids)
-      : this.lifecycle.inputs.current(record.photoReferee.snapshot)) ? record : null;
+      : this.lifecycle.inputs.current({ ...record.photoReferee.snapshot,
+        material: record.photoReferee.restoredMaterial ?? record.photoReferee.snapshot.material })) ? record : null;
+  }
+  // Undo has already verified the operation and restored its human tags. Keep
+  // the original paid snapshot/provenance immutable; only renew applicability
+  // of accepted advice when all other evidence still matches. Group membership
+  // is checked on the next read after rebuilding (it may still be absent here).
+  restoreAfterUndo(rows) {
+    const store = this.curate.store, restored = new Map(), records = new Map();
+    store.flushIds(rows.map(row => row.assetId));
+    for (const { assetId, restoredHuman } of rows) {
+      const tags = store.repo.loadAssetTagsFor([assetId])[assetId] ?? [];
+      if (!restoredHuman?.key || fingerprint(tags.filter(t => t.startsWith('frame/')).sort()) !== restoredHuman.tags) continue;
+      restored.set(assetId, restoredHuman.key);
+      const record = readPhotoRefereeRecord(store, [assetId], { subset: true });
+      if (record) records.set(record.photoReferee.snapshot.inputKey, record);
+    }
+    for (const record of records.values()) {
+      const saved = record.photoReferee;
+      if (!saved.members) continue;
+      store.flushIds([...record.ids, ...saved.snapshot.contextIds]);
+      const prior = this.lifecycle.inputs.material(saved.snapshot, { restoredHuman: restored, checkGroup: false });
+      if (prior.state === 'current' && fingerprint(prior.material) === (saved.restoredMaterial ?? saved.snapshot.material)) {
+        const current = this.lifecycle.inputs.material(saved.snapshot, { checkGroup: false });
+        saved.restoredMaterial = fingerprint(current.material);
+      }
+      // Split siblings may already be decided, so their original full snapshot
+      // need not be current. Renew only exactly restored members, under the
+      // same source/context checks used to retain the accepted partition.
+      if (photoPartitionMembersCurrent(store, record)) {
+        saved.members = saved.members.map(member => {
+          const [id, , , , human] = member;
+          return restored.get(id) === human ? [...member.slice(0, 4), store.photo(id).humanKey] : member;
+        });
+      }
+      const json = JSON.stringify(record);
+      // Advice is optional; its storage envelope must never prevent Undo.
+      if (Buffer.byteLength(json) > 64 * 1024) continue;
+      store.prepare("UPDATE curate_advice SET json=? WHERE role='keeper' AND schema_version=? AND input_key=?")
+        .run(json, PHOTO_REFEREE_CONTRACT, fingerprint(saved.members.map(([id, key]) => [id, key])));
+    }
   }
   recommendations(group) {
     const record = this.saved(group);

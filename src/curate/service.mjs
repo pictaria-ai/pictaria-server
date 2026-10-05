@@ -367,7 +367,8 @@ export class CurateService {
     if (replay) return replay;
     // Undo checks human state/availability, and need not rebuild groupings.
     if (input.kind !== 'undo') await this.refresh();
-    return this.repo.decisions.apply(input, (ids, reviewState, singlesOnly) => this.assertDecisionScope(ids, reviewState, singlesOnly));
+    return this.repo.decisions.apply(input, (ids, reviewState, singlesOnly) => this.assertDecisionScope(ids, reviewState, singlesOnly),
+      undefined, restored => this.photoReferee?.restoreAfterUndo(restored));
   }
   async backgroundTick() {
     if (this.backgroundWork || this.closed) return;

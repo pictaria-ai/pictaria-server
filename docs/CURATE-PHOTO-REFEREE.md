@@ -212,6 +212,22 @@ including preserving several suggestions or none. Enter can confirm a draft
 with suggested Yes choices; an untouched all-Skip draft still needs an explicit
 button click or mark. Undo uses the existing decision operation.
 
+Undo also restores the applicability of already accepted recommendations when
+the original photo, context and comparison evidence still matches. The gold
+stars and suggested choices return with the restored stack; there is no new
+Photo Referee call or preview download just to undo Save. This works with the
+role off and through restart, for whole comparisons, split children and saved
+batches. An incomplete comparison resumes only its missing batches.
+
+The decision receipt's private before-state records the prior human signature.
+Successful Undo checks the restored tags and renews only accepted advice in the
+same transaction. The original request snapshot, provenance and accounting are
+unchanged. Human revisions still advance, so a request in flight during Save
+and Undo remains stale. New/changed photos, references, separations and newer
+human decisions are not forgiven by Undo. Older receipts without this
+before-state still undo human choices but cannot renew advice applicability;
+no database migration or repair queue is added.
+
 ## Publishing Photo Referee splits
 
 A complete whole-input response can split an existing deterministic/Stack

@@ -130,7 +130,7 @@ export class DecisionRepository {
     if (!old.receipt_json) throw new CurateError('This operation receipt expired.', 'curate_expired');
     return JSON.parse(old.receipt_json);
   }
-  apply(input, assertScope, now = Date.now()) {
+  apply(input, assertScope, now = Date.now(), onUndo) {
     const parsed = this.payload(input);
     return this.repo.transaction(() => {
       const replay = this.replay(input);
@@ -154,7 +154,12 @@ export class DecisionRepository {
           return this.before(assetId, rule.add, rule.remove, parsed.payload.outcomes[assetId]);
         });
       }
-      return this.commit(id, parsed.hash, before, now, parsed.payload.kind === 'undo');
+      const isUndo = parsed.payload.kind === 'undo';
+      const receipt = this.commit(id, parsed.hash, before, now, isUndo);
+      // Rebind already accepted advice in this same transaction. This never
+      // restores request/lease revisions or accepts an in-flight AI answer.
+      if (isUndo) onUndo?.(before);
+      return receipt;
     });
   }
   undoLease(operationId, now) {
@@ -205,7 +210,10 @@ export class DecisionRepository {
   }
   before(assetId, add, remove, action) {
     const tags = new Set(this.repo.loadAssetTagsFor([assetId])[assetId] ?? []);
-    return { assetId, action, add, remove, previous: Object.fromEntries([...add,...remove].map(tag => [tag,tags.has(tag)])) };
+    this.repo.curate.flushIds([assetId]);
+    const human = { key: this.repo.curate.photo(assetId)?.humanKey,
+      tags: fingerprint([...tags].filter(tag => tag.startsWith('frame/')).sort()) };
+    return { assetId, action, add, remove, human, previous: Object.fromEntries([...add,...remove].map(tag => [tag,tags.has(tag)])) };
   }
   undoChanges(target) {
     const row = this.db.prepare('SELECT before_json FROM decision_operations WHERE id=?').get(target);
@@ -215,7 +223,7 @@ export class DecisionRepository {
     return JSON.parse(row.before_json).map(previous => {
       const add = Object.keys(previous.previous).filter(t => previous.previous[t]);
       const remove = Object.keys(previous.previous).filter(t => !previous.previous[t]);
-      return this.before(previous.assetId, add, remove, 'restore');
+      return { ...this.before(previous.assetId, add, remove, 'restore'), restoredHuman: previous.human };
     });
   }
   status(id) {

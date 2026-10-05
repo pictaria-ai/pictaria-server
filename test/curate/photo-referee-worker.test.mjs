@@ -22,7 +22,9 @@ const response = (ids, keepers = [ids[0]], groups = [{ ids, keepers, reason: 'Sa
   photos: ids.map(id => ({ id, eyes_closed: 'unsure', reason: 'Visible quality assessment.' })) });
 const until = async predicate => { for (let i = 0; i < 1000 && !predicate(); i++) await new Promise(r => setTimeout(r, 2)); assert.ok(predicate()); };
 
-async function fixture(work, { count = 4, availability = CURATE_AI_AVAILABILITY, capability = refereeCapability } = {}) {
+const uuid = i => `00000000-0000-4000-8000-${String(i + 1).padStart(12, '0')}`;
+async function fixture(work, { count = 4, availability = CURATE_AI_AVAILABILITY, capability = refereeCapability,
+  assetId = i => `a${String(i).padStart(2, '0')}` } = {}) {
   const dir = mkdtempSync(join(tmpdir(), 'pictaria-photo-worker-')), path = join(dir, 'enrichment.sqlite');
   let repo, curate, scheduler, now = Date.now();
   const calls = [], downloads = [];
@@ -47,14 +49,14 @@ async function fixture(work, { count = 4, availability = CURATE_AI_AVAILABILITY,
   initialize();
   const add = (id, seconds) => { repo.reviewListAdd([id], 'synthetic');
     repo.upsertAsset({ id, fileCreatedAt: new Date(1_700_000_000_000 + seconds * 1000).toISOString() }); };
-  for (let i = 0; i < count; i++) add(`a${String(i).padStart(2, '0')}`, i);
+  for (let i = 0; i < count; i++) add(assetId(i), i);
   const run = async () => { await curate.backgroundTick(); const job = curate.aiLifecycle.active; await job?.work; return job?.result; };
   const close = async () => { await curate.close(); await scheduler.stop(1000); repo.close(); };
   try { await work({ get repo() { return repo; }, get curate() { return curate; }, config, provider, immich, calls, downloads, add, run,
     advance: (ms = AI_SETTLE_MS) => { now += ms; }, set answer(v) { answer = v; }, set download(v) { download = v; },
-    get group() { return curate.current.groups.find(g => g.ids.includes('a00')); },
-    get advice() { return curate.photoReferee.recommendations(curate.current.groups.find(g => g.ids.includes('a00'))); },
-    restart: async () => { await close(); initialize(); await curate.refresh(); },
+    get group() { return curate.current.groups.find(g => g.ids.includes(assetId(0))); },
+    get advice() { return curate.photoReferee.recommendations(curate.current.groups.find(g => g.ids.includes(assetId(0)))); },
+    restart: async ({ refresh = true } = {}) => { await close(); initialize(); if (refresh) await curate.refresh(); },
   }); } finally { await close(); rmSync(dir, { recursive: true, force: true }); }
 }
 
@@ -81,6 +83,109 @@ for (const keepers of [[], ['p2'], ['p1', 'p3', 'p4']]) test(`background saves $
   assert.doesNotMatch(JSON.stringify(comparison.photoRecommendations), /requestKey|inputKey|PRIVATE|http:/);
   f.config.curateKeeperRefereeEnabled = false; await f.run(); assert.equal(f.advice.state, 'complete');
 }));
+
+async function saveGroup(f, group = f.group) {
+  const page = await f.curate.openView();
+  const comparison = f.curate.comparison(page.viewId, group.id);
+  const operation = await f.curate.issueDecision(comparison.id);
+  const { expiresAt, ...input } = operation;
+  return f.curate.applyDecision({ ...input, outcomes: Object.fromEntries(group.ids.map((id, i) => [id, i ? 'reviewed' : 'approve'])) });
+}
+
+async function undoGroup(f, receipt) {
+  const { expiresAt, ...undo } = receipt.undo;
+  return f.curate.applyDecision(undo);
+}
+
+for (const variant of ['whole', 'split', 'batches', 'stack-checked']) test(`Save then Undo reuses ${variant} Photo Referee advice instead of another provider call`, async () => fixture(async f => {
+  if (variant === 'split') f.answer = () => response(['p1', 'p2', 'p3', 'p4'], [], [
+    { ids: ['p1', 'p2'], keepers: ['p2'], reason: 'First subject.' },
+    { ids: ['p3', 'p4'], keepers: ['p3'], reason: 'Second subject.' },
+  ]);
+  if (variant === 'stack-checked') {
+    f.config.curateStackRefereeEnabled = true;
+    f.answer = (_images, prompt) => prompt.schemaName === PHOTO_REFEREE_CONTRACT ? response(['p1', 'p2', 'p3', 'p4']) :
+      { groups: [{ ids: ['p1', 'p2', 'p3', 'p4'], reason: 'Same subject.' }] };
+  }
+  await f.run(); f.advance(); await f.run();
+  await f.run(); f.advance(); await f.run();
+  await f.curate.refresh();
+  const expected = f.advice, calls = f.calls.length, downloads = f.downloads.length;
+  assert.equal(expected.state, 'complete');
+  const originalSnapshot = readPhotoRefereeRecord(f.repo.curate, f.group.ids, { subset: true }).photoReferee.snapshot;
+  for (let round = 0; round < 2; round++) {
+    const receipt = await saveGroup(f);
+    await f.curate.refresh();
+    if (round === 1) { await f.restart({ refresh: false }); f.config.curateKeeperRefereeEnabled = false; }
+    await undoGroup(f, receipt);
+    await f.curate.refresh();
+    assert.deepEqual(f.advice, expected, 'advice is immediately usable, before any background tick');
+    assert.deepEqual(readPhotoRefereeRecord(f.repo.curate, f.group.ids, { subset: true }).photoReferee.snapshot, originalSnapshot,
+      'original request snapshot and provenance are immutable');
+    await f.run(); f.advance(); await f.run(); await f.restart();
+    assert.deepEqual(f.advice, expected);
+    assert.equal(f.calls.length, calls, 'Undo must not ask either referee again');
+    assert.equal(f.downloads.length, downloads, 'Undo does not redownload previews');
+  }
+  // Simulate completed synchronization and expired Undo/comparison leases so
+  // this assertion tests the advice pin, not an unrelated pending operation.
+  f.repo.db.prepare('UPDATE decision_operations SET settled_at=?').run(Date.now());
+  f.advance(31 * 60_000); f.curate.aiLifecycle.inputs.prune();
+  assert.ok(f.repo.db.prepare('SELECT 1 FROM curate_ai_inputs WHERE input_key=?').get(originalSnapshot.inputKey),
+    'accepted advice still protects its original input accounting');
+}, { assetId: uuid, count: variant === 'batches' ? 11 : 4 }));
+
+for (const change of ['source', 'new-member', 'context', 'newer-human']) test(`Undo does not restore stale advice after ${change} changes`, async () => fixture(async f => {
+  if (change === 'context') {
+    f.add(uuid(10), 0);
+    f.repo.recordDecision({ assetIds: [uuid(10)], addTags: ['frame/eligible'], removeTags: [], action: 'approve' });
+  }
+  await f.run(); f.advance(); await f.run();
+  const receipt = await saveGroup(f);
+  if (change === 'source') f.repo.upsertAsset({ id: uuid(0), checksum: 'changed' });
+  if (change === 'new-member') f.add(uuid(20), 2);
+  if (change === 'context') f.repo.recordDecision({ assetIds: [uuid(10)], addTags: ['frame/never-show'], removeTags: ['frame/eligible'], action: 'reject' });
+  if (change === 'newer-human') {
+    f.repo.recordDecision({ assetIds: [uuid(0)], addTags: ['frame/favorite'], removeTags: [], action: 'favorite' });
+    await assert.rejects(undoGroup(f, receipt), /newer human/);
+  } else await undoGroup(f, receipt);
+  await f.curate.refresh();
+  assert.ok(f.curate.current.groups.every(g => f.curate.photoReferee.recommendations(g) === null));
+  assert.equal(f.calls.length, 1);
+}, { assetId: uuid }));
+
+test('Save and Undo during inference still reject the in-flight Photo Referee answer', async () => fixture(async f => {
+  const deferred = Promise.withResolvers(); f.answer = () => deferred.promise;
+  await f.run(); f.advance(); const running = f.run(); await until(() => f.calls.length === 1);
+  const receipt = await saveGroup(f);
+  await undoGroup(f, receipt); await f.curate.refresh();
+  deferred.resolve(response(['p1', 'p2', 'p3', 'p4']));
+  assert.equal((await running).state, 'stale');
+  assert.equal(f.advice, null);
+}, { assetId: uuid }));
+
+test('Undo preserves accepted batches and resumes only the missing Photo Referee batch', async () => fixture(async f => {
+  await f.run(); f.advance(); await f.run();
+  assert.equal(f.advice.state, 'partial');
+  const expected = f.advice;
+  const receipt = await saveGroup(f); await undoGroup(f, receipt); await f.curate.refresh();
+  assert.deepEqual(f.advice, expected);
+  await f.run(); f.advance(); await f.run();
+  assert.equal(f.calls.length, 2);
+  assert.deepEqual(f.calls.map(c => c.images.length), [6, 5]);
+  assert.equal(f.advice.state, 'complete');
+}, { assetId: uuid, count: 11 }));
+
+test('Undo receipts from before advice restoration still restore human choices safely', async () => fixture(async f => {
+  await f.run(); f.advance(); await f.run();
+  const receipt = await saveGroup(f);
+  const row = f.repo.db.prepare('SELECT before_json FROM decision_operations WHERE id=?').get(receipt.operationId);
+  const legacy = JSON.parse(row.before_json).map(({ human, ...before }) => before);
+  f.repo.db.prepare('UPDATE decision_operations SET before_json=? WHERE id=?').run(JSON.stringify(legacy), receipt.operationId);
+  await undoGroup(f, receipt); await f.curate.refresh();
+  assert.ok(f.group.ids.every(id => f.repo.curate.photo(id).state === 'undecided'));
+  assert.equal(f.advice, null, 'missing historical signatures cannot authorize advice restoration');
+}, { assetId: uuid }));
 
 test('production availability requires opt-in, then permits background Photo Referee work independently', async () => fixture(async f => {
   f.config.curateKeeperRefereeEnabled = false;
