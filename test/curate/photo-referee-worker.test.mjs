@@ -151,6 +151,24 @@ for (const variant of ['whole', 'legacy-grouped', 'batches', 'stack-checked']) t
     'accepted advice still protects its original input accounting');
 }, { assetId: uuid, count: variant === 'batches' ? 11 : 4 }));
 
+test('Undo leaves advice unrestored if current material is unavailable after checking prior material', async () => fixture(async f => {
+  await f.run(); f.advance(); await f.run();
+  const receipt = await saveGroup(f), worker = f.curate.photoReferee, inputs = f.curate.aiLifecycle.inputs;
+  const material = inputs.material.bind(inputs), restore = worker.restoreAfterUndo.bind(worker);
+  let unavailable = 0, completed = false;
+  inputs.material = (snapshot, options) => {
+    if (options?.checkGroup === false && !options.restoredHuman) { unavailable++; return { state: 'stale' }; }
+    return material(snapshot, options);
+  };
+  worker.restoreAfterUndo = rows => { restore(rows); completed = true; };
+  await undoGroup(f, receipt);
+  assert.equal(unavailable, 1); assert.equal(completed, true, 'restoration must handle unavailable material without throwing');
+  const record = JSON.parse(f.repo.db.prepare("SELECT json FROM curate_advice WHERE role='keeper'").get().json);
+  assert.equal(record.photoReferee.restoredMaterial, undefined);
+  assert.equal(f.repo.db.prepare("SELECT COUNT(*) n FROM asset_tags WHERE tag LIKE 'frame/%'").get().n, 0);
+  assert.equal(f.calls.length, 1);
+}, { assetId: uuid }));
+
 for (const change of ['source', 'new-member', 'context', 'newer-human']) test(`Undo does not restore stale advice after ${change} changes`, async () => fixture(async f => {
   if (change === 'context') {
     f.add(uuid(10), 0);
@@ -277,17 +295,31 @@ for (const inline of [false, true]) test(`historical Photo Referee groups never 
   assert.equal(f.repo.db.prepare('SELECT COUNT(*) n FROM asset_tags').get().n, 0);
 }, { inline }));
 
-test('new grouped Photo Referee output is rejected without splitting or mutating photos', async () => fixture(async f => {
-  f.answer = () => response(['p1', 'p2', 'p3', 'p4'], [], [
-    { ids: ['p1', 'p2'], keepers: ['p1'], reason: 'First subject.' },
-    { ids: ['p3', 'p4'], keepers: ['p3'], reason: 'Second subject.' },
-  ]);
-  await f.run(); f.advance(); assert.equal((await f.run()).state, 'failed');
-  await f.curate.refresh();
-  assert.equal(f.advice, null); assert.equal(f.curate.current.groups.length, 1);
-  assert.equal(f.group.ids.length, 4);
+test('valid grouped replies across four stacks preserve recommendations without splitting or pausing the role', async () => fixture(async f => {
+  for (let stack = 1; stack <= 3; stack++) for (let i = 0; i < 6; i++) f.add(`b${stack}-${i}`, stack * 600 + i);
+  f.answer = (_images, prompt) => {
+    const ids = prompt.jsonSchema.properties.photos.items.properties.id.enum;
+    return response(ids, [], [
+      { ids: ids.slice(0, 3), keepers: [ids[0]], reason: 'First recommendation.' },
+      { ids: ids.slice(3), keepers: [ids[3]], reason: 'Another recommendation.' },
+    ]);
+  };
+  await f.run();
+  const original = f.curate.current.groups.map(g => g.ids);
+  f.advance(); for (let i = 0; i < 4; i++) assert.equal((await f.run()).state, 'succeeded');
+  assert.equal(f.calls.length, 4); assert.equal(f.curate.photoReferee.modelReady(), true);
+  assert.equal(f.repo.db.prepare("SELECT COUNT(*) n FROM curate_meta WHERE key GLOB 'photo-model-failure:*'").get().n, 0);
+  await f.restart(); await f.run(); f.advance(); await f.run();
+  assert.deepEqual(f.curate.current.groups.map(g => g.ids), original);
+  assert.equal(f.calls.length, 4, 'accepted advice is reused after restart');
+  for (const g of f.curate.current.groups) {
+    assert.equal(g.ids.length, 6);
+    const advice = f.curate.photoReferee.recommendations(g);
+    assert.equal(advice.canApplyAll, true); assert.equal(advice.partition, null);
+    assert.deepEqual(advice.keeperIds, [g.ids[0], g.ids[3]]);
+  }
   assert.equal(f.repo.db.prepare('SELECT COUNT(*) n FROM asset_tags').get().n, 0);
-}));
+}, { count: 6 }));
 
 test('incomplete historical comparisons do not mix old and new prompt batches', async () => fixture(async f => {
   await f.run(); f.advance(); await f.run();

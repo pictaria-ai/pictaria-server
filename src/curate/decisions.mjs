@@ -156,9 +156,14 @@ export class DecisionRepository {
       }
       const isUndo = parsed.payload.kind === 'undo';
       const receipt = this.commit(id, parsed.hash, before, now, isUndo);
-      // Rebind already accepted advice in this same transaction. This never
-      // restores request/lease revisions or accepts an in-flight AI answer.
-      if (isUndo) onUndo?.(before);
+      // Advice restoration is optional: contain its failures and partial writes
+      // without rolling back the human Undo, its receipt or its sync jobs.
+      if (isUndo && onUndo) {
+        this.db.exec('SAVEPOINT curate_undo_advice');
+        try { onUndo(before); }
+        catch { this.db.exec('ROLLBACK TO curate_undo_advice'); }
+        finally { this.db.exec('RELEASE curate_undo_advice'); }
+      }
       return receipt;
     });
   }

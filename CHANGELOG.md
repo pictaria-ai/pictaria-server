@@ -7,6 +7,12 @@ All notable changes to Pictaria Server are documented here. This project follows
 
 ### Development
 
+- Accept otherwise valid Photo Referee answers formatted as multiple groups
+  (PIC-116). Use their recommendation union without changing stack membership
+  or pausing the role; strict membership, context and assessment checks remain.
+  Optional AI advice restoration failures no longer roll back a human Undo:
+  discard partial advisory writes while preserving the decision and sync jobs.
+
 - Limit Photo Referee to recommendations within existing stacks (PIC-116).
   Only deterministic grouping and Stack Referee can change membership; earlier
   Photo Referee splits no longer affect fresh views. The revised prompt usually
@@ -46,8 +52,8 @@ All notable changes to Pictaria Server are documented here. This project follows
   (PIC-116). Retain the released quality criteria within each subject, with
   explicit zero/one/multiple recommendations, per-photo explanations and
   read-only already-kept context. Larger inputs use up to three balanced
-  comparisons within the total image/byte limits; incomplete or mixed batch
-  results cannot become full-stack advice. Up to two nearby approved references
+  comparisons within the total image/byte limits; incomplete or historical mixed
+  batch results cannot become full-stack advice. Up to two nearby approved references
   use spare capacity in whole-stack requests only; references never create
   extra batches or crowd out pending photos. Valid batches persist independently
   through restart, with current-input guards and existing shared scheduling,

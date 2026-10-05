@@ -113,6 +113,29 @@ test('conditional Undo cannot erase a later Frame Favorite; unrelated AI changes
  const result=await f.curate.applyDecision(undoPayload(receipt));assert.deepEqual(local(f,IDS[0]),['ai/scene/new']);await f.restart();assert.deepEqual(await f.curate.applyDecision(undoPayload(receipt)),result);
  });
 });
+test('optional advice failure rolls back its partial writes while human Undo commits and replays',async()=>{
+ await fixture(async f=>{
+  f.seed();const saved=await f.curate.applyDecision(await f.operation());await f.drain();
+  let callbacks=0;
+  f.curate.photoReferee={restoreAfterUndo:()=>{
+   callbacks++;
+   f.repo.db.prepare("INSERT INTO curate_meta VALUES('synthetic-advice-write',1)").run();
+   throw Error('synthetic advice restoration failure');
+  }};
+  const input=undoPayload(saved), receipt=await f.curate.applyDecision(input);
+  assert.equal(callbacks,1);assert.equal(receipt.assetCount,3);assert.equal(receipt.sync,'pending');
+  IDS.forEach(x=>assert.deepEqual(local(f,x),[]));
+  assert.equal(f.repo.db.prepare("SELECT 1 FROM curate_meta WHERE key='synthetic-advice-write'").get(),undefined);
+  assert.equal(f.repo.db.prepare('SELECT COUNT(*) n FROM decision_operations').get().n,2);
+  const jobs=f.repo.pendingSyncJobCount();assert.ok(jobs>0);
+  assert.deepEqual(await f.curate.applyDecision(input),receipt);assert.equal(callbacks,1);
+  assert.equal(f.repo.pendingSyncJobCount(),jobs);
+  await f.restart();assert.deepEqual(await f.curate.applyDecision(input),receipt);
+  assert.equal(f.repo.pendingSyncJobCount(),jobs);
+  await f.drain();IDS.forEach(x=>assert.deepEqual([...f.immich.assets.get(x)],[]));
+  assert.equal(f.repo.decisions.status(receipt.operationId).sync,'synced');
+ });
+});
 test('Undo ID cannot authorize a different target and expired Undo cannot become a fresh decision',async()=>{
  await fixture(async f=>{f.seed();const receipt=await f.curate.applyDecision(await f.operation());const input=undoPayload(receipt);
  await assert.rejects(f.curate.applyDecision({...input,targetOperationId:'other'}),/scope/);

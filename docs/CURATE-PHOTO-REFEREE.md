@@ -51,10 +51,14 @@ The deliberate differences are:
 - Already-kept photos are read-only context. They can inform the comparison but
   cannot appear in the actionable recommendation set. An existing human choice
   is never reopened or demoted.
-- There are no model ranks to repair or default. The existing response envelope
-  contains exactly one group with all submitted `ids`, actionable `keepers` and
-  a concise `reason`. New multi-group answers are rejected. A separate exhaustive
-  `photos` array supplies `id`, `eyes_closed` and `reason` for every submitted
+- There are no model ranks to repair or default. The prompt and provider schema
+  request exactly one group with all submitted `ids`, actionable `keepers` and
+  a concise `reason`. If a provider returns multiple otherwise valid groups,
+  local validation accepts their recommendation union and retains their reasons
+  for explanation only. Those boundaries never change stacks or count as a model
+  failure. Exhaustive, disjoint membership, valid keeper IDs, context exclusions
+  and assessments remain mandatory. A separate exhaustive `photos` array
+  supplies `id`, `eyes_closed` and `reason` for every submitted
   photo, including context. Context membership is not a claim of shared subject.
 
 Requests use positional aliases and image bytes, with no asset IDs, captions,
@@ -132,7 +136,9 @@ Each comparison generally recommends one; a large stack may therefore receive
 several suggestions from different batches. This does not promise cross-batch
 duplicate elimination or launch an extra AI round. No accepted recommendation is
 silently discarded to impose a global winner. Incomplete comparisons stay manual.
-Historical mixed-subject batches also retain their existing manual-only guard.
+Current recommendation-only answers use the validated union even if formatted
+as several groups. Historical mixed-subject batches retain their existing
+manual-only guard.
 
 The collector's `canApplyAll` means **structurally complete advice**, not authority
 to change photos. The worker and decision service must still verify current
@@ -203,15 +209,15 @@ decision authority or overwrite open memberships and draft choices.
 
 The PIC-371 grouping badge remains independent of the Photo Referee. Complete
 advice supplies a gold star with the number suggested. A valid empty set reads
-“none suggested”; missing, invalid or mixed batch output never means none.
-The Why panel includes the comparison coverage, concise group reasons and
+“none suggested”; missing, invalid or historical mixed batch output never means
+none. The Why panel includes the comparison coverage, concise group reasons and
 saved provider/model. Every inspected valid batch provides per-photo reasons;
 the lightbox shows the full assessment. Model text is rendered as text.
 
 Opening a new pending comparison seeds an untouched draft only when its advice
 is complete and applicable: suggested photos start at **Yes**, the others at
-**Skip**. Saved human outcomes take precedence. Partial/mixed batches and advice
-awaiting a prerequisite are inspectable but do not seed choices. Recommendations
+**Skip**. Saved human outcomes take precedence. Partial comparisons, historical
+mixed batches and advice awaiting a prerequisite are inspectable but do not seed choices. Recommendations
 arriving while a comparison is open never change its draft; the page says to
 reopen it to inspect them. Zero suggestions never silently reject any photo.
 
@@ -237,8 +243,12 @@ same transaction. The original request snapshot, provenance and accounting are
 unchanged. Human revisions still advance, so a request in flight during Save
 and Undo remains stale. New/changed photos, references, separations and newer
 human decisions are not forgiven by Undo. Older receipts without this
-before-state still undo human choices but cannot renew advice applicability;
-no database migration or repair queue is added.
+before-state still undo human choices but cannot renew advice applicability.
+Optional advice restoration runs inside a savepoint: if it fails, its partial
+database writes roll back while the human Undo, receipt and synchronization jobs
+still commit. Unavailable current evidence leaves advice unrestored. This does
+not bypass errors in the required human decision or storage path. No database
+migration or repair queue is added.
 
 ## Stack ownership and earlier saved results
 

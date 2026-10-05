@@ -86,6 +86,7 @@ export class PhotoRefereeWorker {
       const prior = this.lifecycle.inputs.material(saved.snapshot, { restoredHuman: restored, checkGroup: false });
       if (prior.state === 'current' && fingerprint(prior.material) === (saved.restoredMaterial ?? saved.snapshot.material)) {
         const current = this.lifecycle.inputs.material(saved.snapshot, { checkGroup: false });
+        if (current.state !== 'current') continue;
         saved.restoredMaterial = fingerprint(current.material);
       }
       const json = JSON.stringify(record);

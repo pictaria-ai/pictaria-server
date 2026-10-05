@@ -178,19 +178,17 @@ test('maps zero, one and multiple keepers faithfully without a two-photo cap', (
   }
 });
 
-test('new answers cannot split a stack; historical grouped advice stays readable without a partition', () => {
+test('current and historical grouped answers retain recommendations without a partition', () => {
   const f = setup(), images = photos(4), plan = f.plan(images), request = f.build({ images, plan });
-  assert.throws(() => request.validate(response([group(['p4', 'p3'], ['p4']), group(['p2', 'p1'], ['p2', 'p1'])])),
-    { code: 'photo_referee_stack_split' });
-  const saved = request.validate(response([group(['p1', 'p2', 'p3', 'p4'], ['p1', 'p4'])]));
-  saved.result.groups = [group(images.slice(0, 2).map(p => p.assetId), [images[0].assetId]),
-    group(images.slice(2).map(p => p.assetId), [images[3].assetId])];
-  assert.equal(collectPhotoRefereeComparisons(plan, [saved]).batches[0].status, 'invalid-answer');
-  delete saved.provenance.promptRevision; // Previously accepted revision-1 response.
-  const collected = collectPhotoRefereeComparisons(plan, [saved]);
-  assert.equal(collected.canApplyAll, true); assert.equal(collected.wholeGroupCompared, true);
-  assert.equal(collected.partition, null);
-  assert.deepEqual(collected.keeperIds, [images[0].assetId, images[3].assetId]);
+  const saved = request.validate(response([group(['p4', 'p3'], ['p4']), group(['p2', 'p1'], ['p2', 'p1'])]));
+  for (const legacy of [false, true]) {
+    if (legacy) delete saved.provenance.promptRevision;
+    const collected = collectPhotoRefereeComparisons(plan, [saved]);
+    assert.equal(collected.state, 'complete'); assert.equal(collected.canApplyAll, true);
+    assert.equal(collected.wholeGroupCompared, true); assert.equal(collected.partition, null);
+    assert.deepEqual(collected.keeperIds, [0, 1, 3].map(i => images[i].assetId));
+    assert.deepEqual(collected.batches[0].assessments.map(p => p.id), images.map(p => p.assetId));
+  }
 });
 
 test('already-kept context is assessed but cannot be returned as an actionable keeper', async () => {
@@ -199,6 +197,8 @@ test('already-kept context is assessed but cannot be returned as an actionable k
   assert.match(f.calls[0].options.userPrompt, /Already-kept read-only context: p3/);
   assert.deepEqual(f.calls[0].options.jsonSchema.properties.groups.items.properties.keepers.items.enum, ['p1', 'p2']);
   assert.throws(() => request.validate(response([group(['p1', 'p2', 'p3'], ['p3'])])), { code: 'photo_referee_context_keeper' });
+  assert.throws(() => request.validate(response([group(['p1', 'p2'], ['p1']), group(['p3'], ['p3'])])),
+    { code: 'photo_referee_context_keeper' });
   const valid = request.validate(response([group(['p1', 'p2', 'p3'], [])]));
   assert.deepEqual(valid.result.groups[0].keepers, []);
   assert.equal(valid.assessments.length, 3);
@@ -244,12 +244,15 @@ test('separate comparisons preserve every recommendation without inventing a glo
   assert.equal(missing.canApplyAll, false); assert.equal(missing.state, 'partial'); assert.equal(missing.noneRecommended, false);
   assert.equal(missing.batches[1].status, 'unavailable');
   const mixed = structuredClone(answers);
+  mixed[1] = requests[1].validate(response([group(['p1', 'p2']), group(['p3', 'p4', 'p5', 'p6', 'p7', 'p8', 'p9', 'p10'])]));
+  const current = collectPhotoRefereeComparisons(plan, mixed);
+  assert.equal(current.state, 'complete'); assert.equal(current.canApplyAll, true);
+  assert.equal(current.partition, null); assert.equal(current.wholeGroupCompared, false);
+  assert.deepEqual(current.keeperIds, [0, 4, 10, 12, 20, 24].map(i => images[i].assetId));
   delete mixed[1].provenance.promptRevision;
-  const ids = plan.requests[1].ids;
-  mixed[1].result.groups = [group(ids.slice(0, 2)), group(ids.slice(2))];
   const result = collectPhotoRefereeComparisons(plan, mixed);
   assert.equal(result.state, 'complete'); assert.equal(result.canApplyAll, false); assert.equal(result.partition, null);
-  assert.equal(result.keeperIds.length, 6, 'mixed results remain inspectable without apply-all advice');
+  assert.equal(result.keeperIds.length, 6, 'historical mixed batches remain inspectable without apply-all advice');
 });
 
 test('collection rejects swapped batches, another comparison, and corrupted normalized answers', () => {

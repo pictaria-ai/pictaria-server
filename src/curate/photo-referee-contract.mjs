@@ -64,10 +64,11 @@ function requestPrompt(aliases, actionable, context) {
   };
 }
 
-function validateAnswer(ids, contextIds, answer, recommendationOnly = false) {
+function validateAnswer(ids, contextIds, answer) {
   if (!object(answer) || Object.keys(answer).some(k => !['groups', 'photos'].includes(k))) reject('answer');
   const result = validateAdvice(ids, { groups: answer.groups }, 'keeper');
-  if (recommendationOnly && result.groups.length !== 1) reject('stack_split');
+  // Prefer one group in the prompt, but tolerate otherwise valid subgroup
+  // formatting. Only the recommendation union is used, never these boundaries.
   if (result.groups.some(g => g.keepers.some(id => contextIds.includes(id)))) reject('context_keeper');
   if (!Array.isArray(answer.photos) || answer.photos.some(p => !object(p) ||
       Object.keys(p).some(k => !['id', 'eyes_closed', 'reason'].includes(k)) ||
@@ -85,14 +86,14 @@ function answerValidator(ids, aliases, contextIds, provenance) {
   const order = (a, b) => positions.get(a) - positions.get(b);
   const contextAliases = aliases.filter((_, i) => contextIds.includes(ids[i]));
   return answer => {
-    const validated = validateAnswer(aliases, contextAliases, answer, true);
+    const validated = validateAnswer(aliases, contextAliases, answer);
     const result = { groups: validated.result.groups.map(g => ({
       ids: g.ids.map(id => byAlias.get(id)).sort(order),
       keepers: g.keepers.map(id => byAlias.get(id)).sort(order), reason: g.reason.trim(),
     })).sort((a, b) => order(a.ids[0], b.ids[0])) };
     const assessments = validated.assessments.map(p => ({ ...p, id: byAlias.get(p.id), reason: p.reason.trim() }))
       .sort((a, b) => order(a.id, b.id));
-    validateAnswer(ids, contextIds, { ...result, photos: assessments }, true);
+    validateAnswer(ids, contextIds, { ...result, photos: assessments });
     return { result, assessments, provenance: structuredClone(provenance) };
   };
 }
@@ -159,13 +160,15 @@ export function collectPhotoRefereeComparisons(plan, answers) {
           answer.provenance.requestIndex !== index || answer.provenance.provider !== checked.capability.provider ||
           answer.provenance.model !== checked.capability.model) reject('batch_identity');
       const valid = validateAnswer([...request.ids, ...request.contextIds], request.contextIds,
-        { ...answer.result, photos: answer.assessments }, answer.provenance.promptRevision === PHOTO_REFEREE_PROMPT_REVISION);
+        { ...answer.result, photos: answer.assessments });
       return { index, status: 'valid', ...valid, provenance: structuredClone(answer.provenance) };
     } catch { return { index, status: 'invalid-answer' }; }
   });
   const complete = batches.every(b => b.status === 'valid');
-  const mixed = batches.some(b => b.result?.groups.length > 1);
-  const canApplyAll = complete && (checked.coverage === 'whole-group' || !mixed);
+  // Historical mixed-subject batches retain their manual-only guard. Current
+  // recommendation-only answers can use their union regardless of formatting.
+  const legacyMixed = batches.some(b => b.provenance?.promptRevision !== PHOTO_REFEREE_PROMPT_REVISION && b.result?.groups.length > 1);
+  const canApplyAll = complete && (checked.coverage === 'whole-group' || !legacyMixed);
   const keeperIds = batches.flatMap(b => b.result?.groups.flatMap(g => g.keepers) ?? []);
   return { state: complete ? 'complete' : 'partial', coverage: checked.coverage,
     wholeGroupCompared: complete && checked.coverage === 'whole-group', canApplyAll,
