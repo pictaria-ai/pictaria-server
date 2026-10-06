@@ -223,7 +223,7 @@ test('background status markers and inline progress remain stable on desktop and
     await page.waitFor('document.querySelector(".group-card[data-similarity=checked]")', { timeoutMs: 42000 });
     assert.equal(fixture.similarityReads.length, 4);
     assert.equal(await page.evaluate('document.querySelector(".group-card[data-similarity=checked] .stack-badge").dataset.badge'), 'unsure');
-    assert.equal(await page.evaluate('document.querySelector(".group-card[data-similarity=checked] .p-chip").textContent'), 'Unsure · 3 photos');
+    assert.equal(await page.evaluate('document.querySelector(".group-card[data-similarity=checked] .p-chip").textContent'), '3 photos');
     assert.equal(await progress(), '1 unsure', 'completed checks no longer count as checking');
     assert.equal(await page.evaluate('document.querySelector("#check-activity").childElementCount'), 0);
   });

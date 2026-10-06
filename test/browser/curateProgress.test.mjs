@@ -72,7 +72,7 @@ test('Enrich notice follows live status and card status changes keep dates witho
       assert.equal(await page.evaluate('window.progressCards.every((c,i)=>c.querySelector(".capture-date").textContent===window.cardDates[i])'), true);
     }
     assert.match(await page.evaluate('window.progressCards[1].querySelector(".stack-badge").title'), /^Not fully checked\. .*Similarity unavailable/);
-    assert.equal(await page.evaluate('window.progressCards[1].querySelector(".p-chip").textContent'), 'Not fully checked · 3 photos');
+    assert.equal(await page.evaluate('window.progressCards[1].querySelector(".p-chip").textContent'), '3 photos');
     await page.evaluate('window.progressCards.forEach(c=>c.updateStatus({similarity:{state:"checking",done:4,total:5}}))');
     if (process.env.PICTARIA_TEST_SCREENSHOTS) {
       const { data } = await page.send('Page.captureScreenshot', { format:'png' });

@@ -167,7 +167,8 @@ button {
 .group-grid {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
-  gap: 18px;
+  gap: 26px 18px;
+  padding-top: 12px;
 }
 .group-card {
   overflow: hidden;
@@ -178,6 +179,7 @@ button {
   border: 1px solid var(--p-line);
   border-radius: var(--p-radius);
 }
+.group-card.is-stack { border-color: var(--p-strong-line, var(--p-line)); }
 .group-card:hover {
   border-color: var(--p-accent);
 }
@@ -195,10 +197,10 @@ button {
   height: 100%;
   object-fit: cover;
 }
-.cover .p-chip {
+.cover .stack-count {
   position: absolute;
-  left: 12px;
-  bottom: 12px;
+  left: 10px;
+  top: 10px;
   background: var(--p-panel);
 }
 /* Stack status (PIC-371): one badge per stack, a keeper star beside it. Icon
@@ -588,13 +590,19 @@ dialog::backdrop {
 .page-tools summary, .card-menu summary { list-style: none; cursor: pointer; }
 .page-tools > div { position: absolute; z-index: 3; right: 0; display: grid; gap: 6px; width: 180px; padding: 10px; background: var(--p-panel); border: 1px solid var(--p-line); border-radius: 8px; box-shadow: var(--p-shadow); }
 #bulk-label { display: flex; gap: 8px; align-items: center; font-size: 13px; }
-.group-card { position: relative; overflow: visible; display: flex; flex-direction: column; }
+.group-card { position: relative; isolation: isolate; overflow: visible; display: flex; flex-direction: column; }
 .group-card .cover { padding: 0; border: 0; width: 100%; overflow: hidden; border-radius: 11px 11px 0 0; display: block; }
 .group-card .cover:focus-visible { outline: 3px solid var(--p-accent); outline-offset: -3px; }
-.group-card.is-stack { box-shadow: 0 -4px 0 -1px var(--p-panel), 0 -5px 0 -1px var(--p-line); }
-.group-caption { flex: 1; min-width: 0; grid-template-columns: minmax(0,1fr); padding: 10px 12px; gap: 5px; }
+.group-card.is-stack::before, .group-card.is-stack::after {
+  content: ''; position: absolute; z-index: -1; pointer-events: none;
+  height: 14px; border: 1px solid var(--p-strong-line, var(--p-line));
+  border-radius: 10px 10px 0 0; background: var(--p-panel-2);
+}
+.group-card.is-stack::before { top: -13px; left: 15px; right: 15px; }
+.group-card.is-stack::after { top: -7px; left: 7px; right: 7px; }
+.group-caption { flex: 1; min-width: 0; grid-template-columns: minmax(0,1fr); grid-template-rows: 50px 20px 20px; align-content: start; padding: 10px 12px; gap: 5px; }
 .group-caption .filename { font-size: 14px; }
-.card-actions { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 4px; }
+.card-actions { display: flex; flex-wrap: wrap; gap: 6px; margin: 0; }
 .card-actions .p-btn { font-size: 12px; min-height: 34px; padding: 5px 9px; }
 .card-menu { position: relative; }
 .card-menu[open] { z-index: 3; }
@@ -676,7 +684,9 @@ dialog::backdrop {
 .card-actions { display: grid; grid-template-columns: repeat(4,minmax(0,1fr)); gap: 5px; }
 .card-actions .p-btn { padding: 5px 4px; }
 .is-stack .card-actions { display: flex; }
-.group-caption .photo-caption { font-size: 14px; min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.group-caption .photo-caption { grid-row: 2; line-height: 20px; font-size: 14px; min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.group-caption .card-meta { grid-row: 3; }
+.group-caption .stack-strip, .group-caption .card-actions { grid-row: 1; }
 .check-heading { display: flex; align-items: center; flex-wrap: wrap; gap: 9px; }
 .why-tooltip { display: inline-flex; }
 .why-trigger { padding: 0; background: transparent; border: 0; color: var(--p-muted); font: inherit; font-size: 12px; cursor: help; text-decoration: underline dotted; text-underline-offset: 3px; }

@@ -305,9 +305,15 @@ had no split controls since PIC-384; an earlier saved split still applies and
 appears in **Why?** as "Your earlier split applies". Decided photos show their
 decision only.
 
-The badge's icon sits at the top right of the cover and its word in the cover
-chip, for example "Unsure · 9 photos", so color is never the only signal. The
-capture date stays put while checks run. When a newer grouping supersedes a
+The badge's icon sits at the top right of the cover, with its word and explanation
+in the tooltip and accessible label. Icon shapes distinguish states as well as
+color. A stack shows only its photo count at the top left, such as "9 photos";
+single photos have no count/status text chip. Two inset photo edges make stacks
+stand out. The thumbnail strip and single-photo action buttons occupy the same
+row, with descriptions and capture dates aligned below them. Missing descriptions
+reserve the same space, and long descriptions truncate to one line.
+
+The capture date stays put while checks run. When a newer grouping supersedes a
 card on screen, from similarity checks, the Stack Referee or a new photo nearby,
 the card and any open comparison keep a settled verdict such as **AI checked**,
 gain an accent outline, and **Why?** says "A newer grouping is ready; it appears

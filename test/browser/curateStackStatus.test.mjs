@@ -44,7 +44,9 @@ test('a kept-apart single and suggested keepers show in the grid, the open stack
   assert.equal(await page.evaluate('document.querySelector(".is-stack").dataset.badge'), 'checked');
   assert.equal(await page.evaluate('document.querySelector(".is-stack .keeper-star").getAttribute("aria-label")'), '2 keepers suggested');
   assert.equal(await text('.is-stack .keeper-star'), '★2');
-  assert.equal(await text('.group-card:not(.is-stack) .p-chip'), 'Kept apart · Single photo');
+  assert.equal(await text('.is-stack .stack-count'), '4 photos');
+  assert.equal(await text('.group-card:not(.is-stack) .p-chip'), null);
+  assert.equal(await page.evaluate('document.querySelector(".group-card:not(.is-stack) .stack-badge").getAttribute("aria-label")'), 'Kept apart');
   assert.equal(await text('#refinement'), '', 'checked and kept-apart cards need no header count');
 
   await click('.is-stack .cover');

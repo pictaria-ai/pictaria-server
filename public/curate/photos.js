@@ -135,15 +135,13 @@ export function groupCard(group, open, { decide, select, selected = false, decid
   cover.type = 'button';
   const coverLabel = group.memberCount > 1 ? `Compare ${group.memberCount} photos: ${photo.caption || label}` : `View ${photo.caption || label}`;
   const img = node('img'); img.src = thumbnail(photo.id); img.alt = ''; img.loading = 'lazy';
-  const chip = node('span', undefined, 'p-chip');
   const marker = node('span', undefined, 'status-marker');
-  cover.append(img, chip, marker);
+  cover.append(img, marker);
+  if (group.memberCount > 1) cover.append(node('span', `${group.memberCount} photos`, 'p-chip stack-count'));
   const caption = node('div', undefined, 'group-caption');
-  if (photo.caption) {
-    const description = node('span', photo.caption, 'photo-caption');
-    description.title = photo.caption;
-    caption.append(description);
-  }
+  const description = node('span', photo.caption || '', 'photo-caption');
+  description.title = photo.caption || '';
+  caption.append(description);
   const meta = node('div', undefined, 'card-meta');
   const date = node('small', photo.capturedAt
     ? new Date(photo.capturedAt).toLocaleString([], { dateStyle: 'medium', timeStyle: 'short' }) : '', 'capture-date');
@@ -174,15 +172,12 @@ export function groupCard(group, open, { decide, select, selected = false, decid
     check.setAttribute('aria-label',`Check ${photo.caption || label}`);
     check.onchange = () => select?.(group,check.checked); selection.append(check); card.append(selection);
   }
-  if (actions.childElementCount) caption.append(actions);
-  // Status refreshes in place: the badge, star and chip words change, while
-  // the date, the chip's position and the card's size stay put.
+  if (actions.childElementCount) caption.prepend(actions);
+  // Status refreshes in place at the top right, without repeating the status
+  // in the photo count or moving descriptions, dates and controls.
   card.updateStatus = (patch = {}) => {
     mergeStatus(group, patch);
     const status = stackStatus(group, { decided });
-    const count = group.memberCount > 1 ? `${group.memberCount} photos` : 'Single photo';
-    chip.hidden = decided;
-    chip.textContent = status?.word ? `${status.word} · ${count}` : count;
     cover.setAttribute('aria-label', status?.word ? `${status.word}. ${coverLabel}` : coverLabel);
     const badge = badgeNode(status), star = keeperStar(status?.keepers);
     const signature = JSON.stringify([badge?.title, status?.keepers]);

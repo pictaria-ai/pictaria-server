@@ -7,6 +7,12 @@ All notable changes to Pictaria Server are documented here. This project follows
 
 ### Development
 
+- Make Curate Preview stacks easier to spot with two layered photo edges and
+  a top-left photo-count badge (PIC-116 / PIC-371). Remove repeated status text
+  chips; existing top-right status icons, tooltips and recommendation stars remain.
+  Single-photo buttons now line up with stack thumbnails, with descriptions and
+  dates aligned underneath across Pending and Decided cards.
+
 - Accept otherwise valid Photo Referee answers formatted as multiple groups
   (PIC-116). Use their recommendation union without changing stack membership
   or pausing the role; strict membership, context and assessment checks remain.
@@ -65,7 +71,8 @@ All notable changes to Pictaria Server are documented here. This project follows
   **Checked** as the default. A single photo shows **Kept apart** only when
   embeddings, people, Immich searches, the Stack Referee or an earlier split
   separated it from photos taken at the same time. The card keeps its date while
-  checks run, and its chip names the badge, such as "Unsure · 9 photos".
+  checks run; status lives in the top-right icon and tooltip, with the photo
+  count in a separate top-left chip for stacks.
   **Why?** repeats the badge as a verdict, adds a Grouping → AI check step strip
   that says why a check could not run (for example "34 photos is over the
   30-photo limit"), and lists short evidence rows marked ✓ supports, ? unsure,

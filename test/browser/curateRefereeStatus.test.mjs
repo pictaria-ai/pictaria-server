@@ -34,7 +34,7 @@ test('referee status updates cards and open comparisons without moving photos or
   await click('#refresh');
   await page.waitFor('document.querySelector(".is-stack .stack-badge")?.title.includes("AI check: queued")');
   assert.equal(await page.evaluate('document.querySelector(".is-stack .stack-badge").dataset.badge'), 'checking');
-  assert.equal(await page.evaluate('document.querySelector(".is-stack .p-chip").textContent'), 'Checking · 4 photos');
+  assert.equal(await page.evaluate('document.querySelector(".is-stack .p-chip").textContent'), '4 photos');
   assert.match(await page.evaluate('document.querySelector("#refinement").textContent'), /1 checking/);
   assert.match(await page.evaluate('document.querySelector("#check-activity .activity-indicator").title'), /Stack Referee queued/);
   assert.equal(await page.evaluate('document.querySelector(".is-stack .capture-date").hidden'), false, 'the date stays put');
