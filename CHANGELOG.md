@@ -7,6 +7,13 @@ All notable changes to Pictaria Server are documented here. This project follows
 
 ### Development
 
+- Simplify the Curate Preview stack comparison (PIC-116 / PIC-371): retain
+  recommendation stars and filled decision buttons without duplicate colored
+  outlines or per-photo Draft labels. Use one restrained focus border and photo
+  number, compact header/toolbar, and hover/focus/tap help for shortcuts and
+  referee reasons. Fit uncropped photos by row while keeping controls aligned;
+  partial advice and check limitations stay visible. Save behavior is unchanged.
+
 - Make Curate Preview stacks easier to spot with two layered photo edges and
   a top-left photo-count badge (PIC-116 / PIC-371). Remove repeated status text
   chips; existing top-right status icons, tooltips and recommendation stars remain.

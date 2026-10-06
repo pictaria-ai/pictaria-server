@@ -1,3 +1,5 @@
+import { textTooltip } from './tooltip.js';
+import { fitPhotoRows } from './photo-layout.js';
 import { CurateClient, request, decisionSummary } from './client.js';
 import { comesAfter } from './order.js';
 import { explanation } from './explanation.js';
@@ -8,6 +10,10 @@ import { initialPhotoChoices, photoAssessment, photoAdviceSummary } from './phot
 import { stackStatus, statusCounts, mergeStatus, BADGE_WORDS } from './stack-status.js';
 
 const el = (id) => document.getElementById(id);
+el('comparison-shortcuts').append(textTooltip('Shortcuts', 'Comparison shortcuts',
+  'Focus a photo: ← → or 1–9. Mark: Y Yes · S Skip · F Fav · N No. Enter: save & next after marking. Z: undo last save. Unmarked photos default to Skip. Choices remain a draft until you save.',
+  'comparison-shortcuts-help'));
+const layoutPhotos = fitPhotoRows(el('photos'));
 const client = new CurateClient();
 const previews = new PreviewImages();
 const SORT_PREFERENCE = 'pictaria.curate.sort';
@@ -240,9 +246,22 @@ function showComparisonStatus(patch = {}) {
   const status = stackStatus(comparisonGroup(), { decided: state.section === 'decided' });
   const signature = JSON.stringify([c.id, status]);
   const summary = el('photo-advice-summary');
-  summary.textContent = photoAdviceSummary(c.photoRecommendations) ||
+  const advice = c.photoRecommendations;
+  const adviceText = photoAdviceSummary(advice) ||
     (c.photoReferee?.state === 'complete' && !c.updated ? 'Photo Referee suggestions are ready. Reopen this comparison to see them; your draft stays unchanged.' : '');
-  summary.hidden = !summary.textContent;
+  if (summary.dataset.copy !== adviceText) {
+    summary.dataset.copy = adviceText;
+    const complete = advice?.state === 'complete' && advice.canApplyAll && !advice.unavailableReason;
+    const label = complete ? advice.noneRecommended ? 'None suggested' : `★ ${advice.keeperIds.length} suggested` : 'Photo Referee';
+    summary.replaceChildren(...(adviceText ? [textTooltip(label, 'Photo Referee', adviceText, 'photo-advice-help')] : []));
+    summary.hidden = !adviceText;
+    // Keep limitations visible: a compact count must not imply complete,
+    // full-stack advice when the model only saw separate batches or partial checks.
+    const notice = el('photo-advice-notice');
+    notice.textContent = !complete || advice.coverage === 'within-batches' ||
+      ['unchecked-size', 'incomplete'].includes(advice.checkCoverage) ? adviceText : '';
+    notice.hidden = !notice.textContent;
+  }
   if (c.ids.length === 1) {
     const target = el('photo-reason');
     if (target.dataset.status !== signature) {
@@ -369,6 +388,7 @@ async function compare(group) {
     el('context-photos').replaceChildren(
       ...comparison.context.map((photo) => photoCard(photo, { readOnly: true, open: showPhoto })),
     );
+    layoutPhotos();
     recovery();
     if (single) { el('comparison').close(); renderPhoto(comparison.photos[0], preview); }
     else el('photos').firstElementChild?.focus({ preventScroll: true });
@@ -833,7 +853,7 @@ function repaintSelection() {
   for (const card of el('photos').children) card.syncSelection();
   selection();
 }
-el('compact').onchange = () => el('photos').classList.toggle('compact', el('compact').checked);
+el('compact').onchange = () => { el('photos').classList.toggle('compact', el('compact').checked); layoutPhotos(); };
 function saveComparison(next = false) {
   if (el('apply').disabled || !state.comparison) return;
   const anchor = state.groups.find(g => g.id === state.comparison.groupId)?.photos[0];

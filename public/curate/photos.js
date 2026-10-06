@@ -1,3 +1,4 @@
+import { textTooltip } from './tooltip.js';
 import { stackStatus, mergeStatus } from './stack-status.js';
 
 export function node(tag, text, className) {
@@ -58,12 +59,12 @@ export function photoCard(
       button.onclick = () => change(value);
       actions.append(button);
     }
-    info.append(node('small', label, 'photo-label'), actions, node('small', '', 'draft-outcome'));
-    if (assessment) {
-      const reason = node('small', `Photo Referee: ${assessment.reason}`, 'photo-advice');
-      reason.title = reason.textContent;
-      info.append(reason);
-    }
+    const heading = node('div', undefined, 'photo-info-heading');
+    heading.append(node('small', label, 'photo-label'));
+    if (assessment) heading.append(textTooltip('Why?',
+      `Photo Referee · ${suggested ? 'Suggested' : 'Not suggested'} · ${label}`,
+      assessment.reason, `photo-advice-${photo.id}`));
+    info.append(heading, actions);
   }
   const imageError = node('span', 'Preview unavailable. Try opening it in Immich.', 'p-muted');
   imageError.hidden = true;
@@ -72,10 +73,8 @@ export function photoCard(
   info.append(imageError);
   card.syncSelection = () => {
     if (readOnly) return;
-    info.querySelector('.draft-outcome').textContent = `Draft: ${outcomeLabel(outcome())}`;
     for (const button of info.querySelectorAll('[data-choice]'))
       button.setAttribute('aria-pressed', String(button.dataset.choice === outcome()));
-    card.classList.toggle('selected', ['approve', 'favorite'].includes(outcome()));
     card.classList.toggle('batch-selected', selected()); checkbox.checked = selected();
   };
   card.syncSelection();

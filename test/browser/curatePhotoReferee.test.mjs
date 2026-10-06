@@ -73,7 +73,18 @@ for (const { keepers, legacyGrouped } of [{ keepers: [] }, { keepers: ['p2', 'p4
   assert.equal(operations(), 0, 'opening suggestions is not a decision');
   assert.match(await text('#photo-advice-summary'), keepers.length ? /2 suggested/ : /none suggested/, await page.evaluate('JSON.stringify([__comparison.photoReferee,__comparison.similarity,__comparison.photoRecommendations.unavailableReason,__comparison.route])'));
   assert.equal(await page.evaluate('document.querySelectorAll("#photos .suggested").length'), keepers.length);
-  assert.equal(await page.evaluate('document.querySelector(".photo-advice img")'), null, 'model text is never interpreted as HTML');
+  const photoWhy = `#photos [data-photo-id="${fixture.id(2)}"] .why-trigger`;
+  await page.evaluate(`document.querySelector(${JSON.stringify(photoWhy)}).focus()`);
+  assert.match(await text(`#photo-advice-${fixture.id(2)}`), /<img src=x onerror=alert\(1\)> Natural expression/);
+  assert.equal(await page.evaluate('document.querySelector("#photos .why-content img")'), null, 'model text is never interpreted as HTML');
+  await page.send('Input.dispatchKeyEvent', { type: 'keyDown', key: 'Enter' });
+  assert.equal(operations(), 0, 'Enter on explanation help never saves the comparison');
+  await page.send('Input.dispatchKeyEvent', { type: 'keyDown', key: 'Escape' });
+  assert.equal(await page.evaluate('document.querySelector("#comparison").open && !document.querySelector("#photos .why-content:not([hidden])")'), true,
+    'Escape dismisses photo advice before the comparison');
+  await click('#comparison-shortcuts .why-trigger');
+  assert.match(await text('#comparison-shortcuts-help'), /Unmarked photos default to Skip/);
+  await page.send('Input.dispatchKeyEvent', { type: 'keyDown', key: 'Escape' });
   await click('#comparison-similarity .why-trigger');
   assert.match(await text('#stack-reason'), /Synthetic vision/);
   await page.send('Input.dispatchKeyEvent', { type: 'keyDown', key: 'Escape' });

@@ -1,3 +1,4 @@
+import { attachTooltip } from './tooltip.js';
 import { node, badgeNode } from './photos.js';
 import { photoAdviceSummary } from './photo-advice.js';
 import { evidenceRows, algorithmLabel, MARKS, HOW_STACKS_WORK } from './explanation-copy.js';
@@ -78,57 +79,7 @@ export function explanation(comparison, prefix, status = null) {
   docs.href = HOW_STACKS_WORK; docs.target = '_blank'; docs.rel = 'noopener';
   footer.append(docs);
   panel.append(footer);
-  let pinned = false;
-  wrap.dismiss = () => {
-    panel.hidden = true;
-    pinned = false;
-    trigger.setAttribute('aria-expanded', 'false');
-  };
-  const show = () => {
-    panel.hidden = false;
-    trigger.setAttribute('aria-expanded', 'true');
-    const rect = trigger.getBoundingClientRect(),
-      width = panel.offsetWidth,
-      height = panel.offsetHeight;
-    panel.style.left = `${Math.max(12, Math.min(rect.left, innerWidth - width - 12))}px`;
-    panel.style.top = `${Math.max(12, rect.bottom + height > innerHeight - 12 ? rect.top - height : rect.bottom)}px`;
-  };
-  wrap.addEventListener('pointerenter', (event) => {
-    if (event.pointerType === 'mouse') show();
-  });
-  wrap.addEventListener('pointerleave', () => {
-    if (!pinned && !wrap.contains(document.activeElement)) wrap.dismiss();
-  });
-  trigger.addEventListener('focus', show);
-  wrap.addEventListener('focusout', (event) => {
-    if (!wrap.contains(event.relatedTarget)) wrap.dismiss();
-  });
-  trigger.onclick = () => {
-    if (pinned) wrap.dismiss();
-    else {
-      pinned = true;
-      show();
-    }
-  };
+  attachTooltip(wrap, trigger, panel);
   wrap.append(trigger, panel);
   return wrap;
 }
-function dismissAll(event) {
-  for (const tooltip of document.querySelectorAll('.why-tooltip')) {
-    if (event?.target instanceof Node && tooltip.contains(event.target)) continue;
-    tooltip.dismiss();
-  }
-}
-document.addEventListener('pointerdown', dismissAll);
-document.addEventListener('scroll', dismissAll, true);
-window.addEventListener('resize', dismissAll);
-document.addEventListener(
-  'keydown',
-  (event) => {
-    if (event.key !== 'Escape' || !document.querySelector('.why-content:not([hidden])')) return;
-    dismissAll();
-    event.preventDefault();
-    event.stopImmediatePropagation();
-  },
-  true,
-);

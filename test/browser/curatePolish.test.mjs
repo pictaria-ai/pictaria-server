@@ -248,6 +248,13 @@ test(
       await page.evaluate('getComputedStyle(document.querySelector("#photos .photo-image")).backgroundColor'),
       'rgba(0, 0, 0, 0)',
     );
+    await page.waitFor(`[...document.querySelectorAll('#photos img')].every(img=>img.style.getPropertyValue('--photo-height'))`);
+    assert.equal(await page.evaluate(`(() => {
+      const cards=[...document.querySelectorAll('#photos .photo-card')];
+      return cards.every((card,i)=>!i || card.offsetTop!==cards[i-1].offsetTop ||
+        Math.abs(card.querySelector('.photo-choices').getBoundingClientRect().top-
+          cards[i-1].querySelector('.photo-choices').getBoundingClientRect().top)<1);
+    })()`), true, 'mixed orientations keep decision controls aligned within every row');
     await screenshot(page, 'curate-polish-comparison.png');
   },
 );

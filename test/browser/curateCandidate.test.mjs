@@ -40,7 +40,7 @@ test('hash-supported stack updates automatically after closing, without changing
     await page.waitFor('!document.querySelector("#updates").hidden && !/checking/.test(document.querySelector("#refinement").textContent)', { timeoutMs: 35000 });
     assert.equal(fixture.similarityReads.length, 4, 'local ThumbHash support cannot suppress necessary verification');
     assert.equal(await page.evaluate('document.querySelectorAll(".group-card").length'), 1);
-    assert.equal(await page.evaluate('document.querySelectorAll("#photos .selected").length'), 1);
+    assert.equal(await page.evaluate('document.querySelectorAll("#photos [data-choice=approve][aria-pressed=true]").length'), 1);
     assert.equal(await page.evaluate('document.querySelectorAll("#photos [data-keeper]").length'), 4);
     await click('[data-close=comparison]');
     await page.waitFor('document.querySelectorAll(".group-card").length===2 && !document.querySelector("#refresh").disabled');
@@ -94,7 +94,7 @@ test('candidate preview refines automatically, preserves selections, explains re
     await page.waitFor('!document.querySelector("#updates").hidden && !/checking/.test(document.querySelector("#refinement").textContent)', { timeoutMs: 40000 });
     assert.equal(fixture.similarityReads.length, 5);
     assert.equal(await page.evaluate('document.querySelectorAll(".group-card").length'), 1);
-    assert.equal(await page.evaluate('document.querySelectorAll("#photos .selected").length'), 1);
+    assert.equal(await page.evaluate('document.querySelectorAll("#photos [data-choice=approve][aria-pressed=true]").length'), 1);
     assert.equal(await page.evaluate('document.querySelectorAll("#photos [data-keeper]").length'), 5);
     assert.equal(await page.evaluate('document.querySelectorAll(".group-card[data-similarity=updated]").length'), 1);
     assert.doesNotMatch(await page.evaluate('document.querySelector("#comparison-similarity").textContent'), /Updated grouping available|Close this/);

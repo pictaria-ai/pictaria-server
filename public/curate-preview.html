@@ -121,7 +121,8 @@
       <div class="dialog-frame">
         <header class="dialog-head">
           <h2 id="comparison-title">Compare photos</h2>
-          <button class="p-btn" data-close="comparison">Close</button>
+          <div class="compare-heading-actions"><div id="comparison-similarity" role="status" hidden></div>
+          <button class="p-btn" data-close="comparison">Close</button></div>
         </header>
         <div class="dialog-body">
           <p id="comparison-state" class="p-muted" aria-live="polite"></p>
@@ -148,10 +149,10 @@
             </div>
             <div class="p-grow"></div>
             <label id="compact-label" hidden><input id="compact" type="checkbox" /> Compact grid</label>
-            <div id="comparison-similarity" role="status" hidden></div>
+            <span id="photo-advice-summary" class="p-muted" hidden></span>
+            <span id="comparison-shortcuts"></span>
           </div>
-          <p class="comparison-keys p-muted">Focus a photo: ← → or 1–9. Mark: Y Yes · S Skip · F Fav · N No. Enter: save &amp; next after marking. Z: undo last save.</p>
-          <p id="photo-advice-summary" class="p-muted" hidden></p>
+          <p id="photo-advice-notice" class="p-muted" hidden></p>
           <section id="photos" class="photo-grid" aria-label="Comparison photos"></section>
           <section id="context" hidden>
             <h3>Already kept nearby</h3>
@@ -163,7 +164,7 @@
           </section>
         </div>
         <footer class="dialog-foot">
-          <span id="selection-count" aria-live="polite"></span>
+          <span class="draft-summary"><span class="p-muted">Draft</span> <span id="selection-count" aria-live="polite"></span></span>
           <div id="comparison-receipt" class="comparison-receipt" role="status" hidden>
             <span id="comparison-receipt-text"></span>
             <button id="comparison-undo" class="p-btn">Undo last save (Z)</button>

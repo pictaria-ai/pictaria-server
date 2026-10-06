@@ -116,8 +116,10 @@ search draft has not been applied.
   earlier items. An accepted save remains saved if opening the next item fails;
   Refresh and Undo remain available. Undo after continuation refreshes the grid.
   **Save & next** remains the primary button for every combination of outcomes,
-  including Skip-all. The compact header reads **Compare stack · N photos**;
-  the status badge, with its word, sits beside the checkbox controls.
+  including Skip-all. The compact header reads **Compare stack · N photos**,
+  with the stack status and Close on the right. A second toolbar holds checkbox
+  controls, the recommendation count and **Shortcuts** help. On narrow screens
+  the status uses its icon with the full accessible label and explanation.
 - In a comparison, focus a photo using **Left/Right** or **1–9**, then use
   **Y / S / F / N** to mark its draft outcome. **Enter** on the focused card
   saves the comparison and continues after **at least one explicit draft choice**
@@ -129,8 +131,18 @@ search draft has not been applied.
   Enter on a button or image retains its normal action. Modified/repeated keys,
   inputs, reference photos and uncertain actions cannot invoke these shortcuts.
 - Comparisons with more than ten photos open in a compact grid; **Compact grid**
-  can be turned off for larger images. Equal-height image areas keep decision
-  buttons aligned across different aspect ratios; photos are resized without cropping.
+  can be turned off for larger images. Each row sizes its image areas to the
+  photos' proportions, capped to leave room for controls. Full photos remain
+  uncropped, with decision buttons aligned across mixed orientations. All-landscape
+  rows can be shorter; mixed rows retain some neutral space around wider images.
+- In the comparison, the **gold star** alone identifies an AI recommendation;
+  the filled Yes/Skip/Fav/No button identifies the draft choice. A single thin
+  accent border and highlighted photo number identify keyboard focus. Checkboxes
+  select a batch independently. Repeated per-photo Draft labels are replaced by
+  one footer draft summary. Per-photo **Why?**, the recommendation count and
+  **Shortcuts** open overlays on hover, focus or tap; Escape dismisses the overlay
+  first. Photo Referee reasons remain available in full in the lightbox. Partial
+  advice, separate comparisons and incomplete-check notices remain visible.
 - The lightbox follows the production layout: the photo fills the available
   space beside a narrow panel with caption, tags, capture date, enrichment score,
   producing model/profile when available, and an Immich link. On narrow screens
@@ -208,9 +220,9 @@ comparisons expose the same explanation through **Why?**, available on hover,
 keyboard focus or tap. Successful but inconclusive searches remain
 distinguishable from failed searches in the explanation.
 
-The open comparison keeps the badge, with its word, at the right of its
-checkbox controls. The stack lightbox uses the same labels and reasons. Manual
-choices remain available in every status. Per-stack limitations do not use an
+The open comparison keeps the badge beside Close in the header; narrow screens
+show its icon with the full accessible label. The stack lightbox uses the same
+labels and reasons. Manual choices remain available in every status. Per-stack limitations do not use an
 amber warning; the header retains that treatment for overall paused work.
 
 Searches stay sequential but can start two seconds apart, up to 30 new automatic
