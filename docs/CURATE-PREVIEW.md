@@ -73,6 +73,8 @@ search draft has not been applied.
   A newer concurrent decision invalidates the old action scope; it cannot be
   silently overwritten. Background checks continue for pending photos while you browse Decided.
 - Cards show a cover, up to three member thumbnails, available caption, capture date/time and stack size. Filenames are omitted.
+  Single-photo decision buttons are vertically centered in the same row as stack
+  thumbnails, keeping descriptions and dates aligned underneath.
   Captions are limited to one line with an ellipsis so decision buttons stay
   aligned. Hover for the full caption, or open the lightbox to read it.
   The capture date stays on its line while checks run; the cover's status badge

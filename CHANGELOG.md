@@ -17,8 +17,8 @@ All notable changes to Pictaria Server are documented here. This project follows
 - Make Curate Preview stacks easier to spot with two layered photo edges and
   a top-left photo-count badge (PIC-116 / PIC-371). Remove repeated status text
   chips; existing top-right status icons, tooltips and recommendation stars remain.
-  Single-photo buttons now line up with stack thumbnails, with descriptions and
-  dates aligned underneath across Pending and Decided cards.
+  Single-photo buttons are vertically centered alongside stack thumbnails, with
+  descriptions and dates aligned underneath across Pending and Decided cards.
 
 - Accept otherwise valid Photo Referee answers formatted as multiple groups
   (PIC-116). Use their recommendation union without changing stack membership

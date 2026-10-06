@@ -684,6 +684,7 @@ dialog::backdrop {
 .group-caption .photo-caption { grid-row: 2; line-height: 20px; font-size: 14px; min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
 .group-caption .card-meta { grid-row: 3; }
 .group-caption .stack-strip, .group-caption .card-actions { grid-row: 1; }
+.group-caption .card-actions { align-self: center; }
 .check-heading { display: flex; align-items: center; flex-wrap: wrap; gap: 9px; }
 .why-tooltip { display: inline-flex; }
 .why-trigger { padding: 0; background: transparent; border: 0; color: var(--p-muted); font: inherit; font-size: 12px; cursor: help; text-decoration: underline dotted; text-underline-offset: 3px; }
