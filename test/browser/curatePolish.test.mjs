@@ -162,7 +162,7 @@ test(
       'desktop group tabs lead date, category and search on one row',
     );
     await screenshot(page, 'curate-toolbar-desktop.png');
-    const headerPositions = () => page.evaluate(`['#sections','#curate-status','#search','#sort','#groups'].map(selector=>{
+    const headerPositions = () => page.evaluate(`['#sections','#curate-status','#search','#groups'].map(selector=>{
       const {x,y}=document.querySelector(selector).getBoundingClientRect();return {selector,x,y};
     })`);
     const stableViews = async () => {
@@ -174,12 +174,20 @@ test(
           'header selection is available only for Singles and Decided');
         assert.deepEqual(await headerPositions(), initial, `header controls stay anchored after ${selector}`);
         assert.equal(await page.evaluate(`(() => {
+          if (innerWidth<=1100) return true;
+          const sort=document.querySelector('#sort').getBoundingClientRect();
+          const category=document.querySelector('#category-label');
+          const next=document.querySelector(category.hidden ? '#search' : '#category').getBoundingClientRect();
+          return Math.abs(next.left-sort.right-12)<1;
+        })()`), true, 'date order sits directly before the next available filter');
+        assert.equal(await page.evaluate(`(() => {
           const count=document.querySelector('#count').getBoundingClientRect(), tabs=document.querySelector('#filters');
           const check=document.querySelector('#bulk-label'), row=document.querySelector('.toolbar').getBoundingClientRect();
           const left=tabs.hidden||innerWidth<=600 ? row.left : tabs.getBoundingClientRect().right+16;
           return Math.abs(count.left-left)<1 && (check.hidden||check.getBoundingClientRect().left>=count.right);
         })()`), true, 'count follows the tabs without a checkbox spacer; the checkbox follows the count');
         if (selector === '[data-kind=singles]') await screenshot(page, `curate-toolbar-singles-${await page.evaluate('innerWidth')}.png`);
+        if (selector === '[data-section=decided]') await screenshot(page, `curate-toolbar-decided-${await page.evaluate('innerWidth')}.png`);
       }
     };
     await stableViews();

@@ -39,6 +39,9 @@ The header has two stable rows: Pending/Decided with one activity chip at the
 right, then All/Stacks/Singles, matching counts, date order, category and Search.
 The header checkbox after the counts appears in Singles and Decided; All still
 allows checking individual single-photo cards. No space is reserved when hidden.
+The date dropdown shows **Oldest first / Newest first**, with a screen-reader
+label and hover help for date taken. In Decided it sits directly before Search,
+closing the gap left by the hidden category filter.
 The page reserves scrollbar space to keep controls aligned between long and short
 views. On narrower screens, **Filters** reveals date order, category and Search;
 phone counts and selection sit below the tabs. The remembered sort is unchanged.

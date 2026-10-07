@@ -7,6 +7,10 @@ All notable changes to Pictaria Server are documented here. This project follows
 
 ### Development
 
+- Compact Curate Preview's date filter: hide the visible “Date taken” label
+  while retaining accessible naming and hover help, and close the category gap
+  between date order and Search in Decided (PIC-116).
+
 - Clarify Curate Preview counts as totals across matching results, without
   “left” or “in this view.” Label bulk selection **Select: ☐ All loaded (N)** so
   its scope is clear, including loaded photos below the screen (PIC-116).
