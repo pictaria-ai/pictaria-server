@@ -232,7 +232,7 @@ test('grid suggestions: explicit keyboard acceptance, Undo, stale/partial fallba
   await page.waitFor('document.querySelector(".gate-backdrop input")');
   await page.evaluate('document.querySelector(".gate-backdrop input").value="smoke-secret";document.querySelector(".gate-backdrop button").click()');
   await ready();
-  assert.equal(await page.evaluate('document.querySelector("#count").textContent'), '1 stack · 1 single photo left');
+  assert.equal(await page.evaluate('document.querySelector("#count").textContent'), '1 stack · 1 single photo');
   assert.deepEqual(await page.evaluate('[...document.querySelectorAll(".is-stack .stack-strip img")].map(i=>i.src.split("/").pop())'), [1,3,4].map(fixture.id));
   await page.evaluate('document.querySelector(".is-stack .cover").focus()');
   await enter();

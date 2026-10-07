@@ -233,11 +233,10 @@ function showViewStatus(view) {
   const parts = [];
   if (stacks) parts.push(`${loadedStacks} of ${stacks} ${stacks === 1 ? 'stack' : 'stacks'}`);
   if (singles) parts.push(`${state.groups.length - loadedStacks} of ${singles} ${singles === 1 ? 'single photo' : 'single photos'}`);
-  el('count').title = parts.length ? `${parts.join(' · ')} shown` : '0 photos shown';
-  const left = [stacks && `${stacks} ${stacks === 1 ? 'stack' : 'stacks'}`, singles && `${singles} ${singles === 1 ? 'single photo' : 'single photos'}`].filter(Boolean);
-  const filtered = state.search || state.category !== 'all' || state.kind !== 'all';
-  el('count').textContent = state.section === 'decided' ? el('count').title
-    : left.length ? `${left.join(' · ')} left${filtered ? ' in this view' : ''}` : `Nothing left${filtered ? ' in this view' : ''}`;
+  const shown = parts.length ? `${parts.join(' · ')} shown` : '0 photos shown';
+  el('count').title = `Totals include all ${state.section} results matching the current filters, including photos not yet loaded. ${shown}.`;
+  const totals = [stacks && `${stacks} ${stacks === 1 ? 'stack' : 'stacks'}`, singles && `${singles} ${singles === 1 ? 'single photo' : 'single photos'}`].filter(Boolean);
+  el('count').textContent = state.section === 'decided' ? shown : totals.join(' · ') || '0 photos';
   state.updateStatus = view;
   updateHint();
   const metadata = view.metadata;
@@ -725,6 +724,7 @@ function bulkSelection() {
   const singles = state.groups.filter(g => g.memberCount === 1);
   const locked = state.loading || state.busy || state.continuing || state.autoUpdateFailed || Boolean(client.saved.pending);
   el('bulk-label').hidden = state.section === 'pending' && state.kind !== 'singles';
+  el('bulk-label-text').textContent = `All loaded (${singles.length})`;
   const count = singles.filter(g => state.selected.has(g.id)).length;
   el('select-shown').checked = count > 0 && count === singles.length;
   el('select-shown').indeterminate = count > 0 && count < singles.length;

@@ -77,7 +77,7 @@ button {
 .primary-filters { display: flex; align-items: center; gap: 16px; min-width: 0; grid-column: 1; grid-row: 1; }
 .filter-summary { display: flex; align-items: center; gap: 8px; min-width: 0; }
 #count { display: block; min-width: 0; line-height: 20px; font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-#bulk-label { flex-shrink: 0; min-height: 24px; }
+#bulk-label { flex-shrink: 0; min-height: 24px; white-space: nowrap; }
 #bulk-label input { margin: 0; }
 #filters { flex-shrink: 0; min-width: 190px; }
 .search-label {

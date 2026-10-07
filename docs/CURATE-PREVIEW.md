@@ -36,14 +36,16 @@ in this preview, its proposed partitions are never saved.
 ## Review flow
 
 The header has two stable rows: Pending/Decided with one activity chip at the
-right, then remaining counts, All/Stacks/Singles, date order, category and Search.
-The header checkbox beside the counts appears in Singles and Decided; All still
-allows checking individual single-photo cards. Its space is reserved when hidden.
+right, then All/Stacks/Singles, matching counts, date order, category and Search.
+The header checkbox after the counts appears in Singles and Decided; All still
+allows checking individual single-photo cards. No space is reserved when hidden.
 The page reserves scrollbar space to keep controls aligned between long and short
 views. On narrower screens, **Filters** reveals date order, category and Search;
-phone counts sit above those controls. The remembered sort is unchanged.
+phone counts and selection sit below the tabs. The remembered sort is unchanged.
 Pending counts include all remaining stacks/singles matching the current filters,
-not just loaded cards. Filtered counts say **in this view**; hover for loaded counts.
+not just loaded cards. They use plain totals, such as **12 stacks · 60 single
+photos**; Pending supplies the context. Hover explains the filter scope and shows
+how many are loaded.
 Decided retains **X of Y shown**.
 
 The activity chip's popover includes a neutral note while Enrich is running:
@@ -90,7 +92,8 @@ search draft has not been applied.
   accepts the suggestions. A changed suggestion or prerequisite opens manual
   comparison instead. Partial/mixed, pending, stale and zero-suggestion results
   have no shortcut. Valid saved advice remains usable with the referee off.
-- **Check shown photos** checks the currently loaded photos in Singles or Decided.
+- **Select: ☐ All loaded (N)** checks the currently loaded photos in Singles or
+  Decided, including those below the screen, but not results behind **Load more**.
   All and Stacks hide this header control; All retains each single-photo checkbox.
   Loading more does not check additional photos. The fixed bottom action bar does not move the grid. Checked singles expose the same
   **Yes / Skip / Fav / No** actions in one undoable operation
@@ -225,8 +228,8 @@ search draft has not been applied.
 **Load more** only displays additional results; it is not needed to get those
 photos checked. There is no duplicate loaded-stack status count beside the photo
 counts. The filter row starts with **All / Stacks / Singles**, followed by its
-photo count and, in Singles, the check-shown checkbox. No space is reserved for
-a hidden checkbox. Decided shows its count at the left with its bulk checkbox.
+photo count and, in Singles, the **Select: ☐ All loaded (N)** checkbox. No space is
+reserved for a hidden checkbox. Decided shows its count at the left with its bulk checkbox.
 Date, category and search remain on the right; phones put the count and checkbox
 directly below the tabs and collapse the secondary filters.
 The right-aligned activity chip uses a reserved space so updates cannot

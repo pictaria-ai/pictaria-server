@@ -161,7 +161,7 @@ test('background status markers and inline progress remain stable on desktop and
       t.diagnostic(JSON.stringify({ searches: fixture.similarityReads, details: fixture.detailReads }));
       throw error;
     }
-    assert.match(await page.evaluate('document.querySelector("#count").textContent'), /1 stack · 1 single photo left/);
+    assert.match(await page.evaluate('document.querySelector("#count").textContent'), /1 stack · 1 single photo/);
     assert.equal(await page.evaluate('document.querySelector("[data-section=pending]").textContent'), 'Pending');
     assert.equal(await page.evaluate('document.querySelector(".is-stack .card-actions")'), null);
     const progress = () => page.evaluate('document.querySelector(".curate-status-copy").textContent');

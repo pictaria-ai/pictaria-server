@@ -7,6 +7,10 @@ All notable changes to Pictaria Server are documented here. This project follows
 
 ### Development
 
+- Clarify Curate Preview counts as totals across matching results, without
+  “left” or “in this view.” Label bulk selection **Select: ☐ All loaded (N)** so
+  its scope is clear, including loaded photos below the screen (PIC-116).
+
 - Align Curate Preview's All/Stacks/Singles tabs at the left, followed by counts
   and the Singles check-shown checkbox, without a hidden-checkbox spacer.
   Keep secondary filters on the right and use white individual-photo star
