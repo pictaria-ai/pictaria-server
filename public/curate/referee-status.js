@@ -6,32 +6,151 @@ const reasons = {
   'provider-configuration': 'Check the AI provider configuration in Settings.',
   'provider-interrupted': 'The previous AI request was interrupted. Verify the connection in Settings.',
   'configuration': 'Check the Curate AI provider configuration in Settings.',
+  'stack-configuration': 'Stack checks need a valid AI configuration in Settings.',
   'model-failures': 'The selected model repeatedly failed stack checks. Choose a vision model that compares multiple images in Settings.',
   'unknown-capability': 'Configure a Curate provider and multi-image vision model in Settings.',
   'unsupported-provider': 'This provider cannot compare stack photos.',
-  'unsupported-size': 'This stack exceeds the automatic per-request image limit.',
-  'too-many-images': 'This stack exceeds the 30-photo automatic comparison limit.',
-  'input-limit': 'This stack exceeds an automatic comparison limit.',
-  'preparation-failed': 'The previews could not be prepared within the download limits.',
-  'invalid-answer': 'The model did not return a valid grouping after the allowed attempts.',
-  'attempts-finished': 'The allowed automatic attempts for this stack have finished.',
-  'photo-limit': 'The automatic request allowance for these photos has been reached.',
 };
 
-// Explicit server state only. Neither successful similarity nor Photo Referee
-// advice implies that the Stack Referee ran. Unknown reasons stay generic.
-export function stackRefereePresentation(status, { page = false } = {}) {
-  if (status?.scope === 'configuration' && !page) return null;
+const blockers = {
+  setup: { phase: 'attention', text: 'AI setup needed', label: 'setup needed', status: 'Can’t run: check AI settings' },
+  model: { phase: 'attention', text: 'AI model needs attention', label: 'model needs attention', status: 'Model needs attention' },
+  temporary: { phase: 'paused', text: 'Temporarily paused', label: 'temporarily paused', status: 'Temporarily paused' },
+  unknown: { phase: 'attention', text: 'AI needs attention', label: 'needs attention', status: 'Needs attention' },
+};
+function blockerKind(reason) {
+  if (['configuration', 'stack-configuration', 'provider-auth', 'provider-configuration', 'unknown-capability', 'unsupported-provider'].includes(reason)) return 'setup';
+  if (reason === 'model-failures') return 'model';
+  if (['preview-cooldown', 'provider-cooldown'].includes(reason)) return 'temporary';
+  return 'unknown';
+}
+
+function retryDetail(status) {
+  if (blockerKind(status.reason) !== 'temporary' || !Number.isSafeInteger(status.retryAt) || status.retryAt <= 0) return '';
+  const time = new Date(status.retryAt);
+  // This is eligibility, not a promise of an immediate retry or recovery.
+  return Number.isFinite(time.getTime()) ? ` Retry eligible after ${time.toLocaleString()}.` : '';
+}
+
+// Short forms for a process step, after "not possible," or "paused,".
+const short = {
+  'preview-cooldown': 'previews are paused after an Immich error',
+  'shared-provider': 'waiting for the shared AI provider',
+  'provider-cooldown': 'the AI provider is paused after an error',
+  'provider-auth': 'check the AI provider credentials in Settings',
+  'provider-configuration': 'check the AI provider in Settings',
+  'provider-interrupted': 'the last AI request was interrupted',
+  'configuration': 'check the AI provider in Settings',
+  'stack-configuration': 'check the AI provider in Settings',
+  'model-failures': 'the model keeps failing, so choose another in Settings',
+  'unknown-capability': 'choose a multi-image vision model in Settings',
+  'unsupported-provider': 'this provider cannot compare photos',
+  'preparation-failed': 'the previews could not be prepared',
+  'invalid-answer': 'the model gave no valid answer',
+  'attempts-finished': 'the allowed attempts are used up',
+  'photo-limit': 'the request allowance for these photos is used up',
+  'comparison-changed': 'the comparison inputs or AI settings changed',
+  'request-limit': 'too many comparisons for the automatic limit',
+  'dense-neighborhood': 'too many nearby photos for automatic comparison',
+  'provider-rejected': 'the provider could not complete the comparison',
+  'rendition': 'the previews could not be used',
+};
+
+// Explicit server state only; unknown reasons stay generic.
+export function refereeReasonShort(status, memberCount) {
+  if (['unsupported-size', 'input-limit', 'too-many-images'].includes(status?.reason))
+    return Number.isInteger(memberCount) && Number.isInteger(status.limit)
+      ? `${memberCount} photos is over the ${status.limit}-photo limit` : 'too many photos for one request';
+  return short[status?.reason] ?? 'the check could not finish';
+}
+
+// Library-wide Stack Referee activity for the page header. Per-stack states
+// are in stack-status.js; neither successful similarity nor Photo Referee
+// advice implies that the Stack Referee ran.
+export function refereeActivity(status) {
   if (!status || ['off', 'idle', 'skipped', 'updated'].includes(status.state)) return null;
-  if (status.state === 'checked') return { title: 'AI checked', phase: 'ai-checked',
-    detail: 'The Stack Referee checked this grouping. Photo choices are still yours.' };
-  if (status.state === 'checking') return { title: 'Stack Referee checking', phase: 'checking',
-    detail: 'The AI is comparing these photos to check the stack composition.' };
-  if (status.state === 'waiting') return { title: 'Stack Referee queued', phase: 'waiting',
+  if (status.state === 'checking') return { title: 'Stack Referee checking', phase: 'running',
+    detail: 'The AI is comparing photos to check stack composition.' };
+  if (status.state === 'waiting') return { title: 'Stack Referee queued', phase: 'queued',
     detail: reasons[status.reason] ?? 'Waiting for a Stack Referee check.' };
-  if (['paused', 'incomplete'].includes(status.state)) return {
-    title: status.state === 'paused' ? 'Stack Referee paused' : 'Stack not AI checked', phase: 'limited',
-    detail: `${reasons[status.reason] ?? 'The Stack Referee could not finish this check.'} You can still curate these photos.`,
-  };
+  if (['paused', 'incomplete'].includes(status.state)) {
+    const blocker = blockerKind(status.reason), presentation = blockers[blocker];
+    return { title: `Stack Referee: ${presentation.label}`, phase: presentation.phase, status: presentation.status, blocker,
+      detail: `${reasons[status.reason] ?? 'The Stack Referee could not finish its checks.'}${retryDetail(status)} You can still curate these photos.` };
+  }
   return null;
+}
+
+export function photoRefereeActivity(status) {
+  const presentation = refereeActivity(status);
+  if (!presentation) return null;
+  return { ...presentation, title: presentation.title.replace('Stack Referee', 'Photo Referee'),
+    detail: status.state === 'checking' ? 'The AI is comparing photos to suggest which ones to keep.'
+      : status.reason === 'model-failures' ? 'The selected model repeatedly failed photo comparisons. Choose another multi-image vision model in Settings. You can still curate.'
+        : presentation.detail.replaceAll('Stack Referee', 'Photo Referee').replaceAll('stack checks', 'photo comparisons') };
+}
+
+// Progress counts come from all pending stacks, independently of the current
+// page. Queue lengths and batch counts are intentionally not used here.
+export function refereeProgress(counts, activity, role = 'stack') {
+  const label = role === 'photo' ? 'Photo Referee' : 'Stack Referee';
+  const details = (role === 'photo' ? photoRefereeActivity : refereeActivity)(activity);
+  if (counts?.state === 'off' || activity?.state === 'off')
+    return { phase: 'off', text: 'Off', value: 0, detail: `${label} is turned off in Curate Settings.` };
+  if (counts?.state !== 'ready') return { phase: details?.phase ?? 'counting', blocker: details?.blocker, text: 'Counting…', value: 0,
+    status: details?.status ?? (details?.phase === 'running' ? 'Comparing photos' : 'Counting stacks…'),
+    detail: [`Counting ${label} work across all pending stacks.`, details?.detail].filter(Boolean).join(' ') };
+  const { total, completed, incomplete, remaining, waitingForGrouping, waitingForStack, paused } = counts;
+  const summary = `${completed} of ${total} pending stacks finished successfully.` +
+    (incomplete ? ` ${incomplete} finished without a full result and will not be retried automatically.` : '') +
+    ' Counts include photos outside this view and can change as photos arrive or stacks split. You can keep curating.';
+  if (!remaining && !details?.blocker && details?.phase !== 'running') return { phase: 'idle', text: 'Up to date', value: 1, detail: summary };
+  let phase = 'queued', status = 'Queued', blocker;
+  if (details?.phase === 'running') { phase = 'running'; status = 'Comparing photos'; }
+  else if (details?.blocker || (remaining > 0 && paused === remaining)) {
+    blocker = details?.blocker ?? 'unknown';
+    ({ phase, status } = blockers[blocker]);
+  }
+  else if (waitingForGrouping === remaining) status = 'Waiting for grouping';
+  else if (waitingForGrouping + waitingForStack === remaining) status = 'Waiting for stack checks';
+  else if (activity?.reason === 'shared-provider') status = 'Waiting for AI';
+  return { phase, status, blocker, text: remaining ? `${remaining.toLocaleString()} ${remaining === 1 ? 'stack' : 'stacks'} left` : 'Checking…',
+    value: total ? (completed + incomplete) / total : 0,
+    detail: [summary, `${label} · ${status}.`, details?.detail].filter(Boolean).join(' ') };
+}
+
+// One user-facing status; the library scan counts unfinished stacks once even
+// when both roles still need them. Never add the two role counts in the browser.
+export function curateStatus(view) {
+  const progress = view.refereeProgress ?? {};
+  const roles = ['stack', 'photo'].map(role => ({ role,
+    ...refereeProgress(progress[role], view[`${role}RefereeActivity`], role),
+    activity: view[`${role}RefereeActivity`], counts: progress[role] }));
+  const enabled = roles.filter(r => r.phase !== 'off');
+  const remaining = Number.isSafeInteger(progress.remaining) ? progress.remaining : null;
+  const make = (phase, text, count = remaining) => ({ phase, text, count, roles });
+  const suffix = remaining > 0 ? ` · ${remaining.toLocaleString()} ${remaining === 1 ? 'stack' : 'stacks'} left` : '';
+  const blocked = enabled.filter(r => r.blocker);
+  if (blocked.length) {
+    const shared = blocked.every(r => r.blocker === blocked[0].blocker), kind = shared ? blocked[0].blocker : 'unknown';
+    const presentation = blockers[kind];
+    const text = blocked.length === 1 ? `${blocked[0].role === 'photo' ? 'Photo' : 'Stack'} Referee: ${presentation.label}` : presentation.text;
+    return make(presentation.phase === 'paused' ? 'waiting' : 'attention', text);
+  }
+  if (view.metadata?.problem) return make('attention', 'Photo information paused');
+  if (['paused', 'limited'].includes(view.refinement?.state)) return make('attention', 'Grouping paused');
+  const active = enabled.find(r => r.phase === 'running');
+  if (active) return make('running', `${active.role === 'photo' ? 'Picking best photos' : 'Checking stacks'}${suffix}`, remaining || null);
+  if (view.refinement?.remainingGroups > 0 || view.refinement?.state === 'searching' || view.metadata?.state === 'refreshing')
+    return make('grouping', 'Grouping photos…', remaining || view.refinement?.remainingGroups || null);
+  const waiting = enabled.find(r => r.phase === 'queued');
+  if (waiting) {
+    const text = waiting.activity?.reason === 'shared-provider'
+      ? view.enrichRunning ? 'Waiting for Enrich' : 'Waiting for AI'
+      : waiting.status === 'Waiting for grouping' ? 'Waiting for grouping'
+        : waiting.status === 'Waiting for stack checks' ? 'Waiting for stack checks' : 'AI work queued';
+    return make('waiting', text + suffix);
+  }
+  if (enabled.some(r => r.phase === 'counting')) return make('counting', 'Checking AI status…', null);
+  return make(enabled.length ? 'idle' : 'hidden', 'AI up to date', 0);
 }

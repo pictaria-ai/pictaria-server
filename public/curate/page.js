@@ -1,11 +1,20 @@
+import { textTooltip } from './tooltip.js';
+import { fitPhotoRows } from './photo-layout.js';
 import { CurateClient, request, decisionSummary } from './client.js';
 import { comesAfter } from './order.js';
 import { explanation } from './explanation.js';
 import { PreviewImages } from './preview-images.js';
-import { node, thumbnail, photoCard, groupCard, savedOutcome, outcomeLabel, groupSimilarity, similarityDetail, similarityIndicator, groupPresentation, statusIndicator } from './photos.js';
-import { stackRefereePresentation } from './referee-status.js';
+import { node, thumbnail, photoCard, groupCard, savedOutcome, outcomeLabel, badgeNode, choiceControls } from './photos.js';
+import { showCurateStatus } from './referee-progress.js';
+import { initialPhotoChoices, photoAssessment, photoAdviceSummary } from './photo-advice.js';
+import { applicableAdvice, suggestionMatches, nextActionLabel } from './suggestions.js';
+import { stackStatus, mergeStatus } from './stack-status.js';
 
 const el = (id) => document.getElementById(id);
+el('comparison-shortcuts').append(textTooltip('Shortcuts', 'Comparison shortcuts',
+  'Focus a photo: ← → or 1–9. Mark: Y Yes · S Skip · F Fav · N No. Enter: save & next after marking. Z: undo last save. Unmarked photos default to Skip. Choices remain a draft until you save.',
+  'comparison-shortcuts-help'));
+const layoutPhotos = fitPhotoRows(el('photos'));
 const client = new CurateClient();
 const previews = new PreviewImages();
 const SORT_PREFERENCE = 'pictaria.curate.sort';
@@ -21,18 +30,61 @@ const state = {
   next: null,
   loading: false,
   comparison: null,
-  outcomes: {}, batchPhotos: new Set(), draftTouched: false,
+  outcomes: {}, batchPhotos: new Set(), selectMode: false, draftTouched: false, draftSuggested: false,
   busy: false,
   undo: null,
   syncId: null,
-  updateStatus: null, autoUpdateFailed: false,
-  photoIndex: 0,
+  updateStatus: null, autoUpdateFailed: false, viewExpired: false,
+  photoIndex: 0, displayedPhotoId: null, previousPhotoId: null,
   photoList: [],
   dialogGeneration: 0,
   openFailed: false,
   opening: null,
   syncKind: null,
 };
+const stackChoices = choiceControls({ label: 'this photo', namespace: 'stackChoice',
+  change: value => { const photo = state.photoList[state.photoIndex]; if (photo) setOutcome(photo.id, value); } });
+stackChoices.keep.id = 'photo-keep';
+el('stack-choice-controls').append(stackChoices.root);
+el('photo-flip').onclick = () => run(flipPhoto);
+async function flipPhoto() {
+  if (state.viewerMode !== 'stack' || !state.previousPhotoId) return;
+  const photo = state.photoList.find(p => p.id === state.previousPhotoId);
+  if (photo) await showPhoto(photo);
+}
+function syncFilmstrip() {
+  const strip = el('photo-filmstrip'), c = state.comparison;
+  strip.hidden = state.viewerMode !== 'stack' || !c || !el('photo-view').open;
+  if (strip.hidden) return;
+  if (strip.dataset.comparison !== c.id) {
+    strip.dataset.comparison = c.id;
+    strip.replaceChildren();
+    state.photoList.forEach((photo, index) => {
+      const reference = index >= c.photos.length;
+      if (index === c.photos.length) strip.append(node('span', 'Already kept', 'filmstrip-reference'));
+      const button = node('button', undefined, 'filmstrip-photo'); button.type = 'button'; button.dataset.id = photo.id;
+      const img = node('img'); img.src = thumbnail(photo.id); img.alt = ''; img.loading = 'lazy';
+      const star = node('span', '★', 'filmstrip-star'); star.hidden = !c.photoRecommendations?.keeperIds.includes(photo.id); star.setAttribute('aria-hidden', 'true');
+      const check = node('span', '✓', 'filmstrip-pick'); check.setAttribute('aria-hidden', 'true');
+      button.append(img, star, check); button.dataset.reference = String(reference);
+      button.onclick = () => run(() => showPhoto(photo)); strip.append(button);
+    });
+  }
+  for (const button of strip.querySelectorAll('button')) {
+    const id = button.dataset.id, reference = button.dataset.reference === 'true';
+    const picked = reference || ['approve', 'favorite'].includes(state.outcomes[id]);
+    button.querySelector('.filmstrip-pick').hidden = !picked;
+    button.setAttribute('aria-current', String(id === state.displayedPhotoId));
+    button.setAttribute('aria-label', `${reference ? 'Already kept reference' : `Photo ${c.ids.indexOf(id) + 1}`}${!button.querySelector('.filmstrip-star').hidden ? ', AI suggested' : ''}${reference ? '' : `, your pick: ${outcomeLabel(state.outcomes[id])}`}`);
+    button.disabled = Boolean(state.opening || state.busy || client.saved.pending);
+  }
+  const active = strip.querySelector('[aria-current=true]');
+  if (active) {
+    const item = active.getBoundingClientRect(), viewport = strip.getBoundingClientRect();
+    if (item.left < viewport.left) strip.scrollLeft -= viewport.left - item.left;
+    else if (item.right > viewport.right) strip.scrollLeft += item.right - viewport.right;
+  }
+}
 let failedPreviews = new Set();
 const cards = new Map(), visibleCards = new Set();
 const visibility = new IntersectionObserver(entries => {
@@ -44,6 +96,7 @@ const visibility = new IntersectionObserver(entries => {
 function makeCard(group, index = 0) {
   const card = groupCard(group, g => run(() => compare(g)), {
     decide: (g, outcome) => run(() => quickDecision([g], outcome)),
+    keepSuggestions: (g, shown) => run(() => keepSuggestions(g, shown)),
     select: (g, checked) => { checked ? state.selected.add(g.id) : state.selected.delete(g.id); bulkSelection(); },
     selected: state.selected.has(group.id), decided: state.section === 'decided',
     label: `Photo ${index + 1}`,
@@ -59,6 +112,7 @@ function error(error) {
     : el('error');
   target.textContent = error.message || String(error);
   target.hidden = false;
+  if (target === el('error')) el('refresh').hidden = false;
   if (el('comparison').open && !state.comparison) {
     state.openFailed = true;
     el('comparison-state').textContent = '';
@@ -73,6 +127,7 @@ function clearErrors() {
     el(id).textContent = '';
   }
   el('comparison-refresh').hidden = el('photo-refresh').hidden = true;
+  el('refresh').hidden = true;
 }
 function run(work) {
   return Promise.resolve().then(work).catch(error);
@@ -90,8 +145,9 @@ function recovery() {
   el('more').disabled = locked || state.loading;
   for (const button of document.querySelectorAll('#filters button, #sections button, .group-card button, .group-card input'))
     button.disabled = locked || state.loading || state.autoUpdateFailed;
-  for (const input of document.querySelectorAll('#photos [data-choice], #photos [data-compare-select], .compare-tools button:not(.why-trigger)'))
+  for (const input of document.querySelectorAll('#photos [data-choice], #photos [data-keep-toggle], #photos [data-compare-select], .compare-tools button:not(.why-trigger)'))
     input.disabled = locked || !state.comparison || state.comparison.oversized;
+  for (const card of el('photos').children) card.syncSelection?.();
   el('undo').disabled = locked;
   selection();
   syncViewer();
@@ -100,7 +156,11 @@ function recovery() {
 }
 function selection() {
   el('selection-count').textContent = state.comparison ? decisionSummary(state.outcomes) : '';
-  el('comparison-bulk').hidden = !state.batchPhotos.size;
+  el('photos').classList.toggle('selecting', state.selectMode);
+  el('select-mode').setAttribute('aria-pressed', String(state.selectMode));
+  el('select-mode').textContent = state.selectMode ? 'Done selecting' : 'Select';
+  el('select-all').hidden = el('select-none').hidden = !state.selectMode;
+  el('comparison-bulk').hidden = !state.selectMode || !state.batchPhotos.size;
   el('comparison-bulk-count').textContent = `${state.batchPhotos.size} checked`;
   el('apply').textContent = state.comparison
     ? 'Save'
@@ -116,6 +176,7 @@ function selection() {
     state.comparison.oversized ||
     failedPreviews.size > 0;
   el('apply-next').disabled = el('apply').disabled;
+  el('apply-next').textContent = nextActionLabel(state.outcomes);
   el('apply-next').hidden = state.section !== 'pending';
 }
 function closeComparison() {
@@ -142,6 +203,7 @@ async function refresh({ automatic = false, keepLightbox = false } = {}) {
       view.groups.push(...page.groups); view.nextOffset = page.nextOffset;
     }
     state.autoUpdateFailed = false;
+    state.viewExpired = false;
     state.selected.clear(); state.removed.clear();
     state.view = view;
     state.groups = view.groups;
@@ -163,7 +225,7 @@ async function refresh({ automatic = false, keepLightbox = false } = {}) {
   }
 }
 function showViewStatus(view) {
-  el('enrich-note').hidden = !view.enrichRunning;
+  showCurateStatus(el('curate-status'), view);
   const loadedStacks = state.groups.filter(g => g.memberCount > 1).length;
   const removedStacks = [...state.removed.values()].filter(g => g.memberCount > 1).length;
   const stacks = Math.max(0, (view.counts?.stacks ?? loadedStacks) - removedStacks);
@@ -171,80 +233,76 @@ function showViewStatus(view) {
   const parts = [];
   if (stacks) parts.push(`${loadedStacks} of ${stacks} ${stacks === 1 ? 'stack' : 'stacks'}`);
   if (singles) parts.push(`${state.groups.length - loadedStacks} of ${singles} ${singles === 1 ? 'single photo' : 'single photos'}`);
-  el('count').textContent = parts.length ? `${parts.join(' · ')} shown` : '0 photos shown';
-  el('count').title = el('count').textContent;
+  const shown = parts.length ? `${parts.join(' · ')} shown` : '0 photos shown';
+  el('count').title = `Totals include all ${state.section} results matching the current filters, including photos not yet loaded. ${shown}.`;
+  const totals = [stacks && `${stacks} ${stacks === 1 ? 'stack' : 'stacks'}`, singles && `${singles} ${singles === 1 ? 'single photo' : 'single photos'}`].filter(Boolean);
+  el('count').textContent = state.section === 'decided' ? shown : totals.join(' · ') || '0 photos';
   state.updateStatus = view;
   updateHint();
-  const refinement = view.refinement;
   const metadata = view.metadata;
   if (state.view?.viewId === view.viewId) state.view.metadata = metadata;
   if (state.comparison) el('metadata-retry').hidden = !metadata?.problem;
-  const paused = refinement?.state === 'paused' || refinement?.state === 'limited';
-  const remaining = refinement?.remainingGroups ?? 0;
-  const checking = remaining > 0;
-  const progress = checking ? ` · ${remaining.toLocaleString()} remaining` : '';
-  const status = paused ? `Checks paused${progress}` : checking ? `Checking stacks${progress}`
-    : metadata?.problem ? 'Photo information paused'
-    : metadata?.state === 'refreshing' ? 'Refreshing photo information' : '';
-  const referee = stackRefereePresentation(view.stackRefereeActivity, { page: true });
-  el('refinement').textContent = [status, referee?.title].filter(Boolean).join(' · ');
-  el('refinement').title = [paused ? refinement?.problem : metadata?.problem,
-    checking ? 'Remaining checks across all pending photos, including outside this view. Includes queued and in-progress checks. Each check covers nearby photos that may form more than one stack.' : '',
-    referee?.detail ?? '',
-  ].filter(Boolean).join(' ');
-  const activity = paused ? { state: 'paused' } : refinement?.state === 'searching' || metadata?.state === 'refreshing'
-    ? { state: 'checking' } : checking ? { state: 'waiting' } : null;
-  const indicator = similarityIndicator(activity, { warning: paused }) ?? (referee ? statusIndicator(referee) : null);
-  if (indicator) {
-    indicator.title = indicator.ariaLabel = el('refinement').title || (paused ? 'Stack checks paused' : 'Checking pending stacks in the background');
-  }
-  const slot = el('check-activity');
-  if (slot.firstChild?.dataset.phase !== indicator?.dataset.phase) slot.replaceChildren(...(indicator ? [indicator] : []));
-  else if (indicator) slot.firstChild.title = slot.firstChild.ariaLabel = indicator.title;
   for (const group of view.groups) {
-    cards.get(group.id)?.updateSimilarity(group.similarity, group.stackReferee);
-    if (state.comparison?.groupId === group.id) showComparisonSimilarity(group.similarity, group.stackReferee);
+    cards.get(group.id)?.updateStatus(group);
+    if (state.comparison?.groupId === group.id) showComparisonStatus(group);
   }
   scheduleUpdates();
 }
-function showComparisonSimilarity(status, referee = state.comparison?.stackReferee) {
-  if (state.comparison) {
-    state.comparison.similarity = status;
-    state.comparison.stackReferee = referee;
+function comparisonGroup() {
+  const c = state.comparison;
+  return c && { memberCount: c.ids.length, route: c.route ?? state.groups.find(group => group.id === c.groupId)?.route,
+    similarity: c.similarity, stackReferee: c.stackReferee, photoReferee: c.photoReferee,
+    photoRecommendations: c.photoRecommendations, reasons: c.reasons, updated: c.updated };
+}
+// Live status for the open comparison. A machine update is for the next view,
+// not an instruction to abandon an inspected comparison: its photos and drafts
+// stay put, and real scope/input conflicts still use the Save guards.
+function showComparisonStatus(patch = {}) {
+  const c = state.comparison;
+  if (!c) return;
+  const { reasons, ...statuses } = patch; // The comparison keeps the reasons it opened with.
+  mergeStatus(c, statuses);
+  const status = stackStatus(comparisonGroup(), { decided: state.section === 'decided' });
+  const signature = JSON.stringify([c.id, status]);
+  const summary = el('photo-advice-summary');
+  const advice = c.photoRecommendations;
+  const adviceText = photoAdviceSummary(advice) ||
+    (c.photoReferee?.state === 'complete' && !c.updated ? 'Photo Referee suggestions are ready. Reopen this comparison to see them; your draft stays unchanged.' : '');
+  if (summary.dataset.copy !== adviceText) {
+    summary.dataset.copy = adviceText;
+    const complete = advice?.state === 'complete' && advice.canApplyAll && !advice.unavailableReason;
+    const label = complete ? advice.noneRecommended ? 'None suggested' : `★ ${advice.keeperIds.length} suggested` : 'Photo Referee';
+    summary.replaceChildren(...(adviceText ? [textTooltip(label, 'Photo Referee', adviceText, 'photo-advice-help')] : []));
+    summary.hidden = !adviceText;
+    // Keep limitations visible: a compact count must not imply complete,
+    // full-stack advice when the model only saw separate batches or partial checks.
+    const notice = el('photo-advice-notice');
+    notice.textContent = !complete || advice.coverage === 'within-batches' ||
+      ['unchecked-size', 'incomplete'].includes(advice.checkCoverage) ? adviceText : '';
+    notice.hidden = !notice.textContent;
   }
-  // A machine update is for the next view, not an instruction to abandon an
-  // inspected comparison. Real scope/input conflicts still use the Save guards.
-  if (status?.state === 'updated') status = null;
-  else status = groupSimilarity(state.groups.find(group => group.id === state.comparison?.groupId), status);
-  const presentation = groupPresentation({ similarity: status, stackReferee: referee });
-  const hasReferee = Boolean(stackRefereePresentation(referee));
-  const title = presentation.title;
-  const working = ['waiting', 'checking'].includes(presentation.phase);
-  const detail = [presentation.detail, hasReferee && similarityDetail(status) ? `Earlier grouping: ${similarityDetail(status)}` : '', working
-    ? 'This stack may change after checking. You can still choose which photos to keep.'
-    : !hasReferee && (status?.uncertain || ['incomplete', 'paused', 'limited', 'unavailable'].includes(status?.state))
-      ? 'You can still choose which photos to keep.' : ''].filter(Boolean).join(' ');
-  for (const id of ['comparison-similarity','photo-similarity']) {
+  if (c.ids.length === 1) {
+    const target = el('photo-reason');
+    if (target.dataset.status !== signature) {
+      target.dataset.status = signature;
+      target.replaceChildren(explanation(c, 'single-reason', status));
+    }
+  }
+  for (const id of ['comparison-similarity', 'photo-similarity']) {
     const target = el(id);
-    target.hidden = (!title && !(state.comparison?.ids.length > 1)) || (id === 'photo-similarity' && state.viewerMode === 'single');
-    const signature = JSON.stringify([state.comparison?.id, status, referee]);
-    if (target.dataset.status === signature) continue;
+    target.hidden = c.ids.length < 2 || (id === 'photo-similarity' && state.viewerMode === 'single');
+    if (target.hidden || target.dataset.status === signature) continue;
     target.dataset.status = signature;
     if (id === 'comparison-similarity') {
-      target.replaceChildren(explanation(state.comparison, 'stack-reason', title ? {
-        title, detail, indicator: statusIndicator(presentation),
-      } : null));
+      target.replaceChildren(explanation(c, 'stack-reason', status));
       continue;
     }
     const copy = node('div'), heading = node('div', undefined, 'check-heading');
-    heading.append(node('strong', title || 'Stack comparison'));
-    if (state.comparison?.ids.length > 1)
-      heading.append(explanation(state.comparison, 'photo-stack-reason', title ? { title, detail } : null));
+    heading.append(explanation(c, 'photo-stack-reason', status));
     copy.append(heading);
-    if (detail) copy.append(node('p', detail));
-    const indicator = statusIndicator(presentation);
-    target.replaceChildren(...(indicator ? [indicator] : []), copy);
-    target.classList.toggle('check-pending', working);
+    if (status?.detail) copy.append(node('p', status.detail));
+    target.replaceChildren(copy);
+    target.classList.toggle('check-pending', status?.badge === 'checking');
   }
 }
 async function more() {
@@ -272,16 +330,19 @@ async function compare(group) {
   const keepPhoto = single && el('photo-view').open;
   state.opening = single ? 'single' : 'stack';
   state.viewerMode = group.memberCount === 1 ? 'single' : 'stack';
-  state.batchPhotos.clear();
+  state.batchPhotos.clear(); state.selectMode = false;
   if (!keepPhoto) state.comparison = null;
   state.outcomes = {};
-  state.draftTouched = false;
+  state.draftTouched = false; state.draftSuggested = false;
+  state.displayedPhotoId = state.previousPhotoId = null;
+  el('photo-filmstrip').replaceChildren();
+  delete el('photo-filmstrip').dataset.comparison;
   state.openFailed = false;
   failedPreviews = new Set();
   el('preview-errors').hidden = true;
   el('comparison-title').textContent = group.memberCount > 1
     ? `Compare stack · ${group.memberCount} photos` : 'Review photo';
-  el('select-all').hidden = el('select-none').hidden = group.memberCount < 2;
+  el('select-mode').hidden = group.memberCount < 2;
   el('compact-label').hidden = group.memberCount <= 10;
   el('compact').checked = group.memberCount > 10;
   el('photos').classList.toggle('compact', el('compact').checked);
@@ -299,12 +360,21 @@ async function compare(group) {
   try {
     const comparison = await client.comparison(state.view.viewId, group.id);
     if (generation !== state.dialogGeneration) return;
+    // Start from the card's statuses for these photos, so a newer grouping
+    // keeps the verdict the card showed.
+    const card = state.groups.find(g => g.id === group.id);
+    if (card) {
+      const opened = { similarity: comparison.similarity, stackReferee: comparison.stackReferee, photoReferee: comparison.photoReferee };
+      Object.assign(comparison, { similarity: card.similarity, stackReferee: card.stackReferee, photoReferee: card.photoReferee });
+      mergeStatus(comparison, opened);
+    }
     const preview = single ? await previews.get(comparison.photos[0].id).promise : null;
     if (generation !== state.dialogGeneration || !(single ? el('photo-view') : el('comparison')).open) return;
     state.comparison = comparison;
-    showComparisonSimilarity(comparison.similarity);
-    state.outcomes = comparison.oversized ? {} : Object.fromEntries(comparison.photos.map(photo =>
-      [photo.id, savedOutcome(photo) || 'reviewed']));
+    showComparisonStatus();
+    state.outcomes = comparison.oversized ? {} : initialPhotoChoices(comparison, { decided: state.section === 'decided' });
+    state.draftSuggested = state.section === 'pending' && applicableAdvice(comparison) &&
+      Object.values(state.outcomes).includes('approve');
     state.photoList = [...comparison.photos, ...comparison.context];
     el('comparison-state').textContent = comparison.oversized
       ? 'This group exceeds the 1,000-photo decision limit. Only the first 50 previews are shown; decisions are disabled. Turn off stacks in Settings to review these photos individually.'
@@ -312,10 +382,13 @@ async function compare(group) {
         ? 'Some photo information is awaiting refresh. You can still make a manual choice; changed inputs will require a refresh before saving.'
         : '';
     el('metadata-retry').hidden = !state.view.metadata?.problem;
+    const suggested = new Set(comparison.photoRecommendations?.keeperIds ?? []);
     el('photos').replaceChildren(
       ...comparison.photos.map((photo, index) =>
         photoCard(photo, {
-          label: `Photo ${index + 1}`,
+          label: `Photo ${index + 1}`, suggested: suggested.has(photo.id),
+          assessment: photoAssessment(comparison.photoRecommendations, photo.id),
+          inlineReason: state.draftSuggested && suggested.has(photo.id),
           selected: () => state.batchPhotos.has(photo.id),
           select: (selected) => {
             selected ? state.batchPhotos.add(photo.id) : state.batchPhotos.delete(photo.id);
@@ -338,9 +411,15 @@ async function compare(group) {
     el('context-photos').replaceChildren(
       ...comparison.context.map((photo) => photoCard(photo, { readOnly: true, open: showPhoto })),
     );
+    layoutPhotos();
     recovery();
     if (single) { el('comparison').close(); renderPhoto(comparison.photos[0], preview); }
-    else el('photos').firstElementChild?.focus({ preventScroll: true });
+    else {
+      const firstSuggested = state.draftSuggested ? comparison.photos.findIndex(p => suggested.has(p.id)) : 0;
+      const focus = el('photos').children[firstSuggested] ?? el('photos').firstElementChild;
+      focus?.focus({ preventScroll: true });
+      if (matchMedia('(max-width: 600px)').matches && state.draftSuggested) focus?.scrollIntoView({ block: 'start' });
+    }
   } catch (cause) {
     if (generation === state.dialogGeneration) throw cause;
   } finally {
@@ -378,6 +457,9 @@ async function showPhoto(photo) {
   }
 }
 function renderPhoto(photo, preview) {
+  if (state.displayedPhotoId !== photo.id) el('stack-choice-controls').querySelector('details').open = false;
+  if (state.viewerMode === 'stack' && state.displayedPhotoId && state.displayedPhotoId !== photo.id) state.previousPhotoId = state.displayedPhotoId;
+  state.displayedPhotoId = photo.id;
   state.photoIndex = state.photoList.findIndex((p) => p.id === photo.id);
   el('photo-title').textContent = 'Photo';
   preview.image.id = 'photo-large';
@@ -388,7 +470,14 @@ function renderPhoto(photo, preview) {
   el('photo-caption').textContent = photo.caption || '';
   el('photo-date').textContent = photo.capturedAt ? new Date(photo.capturedAt).toLocaleString() : '';
   el('photo-score').textContent = Number.isFinite(photo.frameScore) ? `Enrichment score: ${photo.frameScore.toFixed(2)}` : '';
+  const assessment = photoAssessment(state.comparison?.photoRecommendations, photo.id);
+  const advice = state.comparison?.photoRecommendations;
   el('photo-model').hidden = true;
+  el('photo-model').textContent = '';
+  el('photo-referee-model').hidden = !assessment;
+  el('photo-referee-model').textContent = assessment ? `${assessment.suggested ? '★ Suggested by' : 'Not suggested by'} Photo Referee${advice.model ? ` · ${advice.model}` : ''}` : '';
+  el('photo-assessment').hidden = !assessment;
+  el('photo-assessment').textContent = assessment?.reason ?? '';
   el('photo-image-error').hidden = preview.ok;
   el('photo-tags').replaceChildren(...(photo.tags || []).map((tag) => node('span', tag)));
   const references = state.viewerMode === 'single' ? state.comparison.context : [];
@@ -406,7 +495,7 @@ function renderPhoto(photo, preview) {
   el('photo-next').disabled = state.photoIndex >= state.photoList.length - 1;
   if (!el('photo-view').open) el('photo-view').showModal();
   syncViewer();
-  showComparisonSimilarity(state.comparison?.similarity);
+  showComparisonStatus();
   fullCaption(photo);
   const list = state.viewerMode === 'single' ? state.groups : state.photoList;
   const index = state.viewerMode === 'single'
@@ -444,8 +533,13 @@ function syncViewer() {
   const at = state.groups.findIndex(g => g.id === state.comparison?.groupId);
   const onlyPhotos = state.section === 'decided' || state.kind === 'singles' || state.view?.counts?.stacks === 0;
   const unit = onlyPhotos ? 'photos' : 'items';
-  el('photo-position').textContent = single ? `${at + 1} of ${state.groups.length} ${state.next !== null ? 'loaded ' : ''}${unit}`
-    : `${state.photoIndex + 1} of ${state.photoList.length} photos`;
+  const stackIndex = state.comparison?.photos.findIndex(p => p.id === photo?.id) ?? -1;
+  el('photo-position').textContent = stackIndex < 0 ? 'Already kept · reference photo'
+    : single ? `${at + 1} of ${state.groups.length} ${state.next !== null ? 'loaded ' : ''}${unit}`
+    : `${stackIndex + 1} of ${state.comparison.photos.length} photos`;
+  const references = state.comparison?.context.length ?? 0;
+  el('photo-reference-count').hidden = !references;
+  el('photo-reference-count').textContent = `${references} already kept · reference only`;
   el('single-actions').hidden = !single || !actionable;
   el('stack-actions').hidden = single || !actionable;
   el('photo-keep').hidden = single || !actionable;
@@ -453,14 +547,10 @@ function syncViewer() {
   el('photo-readonly').textContent = photo?.state === 'approved' ? 'Already kept · reference only' : 'Decision unavailable for this comparison';
   el('back-pending-photo').hidden = !single || actionable;
   el('photo-reason').hidden = !single || !actionable || state.section === 'decided';
-  if (state.comparison && el('photo-reason').dataset.comparison !== state.comparison.id) {
-    el('photo-reason').dataset.comparison = state.comparison.id;
-    el('photo-reason').replaceChildren(explanation(state.comparison, 'single-reason'));
-  }
   el('photo-outcome').textContent = single || !actionable
     ? `Current: ${outcomeLabel(savedOutcome(photo))}`
-    : `Draft: ${outcomeLabel(state.outcomes[photo.id])} · not saved`;
-  const locked = state.busy || state.loading || state.opening || state.continuing || Boolean(client.saved.pending) || state.comparison?.oversized;
+    : `Your pick: ${outcomeLabel(state.outcomes[photo.id])} · not saved`;
+  const locked = Boolean(state.busy || state.loading || state.opening || state.continuing || client.saved.pending || state.comparison?.oversized);
   for (const control of document.querySelectorAll('[data-stack-choice], [data-photo-action]'))
     control.disabled = locked || !actionable;
   el('photo-prev').disabled = locked || (single ? !actionable || at <= 0 : state.photoIndex <= 0);
@@ -470,14 +560,16 @@ function syncViewer() {
   el('photo-keys').hidden = !actionable;
   el('photo-keys').textContent = single
     ? 'Y Yes · S Skip · F Fav · N No · Z Undo · ← → browse · Esc close. Choices save immediately.'
-    : 'Y Yes · S Skip · F Fav · N No: mark & next. ← → browse. Esc returns to comparison. Choices are not saved until you save the stack.';
+    : 'Y Yes · S Skip · F Fav · N No: mark & next. ← → browse · C flip previous · K keep/skip. Esc returns to comparison. Choices are not saved until you save the stack.';
   syncReceipts();
   for (const button of document.querySelectorAll('[data-photo-action]'))
     button.setAttribute('aria-pressed', String(button.dataset.photoAction === savedOutcome(photo)));
-  if (!actionable) return;
+  el('photo-flip').hidden = single;
+  el('photo-flip').disabled = locked || single || !state.previousPhotoId;
+  if (!actionable) { stackChoices.sync('reviewed', true); syncFilmstrip(); return; }
   const value = state.outcomes[photo.id];
-  for (const button of document.querySelectorAll('[data-stack-choice]'))
-    button.setAttribute('aria-pressed', String(button.dataset.stackChoice === value));
+  stackChoices.sync(value, locked);
+  syncFilmstrip();
 }
 function syncReceipts() {
   const available = Boolean(state.undo && state.undo.until > Date.now());
@@ -632,6 +724,7 @@ function bulkSelection() {
   const singles = state.groups.filter(g => g.memberCount === 1);
   const locked = state.loading || state.busy || state.continuing || state.autoUpdateFailed || Boolean(client.saved.pending);
   el('bulk-label').hidden = state.section === 'pending' && state.kind !== 'singles';
+  el('bulk-label-text').textContent = `All loaded (${singles.length})`;
   const count = singles.filter(g => state.selected.has(g.id)).length;
   el('select-shown').checked = count > 0 && count === singles.length;
   el('select-shown').indeterminate = count > 0 && count < singles.length;
@@ -647,6 +740,24 @@ function quickDecision(groups, outcome) {
     const comparison = await request('selection', { viewId: state.view.viewId, groupIds: groups.map(g => g.id) });
     return client.decide(comparison.id, Object.fromEntries(comparison.ids.map(id => [id,outcome])));
   }, { ids: groups.map(g => g.photos[0].id) });
+}
+async function keepSuggestions(group, shown) {
+  if (state.section !== 'pending' || state.busy || state.loading || state.opening || state.continuing || state.autoUpdateFailed || client.saved.pending) return;
+  // Capture what the button offered before a poll can replace its status.
+  const displayed = structuredClone(shown), viewId = state.view.viewId;
+  state.opening = 'suggestion';
+  recovery();
+  let comparison;
+  try { comparison = await client.comparison(viewId, group.id); }
+  finally { state.opening = null; recovery(); }
+  if (state.view.viewId !== viewId) return;
+  if (comparison.oversized || !suggestionMatches(displayed, comparison)) {
+    await compare(group);
+    if (el('comparison').open) el('comparison-state').textContent = 'Suggestions changed. Review the current choices before saving.';
+    return;
+  }
+  const outcomes = Object.fromEntries(comparison.ids.map(id => [id, displayed.keeperIds.includes(id) ? 'approve' : 'reviewed']));
+  return action(() => client.decide(comparison.id, outcomes), { ids: [...comparison.ids] });
 }
 async function stepPhoto(delta) {
   if (state.busy || state.loading || state.opening || state.continuing || client.saved.pending) return;
@@ -673,23 +784,23 @@ async function changeFilter(patch) {
 // or a pending receipt always owns its current snapshot.
 let updateTimer, lastInteraction = 0, lastAutomatic = 0;
 function canUpdate() {
-  return !document.hidden && !state.busy && !state.loading && !state.continuing && !client.saved.pending &&
+  return !document.hidden && !state.busy && !state.loading && !state.opening && !state.continuing && !client.saved.pending &&
     el('search').value.trim() === state.search &&
-    !state.selected.size && !document.querySelector('dialog[open], .page-tools[open], .card-menu[open]') &&
+    !state.selected.size && !document.querySelector('dialog[open], .card-menu[open]') &&
     !document.activeElement?.matches('input:not([type=checkbox]),select,textarea,[contenteditable=true]');
 }
 function updateHint() {
-  const available = state.autoUpdateFailed || Boolean(state.updateStatus?.updatesAvailable);
+  const available = state.autoUpdateFailed || state.viewExpired || Boolean(state.updateStatus?.updatesAvailable);
   el('updates').hidden = !available;
-  el('updates-copy').textContent = state.autoUpdateFailed ? 'Refresh to load updates'
+  el('updates-copy').textContent = state.autoUpdateFailed ? 'Updates could not load'
+    : state.viewExpired ? 'Photo view will refresh when you finish reviewing'
     : state.updateStatus?.refinement?.ready ? 'Updated stacks available' : 'Photo updates available';
-  el('refresh').classList.toggle('updates-ready', available);
-  el('refresh').title = available ? 'Load the latest photos and completed grouping checks' : 'Refresh photos';
+  el('refresh').hidden = !state.autoUpdateFailed && el('error').hidden;
 }
 function scheduleUpdates() {
   clearTimeout(updateTimer);
-  if (!state.updateStatus?.updatesAvailable || state.autoUpdateFailed || !canUpdate() ||
-      state.updateStatus.metadata?.state === 'refreshing') return;
+  if ((!state.viewExpired && !state.updateStatus?.updatesAvailable) || state.autoUpdateFailed || !canUpdate() ||
+      (!state.viewExpired && state.updateStatus?.metadata?.state === 'refreshing')) return;
   const wait = Math.max(0, lastInteraction + 1200 - Date.now(), lastAutomatic + 5000 - Date.now());
   updateTimer = setTimeout(() => {
     if (!canUpdate()) return;
@@ -698,9 +809,9 @@ function scheduleUpdates() {
       try { await refresh({ automatic: true }); }
       catch {
         // Do not spin on a failed read or on an uncertain replacement view.
-        // Explicit Refresh safely reconciles the server's replacement lease.
+        // Retry updates safely reconciles the server's replacement lease.
         updateHint();
-        throw Error('Could not finish updating photos. Use Refresh to continue.');
+        throw Error('Could not finish updating photos. Use Retry updates to continue.');
       }
     });
   }, wait);
@@ -800,7 +911,7 @@ function repaintSelection() {
   for (const card of el('photos').children) card.syncSelection();
   selection();
 }
-el('compact').onchange = () => el('photos').classList.toggle('compact', el('compact').checked);
+el('compact').onchange = () => { el('photos').classList.toggle('compact', el('compact').checked); layoutPhotos(); };
 function saveComparison(next = false) {
   if (el('apply').disabled || !state.comparison) return;
   const anchor = state.groups.find(g => g.id === state.comparison.groupId)?.photos[0];
@@ -827,6 +938,7 @@ async function continueReview(anchor) {
     recovery();
   }
 }
+el('select-mode').onclick = () => { state.selectMode = !state.selectMode; if (!state.selectMode) state.batchPhotos.clear(); repaintSelection(); };
 el('apply').onclick = () => run(() => saveComparison());
 el('apply-next').onclick = () => run(() => saveComparison(true));
 el('retry-action').onclick = () =>
@@ -891,10 +1003,6 @@ el('photo-undo').onclick = el('comparison-undo').onclick = () => el('undo').clic
 el('photo-retry').onclick = () => el('retry-action').click();
 el('photo-refresh').onclick = () => run(refresh);
 for (const button of document.querySelectorAll('[data-photo-action]')) button.onclick = () => run(() => decideSingle(button.dataset.photoAction));
-for (const button of document.querySelectorAll('[data-stack-choice]')) button.onclick = () => {
-  const photo = state.photoList[state.photoIndex];
-  if (photo) setOutcome(photo.id, button.dataset.stackChoice);
-};
 for (const button of document.querySelectorAll('[data-close]')) button.onclick = () => el(button.dataset.close).close();
 for (const dialog of document.querySelectorAll('dialog'))
   dialog.addEventListener('click', (e) => {
@@ -926,7 +1034,7 @@ function backToComparison() {
 }
 function markAndAdvance(outcome) {
   const photo = state.photoList[state.photoIndex];
-  if (!photo || !Object.hasOwn(state.outcomes, photo.id) || el('photo-keep').disabled) return;
+  if (!photo || !Object.hasOwn(state.outcomes, photo.id) || state.opening || state.busy || client.saved.pending) return;
   setOutcome(photo.id, outcome);
   const next = state.comparison.photos[state.photoIndex + 1];
   if (next) showPhoto(next);
@@ -948,7 +1056,8 @@ document.addEventListener('keydown', (event) => {
       else markAndAdvance(outcome);
       return;
     }
-    if (key === 'k' && !el('photo-keep').hidden && !el('photo-keep').disabled) {
+    if (key === 'c' && !el('photo-flip').hidden && !el('photo-flip').disabled) { event.preventDefault(); run(flipPhoto); return; }
+    if (key === 'k' && !el('stack-actions').hidden) {
       event.preventDefault();
       const id = state.photoList[state.photoIndex]?.id;
       if (id) markAndAdvance(['approve', 'favorite'].includes(state.outcomes[id]) ? 'reviewed' : 'approve');
@@ -970,10 +1079,10 @@ document.addEventListener('keydown', (event) => {
     event.preventDefault(); photos[index + (key === 'arrowleft' ? -1 : 1)]?.focus();
   } else if (key === 'enter' && event.target === focused) {
     // Enter on an image/button retains its native behavior; only the explicitly
-    // focused card with an explicitly marked draft can invoke save-and-next.
+    // focused card with a marked draft or a suggested Yes can invoke save-and-next.
     // Automatic initial focus must never turn a stray Enter into a Skip-all save.
     event.preventDefault();
-    if (state.draftTouched) run(() => saveComparison(true));
+    if (state.draftTouched || state.draftSuggested) run(() => saveComparison(true));
   }
 });
 window.addEventListener('pagehide', () => client.channel?.close());
@@ -986,9 +1095,10 @@ let polling = false;
 setInterval(async () => {
   if (document.hidden || polling || state.loading || state.busy) return;
   polling = true;
+  let polledViewId = null;
   try {
     if (state.view) {
-      const id = state.view.viewId;
+      const id = polledViewId = state.view.viewId;
       // Keep the visible cards (or the opened comparison) current, in a bounded
       // 50-card read. Only status changes; memberships and selections stay put.
       const index = state.comparison && (el('comparison').open || el('photo-view').open)
@@ -998,6 +1108,7 @@ setInterval(async () => {
         visibleGroupIds: [...visibleCards].slice(0, 50),
         comparisonGroupId: (el('comparison').open || el('photo-view').open) ? state.comparison?.groupId ?? null : null,
       });
+      polledViewId = null;
       if (state.view?.viewId === id) showViewStatus(status);
     }
     if (state.syncId) {
@@ -1022,13 +1133,13 @@ setInterval(async () => {
       syncViewer();
     }
   } catch (e) {
-    if (e.code === 'curate_expired') {
-      el('updates').hidden = false;
-      el('updates-copy').textContent = 'This view expired. Refresh to continue.';
-      state.autoUpdateFailed = true;
-      clearTimeout(updateTimer);
-      el('refresh').classList.add('updates-ready');
-      recovery();
+    if (e.code === 'curate_expired' && polledViewId && state.view?.viewId === polledViewId) {
+      // Expected lease expiry is not a failed replacement. Renew at the same
+      // safe idle boundary as grouping updates, preserving drafts/selections.
+      // A late error for a replaced view (or an old receipt) cannot lock cards.
+      state.viewExpired = true;
+      updateHint();
+      scheduleUpdates();
     }
   } finally {
     polling = false;

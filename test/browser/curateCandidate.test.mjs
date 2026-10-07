@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { launchChrome, findChrome } from './harness.mjs';
+import { cleanupAfter, launchChrome, findChrome } from './harness.mjs';
 import { curatePreviewFixture } from './curatePreviewFixture.mjs';
 import { writeFileSync } from 'node:fs';
 import { join } from 'node:path';
@@ -8,12 +8,12 @@ import { join } from 'node:path';
 test('hash-supported stack updates automatically after closing, without changing an open selection',
   { timeout: 60000 }, async t => {
     if (!findChrome()) return t.skip('Chrome required');
+    const track = cleanupAfter(t);
     // Launch before the server can start the gated 15-second similarity request.
-    const browser = await launchChrome(), page = await browser.newPage();
-    t.after(() => browser.stop());
+    const browser = track(await launchChrome()), page = await browser.newPage();
     let release;
     const gate = new Promise(resolve => { release = resolve; });
-    const fixture = await curatePreviewFixture({ stackSize: 4, singles: 0, metadataReady: true,
+    const fixture = track(await curatePreviewFixture({ stackSize: 4, singles: 0, metadataReady: true,
       prepare(fixture) {
       for (let i = 0; i < 4; i++) {
         const id = fixture.id(i + 1), thumbhash = Buffer.alloc(21, 0).toString('base64');
@@ -26,8 +26,8 @@ test('hash-supported stack updates automatically after closing, without changing
       });
       }
       },
-    });
-    t.after(async () => { release(); await fixture.stop(); });
+    }));
+    track(() => release());
     const click = selector => page.evaluate(`document.querySelector(${JSON.stringify(selector)}).click()`);
     await page.navigate(`${fixture.base}/curate-preview.html`);
     await page.waitFor('document.querySelector(".gate-backdrop input")');
@@ -37,28 +37,28 @@ test('hash-supported stack updates automatically after closing, without changing
     await page.waitFor('document.querySelectorAll("#photos [data-keeper]").length===4 && !document.querySelector("#apply").disabled');
     await click('[data-keeper]');
     release();
-    await page.waitFor('!document.querySelector("#updates").hidden && !document.querySelector("#refinement").textContent', { timeoutMs: 35000 });
+    await page.waitFor('!document.querySelector("#updates").hidden && document.querySelector("#curate-status").dataset.phase!=="grouping"', { timeoutMs: 35000 });
     assert.equal(fixture.similarityReads.length, 4, 'local ThumbHash support cannot suppress necessary verification');
     assert.equal(await page.evaluate('document.querySelectorAll(".group-card").length'), 1);
-    assert.equal(await page.evaluate('document.querySelectorAll("#photos .selected").length'), 1);
+    assert.equal(await page.evaluate('document.querySelectorAll("#photos [data-keep-toggle][aria-pressed=true]").length'), 1);
     assert.equal(await page.evaluate('document.querySelectorAll("#photos [data-keeper]").length'), 4);
     await click('[data-close=comparison]');
     await page.waitFor('document.querySelectorAll(".group-card").length===2 && !document.querySelector("#refresh").disabled');
     await click('.group-card');
     await page.waitFor('document.querySelectorAll("#photos [data-keeper]").length===2 && !document.querySelector("#apply").disabled');
     await click('#comparison-similarity .why-trigger');
-    assert.match(await page.evaluate('document.querySelector("#stack-reasons").textContent'), /distinguish this group/);
+    assert.match(await page.evaluate('document.querySelector("#stack-reasons").textContent'), /Immich searches separate some nearby photos/);
     assert.equal(await page.evaluate('document.querySelector("#error").hidden'), true);
   });
 
 test('candidate preview refines automatically, preserves selections, explains results and saves multiple keepers',
   { timeout: 60000 }, async t => {
     if (!findChrome()) return t.skip('Chrome required');
-    const browser = await launchChrome(), page = await browser.newPage();
-    t.after(() => browser.stop());
+    const track = cleanupAfter(t);
+    const browser = track(await launchChrome()), page = await browser.newPage();
     let release;
     const gate = new Promise(resolve => { release = resolve; });
-    const fixture = await curatePreviewFixture({ stackSize: 5, singles: 0, metadataReady: true,
+    const fixture = track(await curatePreviewFixture({ stackSize: 5, singles: 0, metadataReady: true,
       prepare(fixture) {
       const matrix = [[null,3,5,1,2], [2,null,1,3,4], [9,2,null,23,8], [1,3,5,null,2], [1,6,5,2,null]];
       for (let i = 0; i < 5; i++) {
@@ -72,17 +72,17 @@ test('candidate preview refines automatically, preserves selections, explains re
       });
       }
       },
-    });
-    t.after(async () => { release(); await fixture.stop(); });
+    }));
+    track(() => release());
     const click = selector => page.evaluate(`document.querySelector(${JSON.stringify(selector)}).click()`);
     await page.navigate(`${fixture.base}/curate-preview.html`);
     await page.waitFor('document.querySelector(".gate-backdrop input")');
     await page.evaluate('document.querySelector(".gate-backdrop input").value="smoke-secret";document.querySelector(".gate-backdrop button").click()');
     await page.waitFor('document.querySelectorAll(".group-card").length===1 && !document.querySelector("#refresh").disabled');
     await page.waitFor('document.querySelector(".group-card[data-similarity=checking]")');
-    assert.equal(await page.evaluate('document.querySelector(".group-card .similarity-indicator").dataset.phase'), 'checking');
-    assert.match(await page.evaluate('document.querySelector(".group-card .similarity-indicator").getAttribute("aria-label")'), /Checking/);
-    assert.match(await page.evaluate('document.querySelector("#refinement").textContent'), /Checking stacks/);
+    assert.equal(await page.evaluate('document.querySelector(".group-card .stack-badge").dataset.badge'), 'checking');
+    assert.match(await page.evaluate('document.querySelector(".group-card .stack-badge").getAttribute("aria-label")'), /Checking/);
+    assert.match(await page.evaluate('document.querySelector(".curate-status-copy").textContent'), /Grouping photos/);
     await click('#refresh');
     await page.waitFor('!document.querySelector("#refresh").disabled');
     assert.equal(await page.evaluate('document.querySelectorAll(".group-card").length'), 1, 'partial checks do not regroup on Refresh');
@@ -91,28 +91,32 @@ test('candidate preview refines automatically, preserves selections, explains re
     await click('[data-keeper]');
     release();
     // No per-stack rank button: the server drives bounded work.
-    await page.waitFor('!document.querySelector("#updates").hidden && !document.querySelector("#refinement").textContent', { timeoutMs: 40000 });
+    await page.waitFor('!document.querySelector("#updates").hidden && document.querySelector("#curate-status").dataset.phase!=="grouping"', { timeoutMs: 40000 });
     assert.equal(fixture.similarityReads.length, 5);
     assert.equal(await page.evaluate('document.querySelectorAll(".group-card").length'), 1);
-    assert.equal(await page.evaluate('document.querySelectorAll("#photos .selected").length'), 1);
+    assert.equal(await page.evaluate('document.querySelectorAll("#photos [data-keep-toggle][aria-pressed=true]").length'), 1);
     assert.equal(await page.evaluate('document.querySelectorAll("#photos [data-keeper]").length'), 5);
     assert.equal(await page.evaluate('document.querySelectorAll(".group-card[data-similarity=updated]").length'), 1);
     assert.doesNotMatch(await page.evaluate('document.querySelector("#comparison-similarity").textContent'), /Updated grouping available|Close this/);
-    assert.equal(await page.evaluate('document.querySelector("#comparison-similarity .similarity-indicator")'), null);
+    // The open comparison keeps its badge; Why notes the newer grouping.
+    await page.waitFor('document.querySelector("#stack-reason .why-updated")');
+    assert.equal(await page.evaluate('document.querySelector("#comparison-similarity .stack-badge").dataset.badge'), 'unsure');
+    assert.match(await page.evaluate('document.querySelector("#stack-reason").textContent'), /A newer grouping is ready; it appears when Curate refreshes\./);
     assert.equal(await page.evaluate('document.querySelector("#show-updates")'), null);
     await click('[data-close=comparison]');
     await page.waitFor('document.querySelector(".group-card[data-similarity=checked]") && !document.querySelector("#refresh").disabled');
     assert.equal(await page.evaluate('document.querySelectorAll(".group-card").length'), 1);
-    assert.equal(await page.evaluate('document.querySelector(".group-card .similarity-indicator")'), null);
+    assert.equal(await page.evaluate('document.querySelector(".group-card .stack-badge").dataset.badge'), 'checked');
     await click('#refresh');
     await page.waitFor('!document.querySelector("#refresh").disabled');
     assert.equal(await page.evaluate('document.querySelectorAll(".group-card").length'), 1);
     await click('.group-card'); await page.waitFor('document.querySelectorAll("#photos [data-keeper]").length===5');
-    assert.equal(await page.evaluate('document.querySelector("#comparison-similarity .similarity-indicator")'), null,
-      'normal completion keeps Why without a success badge');
+    assert.equal(await page.evaluate('document.querySelector("#comparison-similarity .stack-badge").dataset.badge'), 'checked',
+      'every stack has a badge; Checked is the default');
     await click('#comparison-similarity .why-trigger');
-    assert.match(await page.evaluate('document.querySelector("#stack-reason").textContent'), /Candidate algorithm 3/);
-    assert.match(await page.evaluate('document.querySelector("#stack-reasons").textContent'), /several photos support/);
+    assert.match(await page.evaluate('document.querySelector("#stack-reason .why-algorithm").textContent'), /^Algorithm 3 · How stacks work$/);
+    assert.match(await page.evaluate('document.querySelector("#stack-reasons").textContent'), /One looser match, backed by several photos/);
+    assert.match(await page.evaluate('document.querySelector("#stack-reason .why-steps").textContent'), /Grouping: done/);
     await click(`[data-keeper="${fixture.id(1)}"]`); await click(`[data-keeper="${fixture.id(3)}"]`);
     await click('#apply');
     await page.waitFor('!document.querySelector("#receipt").hidden && !document.querySelector("#undo").hidden && !document.querySelector("#undo").disabled && !document.querySelector("#refresh").disabled');
@@ -131,10 +135,10 @@ test('candidate preview refines automatically, preserves selections, explains re
 test('background status markers and inline progress remain stable on desktop and mobile',
   { timeout: 60000 }, async t => {
     if (!findChrome()) return t.skip('Chrome required');
-    const browser = await launchChrome(), page = await browser.newPage();
-    t.after(() => browser.stop());
+    const track = cleanupAfter(t);
+    const browser = track(await launchChrome()), page = await browser.newPage();
     let release, first = true;
-    const fixture = await curatePreviewFixture({ stackSize: 3, singles: 1, metadataReady: true,
+    const fixture = track(await curatePreviewFixture({ stackSize: 3, singles: 1, metadataReady: true,
       prepare(fixture) {
         for (let i = 1; i <= 3; i++) fixture.similarityResponses.set(fixture.id(i), async () => {
           if (first) {
@@ -145,31 +149,35 @@ test('background status markers and inline progress remain stable on desktop and
           return { status: 200, body: { assets: { items: [] } } };
         });
       },
-    });
-    t.after(async () => { release?.(); await fixture.stop(); });
+    }));
+    track(() => release?.());
     const click = selector => page.evaluate(`document.querySelector(${JSON.stringify(selector)}).click()`);
     await page.navigate(`${fixture.base}/curate-preview.html`);
     await page.waitFor('document.querySelector(".gate-backdrop input")');
     await page.evaluate('document.querySelector(".gate-backdrop input").value="smoke-secret";document.querySelector(".gate-backdrop button").click()');
-    try { await page.waitFor('document.querySelector(".similarity-indicator[data-phase=checking]")'); }
+    try { await page.waitFor('document.querySelector(".stack-badge[data-badge=checking]")'); }
     catch (error) {
-      t.diagnostic(await page.evaluate('JSON.stringify({groups:document.querySelector("#groups").innerHTML,error:document.querySelector("#error").textContent,progress:document.querySelector("#refinement").textContent})'));
+      t.diagnostic(await page.evaluate('JSON.stringify({groups:document.querySelector("#groups").innerHTML,error:document.querySelector("#error").textContent,progress:document.querySelector(".curate-status-copy").textContent})'));
       t.diagnostic(JSON.stringify({ searches: fixture.similarityReads, details: fixture.detailReads }));
       throw error;
     }
-    assert.match(await page.evaluate('document.querySelector("#count").textContent'), /1 of 1 stack · 1 of 1 single photo shown/);
+    assert.match(await page.evaluate('document.querySelector("#count").textContent'), /1 stack · 1 single photo/);
     assert.equal(await page.evaluate('document.querySelector("[data-section=pending]").textContent'), 'Pending');
     assert.equal(await page.evaluate('document.querySelector(".is-stack .card-actions")'), null);
-    const progress = () => page.evaluate('document.querySelector("#refinement").textContent');
-    assert.equal(await progress(), 'Checking stacks · 1 remaining');
+    const progress = () => page.evaluate('document.querySelector(".curate-status-copy").textContent');
+    const activity = () => page.evaluate('document.querySelector(".status-grouping").textContent');
+    assert.equal(await progress(), 'Grouping photos…', 'one shared status covers all stacks');
+    assert.match(await activity(), /Grouping nearby photos · 1 nearby groups left/);
     // Global work stays visible even when every displayed card is outside it.
     await click('[data-kind=singles]');
     await page.waitFor('!document.querySelector("#refresh").disabled && document.querySelectorAll(".group-card").length===1');
     assert.equal(await page.evaluate('document.querySelector(".is-stack")'), null);
-    assert.equal(await progress(), 'Checking stacks · 1 remaining');
+    assert.equal(await progress(), 'Grouping photos…');
+    assert.match(await activity(), /1 nearby groups left/);
     await click('[data-section=decided]');
     await page.waitFor('!document.querySelector("#refresh").disabled && document.querySelector("[data-section=decided].active")');
-    assert.equal(await progress(), 'Checking stacks · 1 remaining');
+    assert.equal(await progress(), 'Grouping photos…');
+    assert.match(await activity(), /1 nearby groups left/);
     await click('[data-section=pending]');
     await page.waitFor('!document.querySelector("#refresh").disabled');
     await click('[data-kind=all]');
@@ -177,33 +185,32 @@ test('background status markers and inline progress remain stable on desktop and
     const gridTop = await page.evaluate('document.querySelector("#groups").getBoundingClientRect().top');
     assert.equal(await page.evaluate(`(() => {
       const count = document.querySelector('#count').getBoundingClientRect();
-      const status = document.querySelector('#refinement').getBoundingClientRect();
-      const spinner = document.querySelector('#check-activity').getBoundingClientRect();
-      const refresh = document.querySelector('#refresh').getBoundingClientRect();
-      return Math.abs(count.top - status.top) < 2 && Math.abs((spinner.top+spinner.bottom)/2 - (refresh.top+refresh.bottom)/2) < 2;
+      const status = document.querySelector('#curate-status').getBoundingClientRect();
+      return status.bottom <= count.top;
     })()`), true);
 
-    assert.equal(await page.evaluate('document.querySelector("#groups .similarity-indicator[data-phase=done]")'), null);
+    assert.deepEqual(await page.evaluate('[...document.querySelectorAll("#groups .group-card")].map(c=>c.dataset.badge)'), ['checking', ''],
+      'a plain single photo has no badge');
     if (process.env.PICTARIA_TEST_SCREENSHOTS) {
       const { data } = await page.send('Page.captureScreenshot', { format: 'png' });
       writeFileSync(join(process.env.PICTARIA_TEST_SCREENSHOTS, 'curate-checking-desktop.png'), Buffer.from(data, 'base64'));
     }
     release();
     await page.waitFor('document.querySelector(".group-card[data-similarity=checked]")', { timeoutMs: 42000 });
-    assert.equal(await progress(), '');
+    assert.equal(await progress(), 'AI up to date');
     assert.equal(await page.evaluate('document.querySelector("#groups").getBoundingClientRect().top'), gridTop,
       'finishing a check cannot move the grid');
 
-    assert.equal(await page.evaluate('document.querySelector(".group-card[data-similarity=checked] .similarity-indicator").dataset.phase'), 'limited');
-    assert.match(await page.evaluate('document.querySelector(".group-card[data-similarity=checked] .similarity-indicator").title'), /Grouped with limited evidence.*searches finished.*inconclusive/);
+    assert.equal(await page.evaluate('document.querySelector(".group-card[data-similarity=checked] .stack-badge").dataset.badge'), 'unsure');
+    assert.match(await page.evaluate('document.querySelector(".group-card[data-similarity=checked] .stack-badge").title'), /^Unsure\. The evidence was inconclusive/);
     await click('.group-card[data-similarity=checked]');
-    await page.waitFor('document.querySelector("#comparison-similarity .similarity-indicator[data-phase=limited]")');
+    await page.waitFor('document.querySelector("#comparison-similarity .stack-badge[data-badge=unsure]")');
     assert.match(await page.evaluate('document.querySelector("#comparison-similarity").textContent'), /inconclusive/);
     await click('[data-close=comparison]');
     await page.send('Emulation.setDeviceMetricsOverride', { width: 390, height: 844, deviceScaleFactor: 1, mobile: true });
     await page.send('Emulation.setEmulatedMedia', { features: [{ name: 'prefers-reduced-motion', value: 'reduce' }] });
     assert.equal(await page.evaluate('document.documentElement.scrollWidth <= innerWidth'), true);
-    assert.equal(await page.evaluate('getComputedStyle(document.querySelector(".similarity-indicator")).animationName'), 'none');
+    assert.equal(await page.evaluate('getComputedStyle(document.querySelector(".stack-badge-icon")).animationName'), 'none');
     if (process.env.PICTARIA_TEST_SCREENSHOTS) {
       const { data } = await page.send('Page.captureScreenshot', { format: 'png' });
       writeFileSync(join(process.env.PICTARIA_TEST_SCREENSHOTS, 'curate-inconclusive-mobile.png'), Buffer.from(data, 'base64'));
@@ -213,36 +220,37 @@ test('background status markers and inline progress remain stable on desktop and
     await click('#refresh');
     await page.waitFor('document.querySelector(".group-card[data-similarity=checked]")', { timeoutMs: 42000 });
     assert.equal(fixture.similarityReads.length, 4);
-    assert.equal(await page.evaluate('document.querySelector(".group-card[data-similarity=checked] .similarity-indicator").dataset.phase'), 'limited');
-    assert.equal(await page.evaluate('document.querySelector(".group-card[data-similarity=checked] .similarity-status").textContent'), 'Grouped with limited evidence');
-    assert.equal(await progress(), '', 'completed checks no longer contribute to remaining work');
+    assert.equal(await page.evaluate('document.querySelector(".group-card[data-similarity=checked] .stack-badge").dataset.badge'), 'unsure');
+    assert.equal(await page.evaluate('document.querySelector(".group-card[data-similarity=checked] .p-chip").textContent'), '3 photos');
+    assert.equal(await progress(), 'AI up to date', 'completed checks no longer count as checking');
+    assert.equal(await page.evaluate('document.querySelector("#curate-status").dataset.phase'), 'hidden');
   });
 
 test('incomplete similarity checks stay usable with a quiet indicator and a specific failure explanation',
   { timeout: 40000 }, async t => {
     if (!findChrome()) return t.skip('Chrome required');
     let missing = true;
-    const fixture = await curatePreviewFixture({ stackSize: 3, singles: 0, metadataReady: true,
+    const track = cleanupAfter(t);
+    const fixture = track(await curatePreviewFixture({ stackSize: 3, singles: 0, metadataReady: true,
       prepare(f) {
         for (let n = 1; n <= 3; n++) f.similarityResponses.set(f.id(n), async () => missing && n === 1
           ? { status: 400, body: { message: `Asset ${f.id(1)} has no embedding private-upstream-detail` } }
           : { status: 200, body: { assets: { items: [1,2,3].map(i => ({ id: f.id(i), type: 'IMAGE' })) } } });
       },
-    });
-    const browser = await launchChrome(), page = await browser.newPage();
-    t.after(async () => { await browser.stop(); await fixture.stop(); });
+    }));
+    const browser = track(await launchChrome()), page = await browser.newPage();
     const click = selector => page.evaluate(`document.querySelector(${JSON.stringify(selector)}).click()`);
     await page.navigate(`${fixture.base}/curate-preview.html`);
     await page.waitFor('document.querySelector(".gate-backdrop input")');
     await page.evaluate('document.querySelector(".gate-backdrop input").value="smoke-secret";document.querySelector(".gate-backdrop button").click()');
-    await page.waitFor('document.querySelector(".is-stack .similarity-indicator[data-phase=limited]") && !document.querySelector("#refinement").textContent', { timeoutMs: 15000 });
+    await page.waitFor('document.querySelector(".is-stack .stack-badge[data-badge=unsure]") && document.querySelector("#curate-status").dataset.phase!=="grouping"', { timeoutMs: 15000 });
     assert.equal(fixture.similarityReads.length, 4, 'one retry, then finished incomplete');
-    const diagnostic = await page.evaluate('document.querySelector(".is-stack .similarity-indicator").title');
-    assert.match(diagnostic, /Grouped with limited evidence.*could not finish/);
+    const diagnostic = await page.evaluate('document.querySelector(".is-stack .stack-badge").title');
+    assert.match(diagnostic, /^Unsure\. .*Grouping: a similarity check could not finish\./);
     assert.match(diagnostic, /Immich has no search embedding/);
     assert.doesNotMatch(diagnostic, /retry|need attention/i);
     assert.doesNotMatch(diagnostic, /private-upstream-detail|00000000/);
-    assert.equal(await page.evaluate('document.querySelector("#check-activity").childElementCount'), 0,
+    assert.equal(await page.evaluate('document.querySelector("#curate-status").dataset.phase'), 'hidden',
       'settled incomplete checks stay on cards without an idle header warning');
     if (process.env.PICTARIA_TEST_SCREENSHOTS) {
       const { data } = await page.send('Page.captureScreenshot', { format: 'png' });
@@ -255,19 +263,19 @@ test('incomplete similarity checks stay usable with a quiet indicator and a spec
     await page.waitFor('document.querySelector("#comparison-similarity .why-trigger")');
     await click('#comparison-similarity .why-trigger');
     const explanation = await page.evaluate('document.querySelector("#comparison-similarity").textContent');
-    assert.match(explanation, /Grouped with limited evidence/);
+    assert.match(explanation, /Grouping: a similarity check could not finish/);
     assert.match(explanation, /Immich has no search embedding/);
-    assert.doesNotMatch(explanation, /Next retry:/); assert.match(explanation, /still choose/);
+    assert.doesNotMatch(explanation, /Next retry:/); assert.match(explanation, /you decide/);
     assert.equal(await page.evaluate('document.querySelector("#photos [data-keeper]").disabled'), false);
     await click('[data-close=comparison]');
     missing = false;
     await click('#refresh');
     await page.waitFor('!document.querySelector("#refresh").disabled && document.querySelector(".is-stack")');
-    assert.equal(await page.evaluate('document.querySelector(".is-stack .similarity-indicator").textContent'), 'i');
+    assert.equal(await page.evaluate('document.querySelector(".is-stack .stack-badge").dataset.badge'), 'unsure');
     assert.deepEqual(fixture.similarityReads.map(r => r.queryAssetId), [fixture.id(1), fixture.id(2), fixture.id(3), fixture.id(1)]);
     await click('.is-stack');
-    await page.waitFor('document.querySelector("#comparison").open && document.querySelector("#photos [data-choice=approve]") && !document.querySelector("#apply").disabled');
-    await click('#photos [data-choice=approve]');
+    await page.waitFor('document.querySelector("#comparison").open && document.querySelector("#photos [data-keep-toggle]") && !document.querySelector("#apply").disabled');
+    await click('#photos [data-keep-toggle]');
     await click('#apply');
     await page.waitFor('!document.querySelector("#comparison").open && !document.querySelector("#refresh").disabled');
     assert.equal(fixture.repo.db.prepare('SELECT count(*) n FROM decision_operations').get().n, 1, 'incomplete checks never block human decisions');

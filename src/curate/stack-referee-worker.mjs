@@ -22,10 +22,8 @@ export class StackRefereeWorker {
     this.cursor = 0;
   }
   enabled() { return this.lifecycle.enabled('stack'); }
-  previewsReady() {
-    const until = this.curate.store.prepare("SELECT value FROM curate_meta WHERE key='stack-preview-retry-at'").get()?.value ?? 0;
-    return this.lifecycle.now() >= until;
-  }
+  previewRetryAt() { return this.curate.store.prepare("SELECT value FROM curate_meta WHERE key='stack-preview-retry-at'").get()?.value ?? 0; }
+  previewsReady() { return this.lifecycle.now() >= this.previewRetryAt(); }
   configuration(provider) {
     const capability = this.capability(provider);
     return { capability, key: fingerprint({ provider: enrichmentProviderConfiguration(provider), capability,
@@ -74,10 +72,11 @@ export class StackRefereeWorker {
   capture(group) { return this.lifecycle.inputs.capture({ role: 'stack', groupId: group.id, contract: STACK_REFEREE_CONTRACT }); }
   blockingStatus(provider) {
     if (this.modelBlocked(provider)) return { state: 'paused', reason: 'model-failures', scope: 'configuration' };
-    if (!this.previewsReady()) return { state: 'paused', reason: 'preview-cooldown' };
+    const retryAt = this.previewRetryAt();
+    if (this.lifecycle.now() < retryAt) return { state: 'paused', reason: 'preview-cooldown', retryAt };
     const guard = this.curate.store.aiLimits.providerStatus(aiBackendKey(provider));
     if (guard.state === 'paused') return { state: 'paused', reason: `provider-${guard.reason}` };
-    if (guard.state === 'cooldown') return { state: 'paused', reason: 'provider-cooldown' };
+    if (guard.state === 'cooldown') return { state: 'paused', reason: 'provider-cooldown', retryAt: guard.retryAt };
     if (guard.state === 'busy') return { state: 'waiting', reason: 'shared-provider' };
     return null;
   }
@@ -113,6 +112,7 @@ export class StackRefereeWorker {
       const provider = this.lifecycle.resolveProvider(), { key, capability } = this.configuration(provider);
       const support = stackRefereeSupport(provider, capability, snapshot.ids.length);
       if (support.state !== 'ready') return { state: 'incomplete', reason: support.state,
+        ...(support.maxImages ?? support.limit ? { limit: support.maxImages ?? support.limit } : {}),
         ...(['unknown-capability', 'unsupported-provider'].includes(support.state) ? { scope: 'configuration' } : {}) };
       if (this.lifecycle.inputs.preparationFailures(snapshot) >= 2) return { state: 'incomplete', reason: 'preparation-failed' };
       const reason = this.lifecycle.inputs.outcome(snapshot, key);

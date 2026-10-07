@@ -1,12 +1,13 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { setTimeout as delay } from 'node:timers/promises';
-import { launchChrome, findChrome } from './harness.mjs';
+import { cleanupAfter, launchChrome, findChrome } from './harness.mjs';
 import { curatePreviewFixture } from './curatePreviewFixture.mjs';
 
 test('Curate preview date order is global and remembered across automatic updates', { timeout: 60000 }, async (t) => {
   if (!findChrome()) return t.skip('Chrome required');
-  const fixture = await curatePreviewFixture({ stackSize: 3, singles: 52, metadataReady: true,
+  const track = cleanupAfter(t);
+  const fixture = track(await curatePreviewFixture({ stackSize: 3, singles: 52, metadataReady: true,
     prepare({ repo, assets, id }) {
       // Sorting must not race an unrelated unconfirmed -> supported route change.
       // A locally resolved small stack needs no similarity searches.
@@ -16,14 +17,10 @@ test('Curate preview date order is global and remembered across automatic update
         assets.find(a => a.id === id(i)).thumbhash = thumbhash;
       }
     },
-  });
-  const browser = await launchChrome(),
+  }));
+  const browser = track(await launchChrome()),
     page = await browser.newPage();
-  t.after(async () => {
-    await browser.stop();
-    await fixture.stop();
-  });
-  const click = (selector) => page.evaluate(`document.querySelector(${JSON.stringify(selector)}).click()`);
+  const click = (selector) => page.evaluate(`(()=>{const button=document.querySelector(${JSON.stringify(selector)}); const menu=button.closest("details.photo-options"); if(menu) menu.open=true; button.click();})()`);
   const sort = (value) =>
     page.evaluate(
       `document.querySelector('#sort').value=${JSON.stringify(value)};document.querySelector('#sort').dispatchEvent(new Event('change'))`,
@@ -107,14 +104,11 @@ test(
   { timeout: 45000 },
   async (t) => {
     if (!findChrome()) return t.skip('Chrome required');
-    const fixture = await curatePreviewFixture({ stackSize: 3, singles: 2 });
-    const browser = await launchChrome(),
+    const track = cleanupAfter(t);
+    const fixture = track(await curatePreviewFixture({ stackSize: 3, singles: 2 }));
+    const browser = track(await launchChrome()),
       page = await browser.newPage();
-    t.after(async () => {
-      await browser.stop();
-      await fixture.stop();
-    });
-    const click = (selector) => page.evaluate(`document.querySelector(${JSON.stringify(selector)}).click()`);
+    const click = (selector) => page.evaluate(`(()=>{const button=document.querySelector(${JSON.stringify(selector)}); const menu=button.closest("details.photo-options"); if(menu) menu.open=true; button.click();})()`);
     await page.navigate(`${fixture.base}/curate-preview.html`);
     await page.waitFor('document.querySelector(".gate-backdrop input")');
     await page.evaluate(
@@ -180,14 +174,11 @@ test(
   { timeout: 90000 },
   async (t) => {
     if (!findChrome()) return t.skip('Chrome required');
-    const fixture = await curatePreviewFixture();
-    const browser = await launchChrome();
+    const track = cleanupAfter(t);
+    const fixture = track(await curatePreviewFixture());
+    const browser = track(await launchChrome());
     const page = await browser.newPage();
-    t.after(async () => {
-      await browser.stop();
-      await fixture.stop();
-    });
-    const click = (selector) => page.evaluate(`document.querySelector(${JSON.stringify(selector)}).click()`);
+    const click = (selector) => page.evaluate(`(()=>{const button=document.querySelector(${JSON.stringify(selector)}); const menu=button.closest("details.photo-options"); if(menu) menu.open=true; button.click();})()`);
     const wait = (expression) => page.waitFor(expression);
     await page.navigate(`${fixture.base}/curate-preview.html`);
     await wait('document.querySelector(".gate-backdrop input")');

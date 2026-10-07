@@ -2,18 +2,15 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { launchChrome, findChrome } from './harness.mjs';
+import { cleanupAfter, launchChrome, findChrome } from './harness.mjs';
 import { curatePreviewFixture } from './curatePreviewFixture.mjs';
 
 async function setup(t, options) {
-  const fixture = await curatePreviewFixture({ stackSize: 4, singles: 2, metadataReady: true, ...options });
-  const browser = await launchChrome(),
+  const track = cleanupAfter(t);
+  const fixture = track(await curatePreviewFixture({ stackSize: 4, singles: 2, metadataReady: true, ...options }));
+  const browser = track(await launchChrome()),
     page = await browser.newPage();
-  t.after(async () => {
-    await browser.stop();
-    await fixture.stop();
-  });
-  const click = (selector) => page.evaluate(`document.querySelector(${JSON.stringify(selector)}).click()`);
+  const click = (selector) => page.evaluate(`(()=>{const button=document.querySelector(${JSON.stringify(selector)}); const menu=button.closest("details.photo-options"); if(menu) menu.open=true; button.click();})()`);
   const key = (key) => page.send('Input.dispatchKeyEvent', { type: 'keyDown', key });
   const ready = () => page.waitFor('!document.querySelector("#refresh").disabled');
   const operations = () => fixture.repo.db.prepare('SELECT COUNT(*) n FROM decision_operations').get().n;
@@ -165,7 +162,7 @@ test(
       'desktop group tabs lead date, category and search on one row',
     );
     await screenshot(page, 'curate-toolbar-desktop.png');
-    const headerPositions = () => page.evaluate(`['#sections','#refresh','.page-tools','#check-activity','#search','#sort','#count','.view-summary','#groups'].map(selector=>{
+    const headerPositions = () => page.evaluate(`['#sections','#curate-status','#search','#groups'].map(selector=>{
       const {x,y}=document.querySelector(selector).getBoundingClientRect();return {selector,x,y};
     })`);
     const stableViews = async () => {
@@ -176,6 +173,21 @@ test(
           selector === '[data-kind=stacks]' || selector === '[data-kind=all]',
           'header selection is available only for Singles and Decided');
         assert.deepEqual(await headerPositions(), initial, `header controls stay anchored after ${selector}`);
+        assert.equal(await page.evaluate(`(() => {
+          if (innerWidth<=1100) return true;
+          const sort=document.querySelector('#sort').getBoundingClientRect();
+          const category=document.querySelector('#category-label');
+          const next=document.querySelector(category.hidden ? '#search' : '#category').getBoundingClientRect();
+          return Math.abs(next.left-sort.right-12)<1;
+        })()`), true, 'date order sits directly before the next available filter');
+        assert.equal(await page.evaluate(`(() => {
+          const count=document.querySelector('#count').getBoundingClientRect(), tabs=document.querySelector('#filters');
+          const check=document.querySelector('#bulk-label'), row=document.querySelector('.toolbar').getBoundingClientRect();
+          const left=tabs.hidden||innerWidth<=600 ? row.left : tabs.getBoundingClientRect().right+16;
+          return Math.abs(count.left-left)<1 && (check.hidden||check.getBoundingClientRect().left>=count.right);
+        })()`), true, 'count follows the tabs without a checkbox spacer; the checkbox follows the count');
+        if (selector === '[data-kind=singles]') await screenshot(page, `curate-toolbar-singles-${await page.evaluate('innerWidth')}.png`);
+        if (selector === '[data-section=decided]') await screenshot(page, `curate-toolbar-decided-${await page.evaluate('innerWidth')}.png`);
       }
     };
     await stableViews();
@@ -184,7 +196,8 @@ test(
       assert.equal(await page.evaluate(`(() => {
         const tabs=document.querySelector('#filters').getBoundingClientRect();
         const filters=document.querySelector('#secondary-filters').getBoundingClientRect();
-        return tabs.right<=filters.left && document.body.scrollWidth<=innerWidth;
+        const collapsed=getComputedStyle(document.querySelector('#secondary-filters')).display==='none';
+        return (collapsed || tabs.right<=filters.left) && document.body.scrollWidth<=innerWidth;
       })()`), true, `filters do not overlap at ${width}px`);
       await stableViews();
     }
@@ -251,6 +264,13 @@ test(
       await page.evaluate('getComputedStyle(document.querySelector("#photos .photo-image")).backgroundColor'),
       'rgba(0, 0, 0, 0)',
     );
+    await page.waitFor(`[...document.querySelectorAll('#photos img')].every(img=>img.style.getPropertyValue('--photo-height'))`);
+    assert.equal(await page.evaluate(`(() => {
+      const cards=[...document.querySelectorAll('#photos .photo-card')];
+      return cards.every((card,i)=>!i || card.offsetTop!==cards[i-1].offsetTop ||
+        Math.abs(card.querySelector('.photo-choices').getBoundingClientRect().top-
+          cards[i-1].querySelector('.photo-choices').getBoundingClientRect().top)<1);
+    })()`), true, 'mixed orientations keep decision controls aligned within every row');
     await screenshot(page, 'curate-polish-comparison.png');
   },
 );
@@ -306,7 +326,7 @@ test(
     await page.evaluate(`window.issuedDecisions=0;const nativeFetch=window.fetch;
     window.fetch=(...args)=>{if(String(args[0]).endsWith('/operations'))window.issuedDecisions++;return nativeFetch(...args);}`);
     await key('Enter');
-    await click('#select-all');
+    await click('#select-mode'); await click('#select-all');
     await page.evaluate('document.querySelector("#photos .photo-card").focus()');
     await key('Enter');
     assert.equal(

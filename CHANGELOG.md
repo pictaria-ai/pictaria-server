@@ -7,19 +7,157 @@ All notable changes to Pictaria Server are documented here. This project follows
 
 ### Development
 
+- Compact Curate Preview's date filter: hide the visible “Date taken” label
+  while retaining accessible naming and hover help, and close the category gap
+  between date order and Search in Decided (PIC-116).
+
+- Clarify Curate Preview counts as totals across matching results, without
+  “left” or “in this view.” Label bulk selection **Select: ☐ All loaded (N)** so
+  its scope is clear, including loaded photos below the screen (PIC-116).
+
+- Align Curate Preview's All/Stacks/Singles tabs at the left, followed by counts
+  and the Singles check-shown checkbox, without a hidden-checkbox spacer.
+  Keep secondary filters on the right and use white individual-photo star
+  badges inside comparisons (PIC-116).
+
+- Match Curate Preview referee stars to production Curate's bright gold in both
+  themes (PIC-116). Add soft teal, blue and amber activity-chip fills to make
+  working/up-to-date, waiting and attention states easier to spot.
+
+- Add **Keep N ★** to eligible Curate Preview stack cards (PIC-116): one human
+  action accepts saved Photo Referee suggestions and skips the rest, using the
+  existing guarded decision and Undo. Remove the duplicate top-right star badge
+  from grid cards; keep grouping badges and individual-photo recommendation
+  stars inside comparisons. Recheck the displayed suggestion snapshot
+  before saving; changed advice opens manual comparison. Suggested photos become
+  covers and initial comparison focus without reordering stacks or photos.
+  Show suggested reasons inline, label the footer **Your picks**, describe the
+  primary button as **Keep N · Next**, **Skip all · Next** or **Save · Next**, and
+  show remaining counts across the current filters. Keep Photo Referee attribution
+  separate from Enrich in the lightbox, and count already-kept references separately.
+
+- Replace Curate Preview's permanent Refresh and More buttons with a compact,
+  right-aligned activity chip (PIC-116 / PIC-371). Show working, waiting, paused
+  and up-to-date states, with unique remaining stacks across both referees.
+  Its structured popover shows each role's status/count (including Off), limited
+  results, a neutral Enrich note and an AI settings link. Grouping shares the chip;
+  both roles Off with no grouping hides it. Phones show icon/count with the full
+  accessible label. Reuse the existing cooperative summary and status poll.
+  Move remaining photo counts into the filter row and remove duplicate grid
+  status counts. Automatic updates preserve drafts; failures expose Retry updates.
+  Distinguish AI setup problems, repeated model failures and temporary cooldowns;
+  combine shared blockers and name a referee only when it alone is blocked.
+  Show known retry eligibility in the popover without changing retry behavior.
+
+- Simplify stack decisions to a **Keep** toggle and secondary Skip/Fav/No menu;
+  reveal batch checkboxes only in **Select** mode. Preserve four-way shortcuts,
+  draft/save semantics and read-only references. Stack lightboxes gain a filmstrip
+  with separate AI stars and human checks, and **A/B (C)** to flip between the
+  last two inspected photos without changing choices. Singles keep their existing
+  controls. Align the suggested phone card below the header and place lightbox
+  Photo Referee attribution and reason above the choices (PIC-116).
+
+- Simplify the Curate Preview stack comparison (PIC-116 / PIC-371): retain
+  recommendation stars and clear decision controls without duplicate colored
+  outlines or per-photo Draft labels. Use one restrained focus border and photo
+  number, compact header/toolbar, and hover/focus/tap help for shortcuts and
+  referee reasons. Fit uncropped photos by row while keeping controls aligned;
+  partial advice and check limitations stay visible. Save behavior is unchanged.
+
+- Make Curate Preview stacks easier to spot with two layered photo edges and
+  a top-left photo-count badge (PIC-116 / PIC-371). Remove repeated status text
+  chips; existing top-right status icons, tooltips and recommendation stars remain.
+  Single-photo buttons are vertically centered alongside stack thumbnails, with
+  descriptions and dates aligned underneath across Pending and Decided cards.
+
+- Accept otherwise valid Photo Referee answers formatted as multiple groups
+  (PIC-116). Use their recommendation union without changing stack membership
+  or pausing the role; strict membership, context and assessment checks remain.
+  Optional AI advice restoration failures no longer roll back a human Undo:
+  discard partial advisory writes while preserving the decision and sync jobs.
+
+- Limit Photo Referee to recommendations within existing stacks (PIC-116).
+  Only deterministic grouping and Stack Referee can change membership; earlier
+  Photo Referee splits no longer affect fresh views. The revised prompt usually
+  recommends one strong representative and asks for additional photos only when
+  they offer materially different, worthwhile value. Zero/multiple suggestions
+  and all human choices remain supported. Completed applicable advice is reused;
+  the update does not automatically pay to rejudge it. Older incomplete
+  comparisons remain manual rather than mixing prompt revisions.
+
+- Keep Curate Preview usable when its saved view expires after 30 minutes
+  (PIC-116). An idle page renews automatically, preserving loaded cards and
+  scroll position where possible. Open drafts and checked selections wait until
+  reviewing finishes. Late expiry responses for a replaced view no longer
+  disable the current page.
+
+- Preserve accepted Photo Referee recommendations when a Curate Save is undone
+  (PIC-116). Undo restores the existing stars and suggestions without another
+  model call when the comparison inputs still match, including completed batches.
+  Changed evidence and in-flight answers retain their existing stale-input
+  protections.
+
+- Make Photo Referee available in Curate Preview Settings for combined testing
+  (PIC-116). It defaults off on fresh installs; existing saved or migrated on
+  preferences are honored. It runs independently of Enrich and Stack Referee,
+  using the configured Curate provider/model after required checks settle.
+  Review the effective preference before installing a controlled test build.
+  See the [rollout guide](docs/CURATE-PHOTO-REFEREE.md#test-instance-rollout).
+
+- Connect Photo Referee recommendations to Curate Preview (PIC-116), using the
+  shared PIC-371 gold stars and Why panel. Show per-photo reasons, zero/multiple
+  suggestions, batch coverage and independent background activity. Complete
+  applicable advice seeds a new draft; Save still confirms human choices, and
+  live updates preserve open drafts. Photo Referee does not change stack
+  membership. Partial batches stay manual. Controlled test-instance acceptance remains before release.
+
 - Added the Photo Referee contract, bounded comparison planner and background worker
   (PIC-116). Retain the released quality criteria within each subject, with
   explicit zero/one/multiple recommendations, per-photo explanations and
   read-only already-kept context. Larger inputs use up to three balanced
-  comparisons within the total image/byte limits; incomplete or mixed batch
-  results cannot become full-stack advice. Up to two nearby approved references
+  comparisons within the total image/byte limits; incomplete or historical mixed
+  batch results cannot become full-stack advice. Up to two nearby approved references
   use spare capacity in whole-stack requests only; references never create
   extra batches or crowd out pending photos. Valid batches persist independently
   through restart, with current-input guards and existing shared scheduling,
-  attempt limits and provider protection. Photo Referee remains unavailable
-  pending recommendation UI, grouping-correction publication and activation
-  acceptance. See the
+  attempt limits and provider protection. Recommendation UI is now connected; controlled runtime acceptance remains. See the
   [implementation boundary](docs/CURATE-PHOTO-REFEREE.md).
+- Curate Preview gives every stack one status badge, the same on the card, the
+  open stack, **Why?** and the page header (PIC-371). Highest first:
+  **Checking**, **AI checked**, **Unsure**, **Not fully checked**, then
+  **Checked** as the default. A single photo shows **Kept apart** only when
+  embeddings, people, Immich searches, the Stack Referee or an earlier split
+  separated it from photos taken at the same time. The card keeps its date while
+  checks run; status lives in the top-right icon and tooltip, with the photo
+  count in a separate top-left chip for stacks.
+  **Why?** repeats the badge as a verdict, adds a Grouping → AI check step strip
+  that says why a check could not run (for example "34 photos is over the
+  30-photo limit"), and lists short evidence rows marked ✓ supports, ? unsure,
+  ✗ keeps apart or · background. Rules that never change moved to
+  [How stacks work](docs/CURATE-ALGORITHM.md#how-stacks-work). The header counts
+  the loaded stacks that are checking, unsure or not fully checked; library-wide
+  progress moved to the activity spinner's tooltip. Stacking now records short
+  reason codes instead of English sentences, with a new code for different
+  people; groupings saved earlier keep their sentences and show the same rows.
+  Membership is unchanged. The Photo Referee's gold ★ and Keepers step appear
+  once PIC-116 supplies keeper advice.
+
+- Curate Preview Stacks now use Pictaria image embeddings when Image embeddings
+  is on (candidate 4, PIC-392). For a pair of photos that both have an
+  embedding:
+  - very similar ones (0.90 or more) are stacked;
+  - clearly different ones (0.75 or less) are kept apart, unless they show the
+    same recognized people or have near-identical ThumbHashes;
+  - in between, matching people or a similar ThumbHash decide; otherwise the
+    stack stays uncertain for the Stack Referee or you.
+
+  Groups also join when their average similarity reaches 0.80, and such pairs
+  are not sent to Immich search. Replaying eight judged groups placed 81.6% of
+  photo pairs as judged, against 55.6% without other evidence.
+  **Use image embeddings in Stacks** in Settings → Curate is on by default;
+  turned off, or for photos without embeddings, grouping is exactly as before.
+  Settings version 10 adds the switch. See
+  [candidate 4](docs/CURATE-ALGORITHM.md#candidate-4-image-embeddings).
 
 - Stop Stack Referee background work when the selected model rejects requests
   or returns invalid partitions for three distinct stacks without a successful

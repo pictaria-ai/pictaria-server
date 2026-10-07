@@ -63,16 +63,20 @@ export class CurateAiInputs {
     return { state: 'captured', snapshot };
   }
 
-  material(snapshot) {
+  material(snapshot, { restoredHuman = new Map(), checkGroup = true } = {}) {
     const ids = [...snapshot.ids, ...snapshot.contextIds];
     this.store.flushIds(ids);
     const group = this.curate.current?.byMember.get(snapshot.ids[0]);
-    if (!this.curate.current) return { state: 'stale' };
+    if (checkGroup && !this.curate.current) return { state: 'stale' };
     // Stacks-off changes the presentation into singles, not the photo inputs
     // of an already submitted request. Keep useful paid work through that
     // toggle while still checking all source/human evidence below.
-    if (this.curate.current.stacks !== false &&
+    if (checkGroup && this.curate.current.stacks !== false &&
         (!group || group.id !== snapshot.groupId || !same(group.ids, snapshot.ids))) return { state: 'stale' };
+    // Only accepted-advice restoration supplies these prior human signatures.
+    // Source keys are always current; normal request checkpoints use no overrides.
+    const materialKey = (id, current) => restoredHuman.has(id)
+      ? fingerprint({ inputKey: this.store.photo(id)?.inputKey, humanKey: restoredHuman.get(id) }) : current;
     const photos = ids.map(id => this.store.photo(id));
     if (photos.some((p, i) => !p || p.availability === 'unavailable' ||
       p.state !== (i < snapshot.ids.length ? 'undecided' : 'approved'))) return { state: 'stale' };
@@ -88,6 +92,7 @@ export class CurateAiInputs {
         .all(Math.min(...times) - CANDIDATE_LIMITS.spanMs, Math.max(...times) + CANDIDATE_LIMITS.spanMs, MAX_NEIGHBORS + 1);
       // Do not silently sample a dense neighborhood. Manual review stays usable.
       if (neighbors.length > MAX_NEIGHBORS) return limited('dense-neighborhood');
+      neighbors = neighbors.map(row => ({ ...row, material_key: materialKey(row.asset_id, row.material_key) }));
     }
     // The basic grouper also recognizes exact/duplicate candidates outside the
     // time window. Source indexes avoid a whole-library scan at checkpoints.
@@ -98,10 +103,10 @@ export class CurateAiInputs {
       for (const value of new Set(values.filter(Boolean))) {
         const rows = this.store.prepare(`SELECT p.asset_id,p.material_key FROM assets a JOIN curate_photos p ON p.asset_id=a.asset_id
           WHERE a.${column}=? AND p.state='undecided' ORDER BY p.asset_id LIMIT ?`).all(value, MAX_NEIGHBORS + 1);
-        for (const row of rows) exact.set(row.asset_id, row.material_key);
+        for (const row of rows) exact.set(row.asset_id, materialKey(row.asset_id, row.material_key));
         if (exact.size > MAX_NEIGHBORS) return limited('dense-duplicates');
       }
-    const signatures = photos.map(p => [p.id, p.materialKey, p.availability, this.store.separationKey(p.id)]);
+    const signatures = photos.map(p => [p.id, materialKey(p.id, p.materialKey), p.availability, this.store.separationKey(p.id)]);
     return { state: 'current', material: {
       scope: fingerprint({ photos: signatures.slice(0, snapshot.ids.length), neighbors,
         exact: [...exact].sort(([a], [b]) => a.localeCompare(b)) }), context: fingerprint(signatures.slice(snapshot.ids.length)),
@@ -166,7 +171,8 @@ export class CurateAiInputs {
         ON m.role=a.role AND m.input_key=a.input_key WHERE m.asset_id=?`).all(id);
       for (const row of advice) {
         const record = JSON.parse(row.json), members = record.ids;
-        if (record.photoReferee && this.current(record.photoReferee.snapshot)) return true;
+        if (record.photoReferee && (this.current(record.photoReferee.snapshot) ||
+          this.curate.photoReferee?.saved(this.curate.current?.byMember.get(id) ?? { ids: [] }))) return true;
         if (this.store.advice(row.role, members, row.schema_version)) return true;
       }
     }

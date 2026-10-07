@@ -1,12 +1,12 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { launchChrome, findChrome } from './harness.mjs';
+import { cleanupAfter, launchChrome, findChrome } from './harness.mjs';
 import { curatePreviewFixture } from './curatePreviewFixture.mjs';
 
 async function setup(t) {
-  const fixture = await curatePreviewFixture({ stackSize: 0, singles: 12, metadataReady: true });
-  const browser = await launchChrome(), page = await browser.newPage();
-  t.after(async () => { await browser.stop(); await fixture.stop(); });
+  const track = cleanupAfter(t);
+  const fixture = track(await curatePreviewFixture({ stackSize: 0, singles: 12, metadataReady: true }));
+  const browser = track(await launchChrome()), page = await browser.newPage();
   await page.navigate(`${fixture.base}/curate-preview.html`);
   await page.waitFor('document.querySelector(".gate-backdrop input")');
   await page.evaluate('document.querySelector(".gate-backdrop input").value="smoke-secret";document.querySelector(".gate-backdrop button").click()');
@@ -54,9 +54,9 @@ test('Curate search keeps focus and caret, coalesces typing and clearing during 
     assert.equal(await page.evaluate('document.querySelectorAll(".group-card").length'), 4);
 
     await gate(); await replace('single-2'); await blocked();
-    await page.evaluate('document.querySelector(".page-tools summary").focus()');
+    await page.evaluate('document.querySelector(".p-gear").focus()');
     await release(); await ready('single-2');
-    assert.equal(await page.evaluate('document.activeElement.matches(".page-tools summary")'), true);
+    assert.equal(await page.evaluate('document.activeElement.matches(".p-gear")'), true);
 
     await gate(); await replace('single-'); await blocked();
     await page.evaluate('document.querySelector("#search").select()');

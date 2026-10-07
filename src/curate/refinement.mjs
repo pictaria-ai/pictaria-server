@@ -167,7 +167,7 @@ export class CurateRefinement {
       remainingGroups: pendingScopes.length,
       ready: [...new Map([...(view?.groups.values() ?? []), ...groups].map(g => [g.id, g])).values()]
         .filter(g => this.groupStatus(g)?.state === 'updated').length,
-      method: CANDIDATE_METHOD, metrics: this.measurements() };
+      method: this.curate.current?.method ?? CANDIDATE_METHOD, metrics: this.measurements() };
   }
   measurements() {
     const m = this.curate.similarity.metrics;

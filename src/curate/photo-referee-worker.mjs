@@ -4,7 +4,7 @@ import { enrichmentProviderConfiguration } from '../enrich/providers.mjs';
 import { aiBackendKey } from './ai-limits.mjs';
 import { stackRefereeSupport } from './stack-referee-contract.mjs';
 import { transientStackPreviewFailure } from './stack-referee-images.mjs';
-import { PHOTO_REFEREE_CONTRACT, createPhotoRefereeRequest } from './photo-referee-contract.mjs';
+import { PHOTO_REFEREE_CONTRACT, PHOTO_REFEREE_PROMPT_REVISION, createPhotoRefereeRequest } from './photo-referee-contract.mjs';
 import { layoutPhotoRefereeComparisons, photoRefereeContextLimit } from './photo-referee-plan.mjs';
 import { photoRefereeImages } from './photo-referee-images.mjs';
 import { readPhotoRefereeRecord, savePhotoRefereeAnswer, photoRefereeRecommendations } from './photo-referee-results.mjs';
@@ -13,8 +13,8 @@ export const PHOTO_PREVIEW_PAUSE_MS = 3 * 60_000;
 export const PHOTO_MODEL_FAILURE_LIMIT = 3;
 const MODEL_FAILURE_PREFIX = 'photo-model-failure:';
 
-// Runtime integration stays behind server availability until recommendation UI
-// and whole-input grouping corrections have passed their acceptance work.
+// The available worker still requires the user's Photo Referee preference and
+// Stacks, then the shared lifecycle's readiness, scheduling and budget gates.
 export class PhotoRefereeWorker {
   constructor(curate, { capability = () => null } = {}) {
     this.curate = curate; this.lifecycle = curate.aiLifecycle; this.capability = capability; this.cursor = 0;
@@ -22,12 +22,11 @@ export class PhotoRefereeWorker {
   enabled() { return this.lifecycle.enabled('keeper'); }
   configuration(provider) {
     const capability = this.capability(provider);
-    return { capability, key: fingerprint({ provider: enrichmentProviderConfiguration(provider), capability,
+    return { capability, key: fingerprint({ promptRevision: PHOTO_REFEREE_PROMPT_REVISION, provider: enrichmentProviderConfiguration(provider), capability,
       timeoutMs: provider.timeoutMs ?? null, immich: [this.curate.immich?.baseUrl, this.curate.immich?.apiKey] }) };
   }
-  previewsReady() {
-    return this.lifecycle.now() >= (this.curate.store.prepare("SELECT value FROM curate_meta WHERE key='photo-preview-retry-at'").get()?.value ?? 0);
-  }
+  previewRetryAt() { return this.curate.store.prepare("SELECT value FROM curate_meta WHERE key='photo-preview-retry-at'").get()?.value ?? 0; }
+  previewsReady() { return this.lifecycle.now() >= this.previewRetryAt(); }
   modelFailurePrefix(provider) {
     return MODEL_FAILURE_PREFIX + fingerprint({ provider: enrichmentProviderConfiguration(provider),
       backend: aiBackendKey(provider), contract: PHOTO_REFEREE_CONTRACT, capability: this.capability(provider) }) + ':';
@@ -62,15 +61,49 @@ export class PhotoRefereeWorker {
     const current = this.curate.current?.byId.get(group.id);
     if (!current || fingerprint(current.ids) !== fingerprint(group.ids)) return null;
     const record = readPhotoRefereeRecord(this.curate.store, group.ids);
-    return record && this.lifecycle.inputs.current(record.photoReferee.snapshot) ? record : null;
+    return record && this.lifecycle.inputs.current({ ...record.photoReferee.snapshot,
+      material: record.photoReferee.restoredMaterial ?? record.photoReferee.snapshot.material }) ? record : null;
+  }
+  // Undo has already verified the operation and restored its human tags. Keep
+  // the original paid snapshot/provenance immutable; only renew applicability
+  // of accepted advice when all other evidence still matches. Group membership
+  // is checked on the next read after rebuilding (it may still be absent here).
+  restoreAfterUndo(rows) {
+    const store = this.curate.store, restored = new Map(), records = new Map();
+    store.flushIds(rows.map(row => row.assetId));
+    for (const { assetId, restoredHuman } of rows) {
+      const tags = store.repo.loadAssetTagsFor([assetId])[assetId] ?? [];
+      if (!restoredHuman?.key || fingerprint(tags.filter(t => t.startsWith('frame/')).sort()) !== restoredHuman.tags) continue;
+      restored.set(assetId, restoredHuman.key);
+      const record = readPhotoRefereeRecord(store, [assetId], { subset: true });
+      if (record) records.set(record.photoReferee.snapshot.inputKey, record);
+    }
+    for (const record of records.values()) {
+      const saved = record.photoReferee;
+      if (!saved.members) continue;
+      store.flushIds([...record.ids, ...saved.snapshot.contextIds]);
+      const prior = this.lifecycle.inputs.material(saved.snapshot, { restoredHuman: restored, checkGroup: false });
+      if (prior.state === 'current' && fingerprint(prior.material) === (saved.restoredMaterial ?? saved.snapshot.material)) {
+        const current = this.lifecycle.inputs.material(saved.snapshot, { checkGroup: false });
+        if (current.state !== 'current') continue;
+        saved.restoredMaterial = fingerprint(current.material);
+      }
+      const json = JSON.stringify(record);
+      // Advice is optional; its storage envelope must never prevent Undo.
+      if (Buffer.byteLength(json) > 64 * 1024) continue;
+      store.prepare("UPDATE curate_advice SET json=? WHERE role='keeper' AND schema_version=? AND input_key=?")
+        .run(json, PHOTO_REFEREE_CONTRACT, fingerprint(saved.members.map(([id, key]) => [id, key])));
+    }
   }
   recommendations(group) {
     const record = this.saved(group);
     // Results remain inspectable after role-off. A newly pending prerequisite
     // must not expose an apply-all promise from earlier advice.
     if (!record) return null;
-    const result = photoRefereeRecommendations(record);
-    if (this.gate(group).state !== 'eligible') result.canApplyAll = false;
+    const result = photoRefereeRecommendations(record, group.ids);
+    if (!result) return null;
+    const gate = this.gate(group);
+    if (gate.state !== 'eligible') { result.canApplyAll = false; result.noneRecommended = false; result.unavailableReason = gate.reason; }
     return result;
   }
   gate(group) {
@@ -107,10 +140,11 @@ export class PhotoRefereeWorker {
   }
   blockingStatus(provider) {
     if (this.modelBlocked(provider)) return { state: 'paused', reason: 'model-failures', scope: 'configuration' };
-    if (!this.previewsReady()) return { state: 'paused', reason: 'preview-cooldown' };
+    const retryAt = this.previewRetryAt();
+    if (this.lifecycle.now() < retryAt) return { state: 'paused', reason: 'preview-cooldown', retryAt };
     const guard = this.curate.store.aiLimits.providerStatus(aiBackendKey(provider));
     if (guard.state === 'paused') return { state: 'paused', reason: `provider-${guard.reason}` };
-    if (guard.state === 'cooldown') return { state: 'paused', reason: 'provider-cooldown' };
+    if (guard.state === 'cooldown') return { state: 'paused', reason: 'provider-cooldown', retryAt: guard.retryAt };
     if (guard.state === 'busy') return { state: 'waiting', reason: 'shared-provider' };
     return null;
   }
@@ -138,9 +172,14 @@ export class PhotoRefereeWorker {
     return null;
   }
   status(group) {
-    const saved = this.saved(group), advice = saved && photoRefereeRecommendations(saved);
-    if (advice?.state === 'complete') return { state: 'complete', coverage: advice.coverage,
-      checkCoverage: advice.checkCoverage, completed: advice.batches.length, total: advice.batches.length };
+    const saved = this.saved(group), advice = saved && this.recommendations(group);
+    if (advice?.state === 'complete') return { state: 'complete', keepers: advice.keeperIds.length, canApplyAll: advice.canApplyAll, coverage: advice.coverage,
+      checkCoverage: advice.checkCoverage, ...(advice.unavailableReason ? { unavailableReason: advice.unavailableReason } : {}),
+      ...(advice.canApplyAll && !advice.unavailableReason && advice.keeperIds.length ? { suggestion: {
+        keeperIds: group.ids.filter(id => advice.keeperIds.includes(id)),
+        key: fingerprint([group.ids, advice.keeperIds, saved.photoReferee.restoredMaterial ?? saved.photoReferee.snapshot.material]),
+      } } : {}),
+      completed: advice.batches.length, total: advice.batches.length };
     if (!this.enabled()) return { state: 'off' };
     if (!this.curate.current?.byId.has(group.id)) return { state: 'updated' };
     if (group.ids.length < 2) return { state: 'skipped', reason: 'not-pending-stack' };

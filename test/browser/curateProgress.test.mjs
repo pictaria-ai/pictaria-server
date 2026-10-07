@@ -2,20 +2,20 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { launchChrome, findChrome } from './harness.mjs';
+import { cleanupAfter, launchChrome, findChrome } from './harness.mjs';
 import { curatePreviewFixture } from './curatePreviewFixture.mjs';
 
-test('Enrich notice follows live status and card progress replaces dates without moving controls',
+test('Enrich notice follows live status and card status changes keep dates without moving controls',
   { timeout: 45000 }, async t => {
     if (!findChrome()) return t.skip('Chrome required');
-    const fixture = await curatePreviewFixture({ stackSize: 0, singles: 1, metadataReady: true });
-    const browser = await launchChrome(), page = await browser.newPage();
-    t.after(async () => { await browser.stop(); await fixture.stop(); });
+    const track = cleanupAfter(t);
+    const fixture = track(await curatePreviewFixture({ stackSize: 0, singles: 1, metadataReady: true }));
+    const browser = track(await launchChrome()), page = await browser.newPage();
     await page.navigate(`${fixture.base}/curate-preview.html`);
     await page.waitFor('document.querySelector(".gate-backdrop input")');
     await page.evaluate('document.querySelector(".gate-backdrop input").value="smoke-secret";document.querySelector(".gate-backdrop button").click()');
     await page.waitFor('document.querySelector(".group-card") && !document.querySelector("#refresh").disabled');
-    assert.equal(await page.evaluate('document.querySelector("#enrich-note").hidden'), true);
+    assert.equal(await page.evaluate('document.querySelector(".status-enrich").hidden'), true);
     // Exercise run start/stop through the normal four-second status poll,
     // without inference or library writes. The HTTP test checks the runner source.
     await page.evaluate(`window.enrichActive=false; const nativeFetch=window.fetch;
@@ -33,9 +33,9 @@ test('Enrich notice follows live status and card progress replaces dates without
     })`);
     const before = await header();
     await page.evaluate('window.enrichActive=true');
-    await page.waitFor('!document.querySelector("#enrich-note").hidden && document.querySelector("#check-activity .similarity-indicator")');
+    await page.waitFor('!document.querySelector(".status-enrich").hidden && document.querySelector("#curate-status[data-phase=grouping]")');
     assert.deepEqual(await header(), before, 'starting Enrich must not move shared controls or the grid');
-    assert.equal(await page.evaluate(`document.querySelector('#enrich-note').getBoundingClientRect().right <= document.querySelector('#check-activity').getBoundingClientRect().left`), true);
+    assert.match(await page.evaluate('document.querySelector(".status-enrich").textContent'), /Enrich is running/);
 
     // Render real card components at the minimum grid width. Synthetic photos
     // cover both singles and stacks, independently of backend check timing.
@@ -59,21 +59,21 @@ test('Enrich notice follows live status and card progress replaces dates without
       actions:c.querySelector('.card-actions')?.getBoundingClientRect().top-c.getBoundingClientRect().top || null
     }))`);
     const originalSizes = await sizes();
-    for (const status of [
-      { state:'waiting' }, { state:'checking', done:4, total:500 },
-      { state:'updated', checking:true }, { state:'checked' },
-      { state:'checked', uncertain:true }, { state:'incomplete', problem:'Similarity unavailable' },
+    // [single photo, stack] badges: the date, chip position and card size stay put.
+    for (const [status, badges] of [
+      [{ state:'waiting' }, ['checking', 'checking']], [{ state:'checking', done:4, total:500 }, ['checking', 'checking']],
+      [{ state:'updated', checking:true }, ['', 'checked']], [{ state:'checked' }, ['', 'checked']],
+      [{ state:'checked', uncertain:true }, ['', 'unsure']], [{ state:'incomplete', problem:'Similarity unavailable' }, ['', 'partial']],
     ]) {
-      await page.evaluate(`window.progressCards.forEach(c=>c.updateSimilarity(${JSON.stringify(status)}))`);
+      await page.evaluate(`window.progressCards.forEach(c=>c.updateStatus({similarity:${JSON.stringify(status)}}))`);
       assert.deepEqual(await sizes(), originalSizes, `card geometry stays fixed for ${JSON.stringify(status)}`);
-      const active = ['waiting','checking','updated'].includes(status.state);
-      assert.deepEqual(await page.evaluate(`window.progressCards.map(c=>({
-        dateHidden:c.querySelector('.capture-date').hidden,statusHidden:c.querySelector('.similarity-status').hidden
-      }))`), Array(2).fill({ dateHidden:active, statusHidden:!active }));
+      assert.deepEqual(await page.evaluate('window.progressCards.map(c=>c.dataset.badge)'), badges, JSON.stringify(status));
+      assert.deepEqual(await page.evaluate('window.progressCards.map(c=>c.querySelector(".capture-date").hidden)'), [false, false]);
       assert.equal(await page.evaluate('window.progressCards.every((c,i)=>c.querySelector(".capture-date").textContent===window.cardDates[i])'), true);
     }
-    assert.equal(await page.evaluate('window.progressCards.every(c=>c.querySelector(".similarity-indicator").title.includes("Similarity unavailable"))'), true);
-    await page.evaluate('window.progressCards.forEach(c=>c.updateSimilarity({state:"checking",done:4,total:5}))');
+    assert.match(await page.evaluate('window.progressCards[1].querySelector(".stack-badge").title'), /^Not fully checked\. .*Similarity unavailable/);
+    assert.equal(await page.evaluate('window.progressCards[1].querySelector(".p-chip").textContent'), '3 photos');
+    await page.evaluate('window.progressCards.forEach(c=>c.updateStatus({similarity:{state:"checking",done:4,total:5}}))');
     if (process.env.PICTARIA_TEST_SCREENSHOTS) {
       const { data } = await page.send('Page.captureScreenshot', { format:'png' });
       writeFileSync(join(process.env.PICTARIA_TEST_SCREENSHOTS, 'curate-enrich-progress-desktop.png'), Buffer.from(data,'base64'));
@@ -86,7 +86,7 @@ test('Enrich notice follows live status and card progress replaces dates without
       writeFileSync(join(process.env.PICTARIA_TEST_SCREENSHOTS, 'curate-enrich-progress-mobile.png'), Buffer.from(data,'base64'));
     }
     await page.evaluate('window.enrichActive=false');
-    await page.waitFor('document.querySelector("#enrich-note").hidden');
+    await page.waitFor('document.querySelector(".status-enrich").hidden');
     assert.deepEqual(await header(), mobile, 'finishing Enrich must not move the mobile controls or grid');
     assert.equal(fixture.repo.db.prepare('SELECT COUNT(*) n FROM decision_operations').get().n,0);
   });

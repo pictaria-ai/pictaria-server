@@ -1,6 +1,6 @@
 // Capabilities belong to the server composition, never to saved user settings.
 // Turn on each role only when its worker and lifecycle gates are connected.
-export const CURATE_AI_AVAILABILITY = Object.freeze({ stack: true, keeper: false });
+export const CURATE_AI_AVAILABILITY = Object.freeze({ stack: true, keeper: true });
 export const STACK_REFEREE_SCOPES = Object.freeze(['uncertain', 'all']);
 
 export function curateAiRoleEnabled(config, role, availability = CURATE_AI_AVAILABILITY) {

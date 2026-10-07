@@ -1115,9 +1115,12 @@ supported-version floor allows it.
 **Generate image embeddings** on, every Enrich run (manual, queued or Daily)
 also asks Immich's machine-learning service for an *embedding* of each photo it
 analyzes: a list of numbers that describes what the picture looks like. Pictaria
-keeps it permanently in its own database so later features can compare photos
-directly, starting with Curate stacking evaluation. Nothing uses the embeddings
-yet beyond status reporting, and Curate grouping is unchanged.
+keeps it permanently in its own database. Curate Preview's Stacks use these
+embeddings to compare photos taken close together: very similar ones are stacked
+and clearly different ones kept apart, without Immich searches. Settings → Curate
+→ **Use image embeddings in Stacks** controls this (on by default); see
+[candidate 4](CURATE-ALGORITHM.md#candidate-4-image-embeddings). The released
+Curate page is unchanged.
 
 ### Connecting to the machine-learning service
 
@@ -1228,8 +1231,9 @@ public API; see [Immich compatibility](IMMICH-COMPATIBILITY.md#machine-learning-
 Photos that Enrich skips because they are already enriched are not downloaded,
 so they get no embedding from this step. For evaluation, the Curate
 [stacking lab](CURATE-STACKING-LAB.md#pictaria-embeddings-pic-381) can compute
-embeddings for the photos of one time group on request, under the same rules. A
-general backfill for photos enriched earlier is separate, planned work. Turning **Enable
+embeddings for the photos of one time group on request, under the same rules.
+Settings can also embed every photo enriched earlier; see
+[Embedding photos you enriched earlier](#embedding-photos-you-enriched-earlier). Turning **Enable
 AI enrichment** off also stops embeddings, since they are produced only by
 Enrich runs.
 

@@ -16,6 +16,8 @@ import { ResponseTooLargeError } from '../../src/fetchWithTimeout.mjs';
 import { stackRefereeImages } from '../../src/curate/stack-referee-images.mjs';
 import { aiBackendKey } from '../../src/curate/ai-limits.mjs';
 import { ProviderRequestError } from '../../src/enrich/providers.mjs';
+import { stackStatus } from '../../public/curate/stack-status.js';
+import { evidenceRows } from '../../public/curate/explanation-copy.js';
 
 const png = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=', 'base64');
 const partition = (...groups) => ({ groups: groups.map(ids => ({ ids, reason: 'Same subject and composition.' })) });
@@ -70,6 +72,9 @@ test('background worker checks without browser demand or Enrich, publishes non-c
   await f.curate.refresh();
   assert.deepEqual(f.curate.current.groups.map(g => g.ids), [['a0', 'a2'], ['a1', 'a3']]);
   assert.ok(f.curate.current.groups.every(g => g.stackCheck.state === 'checked'));
+  // The page names the split; the model's reason stays with the check, out of the recorded codes.
+  assert.ok(f.curate.current.groups.every(g => g.stackCheck.split === true && g.stackCheck.reason === 'Same subject and composition.'));
+  assert.ok(f.curate.current.groups.every(g => !g.reasons.includes('Same subject and composition.')));
   assert.equal(f.calls.length, 1); assert.equal(f.downloads.length, 4);
   assert.ok(f.downloads.every(d => d.size === 'preview' && d.options.maxBytes <= 2 * 1024 * 1024 && d.options.signal));
   assert.equal(f.repo.db.prepare("SELECT COUNT(*) n FROM asset_tags").get().n, 0);
@@ -223,6 +228,8 @@ test('an Immich outage pauses queued stacks and discovery across restart, then t
   await f.run(); assert.equal(f.curate.aiLifecycle.pending.size, 8);
   f.advance(); assert.equal((await f.run()).reason, 'preparation-failed');
   assert.equal(f.curate.aiLifecycle.pending.size, 7, 'already queued work exists');
+  const retryAt = f.curate.aiLifecycle.now() + STACK_PREVIEW_PAUSE_MS;
+  assert.equal((await f.curate.openView()).stackRefereeActivity.retryAt, retryAt);
   for (let i = 0; i < 3; i++) { f.advance(); await f.run(); }
   assert.equal(f.downloads.length, 1, 'queued work cannot drain during the pause');
   assert.ok(f.curate.current.groups.every(g => f.curate.stackReferee.status(g).reason === 'preview-cooldown'));
@@ -232,12 +239,14 @@ test('an Immich outage pauses queued stacks and discovery across restart, then t
   assert.doesNotMatch(row, /PRIVATE|http:/);
   await f.restart(); await f.run();
   assert.equal(f.downloads.length, 1, 'restart preserves the original pause');
+  assert.equal(f.curate.stackReferee.activity().retryAt, retryAt, 'status reads and restart do not extend the pause');
   f.download = () => ({ data: png, contentType: 'image/png' });
   f.advance(STACK_PREVIEW_PAUSE_MS);
   for (let i = 0; i < 10; i++) { await f.run(); f.advance(); }
   await f.curate.refresh();
   assert.equal(f.calls.length, 8); assert.equal(f.downloads.length, 17);
   assert.ok(f.curate.current.groups.every(g => g.stackCheck?.state === 'checked'));
+  assert.equal(f.curate.stackReferee.activity().retryAt, undefined);
   await f.restart(); f.advance(STACK_PREVIEW_PAUSE_MS); await f.run();
   assert.equal(f.calls.length, 8, 'successful checks do not repeat');
 }, { count: 0 }));
@@ -310,7 +319,9 @@ test('shutdown aborting an in-flight Immich download records neither a failure n
 for (const supported of [false, true]) test(`${supported ? 'confirmed small' : 'unknown'} capability is derived without records or preparation`, async () => fixture(async f => {
   if (supported) f.cap.maxImages = 2;
   await f.run(); f.advance(); await f.run();
-  assert.equal(f.curate.stackReferee.status(f.curate.current.groups[0]).reason, supported ? 'unsupported-size' : 'unknown-capability');
+  const status = f.curate.stackReferee.status(f.curate.current.groups[0]);
+  assert.equal(status.reason, supported ? 'unsupported-size' : 'unknown-capability');
+  assert.equal(status.limit, supported ? 2 : undefined, 'the AI check step can name the photo limit');
   await f.restart(); await f.run(); assert.equal(f.downloads.length, 0); assert.equal(f.calls.length, 0);
   assert.equal(f.repo.db.prepare('SELECT COUNT(*) n FROM curate_ai_inputs').get().n, 0);
   f.cap = { provider: f.provider.providerName, model: f.provider.modelName, comparative: true, maxImages: 30 };
@@ -353,10 +364,41 @@ test('changed source identity invalidates a saved check even when membership is 
   await f.curate.refresh(); assert.ok(f.curate.current.groups.every(g => !g.stackCheck));
 }));
 
+// PIC-371: a single photo shows Kept apart only when the answer divided the
+// photos it compared, not when decisions shrink a confirmed stack.
+const pageStatus = (f, group) => stackStatus({ memberCount: group.ids.length, route: group.route, reasons: group.reasons,
+  stackReferee: f.curate.stackReferee.status(group) });
+test('a confirmed stack that decisions shrink to one photo is not kept apart; a split-off photo is', async () => {
+  await fixture(async f => {
+    f.answer = partition(['p1', 'p2', 'p3', 'p4']);
+    await f.run(); f.advance(); await f.run(); await f.curate.refresh();
+    f.repo.recordDecision({ assetIds: ['a0', 'a1', 'a2'], addTags: ['frame/eligible', 'frame/reviewed'], removeTags: [], action: 'approve' });
+    await f.curate.refresh();
+    const [left] = f.curate.current.groups;
+    assert.deepEqual(left.ids, ['a3']);
+    assert.deepEqual(f.curate.stackReferee.status(left), { state: 'checked', inputKey: left.stackCheck.inputKey,
+      reason: 'Same subject and composition.', split: false });
+    assert.equal(pageStatus(f, left).badge, null);
+    assert.equal(evidenceRows({ ids: left.ids, reasons: left.reasons, stackReferee: left.stackCheck })[0].value,
+      'Grouped it with nearby photos: Same subject and composition.');
+  });
+  await fixture(async f => {
+    f.answer = partition(['p1'], ['p2', 'p3', 'p4']);
+    await f.run(); f.advance(); await f.run(); await f.curate.refresh();
+    const single = f.curate.current.groups.find(g => g.ids.length === 1);
+    assert.equal(pageStatus(f, single).badge, 'apart');
+    assert.equal(pageStatus(f, f.curate.current.groups.find(g => g.ids.length === 3)).badge, 'ai-checked');
+    f.repo.recordDecision({ assetIds: ['a1', 'a2', 'a3'], addTags: ['frame/eligible', 'frame/reviewed'], removeTags: [], action: 'approve' });
+    await f.curate.refresh();
+    assert.equal(pageStatus(f, f.curate.current.groups[0]).badge, 'apart', 'decisions cannot undo a split');
+  });
+});
+
 test('a keep-together answer is still a completed check and does not repeat on scope or role toggles', async () => fixture(async f => {
   f.answer = partition(['p1', 'p2', 'p3', 'p4']);
   await f.run(); f.advance(); await f.run(); await f.curate.refresh();
   assert.equal(f.curate.current.groups.length, 1);
+  assert.equal(f.curate.current.groups[0].stackCheck.split, false);
   f.config.curateStackRefereeScope = 'all'; await f.run();
   f.config.curateStackRefereeEnabled = false; await f.run();
   f.config.curateStackRefereeEnabled = true; f.advance(); await f.run();
@@ -480,6 +522,25 @@ test('provider pauses and request allowances have honest card and global status 
   const captured = f.curate.stackReferee.capture(f.curate.current.groups[0]);
   f.repo.db.prepare('INSERT INTO curate_ai_skipped_inputs VALUES(?,?,?)').run('stack', captured.snapshot.inputKey, Date.now());
   assert.equal(f.curate.stackReferee.status(f.curate.current.groups[0]).reason, 'photo-limit');
+}));
+
+test('Stack Referee exposes the existing provider cooldown without rescheduling or spending requests', async () => fixture(async f => {
+  await f.run();
+  const guard = f.repo.curate.aiLimits, backend = aiBackendKey(f.provider);
+  guard.finish(guard.startProvider(backend), new ProviderRequestError('PRIVATE OUTAGE', { status: 503 }));
+  const retryAt = guard.providerStatus(backend).retryAt;
+  assert.ok(retryAt > f.curate.aiLifecycle.now());
+  for (let i = 0; i < 3; i++) {
+    const activity = (await f.curate.openView()).stackRefereeActivity;
+    assert.equal(activity.reason, 'provider-cooldown');
+    assert.equal(activity.retryAt, retryAt);
+    assert.doesNotMatch(JSON.stringify(activity), /PRIVATE/);
+  }
+  await f.restart();
+  assert.equal(f.curate.stackReferee.activity().retryAt, retryAt);
+  f.advance(retryAt - f.curate.aiLifecycle.now());
+  assert.equal(f.curate.stackReferee.activity().retryAt, undefined, 'expired cooldown does not imply current work');
+  assert.equal(f.calls.length, 0); assert.equal(f.downloads.length, 0);
 }));
 
 test('a successful badge is withheld during source rebuild and is absent from Decided comparisons', async () => fixture(async f => {

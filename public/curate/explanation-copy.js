@@ -1,87 +1,116 @@
-// Translate recorded reasons only. Missing recognition is never proof of the
-// same people, and supporting pairs do not imply every photo is an exact match.
-const copy = new Map([
-  ['Stacking is off.', 'Stacking is turned off.'],
-  [
-    'Time candidates use a 90-second gap and a 3-minute total span.',
-    'Nearby photos are compared within a 90-second gap and a 3-minute total span.',
-  ],
-  [
-    'No other pending photo within the time limits.',
-    'No other pending photo was taken close enough in time.',
-  ],
-  [
-    'No sufficiently supported group found; this photo remains separate for review.',
-    'The available clues did not support grouping this photo with its neighbors.',
-  ],
-  [
-    'Provisional time group: similarity evidence is pending or incomplete.',
-    'These nearby photos are together provisionally; similarity is not yet established.',
-  ],
-  [
-    'Matching original checksums and compatible renditions support grouping.',
-    'Matching original files support this group.',
-  ],
-  ['Close ThumbHash descriptors support visual similarity.', 'Similar-looking previews (ThumbHash) support this group.'],
-  [
-    'Reciprocal nearby Immich search ranks support this composition.',
-    'Matches in both directions from Immich’s similar-photo searches support this group.',
-  ],
-  [
-    'An asymmetric search match was retained through strong support from the established core.',
-    'One less consistent match was included because several photos support it.',
-  ],
-  [
-    'Repeated Immich searches favor separate subgroups; this contrast outweighs ThumbHash similarity and provisional joins.',
-    'Similar-photo searches distinguish this group from other nearby photos.',
-  ],
-  ['Saved human separations were respected.', 'A previously saved stack correction was respected.'],
-  [
-    'Saved human separations and supported people differences were respected.',
-    'Grouping respects saved stack corrections and supported differences in people.',
-  ],
-  [
-    'Distant ThumbHash values or missing search results alone are not evidence of a different subject.',
-    'A different preview fingerprint or a missing search match alone does not establish a different subject.',
-  ],
-  [
-    'Grouped by capture time; similarity not established.',
-    'Taken close together, but similarity has not been established.',
-  ],
-  [
-    'Automatic composition checks are limited to 40 photos and a bounded rebuild budget.',
-    'This group reached an automatic checking limit (40 photos or the processing budget).',
-  ],
-  [
-    'Membership preserved from the opened Curate view.',
-    'This is the grouping from when you opened the view; its original explanation is unavailable.',
-  ],
+// Page wording for the reasons recorded with a grouping (src/curate/reasons.mjs),
+// as short evidence rows: a mark, the signal and a value. Translate recorded
+// reasons only: missing recognition is never proof of the same people, and
+// supporting pairs do not imply every photo is an exact match.
+export const MARKS = Object.freeze({
+  support: ['✓', 'Supports'], unsure: ['?', 'Unsure'], apart: ['✗', 'Keeps apart'], info: ['·', 'Background'],
+});
+export const HOW_STACKS_WORK = 'https://github.com/pictaria-ai/pictaria-server/blob/main/docs/CURATE-ALGORITHM.md#how-stacks-work';
+// Rows appear by mark, strongest first, then in this order.
+const ROWS = {
+  exact: ['support', 'Files', 'Same original file'],
+  'embedding-near': ['support', 'Embeddings', 'Very similar'],
+  'embedding-corroborated': ['support', 'Embeddings', 'Fairly similar, backed by people or previews'],
+  'embedding-average': ['support', 'Joined', 'Close groups, similar on average'],
+  thumbhash: ['support', 'Previews', 'Look alike (ThumbHash)'],
+  ranks: ['support', 'Searches', 'Find each other in Immich searches'],
+  'rank-recovered': ['support', 'Searches', 'One looser match, backed by several photos'],
+  'embedding-undecided': ['unsure', 'Embeddings', 'Only fairly similar, and nothing confirms it'],
+  provisional: ['unsure', 'Grouping', 'Together for now; similarity not established'],
+  budget: ['unsure', 'Grouping', 'Too many photos to compare, so grouped by time'],
+  'embedding-apart': ['apart', 'Embeddings', 'Clearly different from some nearby photos'],
+  'people-apart': ['apart', 'People', 'Different people from some nearby photos'],
+  'rank-contrast': ['apart', 'Searches', 'Immich searches separate some nearby photos'],
+  'saved-split': ['apart', 'Your split', 'Your earlier split applies'],
+  'photo-split': ['apart', 'Photo Referee', 'Separated different subjects while suggesting photos'],
+  unlinked: ['info', 'Grouping', 'Nothing linked it to the nearby photos'],
+  alone: ['info', 'Taken', 'No other pending photo close in time'],
+  'stacks-off': ['info', 'Stacks', 'Turned off in Settings'],
+  preserved: ['info', 'Grouping', 'From when you opened this view; details unavailable'],
+};
+export const REASON_CODES = Object.freeze(Object.keys(ROWS));
+// Groupings saved before reason codes keep their sentences. Null marks a rule
+// that never changes; "How stacks work" explains those instead.
+const LEGACY = new Map([
+  ['Stacking is off.', 'stacks-off'],
+  ['Time candidates use a 90-second gap and a 3-minute total span.', null],
+  ['No other pending photo within the time limits.', 'alone'],
+  ['No sufficiently supported group found; this photo remains separate for review.', 'unlinked'],
+  ['Provisional time group: similarity evidence is pending or incomplete.', 'provisional'],
+  ['Matching original checksums and compatible renditions support grouping.', 'exact'],
+  ['Close ThumbHash descriptors support visual similarity.', 'thumbhash'],
+  ['Reciprocal nearby Immich search ranks support this composition.', 'ranks'],
+  ['An asymmetric search match was retained through strong support from the established core.', 'rank-recovered'],
+  ['Repeated Immich searches favor separate subgroups; this contrast outweighs ThumbHash similarity and provisional joins.', 'rank-contrast'],
+  ['Saved human separations were respected.', 'saved-split'],
+  ['Saved human separations and supported people differences were respected.', null],
+  ['Distant ThumbHash values or missing search results alone are not evidence of a different subject.', null],
+  ['Distant ThumbHash values or missing search results alone are not evidence of a different subject; missing image embeddings are unknown.', null],
+  ['Very similar Pictaria image embeddings support this composition.', 'embedding-near'],
+  ['Moderately similar image embeddings, corroborated by the same people or a similar ThumbHash, support this composition.', 'embedding-corroborated'],
+  ['Groups were joined on their average image embedding similarity.', 'embedding-average'],
+  ['Image embeddings and the other evidence do not settle every pair here, so this composition stays uncertain.', 'embedding-undecided'],
+  ['Clearly different image embeddings separate photos taken at the same time.', 'embedding-apart'],
+  ['Grouped by capture time; similarity not established.', 'budget'],
+  ['Automatic composition checks are limited to 40 photos and a bounded rebuild budget.', 'budget'],
+  ['Membership preserved from the opened Curate view.', 'preserved'],
+  // standard-1 (src/curate/grouping.mjs), the bounded engine without candidate stacking.
+  ['Same recorded original checksum.', 'exact'],
+  ['No compatible alternative in the bounded search.', 'unlinked'],
+  ['Comparison budget reached; stack composition is unconfirmed.', 'budget'],
+  ['Different people counts corroborated by recognition separated candidates.', 'people-apart'],
 ]);
-export function plainReasons(comparison) {
-  const result = [];
-  const photos = comparison.photos ?? [];
-  const times = photos.map((p) => (p.capturedAt ? Date.parse(p.capturedAt) : NaN));
-  if (photos.length > 1 && photos.length === comparison.ids?.length && times.every(Number.isFinite)) {
-    const seconds = Math.ceil((Math.max(...times) - Math.min(...times)) / 1000);
-    result.push(
-      seconds < 60 ? `Taken within ${seconds} seconds.` : `Taken within ${Math.ceil(seconds / 60)} minutes.`,
-    );
+const ORDER = ['support', 'unsure', 'apart', 'info'];
+
+// Codes in recorded order; unknown text stays visible as-is.
+export function reasonCodes(reasons) {
+  const codes = [], other = [];
+  for (const reason of Array.isArray(reasons) ? reasons : []) {
+    if (typeof reason !== 'string') continue;
+    const code = Object.hasOwn(ROWS, reason) ? reason : LEGACY.has(reason) ? LEGACY.get(reason) : undefined;
+    if (code === undefined) { if (!other.includes(reason)) other.push(reason); }
+    else if (code && !codes.includes(code)) codes.push(code);
   }
-  // Keep unmapped recorded reasons visible too: there is no separate raw-details panel.
-  for (const reason of comparison.reasons ?? []) {
-    result.push(comparison.stackReferee?.state === 'checked' && reason === 'Provisional time group: similarity evidence is pending or incomplete.'
-      ? 'Before the AI check, these nearby photos were grouped provisionally.' : copy.get(reason) ?? reason);
-  }
-  if (comparison.stackReferee?.state === 'checked' && typeof comparison.stackReferee.reason === 'string')
-    result.push(comparison.stackReferee.reason);
-  return result.length
-    ? [...new Set(result)]
-    : ['No further grouping explanation is available for this saved view.'];
+  return { codes, other };
 }
 
-export function groupingAlgorithmLabel(comparison) {
-  if (comparison.stackReferee?.state === 'updated' || !/^candidate-\d+$/.test(comparison.algorithm))
-    return 'Grouping from this saved view';
-  return `Candidate algorithm ${comparison.algorithm.split('-')[1]} · ${comparison.stackReferee?.state === 'checked'
-    ? 'Stack Referee checked' : 'no AI stack check'}`;
+const plural = (n, word) => `${n} ${word}${n === 1 ? '' : 's'}`;
+// With the process strip (`steps`), a checking limit is its Grouping step.
+export function evidenceRows(comparison, { steps = false } = {}) {
+  const { codes: recordedCodes, other } = reasonCodes(comparison.reasons);
+  const codes = steps ? recordedCodes.filter(code => code !== 'budget') : recordedCodes;
+  const single = comparison.ids?.length === 1;
+  const check = comparison.stackReferee?.state === 'checked' ? comparison.stackReferee : null;
+  const said = typeof check?.reason === 'string' ? check.reason.trim() : '';
+  const rows = [];
+  // The model's reason is plain text, rendered with textContent. A single
+  // photo is only split off when the answer divided the photos it compared;
+  // otherwise it was checked together with photos decided since.
+  const also = said ? `: ${said}` : '';
+  if (check) rows.push(single ? check.split === true ? { mark: 'apart', signal: 'AI check', value: `Split it from nearby photos${also}` }
+    : { mark: 'info', signal: 'AI check', value: `Grouped it with nearby photos${also}` }
+    : { mark: 'support', signal: 'AI check', value: check.split ? `Split from a larger stack${also}` : said || 'Confirmed this stack' });
+  const recorded = codes.map(code => {
+    const [mark, signal, value] = ROWS[code];
+    return check && code === 'provisional' ? { mark: 'info', signal, value: 'Grouped for now before the AI check' } : { mark, signal, value };
+  });
+  rows.push(...recorded.sort((a, b) => ORDER.indexOf(a.mark) - ORDER.indexOf(b.mark)));
+  const photos = comparison.photos ?? [];
+  const times = photos.map(p => (p.capturedAt ? Date.parse(p.capturedAt) : NaN));
+  if (!single && photos.length > 1 && photos.length === comparison.ids?.length && times.every(Number.isFinite)) {
+    const seconds = Math.ceil((Math.max(...times) - Math.min(...times)) / 1000);
+    rows.push({ mark: 'info', signal: 'Taken', value: seconds <= 1 ? 'Within a second'
+      : seconds < 60 ? `Within ${seconds} seconds` : `Within ${plural(Math.ceil(seconds / 60), 'minute')}` });
+  }
+  if (single && comparison.nearby > 0 && !codes.includes('alone'))
+    rows.push({ mark: 'info', signal: 'Taken', value: `${plural(comparison.nearby, 'other photo')} at the same time` });
+  // No separate raw-details panel: keep unmapped recorded reasons visible.
+  rows.push(...other.map(value => ({ mark: 'info', signal: '', value })));
+  return rows.length ? rows : [{ mark: 'info', signal: '', value: 'No further explanation is available for this saved view.' }];
+}
+
+export function algorithmLabel(comparison) {
+  if (comparison.stackReferee?.state === 'updated' || !/^candidate-\d+$/.test(comparison.algorithm) ||
+      reasonCodes(comparison.reasons).codes.includes('preserved')) return 'Grouping from this saved view';
+  return `Algorithm ${comparison.algorithm.split('-')[1]}`;
 }

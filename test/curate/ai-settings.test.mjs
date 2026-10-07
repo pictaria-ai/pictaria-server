@@ -42,29 +42,35 @@ test('API cannot activate unavailable roles, including null fallback', t => {
   assert.throws(() => store.update({ curate: { stackRefereeScope: 'typo' } }), /stackRefereeScope/);
 });
 
-test('production settings opt into Stack Referee only, preserving off defaults and explicit preferences across restart', t => {
+test('production settings opt into either referee, preserving off defaults and explicit preferences across restart', t => {
   const f = fixture(t);
   let description = f.store.describe().curate;
   assert.equal(description.stackRefereeEnabled.available, true);
   assert.equal(description.stackRefereeEnabled.value, false);
   assert.equal(description.stackRefereeEnabled.active, false);
   assert.equal(description.stackRefereeScope.value, 'uncertain');
-  assert.equal(description.keeperRefereeEnabled.available, false);
-  f.store.update({ curate: { stackRefereeEnabled: true } });
+  assert.equal(description.keeperRefereeEnabled.available, true);
+  assert.equal(description.keeperRefereeEnabled.value, false);
+  assert.equal(description.keeperRefereeEnabled.active, false);
+  f.store.update({ curate: { keeperRefereeEnabled: true } });
   const restarted = f.open();
   description = restarted.store.describe().curate;
   assert.equal(restarted.config.enrichEnabled, false);
-  assert.equal(description.stackRefereeEnabled.active, true);
-  assert.equal(description.keeperRefereeEnabled.active, false);
+  assert.equal(description.stackRefereeEnabled.active, false);
+  assert.equal(description.keeperRefereeEnabled.active, true);
+  assert.equal(description.keeperRefereeEnabled.availabilityNotice, '');
   assert.equal(restarted.config.curateRefereeEnabled, false);
-  const before = f.persisted();
-  assert.throws(() => restarted.store.update({ curate: { keeperRefereeEnabled: true } }), /not available/);
-  assert.deepEqual(f.persisted(), before);
+  restarted.store.update({ curate: { stackRefereeEnabled: true } });
+  assert.equal(restarted.store.describe().curate.stackRefereeEnabled.active, true);
+  assert.equal(restarted.store.describe().curate.keeperRefereeEnabled.active, true);
   restarted.store.update({ curate: { burstGrouping: false } });
-  assert.equal(restarted.store.describe().curate.stackRefereeEnabled.active, false);
-  assert.equal(restarted.store.describe().curate.stackRefereeEnabled.value, true);
-  restarted.store.update({ curate: { burstGrouping: true, stackRefereeEnabled: false } });
-  assert.equal(f.open().store.describe().curate.stackRefereeEnabled.active, false);
+  for (const key of ['stackRefereeEnabled', 'keeperRefereeEnabled']) {
+    assert.equal(restarted.store.describe().curate[key].active, false);
+    assert.equal(restarted.store.describe().curate[key].value, true);
+  }
+  restarted.store.update({ curate: { burstGrouping: true, keeperRefereeEnabled: false } });
+  assert.equal(f.open().store.describe().curate.stackRefereeEnabled.active, true);
+  assert.equal(f.open().store.describe().curate.keeperRefereeEnabled.active, false);
 });
 
 test('Settings reports the effective Stack Referee model when following Enrich or overriding it', t => {
@@ -89,15 +95,15 @@ test('upgrade snapshots effective legacy keeper preference once, without turning
     assert.equal(f.persisted().curate.keeperRefereeEnabled, expected);
     assert.equal(f.config.curateRefereeEnabled, referee, 'legacy preference preserved separately');
     assert.equal(f.config.curateStackRefereeEnabled, false);
-    assert.equal(f.store.describe().curate.keeperRefereeEnabled.active, false);
-    assert.equal(f.store.describe().curate.keeperRefereeEnabled.availabilityNotice.includes('Your preference is saved'), expected);
+    assert.equal(f.store.describe().curate.keeperRefereeEnabled.active, expected);
+    assert.equal(f.store.describe().curate.keeperRefereeEnabled.availabilityNotice, '');
     f.store.update({ curate: { refereeModel: 'custom' } });
     const restarted = f.open({ ENRICH_ENABLED: String(!enrich), CURATE_REFEREE_ENABLED: String(!referee) });
     assert.equal(restarted.config.curateKeeperRefereeEnabled, expected, 'restart cannot reinterpret legacy state');
     assert.equal(restarted.config.curateRefereeModel, 'custom');
     if (expected) {
       restarted.store.update({ curate: { keeperRefereeEnabled: false } });
-      assert.equal(f.open().config.curateKeeperRefereeEnabled, false, 'may opt out before worker is available');
+      assert.equal(f.open().config.curateKeeperRefereeEnabled, false, 'may opt out of the migrated preference');
     }
   }
 });
