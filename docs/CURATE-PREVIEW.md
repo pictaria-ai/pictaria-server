@@ -205,14 +205,25 @@ search draft has not been applied.
 **Load more** only displays additional results; it is no longer needed to get
 those photos checked. The count distinguishes stacks and single photos. Beside
 it, counts of the loaded stacks that are checking, unsure or not fully checked
-use the cards' icons, without shifting the photo grid. A small spinner beside
-the referee progress rows indicates grouping activity across the pending queue; its tooltip
-reads **Checking stacks · N remaining**. This is the overall pending-check queue,
+use the cards' icons, without shifting the photo grid. One spinner to the right
+of the referee progress rows covers grouping, photo-information refreshes and
+both AI referees across the pending queue. It spins slowly while queued, faster
+while working, and stops when idle or paused (or for reduced-motion preferences).
+Grouping still appears when both AI referees are Off. Its tooltip includes
+**Checking stacks · N remaining** for grouping. This is the overall pending-check queue,
 including photos outside the current page or filters and while browsing Decided.
 It includes queued and in-progress checks; finished incomplete checks leave the
 remaining count. Each check covers a nearby group that may form several stacks,
 so it is not a count of final stack cards. Paused work has an attention
 indicator and a word in the header.
+
+The compact panel is anchored to the right edge, with fixed columns for each
+referee's label, short progress bar and right-aligned count. The spinner slot
+and a single explanation line below are always reserved, including when empty,
+so changing counts and states cannot move the controls or photo grid. The line
+prioritizes active work over queued work, then paused work; each referee's name
+still exposes its own details on hover, focus or tap. Disabled roles stay in
+place with a gray empty track and **Off**. Both rows remain visible on phones.
 
 The two referee progress rows count **stacks across the entire pending library**,
 not the displayed cards or the bounded AI request queue. They remain visible in
@@ -220,8 +231,9 @@ Decided and under search, category and All/Stacks/Singles filters. A stack that
 needs several Photo Referee requests still counts once. Singles are excluded;
 Stack Referee also excludes stacks outside its selected scope.
 
-- **N stacks remaining · Working / Queued** covers outstanding work, including
-  work waiting to be discovered by the bounded worker queue.
+- **N stacks left** covers outstanding work, including work waiting to be
+  discovered by the bounded worker queue. The explanation line identifies the
+  active role and **Comparing photos / Queued** as appropriate.
 - **Waiting for grouping / Waiting for stack checks / Waiting for AI** explains
   prerequisites or shared-provider scheduling; it does not assume Enrich is
   always the other provider user. **Paused** retains work blocked by settings,
@@ -234,7 +246,7 @@ Stack Referee also excludes stacks outside its selected scope.
 Each bar shows finished work (successful plus terminal limited outcomes) out of
 that role's current pending-stack scope. This is not a lifetime completion count
 or an ETA: Enrich arrivals, new evidence, splits and human decisions can change
-the denominator. Counts say **Counting stacks…** until a current summary exists.
+the denominator. Counts say **Counting…** until a current summary exists.
 The server collects a shared, read-only summary in cooperative slices, normally
 at most once every four seconds for unchanged grouping/settings, and sends it
 through the existing status poll. A new grouping/settings generation invalidates

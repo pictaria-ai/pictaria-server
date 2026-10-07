@@ -26,7 +26,8 @@ test('referee status updates cards and open comparisons without moving photos or
       if(body.groups){
         body.updatesAvailable=false;body.refinement={state:'idle',remainingGroups:0};
         body.stackRefereeActivity=window.refereeActivity;
-        body.refereeProgress.stack={state:'ready',total:60,completed:20,incomplete:2,remaining:38,
+        const finished=window.refereeActivity.state==='idle';
+        body.refereeProgress.stack={state:'ready',total:60,completed:finished?58:20,incomplete:2,remaining:finished?0:38,
           waitingForGrouping:0,waitingForStack:0,paused:0};
         for(const group of body.groups)if(group.memberCount>1){group.similarity=window.similarityState;group.stackReferee=window.refereeState;}
       }
@@ -38,7 +39,9 @@ test('referee status updates cards and open comparisons without moving photos or
   assert.equal(await page.evaluate('document.querySelector(".is-stack .stack-badge").dataset.badge'), 'checking');
   assert.equal(await page.evaluate('document.querySelector(".is-stack .p-chip").textContent'), '4 photos');
   assert.match(await page.evaluate('document.querySelector("#refinement").textContent'), /1 checking/);
-  assert.match(await page.evaluate('document.querySelector("#stack-referee-progress").textContent'), /38 stacks remaining · Queued/);
+  assert.match(await page.evaluate('document.querySelector("#stack-referee-progress").textContent'), /38 stacks left/);
+  assert.equal(await page.evaluate('document.querySelector("#curate-activity-copy").textContent'), 'Stack Referee · Queued');
+  assert.equal(await page.evaluate('document.querySelector("#check-activity .activity-indicator").dataset.phase'), 'queued');
   assert.equal(await page.evaluate('document.querySelector(".is-stack .capture-date").hidden'), false, 'the date stays put');
   const cardHeight = await page.evaluate('document.querySelector(".is-stack").getBoundingClientRect().height');
   await click('.is-stack .cover');
@@ -98,12 +101,12 @@ test('referee status updates cards and open comparisons without moving photos or
   assert.doesNotMatch(await page.evaluate('document.querySelector("#stack-reason").textContent'), /AI checked|Same composition/);
   await click('#comparison-similarity .why-trigger');
   await page.evaluate("window.refereeState={state:'incomplete',reason:'configuration',scope:'configuration'};window.refereeActivity={state:'paused',reason:'configuration',scope:'configuration'}");
-  await page.waitFor("document.querySelector('#stack-referee-progress').textContent.includes('Paused') && document.querySelector('#comparison-similarity .why-trigger')?.getAttribute('aria-label').startsWith('Unsure')");
+  await page.waitFor("document.querySelector('#curate-activity-copy').textContent.includes('Paused') && document.querySelector('#comparison-similarity .why-trigger')?.getAttribute('aria-label').startsWith('Unsure')");
   assert.equal(await page.evaluate('document.querySelector(".is-stack .stack-badge").dataset.badge'), 'unsure', 'configuration problems belong to the header');
   assert.equal(await page.evaluate('document.querySelector("#stack-referee-progress").dataset.phase'), 'attention');
   await page.evaluate("window.refereeState={state:'paused',reason:'model-failures',scope:'configuration'};window.refereeActivity={...window.refereeState}");
   await page.waitFor("document.querySelector('#stack-referee-progress').title.includes('Choose a vision model that compares multiple images')");
-  assert.match(await page.evaluate('document.querySelector("#stack-referee-progress").textContent'), /Paused/);
+  assert.match(await page.evaluate('document.querySelector("#curate-activity-copy").textContent'), /Paused/);
   assert.doesNotMatch(await page.evaluate('document.querySelector(".is-stack .stack-badge").title'), /paused|not possible/);
   await page.evaluate("window.refereeState={state:'updated'};window.refereeActivity={state:'idle'}");
   await page.waitFor('document.querySelector("#comparison-similarity .why-trigger")?.getAttribute("aria-label").startsWith("Unsure") && !document.querySelector("#check-activity").childElementCount');

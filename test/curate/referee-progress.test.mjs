@@ -6,7 +6,7 @@ import { join } from 'node:path';
 import { Repository } from '../../src/enrich/repository.mjs';
 import { CurateService } from '../../src/curate/service.mjs';
 import { CurateRefereeProgress } from '../../src/curate/referee-progress.mjs';
-import { refereeProgress } from '../../public/curate/referee-status.js';
+import { refereeProgress, curateActivity } from '../../public/curate/referee-status.js';
 
 const status = (state, extra = {}) => ({ state, ...extra });
 
@@ -89,16 +89,70 @@ test('progress copy distinguishes prerequisites, provider waits, pauses, Off and
   const counts = { state: 'ready', total: 20, completed: 5, incomplete: 3, remaining: 12,
     waitingForGrouping: 0, waitingForStack: 0, paused: 0 };
   const present = (extra = {}, activity = status('idle')) => refereeProgress({ ...counts, ...extra }, activity, 'photo');
-  assert.match(present().text, /12 stacks remaining · Queued/);
+  assert.equal(present().text, '12 stacks left');
+  assert.equal(present().status, 'Queued');
   assert.equal(present().value, 0.4);
-  assert.match(present({ waitingForGrouping: 12 }).text, /Waiting for grouping/);
-  assert.match(present({ waitingForGrouping: 4, waitingForStack: 8 }).text, /Waiting for stack checks/);
-  assert.match(present({}, status('waiting', { reason: 'shared-provider' })).text, /Waiting for AI/);
-  assert.match(present({}, status('checking')).text, /Working/);
-  assert.match(present({ paused: 12 }).text, /Paused/);
+  assert.match(present({ waitingForGrouping: 12 }).status, /Waiting for grouping/);
+  assert.match(present({ waitingForGrouping: 4, waitingForStack: 8 }).status, /Waiting for stack checks/);
+  assert.match(present({}, status('waiting', { reason: 'shared-provider' })).status, /Waiting for AI/);
+  assert.match(present({}, status('checking')).status, /Comparing photos/);
+  assert.match(present({ paused: 12 }).status, /Paused/);
   assert.match(present({}, status('paused', { reason: 'model-failures' })).detail, /photo comparisons/);
   assert.equal(present({ remaining: 0 }).text, 'Up to date');
   assert.match(present({ remaining: 0 }).detail, /3 finished without a full result/);
   assert.equal(present({ state: 'off' }).text, 'Off');
-  assert.equal(present({ state: 'counting' }).value, undefined);
+  assert.equal(present({ state: 'off' }).value, 0, 'Off has a neutral track, not a full or animated bar');
+  assert.equal(present({ state: 'counting' }).value, 0);
+});
+
+test('one header activity slot follows grouping and independent referees, including while counts catch up', () => {
+  const off = { state: 'off' }, work = { state: 'ready', total: 20, completed: 17, incomplete: 0, remaining: 3,
+    waitingForGrouping: 0, waitingForStack: 0, paused: 0 };
+  const view = { refereeProgress: { stack: off, photo: off }, refinement: { state: 'idle', remainingGroups: 0 } };
+  assert.deepEqual(curateActivity(view), { phase: null, text: '', detail: '' });
+  view.refinement = { state: 'waiting', remainingGroups: 2 };
+  assert.equal(curateActivity(view).phase, 'queued', 'grouping remains visible with AI off');
+  assert.equal(curateActivity(view).text, 'Grouping nearby photos');
+  assert.match(curateActivity(view).detail, /2 remaining across all pending photos/);
+  view.refereeProgress.photo = work;
+  view.photoRefereeActivity = status('checking');
+  assert.equal(curateActivity(view).phase, 'running');
+  assert.equal(curateActivity(view).text, 'Photo Referee · Comparing photos', 'active work wins over a queue');
+  view.refereeProgress.photo = { ...work, remaining: 0 };
+  assert.equal(curateActivity(view).phase, 'running', 'live work is visible before the count snapshot catches up');
+  view.refinement = { state: 'idle', remainingGroups: 0 };
+  view.refereeProgress.photo = work;
+  view.photoRefereeActivity = status('waiting', { reason: 'shared-provider' });
+  assert.equal(curateActivity(view).text, 'Photo Referee · Waiting for AI');
+  assert.equal(curateActivity(view).phase, 'queued');
+  view.photoRefereeActivity = status('paused', { reason: 'configuration' });
+  assert.equal(curateActivity(view).phase, 'attention', 'paused work does not spin');
+  assert.match(curateActivity(view).detail, /Settings/);
+  view.refereeProgress.photo = { ...work, remaining: 0, incomplete: 3 };
+  view.photoRefereeActivity = status('idle');
+  assert.equal(curateActivity(view).phase, null, 'terminal incomplete checks are finished');
+  view.metadata = { state: 'refreshing' };
+  assert.equal(curateActivity(view).phase, 'running');
+  view.metadata = null;
+  view.refereeProgress.photo = { state: 'counting' };
+  assert.equal(curateActivity(view).phase, null, 'counting alone is not provider work');
+  assert.equal(curateActivity(view).text, 'Photo Referee · Counting stacks…');
+  view.photoRefereeActivity = status('checking');
+  assert.equal(curateActivity(view).phase, 'running', 'counting cannot hide live activity');
+});
+
+test('a paused prerequisite stops the spinner, but does not hide independent work', () => {
+  const work = { state: 'ready', total: 1, completed: 0, incomplete: 0, remaining: 1,
+    waitingForGrouping: 0, waitingForStack: 0, paused: 0 };
+  const view = { refereeProgress: { stack: { ...work, waitingForGrouping: 1 }, photo: { ...work, waitingForStack: 1 } },
+    refinement: { state: 'paused', remainingGroups: 1, problem: 'Connection unavailable.' } };
+  assert.equal(curateActivity(view).phase, 'attention');
+  assert.equal(curateActivity(view).text, 'Grouping paused');
+  view.photoRefereeActivity = status('checking');
+  assert.equal(curateActivity(view).phase, 'running');
+  view.photoRefereeActivity = status('waiting');
+  view.refinement = { state: 'idle' };
+  view.stackRefereeActivity = status('paused', { reason: 'configuration' });
+  assert.equal(curateActivity(view).phase, 'attention');
+  assert.equal(curateActivity(view).text, 'Stack Referee · Paused');
 });

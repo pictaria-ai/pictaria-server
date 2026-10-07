@@ -43,17 +43,18 @@
           </span>
         </div>
         <div class="refresh-tools">
-          <span id="check-activity" aria-live="polite"></span>
           <div class="referee-progress" aria-label="AI progress across all pending stacks">
             <div id="stack-referee-progress" class="referee-progress-row" data-phase="counting">
-              <span class="referee-progress-label" title="">Stack Referee</span><progress max="1" aria-label="Stack Referee progress"></progress>
-              <span class="referee-progress-copy" role="status">Counting stacks…</span>
+              <span class="referee-progress-label" title="">Stack Referee</span><progress max="1" value="0" aria-label="Stack Referee progress"></progress>
+              <span class="referee-progress-copy" role="status">Counting…</span>
             </div>
             <div id="photo-referee-progress" class="referee-progress-row" data-phase="counting">
-              <span class="referee-progress-label" title="">Photo Referee</span><progress max="1" aria-label="Photo Referee progress"></progress>
-              <span class="referee-progress-copy" role="status">Counting stacks…</span>
+              <span class="referee-progress-label" title="">Photo Referee</span><progress max="1" value="0" aria-label="Photo Referee progress"></progress>
+              <span class="referee-progress-copy" role="status">Counting…</span>
             </div>
           </div>
+          <span id="check-activity" aria-live="polite"></span>
+          <span id="curate-activity-copy" role="status"></span>
         </div>
       </div>
       <div class="toolbar">

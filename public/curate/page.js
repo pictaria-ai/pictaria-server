@@ -6,6 +6,7 @@ import { explanation } from './explanation.js';
 import { PreviewImages } from './preview-images.js';
 import { node, thumbnail, photoCard, groupCard, savedOutcome, outcomeLabel, badgeNode, activityIndicator } from './photos.js';
 import { showRefereeProgress } from './referee-progress.js';
+import { curateActivity } from './referee-status.js';
 import { initialPhotoChoices, photoAssessment, photoAdviceSummary } from './photo-advice.js';
 import { stackStatus, statusCounts, mergeStatus, BADGE_WORDS } from './stack-status.js';
 
@@ -197,7 +198,6 @@ function showViewStatus(view) {
     if (state.comparison?.groupId === group.id) showComparisonStatus(group);
   }
   const paused = refinement?.state === 'paused' || refinement?.state === 'limited';
-  const remaining = refinement?.remainingGroups ?? 0;
   // Words for page-level work that needs attention, then counts for the stacks
   // loaded here with the cards' icons. Library-wide progress is the tooltip.
   const notices = [paused ? 'Checks paused' : '',
@@ -217,12 +217,9 @@ function showViewStatus(view) {
   }
   summary.title = [paused ? refinement?.problem : metadata?.problem,
     counts.length ? 'Counts cover the stacks loaded on this page.' : ''].filter(Boolean).join(' ');
-  const phase = paused ? 'attention'
-    : refinement?.state === 'searching' || metadata?.state === 'refreshing' ? 'running'
-      : remaining > 0 ? 'queued' : null;
-  const title = [paused ? refinement?.problem || 'Stack checks are paused.' : '',
-    remaining > 0 ? `Checking stacks · ${remaining.toLocaleString()} remaining across all pending photos, including outside this view. Includes queued and in-progress checks. Each check covers nearby photos that may form more than one stack.` : '',
-    metadata?.state === 'refreshing' ? 'Refreshing photo information.' : ''].filter(Boolean).join(' ') || 'Checking pending stacks in the background';
+  const { phase, text, detail: title } = curateActivity(view);
+  el('curate-activity-copy').textContent = text;
+  el('curate-activity-copy').title = title;
   const slot = el('check-activity');
   if (slot.firstChild?.dataset.phase !== (phase ?? undefined)) slot.replaceChildren(...(phase ? [activityIndicator(phase, title)] : []));
   else if (phase) slot.firstChild.title = slot.firstChild.ariaLabel = title;

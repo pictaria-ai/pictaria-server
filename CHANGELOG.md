@@ -13,6 +13,9 @@ All notable changes to Pictaria Server are documented here. This project follows
   Decided. Show remaining work, waiting/working/paused states, Off and Up to date;
   completed limited checks leave the remaining count. Background summaries are
   shared and collected in cooperative slices, without new AI requests or retries.
+  A compact panel hugs the right edge, with fixed columns for labels, bars and
+  counts, gray Off tracks, and a reserved explanation line. One shared spinner
+  covers grouping and both referees; paused work uses a stationary indicator.
   Automatic updates preserve open drafts; failed page updates expose Retry updates.
 
 - Simplify the Curate Preview stack comparison (PIC-116 / PIC-371): retain
