@@ -232,13 +232,18 @@ export class CurateService {
         Boolean(refinement?.ready) ||
         view.stacks !== (this.config.curateBurstGrouping !== false) ||
         Boolean(this.repo.db.prepare('SELECT 1 FROM curate_dirty LIMIT 1').get()),
-      groups: groups.map((g) => ({ id: g.id, memberCount: g.ids.length, route: g.route,
+      groups: groups.map((g) => {
+        const photoReferee = view.section === 'decided' ? null : this.photoReferee?.status(g) ?? null;
+        const suggestedId = photoReferee?.suggestion?.keeperIds[0];
+        return { id: g.id, memberCount: g.ids.length, route: g.route,
           // What kept a single photo apart, for its badge (public/curate/stack-status.js).
           reasons: view.section === 'decided' || g.ids.length > 1 ? undefined : this.current?.byId.get(g.id)?.reasons,
           similarity: view.section === 'decided' ? null : this.refinement?.groupStatus(g) ?? null,
           stackReferee: view.section === 'decided' ? null : this.stackReferee?.status(g) ?? null,
-          photoReferee: view.section === 'decided' ? null : this.photoReferee?.status(g) ?? null,
-          photos: this.store.covers(g.ids.slice(0, 3)) })),
+          photoReferee,
+          suggestedCover: suggestedId ? this.store.covers([suggestedId])[0] : null,
+          photos: this.store.covers(g.ids.slice(0, suggestedId ? 4 : 3)) };
+      }),
       nextOffset: offset + limit < view.total ? offset + limit : null,
     };
   }

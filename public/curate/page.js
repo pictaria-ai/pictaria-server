@@ -8,6 +8,7 @@ import { node, thumbnail, photoCard, groupCard, savedOutcome, outcomeLabel, badg
 import { showRefereeProgress } from './referee-progress.js';
 import { curateActivity } from './referee-status.js';
 import { initialPhotoChoices, photoAssessment, photoAdviceSummary } from './photo-advice.js';
+import { applicableAdvice, suggestionMatches, nextActionLabel } from './suggestions.js';
 import { stackStatus, statusCounts, mergeStatus, BADGE_WORDS } from './stack-status.js';
 
 const el = (id) => document.getElementById(id);
@@ -53,6 +54,7 @@ const visibility = new IntersectionObserver(entries => {
 function makeCard(group, index = 0) {
   const card = groupCard(group, g => run(() => compare(g)), {
     decide: (g, outcome) => run(() => quickDecision([g], outcome)),
+    keepSuggestions: (g, shown) => run(() => keepSuggestions(g, shown)),
     select: (g, checked) => { checked ? state.selected.add(g.id) : state.selected.delete(g.id); bulkSelection(); },
     selected: state.selected.has(group.id), decided: state.section === 'decided',
     label: `Photo ${index + 1}`,
@@ -127,6 +129,7 @@ function selection() {
     state.comparison.oversized ||
     failedPreviews.size > 0;
   el('apply-next').disabled = el('apply').disabled;
+  el('apply-next').textContent = nextActionLabel(state.outcomes);
   el('apply-next').hidden = state.section !== 'pending';
 }
 function closeComparison() {
@@ -185,8 +188,11 @@ function showViewStatus(view) {
   const parts = [];
   if (stacks) parts.push(`${loadedStacks} of ${stacks} ${stacks === 1 ? 'stack' : 'stacks'}`);
   if (singles) parts.push(`${state.groups.length - loadedStacks} of ${singles} ${singles === 1 ? 'single photo' : 'single photos'}`);
-  el('count').textContent = parts.length ? `${parts.join(' · ')} shown` : '0 photos shown';
-  el('count').title = el('count').textContent;
+  el('count').title = parts.length ? `${parts.join(' · ')} shown` : '0 photos shown';
+  const left = [stacks && `${stacks} ${stacks === 1 ? 'stack' : 'stacks'}`, singles && `${singles} ${singles === 1 ? 'single photo' : 'single photos'}`].filter(Boolean);
+  const filtered = state.search || state.category !== 'all' || state.kind !== 'all';
+  el('count').textContent = state.section === 'decided' ? el('count').title
+    : left.length ? `${left.join(' · ')} left${filtered ? ' in this view' : ''}` : `Nothing left${filtered ? ' in this view' : ''}`;
   state.updateStatus = view;
   updateHint();
   const refinement = view.refinement;
@@ -350,7 +356,7 @@ async function compare(group) {
     state.comparison = comparison;
     showComparisonStatus();
     state.outcomes = comparison.oversized ? {} : initialPhotoChoices(comparison, { decided: state.section === 'decided' });
-    state.draftSuggested = state.section === 'pending' && !comparison.updated && comparison.photoRecommendations?.canApplyAll === true &&
+    state.draftSuggested = state.section === 'pending' && applicableAdvice(comparison) &&
       Object.values(state.outcomes).includes('approve');
     state.photoList = [...comparison.photos, ...comparison.context];
     el('comparison-state').textContent = comparison.oversized
@@ -365,6 +371,7 @@ async function compare(group) {
         photoCard(photo, {
           label: `Photo ${index + 1}`, suggested: suggested.has(photo.id),
           assessment: photoAssessment(comparison.photoRecommendations, photo.id),
+          inlineReason: state.draftSuggested && suggested.has(photo.id),
           selected: () => state.batchPhotos.has(photo.id),
           select: (selected) => {
             selected ? state.batchPhotos.add(photo.id) : state.batchPhotos.delete(photo.id);
@@ -390,7 +397,12 @@ async function compare(group) {
     layoutPhotos();
     recovery();
     if (single) { el('comparison').close(); renderPhoto(comparison.photos[0], preview); }
-    else el('photos').firstElementChild?.focus({ preventScroll: true });
+    else {
+      const firstSuggested = state.draftSuggested ? comparison.photos.findIndex(p => suggested.has(p.id)) : 0;
+      const focus = el('photos').children[firstSuggested] ?? el('photos').firstElementChild;
+      focus?.focus({ preventScroll: true });
+      if (matchMedia('(max-width: 600px)').matches && state.draftSuggested) focus?.scrollIntoView({ block: 'nearest' });
+    }
   } catch (cause) {
     if (generation === state.dialogGeneration) throw cause;
   } finally {
@@ -440,8 +452,10 @@ function renderPhoto(photo, preview) {
   el('photo-score').textContent = Number.isFinite(photo.frameScore) ? `Enrichment score: ${photo.frameScore.toFixed(2)}` : '';
   const assessment = photoAssessment(state.comparison?.photoRecommendations, photo.id);
   const advice = state.comparison?.photoRecommendations;
-  el('photo-model').hidden = !assessment;
-  el('photo-model').textContent = assessment ? `Photo Referee · ${assessment.suggested ? 'Suggested keeper' : 'Not suggested'}${advice.model ? ` · ${advice.model}` : ''}` : '';
+  el('photo-model').hidden = true;
+  el('photo-model').textContent = '';
+  el('photo-referee-model').hidden = !assessment;
+  el('photo-referee-model').textContent = assessment ? `${assessment.suggested ? '★ Suggested by' : 'Not suggested by'} Photo Referee${advice.model ? ` · ${advice.model}` : ''}` : '';
   el('photo-assessment').hidden = !assessment;
   el('photo-assessment').textContent = assessment?.reason ?? '';
   el('photo-image-error').hidden = preview.ok;
@@ -499,8 +513,13 @@ function syncViewer() {
   const at = state.groups.findIndex(g => g.id === state.comparison?.groupId);
   const onlyPhotos = state.section === 'decided' || state.kind === 'singles' || state.view?.counts?.stacks === 0;
   const unit = onlyPhotos ? 'photos' : 'items';
-  el('photo-position').textContent = single ? `${at + 1} of ${state.groups.length} ${state.next !== null ? 'loaded ' : ''}${unit}`
-    : `${state.photoIndex + 1} of ${state.photoList.length} photos`;
+  const stackIndex = state.comparison?.photos.findIndex(p => p.id === photo?.id) ?? -1;
+  el('photo-position').textContent = stackIndex < 0 ? 'Already kept · reference photo'
+    : single ? `${at + 1} of ${state.groups.length} ${state.next !== null ? 'loaded ' : ''}${unit}`
+    : `${stackIndex + 1} of ${state.comparison.photos.length} photos`;
+  const references = state.comparison?.context.length ?? 0;
+  el('photo-reference-count').hidden = !references;
+  el('photo-reference-count').textContent = `${references} already kept · reference only`;
   el('single-actions').hidden = !single || !actionable;
   el('stack-actions').hidden = single || !actionable;
   el('photo-keep').hidden = single || !actionable;
@@ -510,7 +529,7 @@ function syncViewer() {
   el('photo-reason').hidden = !single || !actionable || state.section === 'decided';
   el('photo-outcome').textContent = single || !actionable
     ? `Current: ${outcomeLabel(savedOutcome(photo))}`
-    : `Draft: ${outcomeLabel(state.outcomes[photo.id])} · not saved`;
+    : `Your pick: ${outcomeLabel(state.outcomes[photo.id])} · not saved`;
   const locked = state.busy || state.loading || state.opening || state.continuing || Boolean(client.saved.pending) || state.comparison?.oversized;
   for (const control of document.querySelectorAll('[data-stack-choice], [data-photo-action]'))
     control.disabled = locked || !actionable;
@@ -699,6 +718,24 @@ function quickDecision(groups, outcome) {
     return client.decide(comparison.id, Object.fromEntries(comparison.ids.map(id => [id,outcome])));
   }, { ids: groups.map(g => g.photos[0].id) });
 }
+async function keepSuggestions(group, shown) {
+  if (state.section !== 'pending' || state.busy || state.loading || state.opening || state.continuing || state.autoUpdateFailed || client.saved.pending) return;
+  // Capture what the button offered before a poll can replace its status.
+  const displayed = structuredClone(shown), viewId = state.view.viewId;
+  state.opening = 'suggestion';
+  recovery();
+  let comparison;
+  try { comparison = await client.comparison(viewId, group.id); }
+  finally { state.opening = null; recovery(); }
+  if (state.view.viewId !== viewId) return;
+  if (comparison.oversized || !suggestionMatches(displayed, comparison)) {
+    await compare(group);
+    if (el('comparison').open) el('comparison-state').textContent = 'Suggestions changed. Review the current choices before saving.';
+    return;
+  }
+  const outcomes = Object.fromEntries(comparison.ids.map(id => [id, displayed.keeperIds.includes(id) ? 'approve' : 'reviewed']));
+  return action(() => client.decide(comparison.id, outcomes), { ids: [...comparison.ids] });
+}
 async function stepPhoto(delta) {
   if (state.busy || state.loading || state.opening || state.continuing || client.saved.pending) return;
   if (state.viewerMode !== 'single') return showPhoto(state.photoList[state.photoIndex + delta]);
@@ -724,7 +761,7 @@ async function changeFilter(patch) {
 // or a pending receipt always owns its current snapshot.
 let updateTimer, lastInteraction = 0, lastAutomatic = 0;
 function canUpdate() {
-  return !document.hidden && !state.busy && !state.loading && !state.continuing && !client.saved.pending &&
+  return !document.hidden && !state.busy && !state.loading && !state.opening && !state.continuing && !client.saved.pending &&
     el('search').value.trim() === state.search &&
     !state.selected.size && !document.querySelector('dialog[open], .card-menu[open]') &&
     !document.activeElement?.matches('input:not([type=checkbox]),select,textarea,[contenteditable=true]');

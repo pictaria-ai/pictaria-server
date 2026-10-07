@@ -119,6 +119,7 @@ test(
       'true',
     );
     await key('s');
+    await page.waitFor(`document.querySelector('#photo-large').src.includes('${fixture.id(2)}') && document.querySelector('#photo-loading').hidden`);
     assert.equal(
       await page.evaluate(
         `document.querySelector('${card(1)} [data-choice=reviewed]').getAttribute('aria-pressed')`,
@@ -126,7 +127,9 @@ test(
       'true',
     );
     await key('ArrowLeft'); // A keyboard mark advanced to photo 2.
+    await page.waitFor(`document.querySelector('#photo-large').src.includes('${fixture.id(1)}') && document.querySelector('#photo-loading').hidden`);
     await key('f');
+    await page.waitFor(`document.querySelector('#photo-large').src.includes('${fixture.id(2)}') && document.querySelector('#photo-loading').hidden`);
     assert.equal(operations(), 0);
     assert.doesNotMatch(
       await page.evaluate('document.querySelector("#photo-view").innerText'),

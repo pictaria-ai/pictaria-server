@@ -38,12 +38,15 @@ in this preview, its proposed partitions are never saved.
 The header has three stable rows: Pending/Decided with grouping activity and
 separate Stack Referee / Photo Referee status rows;
 All/Stacks/Singles on the left with date order, category and Search on the right;
-then selection on the left with shown counts and active background progress
+then selection on the left with remaining counts and active background progress
 aligned together on the right. The header checkbox appears in Singles and Decided;
 All still allows checking individual single-photo cards. Hiding Pending-only
 filters or the selection checkbox does not move shared controls or the photo grid.
 The page reserves scrollbar space to keep controls aligned between long and short views.
 On narrow screens, **Filters** reveals date order, category and Search controls.
+Pending counts include all remaining stacks/singles matching the current filters,
+not just the loaded cards. Filtered counts say **in this view**; hover for loaded
+counts. Decided retains **X of Y shown**.
 Counts and progress each keep their own line, and the selection slot remains
 reserved in All and Stacks. Desktop keeps filters visible. The remembered sort is not changed by collapsing them.
 
@@ -68,7 +71,7 @@ search draft has not been applied.
   filtering or matching one member in search always retains the **whole** stack.
 - **Decided** shows individual photos with earlier human choices (including Fav), with search
   and date order. The lightbox labels the saved **Current** outcome separately from
-  stack **Draft** choices; Yes is never filled by default. The saved decision button
+  stack **Your pick** choices; Yes is never filled by default. The saved decision button
   has a subtle tint on the card and in the lightbox; Decided photos have no duplicate
   outcome label over the image. Open a photo or use its card actions to change that choice.
   A newer concurrent decision invalidates the old action scope; it cannot be
@@ -87,6 +90,14 @@ search draft has not been applied.
   large inspection; a stack opens its comparison directly, without a separate
   Compare button. The shared Settings gear
   opens the Curate section, without a second settings button on the page.
+- Complete applicable nonempty Photo Referee advice adds **Keep N ★** over the
+  stack cover. Clicking it marks the suggested photos Yes and the rest Skip, in
+  one normal undoable decision. The first suggested photo becomes the cover; the
+  strip shows other members. Capture-time sorting and chronological membership
+  stay unchanged. Enter on the cover still opens comparison; Enter on **Keep N ★**
+  accepts the suggestions. A changed suggestion or prerequisite opens manual
+  comparison instead. Partial/mixed, pending, stale and zero-suggestion results
+  have no shortcut. Valid saved advice remains usable with the referee off.
 - **Check shown photos** checks the currently loaded photos in Singles or Decided.
   All and Stacks hide this header control; All retains each single-photo checkbox.
   Loading more does not check additional photos. The fixed bottom action bar does not move the grid. Checked singles expose the same
@@ -102,7 +113,7 @@ search draft has not been applied.
   appear automatically when browsing pauses, preserving date order and your place.
   Open comparisons and bulk selections keep their current view.
 - Open a stack and use **Yes / Skip / Fav / No** beneath each photo. Click an
-  image to enlarge it. These choices remain a draft until **Save** or **Save & next**; the
+  image to enlarge it. These choices remain a draft until **Save** or **Keep N · Next**; the
   footer counts each outcome separately. Unmarked photos default to Skip, which
   is neither deletion nor Never show.
   Selected choices use the same subtle fills as Decided: teal for Yes, gray for
@@ -112,14 +123,16 @@ search draft has not been applied.
   photos are checked, the same four choices appear beside the checked count.
   Applying one changes only those photos; **Clear checks** clears the checkboxes
   without undoing any draft choices. Nearby reference photos cannot be checked.
-- **Save** returns to the grid. **Save & next** opens the next pending
+- **Save** returns to the grid. **Keep N · Next** opens the next pending
   comparison after this item's capture-time position, in the current filters and
   date order. It opens a fresh view after the save, so the next comparison uses
   the latest grouping, and loads more pages when needed. It does not wrap to
   earlier items. An accepted save remains saved if opening the next item fails;
   Recovery and Undo remain available. Undo after continuation refreshes the grid.
-  **Save & next** remains the primary button for every combination of outcomes,
-  including Skip-all. The compact header reads **Compare stack · N photos**,
+  The primary button describes the current human draft: **Keep N · Next** counts
+  Yes and Fav, **Skip all · Next** appears only when every photo is Skip, and
+  **Save · Next** covers drafts containing No without any kept photos. It stays
+  primary for every combination of outcomes. The compact header reads **Compare stack · N photos**,
   with the stack status and Close on the right. A second toolbar holds checkbox
   controls, the recommendation count and **Shortcuts** help. On narrow screens
   the status uses its icon with the full accessible label and explanation.
@@ -128,7 +141,9 @@ search draft has not been applied.
   saves the comparison and continues after **at least one explicit draft choice**
   (including Skip), or when complete, applicable Photo Referee advice has seeded
   **suggested Yes choices**. In that case, Enter on the initially focused card
-  confirms the suggested draft. An untouched all-Skip draft, including one with
+  confirms the suggested draft. Eligible advice initially focuses the first
+  suggested photo (and brings it into view on a phone) without reordering photos.
+  An untouched all-Skip draft, including one with
   no suggested keepers, cannot be saved by Enter; initial focus or checking boxes
   alone does not enable it. The Save buttons still allow an intentional Skip-all.
   Enter on a button or image retains its normal action. Modified/repeated keys,
@@ -142,10 +157,16 @@ search draft has not been applied.
   the filled Yes/Skip/Fav/No button identifies the draft choice. A single thin
   accent border and highlighted photo number identify keyboard focus. Checkboxes
   select a batch independently. Repeated per-photo Draft labels are replaced by
-  one footer draft summary. Per-photo **Why?**, the recommendation count and
+  one **Your picks** footer summary. Suggested photos show a one-line reason
+  beside their number, with ellipsis and full hover/focus/tap help; other photos
+  retain **Why?**. Skip choices mute the controls background, never photo pixels.
+  Per-photo help, the recommendation count and
   **Shortcuts** open overlays on hover, focus or tap; Escape dismisses the overlay
-  first. Photo Referee reasons remain available in full in the lightbox. Partial
-  advice, separate comparisons and incomplete-check notices remain visible.
+  first. Photo Referee reasons remain available in full in the lightbox.
+  Their attribution/model are separate from Enrich attribution, so loading a
+  longer caption cannot overwrite the referee label. The stack position counts
+  actionable photos only; already-kept references have their own count and label.
+  Partial advice, separate comparisons and incomplete-check notices remain visible.
 - The lightbox follows the production layout: the photo fills the available
   space beside a narrow panel with caption, tags, capture date, enrichment score,
   producing model/profile when available, and an Immich link. On narrow screens

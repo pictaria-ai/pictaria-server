@@ -1,5 +1,6 @@
 import { textTooltip } from './tooltip.js';
 import { stackStatus, mergeStatus } from './stack-status.js';
+import { gridSuggestion } from './suggestions.js';
 
 export function node(tag, text, className) {
   const element = document.createElement(tag);
@@ -24,7 +25,7 @@ export const outcomeLabel = (value) => choices.find(([key]) => key === value)?.[
 export function photoCard(
   photo,
   { readOnly = false, label = 'Photo', outcome = () => 'reviewed', change, open,
-    selected = () => false, select, imageState = () => {}, suggested = false, assessment = null },
+    selected = () => false, select, imageState = () => {}, suggested = false, assessment = null, inlineReason = false },
 ) {
   const card = node('article', undefined, 'photo-card');
   card.dataset.photoId = photo.id;
@@ -61,9 +62,13 @@ export function photoCard(
     }
     const heading = node('div', undefined, 'photo-info-heading');
     heading.append(node('small', label, 'photo-label'));
-    if (assessment) heading.append(textTooltip('Why?',
-      `Photo Referee · ${suggested ? 'Suggested' : 'Not suggested'} · ${label}`,
-      assessment.reason, `photo-advice-${photo.id}`));
+    if (assessment) {
+      const why = textTooltip(inlineReason ? assessment.reason : 'Why?',
+        `Photo Referee · ${suggested ? 'Suggested' : 'Not suggested'} · ${label}`,
+        assessment.reason, `photo-advice-${photo.id}`);
+      if (inlineReason) why.classList.add('photo-reason-inline');
+      heading.append(why);
+    }
     info.append(heading, actions);
   }
   const imageError = node('span', 'Preview unavailable. Try opening it in Immich.', 'p-muted');
@@ -75,6 +80,7 @@ export function photoCard(
     if (readOnly) return;
     for (const button of info.querySelectorAll('[data-choice]'))
       button.setAttribute('aria-pressed', String(button.dataset.choice === outcome()));
+    card.classList.toggle('is-skipped', outcome() === 'reviewed');
     card.classList.toggle('batch-selected', selected()); checkbox.checked = selected();
   };
   card.syncSelection();
@@ -126,13 +132,12 @@ export function activityIndicator(phase, title) {
   return indicator;
 }
 
-export function groupCard(group, open, { decide, select, selected = false, decided = false, label = 'Photo' } = {}) {
+export function groupCard(group, open, { decide, keepSuggestions, select, selected = false, decided = false, label = 'Photo' } = {}) {
   const card = node('article', undefined, 'group-card');
   card.dataset.groupId = group.id;
   const photo = group.photos[0];
   const cover = node('button', undefined, 'cover');
   cover.type = 'button';
-  const coverLabel = group.memberCount > 1 ? `Compare ${group.memberCount} photos: ${photo.caption || label}` : `View ${photo.caption || label}`;
   const img = node('img'); img.src = thumbnail(photo.id); img.alt = ''; img.loading = 'lazy';
   const marker = node('span', undefined, 'status-marker');
   cover.append(img, marker);
@@ -148,16 +153,21 @@ export function groupCard(group, open, { decide, select, selected = false, decid
   meta.append(date);
   caption.append(meta);
   const actions = node('div', undefined, 'card-actions');
+  const coverWrap = node('div', undefined, 'cover-wrap');
+  coverWrap.append(cover);
+  let strip, keepButton, shownSuggestion;
   if (group.memberCount > 1) {
     card.classList.add('is-stack');
-    const strip = node('button', undefined, 'stack-strip');
+    strip = node('button', undefined, 'stack-strip');
     strip.type = 'button'; strip.setAttribute('aria-label', `Compare ${group.memberCount} photos`);
-    for (const member of group.photos.slice(0, 3)) {
-      const preview = node('img'); preview.src = thumbnail(member.id); preview.alt = ''; preview.loading = 'lazy';
-      strip.append(preview);
-    }
-    if (group.memberCount > 3) strip.append(node('span', `+${group.memberCount - 3}`));
     strip.onclick = event => { event.stopPropagation(); open(group); }; caption.prepend(strip);
+    keepButton = node('button', '', 'p-btn stack-accept');
+    keepButton.type = 'button'; keepButton.hidden = true;
+    keepButton.onclick = event => { event.stopPropagation(); if (shownSuggestion) keepSuggestions?.(group, shownSuggestion); };
+    for (const type of ['keydown', 'keyup']) keepButton.addEventListener(type, event => {
+      if (['Enter', ' '].includes(event.key) && (event.repeat || event.ctrlKey || event.metaKey || event.altKey)) event.preventDefault();
+    });
+    coverWrap.append(keepButton);
   } else {
     for (const [value,text,title] of choices) {
       const button = node('button', text, `p-btn${value === 'favorite' ? ' gold' : value === 'reject' ? ' danger' : ''}`);
@@ -176,6 +186,36 @@ export function groupCard(group, open, { decide, select, selected = false, decid
   // in the photo count or moving descriptions, dates and controls.
   card.updateStatus = (patch = {}) => {
     mergeStatus(group, patch);
+    if (patch.photos) group.photos = patch.photos;
+    if (Object.hasOwn(patch, 'suggestedCover')) group.suggestedCover = patch.suggestedCover;
+    shownSuggestion = decided ? null : gridSuggestion(group);
+    const displayPhoto = shownSuggestion && group.suggestedCover?.id === shownSuggestion.keeperIds[0] ? group.suggestedCover : photo;
+    const coverLabel = group.memberCount > 1 ? `Compare ${group.memberCount} photos: ${displayPhoto.caption || label}` : `View ${displayPhoto.caption || label}`;
+    if (img.getAttribute('src') !== thumbnail(displayPhoto.id)) img.src = thumbnail(displayPhoto.id);
+    description.textContent = description.title = displayPhoto.caption || '';
+    if (strip) {
+      const others = group.photos.filter(p => !shownSuggestion || p.id !== displayPhoto.id).slice(0, 3);
+      const signature = JSON.stringify([others.map(p => p.id), Boolean(shownSuggestion)]);
+      if (strip.dataset.signature !== signature) {
+        strip.dataset.signature = signature;
+        strip.replaceChildren(...others.map(member => {
+          const preview = node('img'); preview.src = thumbnail(member.id); preview.alt = ''; preview.loading = 'lazy'; return preview;
+        }));
+        const extra = group.memberCount - others.length - (shownSuggestion ? 1 : 0);
+        if (extra > 0) strip.append(node('span', `+${extra}`));
+      }
+      keepButton.hidden = !shownSuggestion;
+      if (shownSuggestion) {
+        const count = shownSuggestion.keeperIds.length;
+        const star = node('span', '★', 'keeper-star-icon'); star.setAttribute('aria-hidden', 'true');
+        keepButton.replaceChildren(`Keep ${count} `, star);
+        keepButton.title = `Keep ${count} suggested ${count === 1 ? 'photo' : 'photos'} and skip the other ${group.memberCount - count}.` +
+          (group.photoReferee.coverage === 'within-batches' ? ' Photos were compared in separate batches.' : '') +
+          (group.photoReferee.checkCoverage === 'incomplete' ? ' Stack checking finished incomplete.' : '') +
+          (group.photoReferee.checkCoverage === 'unchecked-size' ? ' Stack not checked: too large.' : '');
+        keepButton.setAttribute('aria-label', keepButton.title);
+      }
+    }
     const status = stackStatus(group, { decided });
     cover.setAttribute('aria-label', status?.word ? `${status.word}. ${coverLabel}` : coverLabel);
     const badge = badgeNode(status), star = keeperStar(status?.keepers);
@@ -190,7 +230,7 @@ export function groupCard(group, open, { decide, select, selected = false, decid
   };
   card.updateStatus();
   cover.onclick = () => open(group);
-  card.append(cover, caption);
+  card.append(coverWrap, caption);
   // The article itself remains a convenient programmatic entry point; child
   // actions never bubble into opening a second interaction.
   card.onclick = event => {

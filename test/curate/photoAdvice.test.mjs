@@ -3,9 +3,40 @@ import assert from 'node:assert/strict';
 import { initialPhotoChoices, photoAssessment, photoAdviceSummary } from '../../public/curate/photo-advice.js';
 import { stackStatus } from '../../public/curate/stack-status.js';
 import { photoRefereeActivity } from '../../public/curate/referee-status.js';
+import { gridSuggestion, suggestionMatches, nextActionLabel } from '../../public/curate/suggestions.js';
 
 const photos = ['a', 'b', 'c'].map(id => ({ id, state: 'undecided' }));
 const advice = { state: 'complete', canApplyAll: true, keeperIds: ['a', 'c'], coverage: 'whole-group', checkCoverage: 'checked' };
+
+test('a grid shortcut requires the same complete applicable advice and pending human scope', () => {
+  const shown = { key: 'snapshot', keeperIds: ['a', 'c'] };
+  const photoReferee = { ...advice, suggestion: shown };
+  const group = { memberCount: 3, photoReferee };
+  const comparison = { ids: ['a', 'b', 'c'], photos, photoReferee, photoRecommendations: advice };
+  assert.deepEqual(gridSuggestion(group), shown);
+  assert.equal(suggestionMatches(shown, comparison), true);
+  for (const patch of [{ state: 'partial' }, { state: 'waiting' }, { canApplyAll: false }, { unavailableReason: 'stack-pending' }, { suggestion: null }])
+    assert.equal(gridSuggestion({ ...group, photoReferee: { ...photoReferee, ...patch } }), null);
+  assert.equal(gridSuggestion({ ...group, similarity: { state: 'updated' } }), null);
+  assert.equal(gridSuggestion({ ...group, updated: true }), null);
+  assert.equal(gridSuggestion({ ...group, memberCount: 1 }), null);
+  for (const patch of [
+    { updated: true }, { photoRecommendations: { ...advice, state: 'partial' } },
+    { photoRecommendations: { ...advice, canApplyAll: false } },
+    { photoRecommendations: { ...advice, unavailableReason: 'stack-pending' } },
+    { photoReferee: { ...photoReferee, suggestion: { ...shown, key: 'changed' } } },
+    { photoRecommendations: { ...advice, keeperIds: ['a', 'b'] } },
+    { photos: [...photos.slice(0, 2), { id: 'c', state: 'rejected' }] },
+    { ids: ['a', 'b'] },
+  ]) assert.equal(suggestionMatches(shown, { ...comparison, ...patch }), false);
+});
+
+test('next action describes the human draft without conflating favorite, skip and rejection', () => {
+  assert.equal(nextActionLabel({ a: 'favorite', b: 'approve', c: 'reviewed' }), 'Keep 2 · Next');
+  assert.equal(nextActionLabel({ a: 'reviewed', b: 'reviewed' }), 'Skip all · Next');
+  assert.equal(nextActionLabel({ a: 'reject', b: 'reviewed' }), 'Save · Next');
+  assert.equal(nextActionLabel({}), 'Save · Next');
+});
 
 test('only complete applicable advice seeds a new draft, including zero and multiple keepers', () => {
   assert.deepEqual(initialPhotoChoices({ photos, photoRecommendations: advice }), { a: 'approve', b: 'reviewed', c: 'approve' });

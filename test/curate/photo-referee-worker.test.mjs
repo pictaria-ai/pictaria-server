@@ -85,6 +85,13 @@ for (const keepers of [[], ['p2'], ['p1', 'p3', 'p4']]) test(`background saves $
   assert.equal(f.curate.page(page.viewId).refereeProgress.photo.remaining, 0);
   const comparison = f.curate.comparison(page.viewId, page.groups[0].id);
   assert.deepEqual(comparison.photoRecommendations.keeperIds, f.advice.keeperIds);
+  assert.deepEqual(page.groups[0].photoReferee.suggestion, comparison.photoReferee.suggestion);
+  assert.equal(page.groups[0].suggestedCover?.id, f.advice.keeperIds[0]);
+  assert.equal(page.groups[0].photos[0].id, f.group.ids[0], 'cover does not alter the chronological anchor');
+  if (keepers.length) {
+    assert.deepEqual(page.groups[0].photoReferee.suggestion.keeperIds, f.advice.keeperIds);
+    assert.equal(typeof page.groups[0].photoReferee.suggestion.key, 'string');
+  } else assert.equal(page.groups[0].photoReferee.suggestion, undefined);
   assert.doesNotMatch(JSON.stringify(comparison.photoRecommendations), /requestKey|inputKey|PRIVATE|http:/);
   f.config.curateKeeperRefereeEnabled = false; await f.run(); assert.equal(f.advice.state, 'complete');
 }));
@@ -509,9 +516,11 @@ test('late Stack Referee work blocks queued Photo Referee preparation and in-fli
 
 test('a newly pending check disables application of earlier recommendations', async () => fixture(async f => {
   await f.run(); f.advance(); await f.run(); assert.equal(f.advice.canApplyAll, true);
+  assert.ok(f.curate.photoReferee.status(f.group).suggestion);
   f.config.curateStackRefereeEnabled = true;
   f.curate.stackReferee.status = () => ({ state: 'waiting' });
   assert.equal(f.advice.canApplyAll, false); assert.equal(f.advice.keeperIds.length, 1);
+  assert.equal(f.curate.photoReferee.status(f.group).suggestion, undefined);
 }));
 
 test('actual Stack Referee partitions feed Photo Referee only after publication, with no calls for singles', async () => fixture(async f => {

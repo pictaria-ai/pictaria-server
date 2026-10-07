@@ -175,6 +175,10 @@ export class PhotoRefereeWorker {
     const saved = this.saved(group), advice = saved && this.recommendations(group);
     if (advice?.state === 'complete') return { state: 'complete', keepers: advice.keeperIds.length, canApplyAll: advice.canApplyAll, coverage: advice.coverage,
       checkCoverage: advice.checkCoverage, ...(advice.unavailableReason ? { unavailableReason: advice.unavailableReason } : {}),
+      ...(advice.canApplyAll && !advice.unavailableReason && advice.keeperIds.length ? { suggestion: {
+        keeperIds: group.ids.filter(id => advice.keeperIds.includes(id)),
+        key: fingerprint([group.ids, advice.keeperIds, saved.photoReferee.restoredMaterial ?? saved.photoReferee.snapshot.material]),
+      } } : {}),
       completed: advice.batches.length, total: advice.batches.length };
     if (!this.enabled()) return { state: 'off' };
     if (!this.curate.current?.byId.has(group.id)) return { state: 'updated' };

@@ -1,10 +1,11 @@
 import { savedOutcome } from './photos.js';
+import { applicableAdvice } from './suggestions.js';
 
 // Suggestions seed a new, untouched pending draft only. A status poll never
 // calls this function; Save remains an explicit human decision for every photo.
 export function initialPhotoChoices(comparison, { decided = false } = {}) {
   const advice = comparison.photoRecommendations;
-  const eligible = !decided && advice?.state === 'complete' && advice.canApplyAll === true && !comparison.updated;
+  const eligible = !decided && applicableAdvice(comparison);
   const keepers = new Set(eligible ? advice.keeperIds : []);
   return Object.fromEntries(comparison.photos.map(photo =>
     [photo.id, savedOutcome(photo) || (keepers.has(photo.id) ? 'approve' : 'reviewed')]));

@@ -168,13 +168,13 @@
           </section>
         </div>
         <footer class="dialog-foot">
-          <span class="draft-summary"><span class="p-muted">Draft</span> <span id="selection-count" aria-live="polite"></span></span>
+          <span class="draft-summary"><span class="p-muted">Your picks</span> <span id="selection-count" aria-live="polite"></span></span>
           <div id="comparison-receipt" class="comparison-receipt" role="status" hidden>
             <span id="comparison-receipt-text"></span>
             <button id="comparison-undo" class="p-btn">Undo last save (Z)</button>
           </div>
           <div class="save-actions"><button id="apply" class="p-btn" disabled>Save</button>
-          <button id="apply-next" class="p-btn primary" disabled>Save &amp; next</button></div>
+          <button id="apply-next" class="p-btn primary" disabled>Save · Next</button></div>
         </footer>
       </div>
     </dialog>
@@ -192,6 +192,7 @@
             <button class="p-btn" data-close="photo-view">Close</button>
           </div>
           <span id="photo-position" class="p-muted"></span>
+          <small id="photo-reference-count" class="p-muted" hidden></small>
           <h2 id="photo-title" class="sr-only">Photo</h2>
           <p id="photo-date" class="p-muted"></p>
           <div id="photo-error" role="alert" hidden></div>
@@ -227,6 +228,7 @@
           <p id="photo-caption"></p>
           <p id="photo-score" class="p-muted"></p>
           <p id="photo-model" class="p-muted" hidden></p>
+          <p id="photo-referee-model" class="p-muted" hidden></p>
           <p id="photo-assessment" hidden></p>
           <h3>Tags</h3>
           <div id="photo-tags" class="tags"></div>

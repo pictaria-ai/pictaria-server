@@ -26,6 +26,26 @@ PIC-371's shared badges rather than introducing another status scheme. Synthetic
 tests cover the production availability gates, saved-result UI and transports;
 they do not establish real-provider quality or runtime acceptance.
 
+## Accepting suggestions in Curate Preview
+
+Complete applicable advice with at least one suggested photo exposes **Keep N ★**
+on the grid. It is an explicit human action: Yes for the suggested members and
+Skip for the rest, through the existing guarded operation, retry receipt and Undo.
+The page returns chronological suggested IDs and an opaque snapshot key covering
+membership, recommendations and the accepted material (including restored Undo
+material). Before saving, the browser loads the complete comparison and verifies
+that the displayed snapshot is still applicable, identical and entirely pending.
+Changed advice opens comparison for manual review. Normal server scope/material
+checks still protect operation creation and application; this adds no new AI call
+or automatic decision mode.
+
+Partial/mixed, stale, pending and zero-suggestion advice stays manual. Older valid
+saved advice remains eligible; turning the role off does not discard it. A saved
+suggestion may become the grid cover and initial comparison focus, without
+changing capture-time ordering. Inline reasons and lightbox attribution remain
+separate from human choices and Enrich metadata. See the
+[review flow](CURATE-PREVIEW.md#review-flow) for controls and reference counts.
+
 ## Quality baseline and response
 
 Prompt revision 2 of `curate_photo_referee_v1` preserves the owner-accepted

@@ -67,6 +67,8 @@ for (const { keepers, legacyGrouped } of [{ keepers: [] }, { keepers: ['p2', 'p4
     'Photo Referee must not create additional singles');
   assert.equal(await page.evaluate('document.querySelector(".is-stack .keeper-star")?.textContent ?? null'), keepers.length ? '★2' : null);
   await page.evaluate(`const fetchBefore=fetch; window.fetch=async(...a)=>{const r=await fetchBefore(...a);if(String(a[0]).endsWith('/comparisons'))window.__comparison=await r.clone().json();return r;}`);
+  assert.equal(await page.evaluate('!document.querySelector(".is-stack .stack-accept").hidden'), keepers.length > 0);
+  assert.equal(await page.evaluate('document.querySelector(".is-stack .cover img").src.split("/").pop()'), fixture.id(keepers.length ? 2 : 1));
   await click('.is-stack .cover');
   await page.waitFor('document.querySelectorAll("#photos .photo-card").length===4 && !document.querySelector("#apply").disabled');
   assert.deepEqual(await outcomes(), keepers.length ? ['reviewed', 'approve', 'reviewed', 'approve'] : Array(4).fill('reviewed'), await page.evaluate('JSON.stringify([__comparison.photoReferee,__comparison.similarity,__comparison.photoRecommendations.unavailableReason,__comparison.route])'));
@@ -88,8 +90,13 @@ for (const { keepers, legacyGrouped } of [{ keepers: [] }, { keepers: ['p2', 'p4
   await click('#comparison-similarity .why-trigger');
   assert.match(await text('#stack-reason'), /Synthetic vision/);
   await page.send('Input.dispatchKeyEvent', { type: 'keyDown', key: 'Escape' });
+  await page.evaluate(`const captionFetch=fetch;window.fetch=(...args)=>String(args[0]).includes('/api/enrich/caption') ? Promise.resolve(new Response(JSON.stringify({caption:'Enriched caption',model:'Enrich model',provider:'Synthetic'}))) : captionFetch(...args)`);
   await click(`#photos [data-photo-id="${fixture.id(2)}"] .photo-image`);
   await page.waitFor('document.querySelector("#photo-view").open && document.querySelector("#photo-loading").hidden');
+  await page.waitFor('document.querySelector("#photo-model").textContent.includes("Enrich model")');
+  assert.match(await text('#photo-referee-model'), /Photo Referee · Synthetic vision/);
+  assert.equal(await text('#photo-position'), '2 of 4 photos');
+  assert.equal(await text('#photo-reference-count'), '1 already kept · reference only');
   assert.match(await text('#photo-assessment'), /<img src=x onerror=alert\(1\)> Natural expression/);
   assert.equal(await page.evaluate('document.querySelector("#photo-assessment img")'), null);
   await click('#back-comparison');
@@ -161,8 +168,8 @@ for (const keepers of [[], ['p2', 'p4']]) test(
     await page.waitFor('document.querySelector(".is-stack") && document.querySelector(".is-stack").dataset.badge!=="checking" && !document.querySelector("#refresh").disabled', { timeoutMs: 35000 });
     await click('.is-stack .cover');
     await page.waitFor('document.querySelectorAll("#photos .photo-card").length===4 && !document.querySelector("#apply-next").disabled');
-    assert.equal(await page.evaluate('document.activeElement===document.querySelector("#photos .photo-card")'), true,
-      'opening the comparison automatically focuses its first card');
+    assert.equal(await page.evaluate('document.activeElement.dataset.photoId'), fixture.id(keepers.length ? 2 : 1),
+      'eligible suggestions receive initial focus without reordering photos');
     assert.equal(operations(), 0);
     assert.deepEqual(await page.evaluate('[...document.querySelectorAll("#photos [data-choice][aria-pressed=true]")].map(b=>b.dataset.choice)'),
       keepers.length ? ['reviewed', 'approve', 'reviewed', 'approve'] : Array(4).fill('reviewed'));
@@ -207,3 +214,99 @@ for (const keepers of [[], ['p2', 'p4']]) test(
     assert.equal(fixture.repo.curate.photo(fixture.contextId).state, 'approved');
   },
 );
+
+test('grid suggestions: explicit keyboard acceptance, Undo, stale/partial fallback and phone layout', { timeout: 90000 }, async t => {
+  if (!findChrome()) return t.skip('Chrome required');
+  const track = cleanupAfter(t);
+  const fixture = track(await curatePreviewFixture({ stackSize: 4, singles: 1, metadataReady: true,
+    prepare: data => seedAdvice(data, ['p2', 'p4']) }));
+  const browser = track(await launchChrome()), page = await browser.newPage();
+  const click = selector => page.evaluate(`document.querySelector(${JSON.stringify(selector)}).click()`);
+  const operations = () => fixture.repo.db.prepare('SELECT COUNT(*) n FROM decision_operations').get().n;
+  const ready = () => page.waitFor('document.querySelector(".stack-accept:not([hidden]):not(:disabled)")');
+  const enter = async (autoRepeat = false, modifiers = 0) => {
+    await page.send('Input.dispatchKeyEvent', { type: 'keyDown', key: 'Enter', code: 'Enter', windowsVirtualKeyCode: 13, text: '\r', unmodifiedText: '\r', autoRepeat, modifiers });
+    await page.send('Input.dispatchKeyEvent', { type: 'keyUp', key: 'Enter', code: 'Enter', windowsVirtualKeyCode: 13, modifiers });
+  };
+  await page.navigate(`${fixture.base}/curate-preview.html`);
+  await page.waitFor('document.querySelector(".gate-backdrop input")');
+  await page.evaluate('document.querySelector(".gate-backdrop input").value="smoke-secret";document.querySelector(".gate-backdrop button").click()');
+  await ready();
+  assert.equal(await page.evaluate('document.querySelector("#count").textContent'), '1 stack · 1 single photo left');
+  assert.deepEqual(await page.evaluate('[...document.querySelectorAll(".is-stack .stack-strip img")].map(i=>i.src.split("/").pop())'), [1,3,4].map(fixture.id));
+  await page.evaluate('document.querySelector(".is-stack .cover").focus()');
+  await enter();
+  await page.waitFor('document.querySelector("#comparison").open && !document.querySelector("#apply").disabled');
+  assert.equal(operations(), 0, 'Enter on cover opens, never accepts advice');
+  assert.equal(await page.evaluate('document.activeElement.dataset.photoId'), fixture.id(2));
+  assert.deepEqual(await page.evaluate('[...document.querySelectorAll("#photos .photo-card")].map(c=>c.dataset.photoId)'), [1,2,3,4].map(fixture.id));
+  assert.equal(await page.evaluate('document.querySelectorAll("#photos .photo-reason-inline").length'), 2);
+  assert.equal(await page.evaluate('document.querySelector("#apply-next").textContent'), 'Keep 2 · Next');
+  await click('#select-all'); await click('#comparison-bulk [data-comparison-bulk="reviewed"]');
+  assert.equal(await page.evaluate('document.querySelector("#apply-next").textContent'), 'Skip all · Next');
+  await click(`#photos [data-photo-id="${fixture.id(1)}"] [data-choice=reject]`);
+  assert.equal(await page.evaluate('document.querySelector("#apply-next").textContent'), 'Save · Next');
+  await click(`#photos [data-photo-id="${fixture.id(2)}"] [data-choice=favorite]`);
+  assert.equal(await page.evaluate('document.querySelector("#apply-next").textContent'), 'Keep 1 · Next');
+  await click('[data-close=comparison]');
+  await ready();
+  await page.evaluate('document.querySelector(".stack-accept").focus()');
+  await enter(true); await enter(false, 2);
+  assert.equal(operations(), 0, 'repeated or modified shortcut keys do not decide');
+  await enter();
+  await page.waitFor('!document.querySelector(".is-stack") && !document.querySelector("#undo").hidden && !document.querySelector("#undo").disabled');
+  assert.equal(operations(), 1);
+  const tags = fixture.repo.loadAssetTagsFor([1,2,3,4].map(fixture.id));
+  for (const n of [1,2,3,4]) {
+    assert.equal(tags[fixture.id(n)].includes('frame/eligible'), n === 2 || n === 4);
+    assert.equal(tags[fixture.id(n)].includes('frame/reviewed'), n === 1 || n === 3);
+  }
+  assert.equal(fixture.repo.curate.photo(fixture.contextId).state, 'approved');
+  await click('#undo'); await ready();
+  assert.equal(operations(), 2);
+  await page.evaluate(`window.__variant=''; const originalFetch=fetch; window.fetch=async(...args)=>{
+    const response=await originalFetch(...args);
+    if (!String(args[0]).endsWith('/comparisons') || !window.__variant) return response;
+    const body=await response.json();
+    if (__variant==='changed') body.photoReferee.suggestion.key='new-snapshot';
+    if (__variant==='partial') { body.photoRecommendations.state='partial'; body.photoRecommendations.canApplyAll=false; }
+    if (__variant==='waiting') { body.photoRecommendations.canApplyAll=false; body.photoRecommendations.unavailableReason='stack-pending'; }
+    return new Response(JSON.stringify(body),{status:response.status,headers:response.headers});
+  }`);
+  for (const variant of ['changed','partial','waiting']) {
+    await page.evaluate(`window.__variant=${JSON.stringify(variant)}`);
+    await click('.stack-accept');
+    await page.waitFor('document.querySelector("#comparison").open && !document.querySelector("#apply").disabled');
+    assert.equal(operations(), 2, `${variant} advice requires manual review`);
+    assert.match(await page.evaluate('document.querySelector("#comparison-state").textContent'), /Suggestions changed/);
+    if (variant !== 'changed') {
+      assert.equal(await page.evaluate('document.activeElement.dataset.photoId'), fixture.id(1));
+      assert.equal(await page.evaluate('document.querySelectorAll("#photos [data-choice=approve][aria-pressed=true]").length'), 0);
+      assert.equal(await page.evaluate('document.querySelectorAll("#photos .photo-reason-inline").length'), 0);
+    }
+    await click('[data-close=comparison]'); await ready();
+  }
+  await page.evaluate('window.__variant=""');
+  for (const [width, theme] of [[1200,'light'],[390,'light'],[390,'dark']]) {
+    await page.send('Emulation.setDeviceMetricsOverride', { width, height: 844, deviceScaleFactor: 1, mobile: width < 600 });
+    await page.evaluate(`document.documentElement.dataset.theme=${JSON.stringify(theme)}`);
+    await page.waitFor('document.querySelector(".stack-accept").getBoundingClientRect().width>0');
+    assert.ok(await page.evaluate(`document.documentElement.scrollWidth <= innerWidth + 1`));
+    const bounds = await page.evaluate(`(()=>{const b=document.querySelector('.stack-accept').getBoundingClientRect();return {left:b.left,right:b.right,width:b.width,height:b.height}})()`);
+    assert.ok(bounds.left >= 0 && bounds.right <= width && bounds.height >= 36, JSON.stringify(bounds));
+    if (process.env.PICTARIA_TEST_SCREENSHOTS) {
+      const shot=await page.send('Page.captureScreenshot',{format:'png'});
+      writeFileSync(join(process.env.PICTARIA_TEST_SCREENSHOTS, `suggestion-grid-${width}-${theme}.png`),Buffer.from(shot.data,'base64'));
+    }
+    await click('.is-stack .cover');
+    await page.waitFor('document.querySelector("#comparison").open && !document.querySelector("#apply").disabled');
+    assert.equal(await page.evaluate('document.activeElement.dataset.photoId'), fixture.id(2));
+    assert.ok(await page.evaluate(`(()=>{const c=document.activeElement.getBoundingClientRect();return c.bottom>0 && c.top<innerHeight})()`), 'suggested card visible on phone');
+    assert.ok(await page.evaluate(`document.querySelector('#comparison').scrollWidth<=document.querySelector('#comparison').clientWidth+1`));
+    if (process.env.PICTARIA_TEST_SCREENSHOTS) {
+      const shot=await page.send('Page.captureScreenshot',{format:'png'});
+      writeFileSync(join(process.env.PICTARIA_TEST_SCREENSHOTS, `suggestion-comparison-${width}-${theme}.png`),Buffer.from(shot.data,'base64'));
+    }
+    await click('[data-close=comparison]'); await ready();
+  }
+});

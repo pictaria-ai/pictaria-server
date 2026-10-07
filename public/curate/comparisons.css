@@ -607,6 +607,10 @@ dialog::backdrop {
 .group-card { position: relative; isolation: isolate; overflow: visible; display: flex; flex-direction: column; }
 .group-card .cover { padding: 0; border: 0; width: 100%; overflow: hidden; border-radius: 11px 11px 0 0; display: block; }
 .group-card .cover:focus-visible { outline: 3px solid var(--p-accent); outline-offset: -3px; }
+.cover-wrap { position: relative; }
+.stack-accept { position: absolute; right: 10px; bottom: 10px; min-height: 36px; background: var(--p-panel); box-shadow: 0 1px 6px #0003; }
+.stack-accept:focus-visible { outline: 3px solid var(--p-accent); outline-offset: 2px; }
+.stack-accept .keeper-star-icon { color: var(--p-gold); }
 .group-card.is-stack::before, .group-card.is-stack::after {
   content: ''; position: absolute; z-index: -1; pointer-events: none;
   height: 14px; border: 1px solid var(--p-strong-line, var(--p-line));
@@ -772,6 +776,11 @@ dialog::backdrop {
 .photo-label { display: inline-block; color: var(--p-muted); font-size: 12px; padding: 2px 6px; border-radius: 4px; }
 .photo-card:focus-within .photo-label, .photo-card:focus-visible .photo-label { color: var(--p-accent-ink); background: var(--p-accent); }
 .photo-info-heading .why-trigger { min-height: 28px; padding: 2px 4px; }
+.photo-label { flex-shrink: 0; }
+.photo-reason-inline { min-width: 0; flex: 1; }
+.photo-reason-inline .why-trigger { overflow: hidden; white-space: nowrap; text-overflow: ellipsis; text-align: left; width: 100%; }
+.photo-card.is-skipped .photo-info { background: var(--p-panel-2); }
+#photo-reference-count { display: block; }
 #photo-advice-summary { font-size: 12px; margin: 0; }
 #photo-advice-notice { font-size: 12px; margin: 4px 0 10px; }
 #photo-assessment { white-space: pre-wrap; }
@@ -849,6 +858,7 @@ dialog::backdrop {
 .status-trigger:hover .stack-badge { border-color: var(--p-muted); }
 
 @media (max-width: 600px) {
+  .stack-accept { min-height: 44px; }
   #comparison .dialog-head { gap: 8px; padding: 8px 12px; }
   #comparison .dialog-head h2 { font-size: 15px; }
   .compare-heading-actions { gap: 6px; }

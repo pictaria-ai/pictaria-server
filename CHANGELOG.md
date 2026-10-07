@@ -7,6 +7,16 @@ All notable changes to Pictaria Server are documented here. This project follows
 
 ### Development
 
+- Add **Keep N ★** to eligible Curate Preview stack cards (PIC-116): one human
+  action accepts saved Photo Referee suggestions and skips the rest, using the
+  existing guarded decision and Undo. Recheck the displayed suggestion snapshot
+  before saving; changed advice opens manual comparison. Suggested photos become
+  covers and initial comparison focus without reordering stacks or photos.
+  Show suggested reasons inline, label the footer **Your picks**, describe the
+  primary button as **Keep N · Next**, **Skip all · Next** or **Save · Next**, and
+  show remaining counts across the current filters. Keep Photo Referee attribution
+  separate from Enrich in the lightbox, and count already-kept references separately.
+
 - Replace Curate Preview's permanent Refresh and More buttons with separate
   Stack Referee and Photo Referee status rows (PIC-116 / PIC-371). Counts cover
   all pending stacks, including outside the current filters/page and while in
