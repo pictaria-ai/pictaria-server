@@ -15,7 +15,7 @@ test('Enrich notice follows live status and card status changes keep dates witho
     await page.waitFor('document.querySelector(".gate-backdrop input")');
     await page.evaluate('document.querySelector(".gate-backdrop input").value="smoke-secret";document.querySelector(".gate-backdrop button").click()');
     await page.waitFor('document.querySelector(".group-card") && !document.querySelector("#refresh").disabled');
-    assert.equal(await page.evaluate('document.querySelector("#enrich-note").hidden'), true);
+    assert.equal(await page.evaluate('document.querySelector(".status-enrich").hidden'), true);
     // Exercise run start/stop through the normal four-second status poll,
     // without inference or library writes. The HTTP test checks the runner source.
     await page.evaluate(`window.enrichActive=false; const nativeFetch=window.fetch;
@@ -33,9 +33,9 @@ test('Enrich notice follows live status and card status changes keep dates witho
     })`);
     const before = await header();
     await page.evaluate('window.enrichActive=true');
-    await page.waitFor('!document.querySelector("#enrich-note").hidden && document.querySelector("#check-activity .activity-indicator")');
+    await page.waitFor('!document.querySelector(".status-enrich").hidden && document.querySelector("#curate-status[data-phase=grouping]")');
     assert.deepEqual(await header(), before, 'starting Enrich must not move shared controls or the grid');
-    assert.equal(await page.evaluate(`document.querySelector('#enrich-note').getBoundingClientRect().right <= document.querySelector('#check-activity').getBoundingClientRect().left`), true);
+    assert.match(await page.evaluate('document.querySelector(".status-enrich").textContent'), /Enrich is running/);
 
     // Render real card components at the minimum grid width. Synthetic photos
     // cover both singles and stacks, independently of backend check timing.
@@ -86,7 +86,7 @@ test('Enrich notice follows live status and card status changes keep dates witho
       writeFileSync(join(process.env.PICTARIA_TEST_SCREENSHOTS, 'curate-enrich-progress-mobile.png'), Buffer.from(data,'base64'));
     }
     await page.evaluate('window.enrichActive=false');
-    await page.waitFor('document.querySelector("#enrich-note").hidden');
+    await page.waitFor('document.querySelector(".status-enrich").hidden');
     assert.deepEqual(await header(), mobile, 'finishing Enrich must not move the mobile controls or grid');
     assert.equal(fixture.repo.db.prepare('SELECT COUNT(*) n FROM decision_operations').get().n,0);
   });

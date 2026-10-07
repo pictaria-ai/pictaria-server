@@ -14,7 +14,7 @@ async function setup(t) {
     },
   }));
   const browser = track(await launchChrome()), page = await browser.newPage();
-  const click = selector => page.evaluate(`document.querySelector(${JSON.stringify(selector)}).click()`);
+  const click = selector => page.evaluate(`(()=>{const button=document.querySelector(${JSON.stringify(selector)}); const menu=button.closest("details.photo-options"); if(menu) menu.open=true; button.click();})()`);
   await page.navigate(`${fixture.base}/curate-preview.html`);
   await page.waitFor('document.querySelector(".gate-backdrop input")');
   await page.evaluate('document.querySelector(".gate-backdrop input").value="smoke-secret";document.querySelector(".gate-backdrop button").click()');

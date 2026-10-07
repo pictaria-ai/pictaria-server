@@ -47,7 +47,7 @@ test('a kept-apart single and suggested keepers show in the grid, the open stack
   assert.equal(await text('.is-stack .stack-count'), '4 photos');
   assert.equal(await text('.group-card:not(.is-stack) .p-chip'), null);
   assert.equal(await page.evaluate('document.querySelector(".group-card:not(.is-stack) .stack-badge").getAttribute("aria-label")'), 'Kept apart');
-  assert.equal(await text('#refinement'), '', 'checked and kept-apart cards need no header count');
+  assert.equal(await page.evaluate('document.querySelector("#refinement")'), null, 'no duplicate grid status count');
 
   await click('.is-stack .cover');
   await page.waitFor('document.querySelectorAll("#photos .photo-card").length===4 && document.querySelector("#comparison-similarity .stack-badge")');

@@ -35,28 +35,20 @@ in this preview, its proposed partitions are never saved.
 
 ## Review flow
 
-The header has three stable rows: Pending/Decided with grouping activity and
-separate Stack Referee / Photo Referee status rows;
-All/Stacks/Singles on the left with date order, category and Search on the right;
-then selection on the left with remaining counts and active background progress
-aligned together on the right. The header checkbox appears in Singles and Decided;
-All still allows checking individual single-photo cards. Hiding Pending-only
-filters or the selection checkbox does not move shared controls or the photo grid.
-The page reserves scrollbar space to keep controls aligned between long and short views.
-On narrow screens, **Filters** reveals date order, category and Search controls.
+The header has two stable rows: Pending/Decided with one activity chip at the
+right, then remaining counts, All/Stacks/Singles, date order, category and Search.
+The header checkbox beside the counts appears in Singles and Decided; All still
+allows checking individual single-photo cards. Its space is reserved when hidden.
+The page reserves scrollbar space to keep controls aligned between long and short
+views. On narrower screens, **Filters** reveals date order, category and Search;
+phone counts sit above those controls. The remembered sort is unchanged.
 Pending counts include all remaining stacks/singles matching the current filters,
-not just the loaded cards. Filtered counts say **in this view**; hover for loaded
-counts. Decided retains **X of Y shown**.
-Counts and progress each keep their own line, and the selection slot remains
-reserved in All and Stacks. Desktop keeps filters visible. The remembered sort is not changed by collapsing them.
+not just loaded cards. Filtered counts say **in this view**; hover for loaded counts.
+Decided retains **X of Y shown**.
 
-While Enrich is running, a red notice to the left of the header spinner says
-stacks may change as photos are added. It follows the live run state through
-the existing status updates, without needing Refresh or an additional poll.
-The notice stays on the lower of two reserved lines, with temporary update text
-above it, so neither message shifts the other. On narrow screens, these lines
-sit below the header controls and use the shorter **Enrich running — stacks may
-change.** wording, readable without a hover tooltip.
+The activity chip's popover includes a neutral note while Enrich is running:
+new photos may still join stacks. This follows the existing status poll; it adds
+neither a separate request nor an extra header line.
 
 Search updates after a short typing pause and keeps focus and cursor position
 while loading results. Text entered during an active request becomes the next
@@ -112,17 +104,16 @@ search draft has not been applied.
   Changing sort resets pagination and opens a fresh view. Background arrivals
   appear automatically when browsing pauses, preserving date order and your place.
   Open comparisons and bulk selections keep their current view.
-- Open a stack and use **Yes / Skip / Fav / No** beneath each photo. Click an
-  image to enlarge it. These choices remain a draft until **Save** or **Keep N · Next**; the
-  footer counts each outcome separately. Unmarked photos default to Skip, which
-  is neither deletion nor Never show.
-  Selected choices use the same subtle fills as Decided: teal for Yes, gray for
-  Skip, gold for Fav and red for No, in both the comparison and its lightbox.
-- Stack checkboxes check photos for batch actions independently of their outcome.
-  **Check all** checks all actionable photos; it does not mark them Yes. When any
-  photos are checked, the same four choices appear beside the checked count.
-  Applying one changes only those photos; **Clear checks** clears the checkboxes
-  without undoing any draft choices. Nearby reference photos cannot be checked.
+- Open a stack and use **Keep** beneath each photo. It toggles Yes/Skip; **Fav**
+  also counts as kept. The secondary menu offers Skip, Fav and No. Click an image
+  to enlarge it. These choices remain a draft until **Save** or **Keep N · Next**;
+  the footer counts each outcome separately. Unmarked photos default to Skip,
+  which is neither deletion nor Never show. Singles and Decided retain their
+  existing four-way decision controls.
+- **Select** reveals stack checkboxes and batch controls. **Check all** selects
+  actionable photos without changing their choices. The four batch actions apply
+  only to checked photos. **Clear checks**, or leaving Select mode, clears the
+  batch without undoing draft choices. Nearby reference photos cannot be checked.
 - **Save** returns to the grid. **Keep N · Next** opens the next pending
   comparison after this item's capture-time position, in the current filters and
   date order. It opens a fresh view after the save, so the next comparison uses
@@ -133,8 +124,8 @@ search draft has not been applied.
   Yes and Fav, **Skip all · Next** appears only when every photo is Skip, and
   **Save · Next** covers drafts containing No without any kept photos. It stays
   primary for every combination of outcomes. The compact header reads **Compare stack · N photos**,
-  with the stack status and Close on the right. A second toolbar holds checkbox
-  controls, the recommendation count and **Shortcuts** help. On narrow screens
+  with the stack status and Close on the right. A second toolbar holds **Select**,
+  the recommendation count and **Shortcuts** help; batch controls appear in Select mode. On narrow screens
   the status uses its icon with the full accessible label and explanation.
 - In a comparison, focus a photo using **Left/Right** or **1–9**, then use
   **Y / S / F / N** to mark its draft outcome. **Enter** on the focused card
@@ -142,7 +133,7 @@ search draft has not been applied.
   (including Skip), or when complete, applicable Photo Referee advice has seeded
   **suggested Yes choices**. In that case, Enter on the initially focused card
   confirms the suggested draft. Eligible advice initially focuses the first
-  suggested photo (and brings it into view on a phone) without reordering photos.
+  suggested photo (aligned below the sticky header on a phone, with its controls visible) without reordering photos.
   An untouched all-Skip draft, including one with
   no suggested keepers, cannot be saved by Enter; initial focus or checking boxes
   alone does not enable it. The Save buttons still allow an intentional Skip-all.
@@ -154,7 +145,8 @@ search draft has not been applied.
   uncropped, with decision buttons aligned across mixed orientations. All-landscape
   rows can be shorter; mixed rows retain some neutral space around wider images.
 - In the comparison, the **gold star** alone identifies an AI recommendation;
-  the filled Yes/Skip/Fav/No button identifies the draft choice. A single thin
+  the Keep toggle and a separate check on the photo identify the human draft.
+  Fav and No appear on the secondary menu when selected. A single thin
   accent border and highlighted photo number identify keyboard focus. Checkboxes
   select a batch independently. Repeated per-photo Draft labels are replaced by
   one **Your picks** footer summary. Suggested photos show a one-line reason
@@ -163,14 +155,21 @@ search draft has not been applied.
   Per-photo help, the recommendation count and
   **Shortcuts** open overlays on hover, focus or tap; Escape dismisses the overlay
   first. Photo Referee reasons remain available in full in the lightbox.
-  Their attribution/model are separate from Enrich attribution, so loading a
+  Their attribution/model sit directly below the lightbox photo position, above
+  the choices, and remain separate from Enrich attribution, so loading a
   longer caption cannot overwrite the referee label. The stack position counts
   actionable photos only; already-kept references have their own count and label.
   Partial advice, separate comparisons and incomplete-check notices remain visible.
 - The lightbox follows the production layout: the photo fills the available
   space beside a narrow panel with caption, tags, capture date, enrichment score,
   producing model/profile when available, and an Immich link. On narrow screens
-  the information panel scrolls below the photo.
+  the information panel scrolls below the photo. Stack lightboxes include a
+  horizontal filmstrip with distinct gold AI stars and human checkmarks. Already
+  kept references are labeled separately and remain read-only. **A/B (C)** flips
+  between the current and previously inspected photo in a stable, uncropped image
+  area. It is disabled until another photo has been inspected. Space retains its
+  native button behavior. Singles have neither filmstrip nor A/B control.
+  Mouse choices stay on the current photo; Y/S/F/N keep their mark-and-next behavior.
 - The lightbox stays open while moving between single photos, including after a
   decision or Undo. It keeps the previous image visible until the next image is
   ready, briefly disabling decisions during the handoff. Adjacent images are
@@ -223,59 +222,41 @@ search draft has not been applied.
 - Save acceptance and Immich synchronization are separate. A failed sync can be
   retried without repeating the human decision or invoking AI.
 
-**Load more** only displays additional results; it is no longer needed to get
-those photos checked. The count distinguishes stacks and single photos. Beside
-it, counts of the loaded stacks that are checking, unsure or not fully checked
-use the cards' icons, without shifting the photo grid. One spinner to the left
-of the referee progress rows covers grouping, photo-information refreshes and
-both AI referees across the pending queue. It spins slowly while queued, faster
-while working, and stops when idle or paused (or for reduced-motion preferences).
-Grouping still appears when both AI referees are Off. Its tooltip includes
-**Checking stacks · N remaining** for grouping. This is the overall pending-check queue,
-including photos outside the current page or filters and while browsing Decided.
-It includes queued and in-progress checks; finished incomplete checks leave the
-remaining count. Each check covers a nearby group that may form several stacks,
-so it is not a count of final stack cards. Paused work has an attention
-indicator and a word in the header.
+**Load more** only displays additional results; it is not needed to get those
+photos checked. There is no duplicate loaded-stack status count beside the photo
+counts. The right-aligned activity chip uses a reserved space so updates cannot
+shift the tabs, filters or grid. It has these states:
 
-The compact panel is anchored to the right edge, with fixed columns for each
-referee's label, activity and right-aligned count. There are no progress bars or
-separate referee explanation line. The spinner slot stays on the left even
-when empty, so the counts always reach the same right edge. The Enrich notice
-aligns with the Photo Referee row; ordinary grouping activity uses the reserved
-notice line above it when no page-update message occupies that line. The spinner
-prioritizes active work over queued work, then paused work. Each referee's name
-opens a structured popover with its current status, Remaining, Completed,
-Limited result and Total pending counts, plus scope or limitation notes.
-Disabled roles stay in place in gray with **Off**. Both rows remain visible on
-phones, with activity below each label on the narrowest screens. Geometry stays
-fixed as states and counts change at each screen size.
+- **Picking best photos / Checking stacks · N stacks left** with an accent
+  spinner while a referee is working. The count is the union of unfinished
+  stacks across both referees; a stack needing both is counted once.
+- **Waiting for Enrich / Waiting for AI / Waiting for grouping / Waiting for
+  stack checks · N stacks left** with a quiet clock for queued work. Enrich is
+  named only when it is running and the referee reports a shared-provider wait.
+- **Photo Referee paused / Stack Referee paused / Grouping paused** with an amber
+  indicator when settings, model, provider, preview or grouping problems block
+  work. The popover explains the pause and includes **AI settings**.
+- **Grouping photos…** with a gray spinner for deterministic grouping or photo
+  information refreshes, including when both AI referees are Off.
+- **AI up to date** in quiet gray when enabled referees have no work left.
+  Finished limited checks count as finished, not endlessly pending work. When
+  both roles are Off and grouping is idle, the chip is hidden.
 
-The two referee progress rows count **stacks across the entire pending library**,
-not the displayed cards or the bounded AI request queue. They remain visible in
-Decided and under search, category and All/Stacks/Singles filters. A stack that
-needs several Photo Referee requests still counts once. Singles are excluded;
-Stack Referee also excludes stacks outside its selected scope.
+Hover, focus or tap opens structured rows for Stack Referee and Photo Referee,
+each with status and remaining count. Disabled roles read **Off** only in this
+popover. It also contains limitation details, the Enrich note and scope guidance.
+On phones, the chip shows its icon and count, retaining a full accessible label
+and the same popover. Reduced-motion preferences stop the spinner.
 
-- **N stacks left** covers outstanding work, including work waiting to be
-  discovered by the bounded worker queue. Each row's activity column reads
-  **Comparing photos / Queued** as appropriate.
-- **Awaiting grouping / Awaiting stack check / Waiting for AI** explains
-  prerequisites or shared-provider scheduling; it does not assume Enrich is
-  always the other provider user. **Paused** retains work blocked by settings,
-  provider or preview problems in the remaining count.
-- **Up to date** means no automatic work remains for the current pending stacks.
-  Finished limited/failed checks count as finished, not endless pending work.
-  Hover, focus or tap a referee's name for successful/limited counts and details.
-  **Off** reflects Settings, even if older advice remains visible on cards.
-
-Counts describe that role's current pending-stack scope. They are not lifetime
-completion counts or an ETA: Enrich arrivals, new evidence, splits and human
-decisions can change the totals. Counts say **Counting…** until a current summary exists.
-The server collects a shared, read-only summary in cooperative slices, normally
-at most once every four seconds for unchanged grouping/settings, and sends it
-through the existing status poll. A new grouping/settings generation invalidates
-old counts. It creates no AI calls, new retry work or persisted progress history.
+Referee counts cover **stacks across the entire pending library**, independently
+of filters, pagination or Decided. Several requests for one stack still count
+once. Singles are excluded; Stack Referee excludes stacks outside its scope.
+Counts are not an ETA or lifetime history: arrivals, evidence, splits and human
+decisions change them. Until a current summary exists, the chip says **Checking
+AI status…** instead of claiming completion. The server reuses its shared,
+read-only scan in cooperative slices, normally at most once every four seconds,
+and returns the union count alongside per-role counts. Grouping/settings changes
+invalidate old counts. No AI requests, retry work or persisted history are added.
 
 Cards and comparisons use the [stack status](#stack-status) badges: **Checking**
 while work is queued or running (reduced-motion preferences stop the spinner),
@@ -408,11 +389,9 @@ when Curate refreshes." Work that produced the newer grouping no longer shows as
   apart and · background, such as "✓ Embeddings · Very similar" or
   "· Taken · Within 4 seconds". A Stack Referee reason appears as plain text.
 
-The page header counts the **loaded** stacks that are checking, unsure or not
-fully checked, with the cards' icons, for example "12 checking · 6 unsure".
-Photo-information and grouping problems stay as words there. Library-wide
-grouping progress is in the activity spinner's tooltip; referee progress is
-visible in the two header rows. These badges describe the current membership and applicable inputs:
+The header activity chip covers library-wide work; there are no repeated
+loaded-stack status counts. Per-card badges describe current membership and
+applicable inputs:
 changed photos or invalidated results never keep an AI badge, and open
 comparisons retain their photos and draft choices as status updates arrive.
 

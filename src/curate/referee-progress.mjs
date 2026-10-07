@@ -39,15 +39,16 @@ export class CurateRefereeProgress {
   }
   status() {
     const fresh = this.current(this.snapshot);
-    return Object.fromEntries(['stack', 'photo'].map((role, i) => [role, !this.enabled()[i] ? { state: 'off' }
-      : fresh ? { state: 'ready', ...this.snapshot[role] } : { state: 'counting' }]));
+    return { remaining: fresh ? this.snapshot.remaining : this.enabled().some(Boolean) ? null : 0,
+      ...Object.fromEntries(['stack', 'photo'].map((role, i) => [role, !this.enabled()[i] ? { state: 'off' }
+        : fresh ? { state: 'ready', ...this.snapshot[role] } : { state: 'counting' }])) };
   }
   async refresh() {
     if (this.current(this.snapshot) && this.now() - this.snapshot.at < this.interval) return;
     const current = this.curate.current;
     if (!current || this.curate.closed) return;
     const snapshot = { current, generation: current.generation, revision: this.revision,
-      enabled: this.enabled(), stack: empty(), photo: empty() };
+      enabled: this.enabled(), remaining: 0, stack: empty(), photo: empty() };
     if (!snapshot.enabled.some(Boolean)) return;
     let slice = performance.now();
     for (const group of current.groups) {
@@ -56,8 +57,10 @@ export class CurateRefereeProgress {
         if (this.curate.closed || !this.current(snapshot)) return;
       }
       if (group.ids.length < 2) continue;
+      const before = snapshot.stack.remaining + snapshot.photo.remaining;
       if (snapshot.enabled[0]) countRefereeStack(snapshot.stack, this.curate.stackReferee.status(group));
       if (snapshot.enabled[1]) countRefereeStack(snapshot.photo, this.curate.photoReferee.status(group));
+      if (snapshot.stack.remaining + snapshot.photo.remaining > before) snapshot.remaining++;
     }
     if (!this.curate.closed && this.current(snapshot)) this.snapshot = { ...snapshot, at: this.now() };
   }

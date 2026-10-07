@@ -4,12 +4,11 @@ import { CurateClient, request, decisionSummary } from './client.js';
 import { comesAfter } from './order.js';
 import { explanation } from './explanation.js';
 import { PreviewImages } from './preview-images.js';
-import { node, thumbnail, photoCard, groupCard, savedOutcome, outcomeLabel, badgeNode, activityIndicator } from './photos.js';
-import { showRefereeProgress } from './referee-progress.js';
-import { curateActivity } from './referee-status.js';
+import { node, thumbnail, photoCard, groupCard, savedOutcome, outcomeLabel, badgeNode, choiceControls } from './photos.js';
+import { showCurateStatus } from './referee-progress.js';
 import { initialPhotoChoices, photoAssessment, photoAdviceSummary } from './photo-advice.js';
 import { applicableAdvice, suggestionMatches, nextActionLabel } from './suggestions.js';
-import { stackStatus, statusCounts, mergeStatus, BADGE_WORDS } from './stack-status.js';
+import { stackStatus, mergeStatus } from './stack-status.js';
 
 const el = (id) => document.getElementById(id);
 el('comparison-shortcuts').append(textTooltip('Shortcuts', 'Comparison shortcuts',
@@ -31,18 +30,61 @@ const state = {
   next: null,
   loading: false,
   comparison: null,
-  outcomes: {}, batchPhotos: new Set(), draftTouched: false, draftSuggested: false,
+  outcomes: {}, batchPhotos: new Set(), selectMode: false, draftTouched: false, draftSuggested: false,
   busy: false,
   undo: null,
   syncId: null,
   updateStatus: null, autoUpdateFailed: false, viewExpired: false,
-  photoIndex: 0,
+  photoIndex: 0, displayedPhotoId: null, previousPhotoId: null,
   photoList: [],
   dialogGeneration: 0,
   openFailed: false,
   opening: null,
   syncKind: null,
 };
+const stackChoices = choiceControls({ label: 'this photo', namespace: 'stackChoice',
+  change: value => { const photo = state.photoList[state.photoIndex]; if (photo) setOutcome(photo.id, value); } });
+stackChoices.keep.id = 'photo-keep';
+el('stack-choice-controls').append(stackChoices.root);
+el('photo-flip').onclick = () => run(flipPhoto);
+async function flipPhoto() {
+  if (state.viewerMode !== 'stack' || !state.previousPhotoId) return;
+  const photo = state.photoList.find(p => p.id === state.previousPhotoId);
+  if (photo) await showPhoto(photo);
+}
+function syncFilmstrip() {
+  const strip = el('photo-filmstrip'), c = state.comparison;
+  strip.hidden = state.viewerMode !== 'stack' || !c || !el('photo-view').open;
+  if (strip.hidden) return;
+  if (strip.dataset.comparison !== c.id) {
+    strip.dataset.comparison = c.id;
+    strip.replaceChildren();
+    state.photoList.forEach((photo, index) => {
+      const reference = index >= c.photos.length;
+      if (index === c.photos.length) strip.append(node('span', 'Already kept', 'filmstrip-reference'));
+      const button = node('button', undefined, 'filmstrip-photo'); button.type = 'button'; button.dataset.id = photo.id;
+      const img = node('img'); img.src = thumbnail(photo.id); img.alt = ''; img.loading = 'lazy';
+      const star = node('span', '★', 'filmstrip-star'); star.hidden = !c.photoRecommendations?.keeperIds.includes(photo.id); star.setAttribute('aria-hidden', 'true');
+      const check = node('span', '✓', 'filmstrip-pick'); check.setAttribute('aria-hidden', 'true');
+      button.append(img, star, check); button.dataset.reference = String(reference);
+      button.onclick = () => run(() => showPhoto(photo)); strip.append(button);
+    });
+  }
+  for (const button of strip.querySelectorAll('button')) {
+    const id = button.dataset.id, reference = button.dataset.reference === 'true';
+    const picked = reference || ['approve', 'favorite'].includes(state.outcomes[id]);
+    button.querySelector('.filmstrip-pick').hidden = !picked;
+    button.setAttribute('aria-current', String(id === state.displayedPhotoId));
+    button.setAttribute('aria-label', `${reference ? 'Already kept reference' : `Photo ${c.ids.indexOf(id) + 1}`}${!button.querySelector('.filmstrip-star').hidden ? ', AI suggested' : ''}${reference ? '' : `, your pick: ${outcomeLabel(state.outcomes[id])}`}`);
+    button.disabled = Boolean(state.opening || state.busy || client.saved.pending);
+  }
+  const active = strip.querySelector('[aria-current=true]');
+  if (active) {
+    const item = active.getBoundingClientRect(), viewport = strip.getBoundingClientRect();
+    if (item.left < viewport.left) strip.scrollLeft -= viewport.left - item.left;
+    else if (item.right > viewport.right) strip.scrollLeft += item.right - viewport.right;
+  }
+}
 let failedPreviews = new Set();
 const cards = new Map(), visibleCards = new Set();
 const visibility = new IntersectionObserver(entries => {
@@ -103,8 +145,9 @@ function recovery() {
   el('more').disabled = locked || state.loading;
   for (const button of document.querySelectorAll('#filters button, #sections button, .group-card button, .group-card input'))
     button.disabled = locked || state.loading || state.autoUpdateFailed;
-  for (const input of document.querySelectorAll('#photos [data-choice], #photos [data-compare-select], .compare-tools button:not(.why-trigger)'))
+  for (const input of document.querySelectorAll('#photos [data-choice], #photos [data-keep-toggle], #photos [data-compare-select], .compare-tools button:not(.why-trigger)'))
     input.disabled = locked || !state.comparison || state.comparison.oversized;
+  for (const card of el('photos').children) card.syncSelection?.();
   el('undo').disabled = locked;
   selection();
   syncViewer();
@@ -113,7 +156,11 @@ function recovery() {
 }
 function selection() {
   el('selection-count').textContent = state.comparison ? decisionSummary(state.outcomes) : '';
-  el('comparison-bulk').hidden = !state.batchPhotos.size;
+  el('photos').classList.toggle('selecting', state.selectMode);
+  el('select-mode').setAttribute('aria-pressed', String(state.selectMode));
+  el('select-mode').textContent = state.selectMode ? 'Done selecting' : 'Select';
+  el('select-all').hidden = el('select-none').hidden = !state.selectMode;
+  el('comparison-bulk').hidden = !state.selectMode || !state.batchPhotos.size;
   el('comparison-bulk-count').textContent = `${state.batchPhotos.size} checked`;
   el('apply').textContent = state.comparison
     ? 'Save'
@@ -178,9 +225,7 @@ async function refresh({ automatic = false, keepLightbox = false } = {}) {
   }
 }
 function showViewStatus(view) {
-  showRefereeProgress(el('stack-referee-progress'), view.refereeProgress?.stack, view.stackRefereeActivity, 'stack');
-  showRefereeProgress(el('photo-referee-progress'), view.refereeProgress?.photo, view.photoRefereeActivity, 'photo');
-  el('enrich-note').hidden = !view.enrichRunning;
+  showCurateStatus(el('curate-status'), view);
   const loadedStacks = state.groups.filter(g => g.memberCount > 1).length;
   const removedStacks = [...state.removed.values()].filter(g => g.memberCount > 1).length;
   const stacks = Math.max(0, (view.counts?.stacks ?? loadedStacks) - removedStacks);
@@ -195,7 +240,6 @@ function showViewStatus(view) {
     : left.length ? `${left.join(' · ')} left${filtered ? ' in this view' : ''}` : `Nothing left${filtered ? ' in this view' : ''}`;
   state.updateStatus = view;
   updateHint();
-  const refinement = view.refinement;
   const metadata = view.metadata;
   if (state.view?.viewId === view.viewId) state.view.metadata = metadata;
   if (state.comparison) el('metadata-retry').hidden = !metadata?.problem;
@@ -203,35 +247,6 @@ function showViewStatus(view) {
     cards.get(group.id)?.updateStatus(group);
     if (state.comparison?.groupId === group.id) showComparisonStatus(group);
   }
-  const paused = refinement?.state === 'paused' || refinement?.state === 'limited';
-  // Words for page-level work that needs attention, then counts for the stacks
-  // loaded here with the cards' icons. Library-wide progress is the tooltip.
-  const notices = [paused ? 'Checks paused' : '',
-    metadata?.problem ? 'Photo information paused' : metadata?.state === 'refreshing' ? 'Refreshing photo information' : ''].filter(Boolean);
-  const counts = Object.entries(state.section === 'decided' ? {} : statusCounts(state.groups)).filter(([, n]) => n > 0);
-  const summary = el('refinement'), signature = JSON.stringify([notices, counts]);
-  if (summary.dataset.signature !== signature) {
-    summary.dataset.signature = signature;
-    summary.replaceChildren(...[...notices.map(text => node('span', text, 'status-notice')), ...counts.map(([badge, n]) => {
-      const item = node('span', undefined, 'status-count'), icon = badgeNode({ badge, word: BADGE_WORDS[badge] });
-      for (const name of ['role', 'aria-label', 'title']) icon.removeAttribute(name);
-      icon.setAttribute('aria-hidden', 'true');
-      item.dataset.badge = badge;
-      item.append(icon, `${n.toLocaleString()} ${BADGE_WORDS[badge].toLowerCase()}`);
-      return item;
-    })].flatMap((item, i) => i ? [' · ', item] : [item]));
-  }
-  summary.title = [paused ? refinement?.problem : metadata?.problem,
-    counts.length ? 'Counts cover the stacks loaded on this page.' : ''].filter(Boolean).join(' ');
-  const { phase, text, detail: title, kind } = curateActivity(view);
-  const activityCopy = el('curate-activity-copy');
-  const notice = ['grouping', 'metadata'].includes(kind) ? text : '';
-  if (activityCopy.textContent !== notice) activityCopy.textContent = notice;
-  activityCopy.hidden = !notice;
-  activityCopy.title = title;
-  const slot = el('check-activity');
-  if (slot.firstChild?.dataset.phase !== (phase ?? undefined)) slot.replaceChildren(...(phase ? [activityIndicator(phase, title)] : []));
-  else if (phase) slot.firstChild.title = slot.firstChild.ariaLabel = title;
   scheduleUpdates();
 }
 function comparisonGroup() {
@@ -316,16 +331,19 @@ async function compare(group) {
   const keepPhoto = single && el('photo-view').open;
   state.opening = single ? 'single' : 'stack';
   state.viewerMode = group.memberCount === 1 ? 'single' : 'stack';
-  state.batchPhotos.clear();
+  state.batchPhotos.clear(); state.selectMode = false;
   if (!keepPhoto) state.comparison = null;
   state.outcomes = {};
   state.draftTouched = false; state.draftSuggested = false;
+  state.displayedPhotoId = state.previousPhotoId = null;
+  el('photo-filmstrip').replaceChildren();
+  delete el('photo-filmstrip').dataset.comparison;
   state.openFailed = false;
   failedPreviews = new Set();
   el('preview-errors').hidden = true;
   el('comparison-title').textContent = group.memberCount > 1
     ? `Compare stack · ${group.memberCount} photos` : 'Review photo';
-  el('select-all').hidden = el('select-none').hidden = group.memberCount < 2;
+  el('select-mode').hidden = group.memberCount < 2;
   el('compact-label').hidden = group.memberCount <= 10;
   el('compact').checked = group.memberCount > 10;
   el('photos').classList.toggle('compact', el('compact').checked);
@@ -401,7 +419,7 @@ async function compare(group) {
       const firstSuggested = state.draftSuggested ? comparison.photos.findIndex(p => suggested.has(p.id)) : 0;
       const focus = el('photos').children[firstSuggested] ?? el('photos').firstElementChild;
       focus?.focus({ preventScroll: true });
-      if (matchMedia('(max-width: 600px)').matches && state.draftSuggested) focus?.scrollIntoView({ block: 'nearest' });
+      if (matchMedia('(max-width: 600px)').matches && state.draftSuggested) focus?.scrollIntoView({ block: 'start' });
     }
   } catch (cause) {
     if (generation === state.dialogGeneration) throw cause;
@@ -440,6 +458,9 @@ async function showPhoto(photo) {
   }
 }
 function renderPhoto(photo, preview) {
+  if (state.displayedPhotoId !== photo.id) el('stack-choice-controls').querySelector('details').open = false;
+  if (state.viewerMode === 'stack' && state.displayedPhotoId && state.displayedPhotoId !== photo.id) state.previousPhotoId = state.displayedPhotoId;
+  state.displayedPhotoId = photo.id;
   state.photoIndex = state.photoList.findIndex((p) => p.id === photo.id);
   el('photo-title').textContent = 'Photo';
   preview.image.id = 'photo-large';
@@ -530,7 +551,7 @@ function syncViewer() {
   el('photo-outcome').textContent = single || !actionable
     ? `Current: ${outcomeLabel(savedOutcome(photo))}`
     : `Your pick: ${outcomeLabel(state.outcomes[photo.id])} · not saved`;
-  const locked = state.busy || state.loading || state.opening || state.continuing || Boolean(client.saved.pending) || state.comparison?.oversized;
+  const locked = Boolean(state.busy || state.loading || state.opening || state.continuing || client.saved.pending || state.comparison?.oversized);
   for (const control of document.querySelectorAll('[data-stack-choice], [data-photo-action]'))
     control.disabled = locked || !actionable;
   el('photo-prev').disabled = locked || (single ? !actionable || at <= 0 : state.photoIndex <= 0);
@@ -540,14 +561,16 @@ function syncViewer() {
   el('photo-keys').hidden = !actionable;
   el('photo-keys').textContent = single
     ? 'Y Yes · S Skip · F Fav · N No · Z Undo · ← → browse · Esc close. Choices save immediately.'
-    : 'Y Yes · S Skip · F Fav · N No: mark & next. ← → browse. Esc returns to comparison. Choices are not saved until you save the stack.';
+    : 'Y Yes · S Skip · F Fav · N No: mark & next. ← → browse · C flip previous · K keep/skip. Esc returns to comparison. Choices are not saved until you save the stack.';
   syncReceipts();
   for (const button of document.querySelectorAll('[data-photo-action]'))
     button.setAttribute('aria-pressed', String(button.dataset.photoAction === savedOutcome(photo)));
-  if (!actionable) return;
+  el('photo-flip').hidden = single;
+  el('photo-flip').disabled = locked || single || !state.previousPhotoId;
+  if (!actionable) { stackChoices.sync('reviewed', true); syncFilmstrip(); return; }
   const value = state.outcomes[photo.id];
-  for (const button of document.querySelectorAll('[data-stack-choice]'))
-    button.setAttribute('aria-pressed', String(button.dataset.stackChoice === value));
+  stackChoices.sync(value, locked);
+  syncFilmstrip();
 }
 function syncReceipts() {
   const available = Boolean(state.undo && state.undo.until > Date.now());
@@ -915,6 +938,7 @@ async function continueReview(anchor) {
     recovery();
   }
 }
+el('select-mode').onclick = () => { state.selectMode = !state.selectMode; if (!state.selectMode) state.batchPhotos.clear(); repaintSelection(); };
 el('apply').onclick = () => run(() => saveComparison());
 el('apply-next').onclick = () => run(() => saveComparison(true));
 el('retry-action').onclick = () =>
@@ -979,10 +1003,6 @@ el('photo-undo').onclick = el('comparison-undo').onclick = () => el('undo').clic
 el('photo-retry').onclick = () => el('retry-action').click();
 el('photo-refresh').onclick = () => run(refresh);
 for (const button of document.querySelectorAll('[data-photo-action]')) button.onclick = () => run(() => decideSingle(button.dataset.photoAction));
-for (const button of document.querySelectorAll('[data-stack-choice]')) button.onclick = () => {
-  const photo = state.photoList[state.photoIndex];
-  if (photo) setOutcome(photo.id, button.dataset.stackChoice);
-};
 for (const button of document.querySelectorAll('[data-close]')) button.onclick = () => el(button.dataset.close).close();
 for (const dialog of document.querySelectorAll('dialog'))
   dialog.addEventListener('click', (e) => {
@@ -1014,7 +1034,7 @@ function backToComparison() {
 }
 function markAndAdvance(outcome) {
   const photo = state.photoList[state.photoIndex];
-  if (!photo || !Object.hasOwn(state.outcomes, photo.id) || el('photo-keep').disabled) return;
+  if (!photo || !Object.hasOwn(state.outcomes, photo.id) || state.opening || state.busy || client.saved.pending) return;
   setOutcome(photo.id, outcome);
   const next = state.comparison.photos[state.photoIndex + 1];
   if (next) showPhoto(next);
@@ -1036,7 +1056,8 @@ document.addEventListener('keydown', (event) => {
       else markAndAdvance(outcome);
       return;
     }
-    if (key === 'k' && !el('photo-keep').hidden && !el('photo-keep').disabled) {
+    if (key === 'c' && !el('photo-flip').hidden && !el('photo-flip').disabled) { event.preventDefault(); run(flipPhoto); return; }
+    if (key === 'k' && !el('stack-actions').hidden) {
       event.preventDefault();
       const id = state.photoList[state.photoIndex]?.id;
       if (id) markAndAdvance(['approve', 'favorite'].includes(state.outcomes[id]) ? 'reviewed' : 'approve');

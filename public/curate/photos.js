@@ -22,6 +22,41 @@ export function savedOutcome(photo) {
 }
 export const outcomeLabel = (value) => choices.find(([key]) => key === value)?.[1] ?? 'Not decided';
 
+// A human Keep toggle is independent of the Photo Referee's gold star.
+export function choiceControls({ label, change, namespace = 'choice' }) {
+  const root = node('div', undefined, 'photo-choices');
+  root.setAttribute('role', 'group'); root.setAttribute('aria-label', `Choices for ${label}`);
+  const keep = node('button', 'Keep', 'p-btn keep-toggle'); keep.type = 'button'; keep.dataset.keepToggle = '';
+  const menu = node('details', undefined, 'photo-options');
+  const more = node('summary', '⋯', 'p-btn');
+  const options = node('div', undefined, 'photo-options-list');
+  let current = 'reviewed', locked = false;
+  keep.onclick = () => change(['approve', 'favorite'].includes(current) ? 'reviewed' : 'approve');
+  more.onclick = event => { if (locked) event.preventDefault(); };
+  for (const [value, text, title] of choices.filter(([value]) => value !== 'approve')) {
+    const button = node('button', text, `p-btn${value === 'favorite' ? ' gold' : value === 'reject' ? ' danger' : ''}`);
+    button.type = 'button'; button.dataset[namespace] = value; button.title = title;
+    button.onclick = () => { if (locked) return; change(value); menu.open = false; more.focus({ preventScroll: true }); };
+    options.append(button);
+  }
+  menu.append(more, options); root.append(keep, menu);
+  root.addEventListener('keydown', event => {
+    if (event.key === 'Escape' && menu.open) { event.preventDefault(); event.stopPropagation(); menu.open = false; more.focus(); }
+  });
+  return { root, keep, sync(value, disabled = keep.disabled) {
+    current = value; locked = disabled;
+    const picked = ['approve', 'favorite'].includes(value);
+    keep.textContent = picked ? '✓ Keep' : 'Keep'; keep.setAttribute('aria-pressed', String(picked));
+    keep.setAttribute('aria-label', `${picked ? 'Kept' : 'Keep'} ${label}${value === 'favorite' ? ' as a favorite' : ''}`);
+    more.textContent = value === 'favorite' ? 'Fav ▾' : value === 'reject' ? 'No ▾' : '⋯';
+    more.classList.toggle('gold', value === 'favorite'); more.classList.toggle('danger', value === 'reject');
+    more.setAttribute('aria-label', `More choices for ${label}. Current: ${outcomeLabel(value)}`);
+    more.setAttribute('aria-disabled', String(disabled)); more.tabIndex = disabled ? -1 : 0;
+    for (const button of root.querySelectorAll('button')) button.disabled = disabled;
+    for (const button of options.children) button.setAttribute('aria-pressed', String(button.dataset[namespace] === value));
+  } };
+}
+
 export function photoCard(
   photo,
   { readOnly = false, label = 'Photo', outcome = () => 'reviewed', change, open,
@@ -41,8 +76,10 @@ export function photoCard(
   imageButton.onclick = () => open(photo);
   // A Photo Referee suggestion (PIC-116) puts the gold star on the photo itself.
   if (suggested) { imageButton.append(keeperStar(1, 'Suggested keeper')); card.classList.add('suggested'); }
+  const humanPick = node('span', '✓', 'human-pick'); humanPick.setAttribute('role', 'img'); humanPick.setAttribute('aria-label', 'Your pick'); humanPick.hidden = true;
+  if (!readOnly) imageButton.append(humanPick);
   const info = node('div', undefined, 'photo-info');
-  let checkbox;
+  let checkbox, controls;
   if (readOnly) {
     imageButton.append(node('span', 'Already kept', 'photo-outcome'));
   } else {
@@ -51,15 +88,8 @@ export function photoCard(
     checkbox.setAttribute('aria-label', `Check ${label}`);
     checkbox.onchange = () => select?.(checkbox.checked);
     selection.append(checkbox); card.append(selection);
-    const actions = node('div', undefined, 'photo-choices');
-    actions.setAttribute('role', 'group'); actions.setAttribute('aria-label', `Choices for ${label}`);
-    for (const [value, text, title] of choices) {
-      const button = node('button', text, `p-btn${value === 'favorite' ? ' gold' : value === 'reject' ? ' danger' : ''}`);
-      button.dataset.choice = value; button.title = title;
-      if (value === 'approve') button.dataset.keeper = photo.id;
-      button.onclick = () => change(value);
-      actions.append(button);
-    }
+    controls = choiceControls({ label, change });
+    controls.keep.dataset.keeper = photo.id;
     const heading = node('div', undefined, 'photo-info-heading');
     heading.append(node('small', label, 'photo-label'));
     if (assessment) {
@@ -69,7 +99,7 @@ export function photoCard(
       if (inlineReason) why.classList.add('photo-reason-inline');
       heading.append(why);
     }
-    info.append(heading, actions);
+    info.append(heading, controls.root);
   }
   const imageError = node('span', 'Preview unavailable. Try opening it in Immich.', 'p-muted');
   imageError.hidden = true;
@@ -78,8 +108,9 @@ export function photoCard(
   info.append(imageError);
   card.syncSelection = () => {
     if (readOnly) return;
-    for (const button of info.querySelectorAll('[data-choice]'))
-      button.setAttribute('aria-pressed', String(button.dataset.choice === outcome()));
+    card.dataset.outcome = outcome();
+    controls.sync(outcome());
+    humanPick.hidden = !['approve', 'favorite'].includes(outcome());
     card.classList.toggle('is-skipped', outcome() === 'reviewed');
     card.classList.toggle('batch-selected', selected()); checkbox.checked = selected();
   };
@@ -121,16 +152,7 @@ export function keeperStar(count, label = count > 1 ? `${count} keepers suggeste
   star.title = label;
   return star;
 }
-// The header's library-wide activity: a spinner while working, or a warning.
-export function activityIndicator(phase, title) {
-  if (!phase) return null;
-  const indicator = node('span', phase === 'attention' ? '!' : '', 'activity-indicator');
-  indicator.dataset.phase = phase;
-  indicator.setAttribute('role', 'img');
-  indicator.title = title;
-  indicator.setAttribute('aria-label', title);
-  return indicator;
-}
+
 
 export function groupCard(group, open, { decide, keepSuggestions, select, selected = false, decided = false, label = 'Photo' } = {}) {
   const card = node('article', undefined, 'group-card');

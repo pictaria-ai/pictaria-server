@@ -10,7 +10,7 @@ async function setup(t, options) {
   const fixture = track(await curatePreviewFixture({ stackSize: 4, singles: 2, metadataReady: true, ...options }));
   const browser = track(await launchChrome()),
     page = await browser.newPage();
-  const click = (selector) => page.evaluate(`document.querySelector(${JSON.stringify(selector)}).click()`);
+  const click = (selector) => page.evaluate(`(()=>{const button=document.querySelector(${JSON.stringify(selector)}); const menu=button.closest("details.photo-options"); if(menu) menu.open=true; button.click();})()`);
   const key = (key) => page.send('Input.dispatchKeyEvent', { type: 'keyDown', key });
   const ready = () => page.waitFor('!document.querySelector("#refresh").disabled');
   const operations = () => fixture.repo.db.prepare('SELECT COUNT(*) n FROM decision_operations').get().n;
@@ -162,7 +162,7 @@ test(
       'desktop group tabs lead date, category and search on one row',
     );
     await screenshot(page, 'curate-toolbar-desktop.png');
-    const headerPositions = () => page.evaluate(`['#sections','.referee-progress','#check-activity','#search','#sort','#count','.view-summary','#groups'].map(selector=>{
+    const headerPositions = () => page.evaluate(`['#sections','#curate-status','#search','#sort','#count','.filter-summary','#groups'].map(selector=>{
       const {x,y}=document.querySelector(selector).getBoundingClientRect();return {selector,x,y};
     })`);
     const stableViews = async () => {
@@ -181,7 +181,8 @@ test(
       assert.equal(await page.evaluate(`(() => {
         const tabs=document.querySelector('#filters').getBoundingClientRect();
         const filters=document.querySelector('#secondary-filters').getBoundingClientRect();
-        return tabs.right<=filters.left && document.body.scrollWidth<=innerWidth;
+        const collapsed=getComputedStyle(document.querySelector('#secondary-filters')).display==='none';
+        return (collapsed || tabs.right<=filters.left) && document.body.scrollWidth<=innerWidth;
       })()`), true, `filters do not overlap at ${width}px`);
       await stableViews();
     }
@@ -310,7 +311,7 @@ test(
     await page.evaluate(`window.issuedDecisions=0;const nativeFetch=window.fetch;
     window.fetch=(...args)=>{if(String(args[0]).endsWith('/operations'))window.issuedDecisions++;return nativeFetch(...args);}`);
     await key('Enter');
-    await click('#select-all');
+    await click('#select-mode'); await click('#select-all');
     await page.evaluate('document.querySelector("#photos .photo-card").focus()');
     await key('Enter');
     assert.equal(

@@ -79,7 +79,7 @@ export function refereeProgress(counts, activity, role = 'stack') {
   const summary = `${completed} of ${total} pending stacks finished successfully.` +
     (incomplete ? ` ${incomplete} finished without a full result and will not be retried automatically.` : '') +
     ' Counts include photos outside this view and can change as photos arrive or stacks split. You can keep curating.';
-  if (!remaining && details?.phase !== 'running') return { phase: 'idle', text: 'Up to date', value: 1, detail: summary };
+  if (!remaining && !['running', 'attention'].includes(details?.phase)) return { phase: 'idle', text: 'Up to date', value: 1, detail: summary };
   let phase = 'queued', status = 'Queued';
   if (details?.phase === 'running') { phase = 'running'; status = 'Comparing photos'; }
   else if (paused === remaining || details?.phase === 'attention') { phase = 'attention'; status = 'Paused'; }
@@ -91,36 +91,33 @@ export function refereeProgress(counts, activity, role = 'stack') {
     detail: [summary, `${label} · ${status}.`, details?.detail].filter(Boolean).join(' ') };
 }
 
-// One stable header slot covers grouping and both independent AI roles. Prefer
-// actual work over queued work, and never animate a blocked prerequisite chain.
-export function curateActivity(view) {
-  const { refinement, metadata } = view;
-  const remaining = refinement?.remainingGroups ?? 0;
-  const paused = ['paused', 'limited'].includes(refinement?.state);
-  const grouping = {
-    kind: 'grouping',
-    phase: paused ? 'attention' : refinement?.state === 'searching' ? 'running' : remaining > 0 ? 'queued' : 'idle',
-    text: paused ? 'Grouping paused' : 'Grouping nearby photos',
-    detail: [paused ? refinement?.problem || 'Stack checks are paused.' : '',
-      remaining > 0 ? `Checking stacks · ${remaining.toLocaleString()} remaining across all pending photos, including outside this view. Includes queued and in-progress checks. Each check covers nearby photos that may form more than one stack.` : ''].filter(Boolean).join(' '),
-  };
-  const stack = refereeProgress(view.refereeProgress?.stack, view.stackRefereeActivity, 'stack');
-  const photo = refereeProgress(view.refereeProgress?.photo, view.photoRefereeActivity, 'photo');
-  if (grouping.phase === 'attention') {
-    for (const role of [stack, photo]) if (role.status === 'Waiting for grouping') role.phase = 'attention';
+// One user-facing status; the library scan counts unfinished stacks once even
+// when both roles still need them. Never add the two role counts in the browser.
+export function curateStatus(view) {
+  const progress = view.refereeProgress ?? {};
+  const roles = ['stack', 'photo'].map(role => ({ role,
+    ...refereeProgress(progress[role], view[`${role}RefereeActivity`], role),
+    activity: view[`${role}RefereeActivity`], counts: progress[role] }));
+  const enabled = roles.filter(r => r.phase !== 'off');
+  const remaining = Number.isSafeInteger(progress.remaining) ? progress.remaining : null;
+  const make = (phase, text, count = remaining) => ({ phase, text, count, roles });
+  const suffix = remaining > 0 ? ` · ${remaining.toLocaleString()} ${remaining === 1 ? 'stack' : 'stacks'} left` : '';
+  const paused = enabled.find(r => r.activity?.state === 'paused' || r.phase === 'attention');
+  if (paused) return make('attention', `${paused.role === 'photo' ? 'Photo' : 'Stack'} Referee paused`);
+  if (view.metadata?.problem) return make('attention', 'Photo information paused');
+  if (['paused', 'limited'].includes(view.refinement?.state)) return make('attention', 'Grouping paused');
+  const active = enabled.find(r => r.phase === 'running');
+  if (active) return make('running', `${active.role === 'photo' ? 'Picking best photos' : 'Checking stacks'}${suffix}`, remaining || null);
+  if (view.refinement?.remainingGroups > 0 || view.refinement?.state === 'searching' || view.metadata?.state === 'refreshing')
+    return make('grouping', 'Grouping photos…', remaining || view.refinement?.remainingGroups || null);
+  const waiting = enabled.find(r => r.phase === 'queued');
+  if (waiting) {
+    const text = waiting.activity?.reason === 'shared-provider'
+      ? view.enrichRunning ? 'Waiting for Enrich' : 'Waiting for AI'
+      : waiting.status === 'Waiting for grouping' ? 'Waiting for grouping'
+        : waiting.status === 'Waiting for stack checks' ? 'Waiting for stack checks' : 'AI work queued';
+    return make('waiting', text + suffix);
   }
-  if (stack.phase === 'attention' && photo.status === 'Waiting for stack checks') photo.phase = 'attention';
-  const candidates = [
-    { kind: 'metadata', phase: metadata?.state === 'refreshing' ? 'running' : metadata?.problem ? 'attention' : 'idle',
-      text: metadata?.state === 'refreshing' ? 'Refreshing photo information' : 'Photo information paused',
-      detail: metadata?.problem || 'Refreshing photo information.' },
-    grouping,
-    { ...stack, kind: 'stack', text: stack.status ? `Stack Referee · ${stack.status}` : '',
-      detail: `Stack Referee · ${stack.text}${stack.status ? ` · ${stack.status}` : ''}` },
-    { ...photo, kind: 'photo', text: photo.status ? `Photo Referee · ${photo.status}` : '',
-      detail: `Photo Referee · ${photo.text}${photo.status ? ` · ${photo.status}` : ''}` },
-  ];
-  const active = ['running', 'queued', 'attention', 'counting'].map(phase => candidates.find(c => c.phase === phase)).find(Boolean);
-  return { phase: active?.phase === 'counting' ? null : active?.phase ?? null, text: active?.text ?? '', kind: active?.kind ?? null,
-    detail: candidates.filter(c => !['off', 'idle'].includes(c.phase)).map(c => c.detail).filter(Boolean).join(' ') };
+  if (enabled.some(r => r.phase === 'counting')) return make('counting', 'Checking AI status…', null);
+  return make(enabled.length ? 'idle' : 'hidden', 'AI up to date', 0);
 }

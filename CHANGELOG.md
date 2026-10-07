@@ -17,21 +17,26 @@ All notable changes to Pictaria Server are documented here. This project follows
   show remaining counts across the current filters. Keep Photo Referee attribution
   separate from Enrich in the lightbox, and count already-kept references separately.
 
-- Replace Curate Preview's permanent Refresh and More buttons with separate
-  Stack Referee and Photo Referee status rows (PIC-116 / PIC-371). Counts cover
-  all pending stacks, including outside the current filters/page and while in
-  Decided. Show remaining work, waiting/working/paused states, Off and Up to date;
-  completed limited checks leave the remaining count. Background summaries are
-  shared and collected in cooperative slices, without new AI requests or retries.
-  A compact panel hugs the right edge, with fixed columns for labels, activity
-  and counts. Off rows stay visible in gray. One shared spinner on the left
-  covers grouping and both referees; paused work uses a stationary indicator.
-  The Enrich notice aligns with the Photo Referee row. Referee popovers show
-  current status and labeled counts rather than a paragraph of statistics.
-  Automatic updates preserve open drafts; failed page updates expose Retry updates.
+- Replace Curate Preview's permanent Refresh and More buttons with a compact,
+  right-aligned activity chip (PIC-116 / PIC-371). Show working, waiting, paused
+  and up-to-date states, with unique remaining stacks across both referees.
+  Its structured popover shows each role's status/count (including Off), limited
+  results, a neutral Enrich note and an AI settings link. Grouping shares the chip;
+  both roles Off with no grouping hides it. Phones show icon/count with the full
+  accessible label. Reuse the existing cooperative summary and status poll.
+  Move remaining photo counts into the filter row and remove duplicate grid
+  status counts. Automatic updates preserve drafts; failures expose Retry updates.
+
+- Simplify stack decisions to a **Keep** toggle and secondary Skip/Fav/No menu;
+  reveal batch checkboxes only in **Select** mode. Preserve four-way shortcuts,
+  draft/save semantics and read-only references. Stack lightboxes gain a filmstrip
+  with separate AI stars and human checks, and **A/B (C)** to flip between the
+  last two inspected photos without changing choices. Singles keep their existing
+  controls. Align the suggested phone card below the header and place lightbox
+  Photo Referee attribution and reason above the choices (PIC-116).
 
 - Simplify the Curate Preview stack comparison (PIC-116 / PIC-371): retain
-  recommendation stars and filled decision buttons without duplicate colored
+  recommendation stars and clear decision controls without duplicate colored
   outlines or per-photo Draft labels. Use one restrained focus border and photo
   number, compact header/toolbar, and hover/focus/tap help for shortcuts and
   referee reasons. Fit uncropped photos by row while keeping controls aligned;

@@ -12,7 +12,7 @@ test(
     const fixture = track(await curatePreviewFixture({ stackSize: 4, singles: 1, metadataReady: true }));
     const browser = track(await launchChrome()),
       page = await browser.newPage();
-    const click = (selector) => page.evaluate(`document.querySelector(${JSON.stringify(selector)}).click()`);
+    const click = (selector) => page.evaluate(`(()=>{const button=document.querySelector(${JSON.stringify(selector)}); const menu=button.closest("details.photo-options"); if(menu) menu.open=true; button.click();})()`);
     const key = (key) => page.send('Input.dispatchKeyEvent', { type: 'keyDown', key });
     const operations = () => fixture.repo.db.prepare('SELECT COUNT(*) n FROM decision_operations').get().n;
     const card = (n) => `#photos [data-photo-id="${fixture.id(n)}"]`;
@@ -39,7 +39,7 @@ test(
     );
     await click('.is-stack .cover');
     await page.waitFor(
-      'document.querySelectorAll("#photos [data-choice]").length===16 && !document.querySelector("#apply").disabled',
+      'document.querySelectorAll("#photos [data-keep-toggle]").length===4 && !document.querySelector("#apply").disabled',
     );
     assert.doesNotMatch(
       await page.evaluate('document.querySelector("#photos").textContent'),
@@ -84,7 +84,7 @@ test(
     );
     await key('Escape');
     await page.send('Emulation.clearDeviceMetricsOverride');
-    await click('#select-all');
+    await click('#select-mode'); await click('#select-all');
     assert.equal(await page.evaluate('document.querySelectorAll("[data-compare-select]:checked").length'), 4);
     assert.equal(
       await page.evaluate('document.querySelectorAll("[data-keeper][aria-pressed=true]").length'),
@@ -110,7 +110,7 @@ test(
     await page.waitFor('document.querySelector("#photo-view").open && document.querySelector("#photo-loading").hidden');
     assert.deepEqual(
       await page.evaluate('[...document.querySelectorAll("[data-stack-choice]")].map(b=>b.textContent)'),
-      ['Yes (Y)', 'Skip (S)', 'Fav (F)', 'No (N)'],
+      ['Skip', 'Fav', 'No'],
     );
     assert.equal(
       await page.evaluate(

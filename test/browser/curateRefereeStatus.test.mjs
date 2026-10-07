@@ -26,7 +26,7 @@ test('referee status updates cards and open comparisons without moving photos or
       if(body.groups){
         body.updatesAvailable=false;body.refinement={state:'idle',remainingGroups:0};
         body.stackRefereeActivity=window.refereeActivity;
-        const finished=window.refereeActivity.state==='idle';
+        const finished=window.refereeActivity.state==='idle';body.refereeProgress.remaining=finished?0:38;
         body.refereeProgress.stack={state:'ready',total:60,completed:finished?58:20,incomplete:2,remaining:finished?0:38,
           waitingForGrouping:0,waitingForStack:0,paused:0};
         for(const group of body.groups)if(group.memberCount>1){group.similarity=window.similarityState;group.stackReferee=window.refereeState;}
@@ -38,15 +38,14 @@ test('referee status updates cards and open comparisons without moving photos or
   await page.waitFor('document.querySelector(".is-stack .stack-badge")?.title.includes("AI check: queued")');
   assert.equal(await page.evaluate('document.querySelector(".is-stack .stack-badge").dataset.badge'), 'checking');
   assert.equal(await page.evaluate('document.querySelector(".is-stack .p-chip").textContent'), '4 photos');
-  assert.match(await page.evaluate('document.querySelector("#refinement").textContent'), /1 checking/);
-  assert.match(await page.evaluate('document.querySelector("#stack-referee-progress").textContent'), /38 stacks left/);
-  assert.equal(await page.evaluate('document.querySelector("#stack-referee-progress .referee-progress-status").textContent'), 'Queued');
-  assert.equal(await page.evaluate('document.querySelector("#check-activity .activity-indicator").dataset.phase'), 'queued');
+  assert.match(await page.evaluate('document.querySelector("[data-role=stack]").textContent'), /38 left/);
+  assert.equal(await page.evaluate('document.querySelector("[data-role=stack] .role-status").textContent'), 'Queued');
+  assert.equal(await page.evaluate('document.querySelector("#curate-status").dataset.phase'), 'waiting');
   assert.equal(await page.evaluate('document.querySelector(".is-stack .capture-date").hidden'), false, 'the date stays put');
   const cardHeight = await page.evaluate('document.querySelector(".is-stack").getBoundingClientRect().height');
   await click('.is-stack .cover');
   await page.waitFor('document.querySelectorAll("#photos .photo-card").length===4 && !document.querySelector("#apply").disabled');
-  await click('#photos [data-choice=approve]');
+  await click('#photos [data-keep-toggle]');
   const positions = () => page.evaluate(`[...document.querySelectorAll('#photos .photo-card')].map(el=>({id:el.dataset.photoId,y:el.getBoundingClientRect().y}))`);
   const before = await positions();
   const phase = value => page.waitFor(`document.querySelector('#comparison-similarity .stack-badge')?.dataset.badge===${JSON.stringify(value)}`);
@@ -56,10 +55,10 @@ test('referee status updates cards and open comparisons without moving photos or
   await phase('ai-checked');
   assert.equal(await page.evaluate('document.querySelector("#comparison-similarity .stack-badge").textContent'), 'AI checked');
   assert.deepEqual(await positions(), before);
-  assert.equal(await page.evaluate('document.querySelector("#photos [data-choice=approve]").getAttribute("aria-pressed")'), 'true');
+  assert.equal(await page.evaluate('document.querySelector("#photos [data-keep-toggle]").getAttribute("aria-pressed")'), 'true');
   assert.equal(await page.evaluate('document.querySelector(".is-stack .capture-date").hidden'), false);
   assert.equal(await page.evaluate('document.querySelector(".is-stack").getBoundingClientRect().height'), cardHeight);
-  assert.equal(await page.evaluate('document.querySelector("#check-activity").childElementCount'), 0);
+  assert.equal(await page.evaluate('document.querySelector("#curate-status").dataset.phase'), 'idle');
   await click('#comparison-similarity .why-trigger');
   assert.match(await page.evaluate('document.querySelector("#stack-reason .why-verdict").textContent'), /^AI checked$/);
   assert.match(await page.evaluate('document.querySelector("#stack-reason .why-steps").textContent'), /AI check: confirmed/);
@@ -92,7 +91,7 @@ test('referee status updates cards and open comparisons without moving photos or
   await updated();
   assert.equal(await page.evaluate('document.querySelector("#comparison-similarity .stack-badge").dataset.badge'), 'unsure');
   assert.equal(await page.evaluate('document.querySelector(".is-stack").dataset.badge'), 'unsure');
-  assert.equal(await page.evaluate('document.querySelector("#photos [data-choice=approve]").getAttribute("aria-pressed")'), 'true', 'drafts stay');
+  assert.equal(await page.evaluate('document.querySelector("#photos [data-keep-toggle]").getAttribute("aria-pressed")'), 'true', 'drafts stay');
   await page.evaluate("window.refereeState={state:'incomplete',reason:'unsupported-size',limit:2}");
   await phase('unsure');
   await page.waitFor('!document.querySelector(".is-stack").hasAttribute("data-updated")');
@@ -101,15 +100,15 @@ test('referee status updates cards and open comparisons without moving photos or
   assert.doesNotMatch(await page.evaluate('document.querySelector("#stack-reason").textContent'), /AI checked|Same composition/);
   await click('#comparison-similarity .why-trigger');
   await page.evaluate("window.refereeState={state:'incomplete',reason:'configuration',scope:'configuration'};window.refereeActivity={state:'paused',reason:'configuration',scope:'configuration'}");
-  await page.waitFor("document.querySelector('#stack-referee-progress .referee-progress-status').textContent.includes('Paused') && document.querySelector('#comparison-similarity .why-trigger')?.getAttribute('aria-label').startsWith('Unsure')");
+  await page.waitFor("document.querySelector('[data-role=stack] .role-status').textContent.includes('Paused') && document.querySelector('#comparison-similarity .why-trigger')?.getAttribute('aria-label').startsWith('Unsure')");
   assert.equal(await page.evaluate('document.querySelector(".is-stack .stack-badge").dataset.badge'), 'unsure', 'configuration problems belong to the header');
-  assert.equal(await page.evaluate('document.querySelector("#stack-referee-progress").dataset.phase'), 'attention');
+  assert.equal(await page.evaluate('document.querySelector("[data-role=stack]").dataset.phase'), 'attention');
   await page.evaluate("window.refereeState={state:'paused',reason:'model-failures',scope:'configuration'};window.refereeActivity={...window.refereeState}");
-  await page.waitFor("document.querySelector('#stack-progress-help').textContent.includes('Choose a vision model that compares multiple images')");
-  assert.match(await page.evaluate('document.querySelector("#stack-referee-progress .referee-progress-status").textContent'), /Paused/);
+  await page.waitFor("document.querySelector('#curate-status-details').textContent.includes('Choose a vision model that compares multiple images')");
+  assert.match(await page.evaluate('document.querySelector("[data-role=stack] .role-status").textContent'), /Paused/);
   assert.doesNotMatch(await page.evaluate('document.querySelector(".is-stack .stack-badge").title'), /paused|not possible/);
   await page.evaluate("window.refereeState={state:'updated'};window.refereeActivity={state:'idle'}");
-  await page.waitFor('document.querySelector("#comparison-similarity .why-trigger")?.getAttribute("aria-label").startsWith("Unsure") && !document.querySelector("#check-activity").childElementCount');
+  await page.waitFor('document.querySelector("#comparison-similarity .why-trigger")?.getAttribute("aria-label").startsWith("Unsure") && document.querySelector("#curate-status").dataset.phase === "idle"');
   assert.deepEqual(await positions(), before);
   await page.send('Emulation.setDeviceMetricsOverride', { width: 390, height: 844, deviceScaleFactor: 1, mobile: false });
   await click('#comparison-similarity .why-trigger');

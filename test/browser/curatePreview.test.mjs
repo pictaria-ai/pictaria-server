@@ -20,7 +20,7 @@ test('Curate preview date order is global and remembered across automatic update
   }));
   const browser = track(await launchChrome()),
     page = await browser.newPage();
-  const click = (selector) => page.evaluate(`document.querySelector(${JSON.stringify(selector)}).click()`);
+  const click = (selector) => page.evaluate(`(()=>{const button=document.querySelector(${JSON.stringify(selector)}); const menu=button.closest("details.photo-options"); if(menu) menu.open=true; button.click();})()`);
   const sort = (value) =>
     page.evaluate(
       `document.querySelector('#sort').value=${JSON.stringify(value)};document.querySelector('#sort').dispatchEvent(new Event('change'))`,
@@ -108,7 +108,7 @@ test(
     const fixture = track(await curatePreviewFixture({ stackSize: 3, singles: 2 }));
     const browser = track(await launchChrome()),
       page = await browser.newPage();
-    const click = (selector) => page.evaluate(`document.querySelector(${JSON.stringify(selector)}).click()`);
+    const click = (selector) => page.evaluate(`(()=>{const button=document.querySelector(${JSON.stringify(selector)}); const menu=button.closest("details.photo-options"); if(menu) menu.open=true; button.click();})()`);
     await page.navigate(`${fixture.base}/curate-preview.html`);
     await page.waitFor('document.querySelector(".gate-backdrop input")');
     await page.evaluate(
@@ -178,7 +178,7 @@ test(
     const fixture = track(await curatePreviewFixture());
     const browser = track(await launchChrome());
     const page = await browser.newPage();
-    const click = (selector) => page.evaluate(`document.querySelector(${JSON.stringify(selector)}).click()`);
+    const click = (selector) => page.evaluate(`(()=>{const button=document.querySelector(${JSON.stringify(selector)}); const menu=button.closest("details.photo-options"); if(menu) menu.open=true; button.click();})()`);
     const wait = (expression) => page.waitFor(expression);
     await page.navigate(`${fixture.base}/curate-preview.html`);
     await wait('document.querySelector(".gate-backdrop input")');

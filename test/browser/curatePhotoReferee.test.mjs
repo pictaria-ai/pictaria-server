@@ -53,9 +53,9 @@ for (const { keepers, legacyGrouped } of [{ keepers: [] }, { keepers: ['p2', 'p4
   const fixture = track(await curatePreviewFixture({ stackSize: 4, singles: 1, metadataReady: true,
     prepare: data => seedAdvice(data, keepers, legacyGrouped) }));
   const browser = track(await launchChrome()), page = await browser.newPage();
-  const click = selector => page.evaluate(`document.querySelector(${JSON.stringify(selector)}).click()`);
+  const click = selector => page.evaluate(`(()=>{const button=document.querySelector(${JSON.stringify(selector)}); const menu=button.closest("details.photo-options"); if(menu) menu.open=true; button.click();})()`);
   const text = selector => page.evaluate(`document.querySelector(${JSON.stringify(selector)}).textContent`);
-  const outcomes = () => page.evaluate('[...document.querySelectorAll("#photos [data-choice][aria-pressed=true]")].map(b=>b.dataset.choice)');
+  const outcomes = () => page.evaluate('[...document.querySelectorAll("#photos .photo-card")].map(b=>b.dataset.outcome)');
   const operations = () => fixture.repo.db.prepare('SELECT COUNT(*) n FROM decision_operations').get().n;
   const originalTags = fixture.repo.loadAssetTagsFor([1, 2, 3, 4].map(fixture.id));
   await page.navigate(`${fixture.base}/curate-preview.html`);
@@ -156,7 +156,7 @@ for (const keepers of [[], ['p2', 'p4']]) test(
     const fixture = track(await curatePreviewFixture({ stackSize: 4, singles: 1, metadataReady: true,
       prepare: data => seedAdvice(data, keepers) }));
     const browser = track(await launchChrome()), page = await browser.newPage();
-    const click = selector => page.evaluate(`document.querySelector(${JSON.stringify(selector)}).click()`);
+    const click = selector => page.evaluate(`(()=>{const button=document.querySelector(${JSON.stringify(selector)}); const menu=button.closest("details.photo-options"); if(menu) menu.open=true; button.click();})()`);
     const enter = async (autoRepeat = false) => {
       await page.send('Input.dispatchKeyEvent', { type: 'keyDown', key: 'Enter', autoRepeat });
       await page.send('Input.dispatchKeyEvent', { type: 'keyUp', key: 'Enter' });
@@ -171,7 +171,7 @@ for (const keepers of [[], ['p2', 'p4']]) test(
     assert.equal(await page.evaluate('document.activeElement.dataset.photoId'), fixture.id(keepers.length ? 2 : 1),
       'eligible suggestions receive initial focus without reordering photos');
     assert.equal(operations(), 0);
-    assert.deepEqual(await page.evaluate('[...document.querySelectorAll("#photos [data-choice][aria-pressed=true]")].map(b=>b.dataset.choice)'),
+    assert.deepEqual(await page.evaluate('[...document.querySelectorAll("#photos .photo-card")].map(b=>b.dataset.outcome)'),
       keepers.length ? ['reviewed', 'approve', 'reviewed', 'approve'] : Array(4).fill('reviewed'));
     await page.evaluate(`window.issuedDecisions=0;const nativeFetch=window.fetch;
       window.fetch=async(...args)=>{if(String(args[0]).endsWith('/operations'))window.issuedDecisions++;
@@ -180,7 +180,7 @@ for (const keepers of [[], ['p2', 'p4']]) test(
     assert.equal(await page.evaluate('window.issuedDecisions'), 0, 'held Enter never confirms a draft');
     await enter();
     if (!keepers.length) {
-      await click('#select-all');
+      await click('#select-mode'); await click('#select-all');
       await page.evaluate('document.querySelector("#photos .photo-card").focus()');
       await enter();
       assert.equal(await page.evaluate('window.issuedDecisions'), 0, 'zero recommendations and checked boxes do not express save intent');
@@ -208,7 +208,7 @@ for (const keepers of [[], ['p2', 'p4']]) test(
       await page.waitFor('document.querySelector(".is-stack").dataset.badge!=="checking" && !document.querySelector("#refresh").disabled');
       await click('.is-stack .cover');
       await page.waitFor('document.querySelectorAll("#photos .photo-card").length===4 && !document.querySelector("#apply-next").disabled');
-      assert.deepEqual(await page.evaluate('[...document.querySelectorAll("#photos [data-choice][aria-pressed=true]")].map(b=>b.dataset.choice)'),
+      assert.deepEqual(await page.evaluate('[...document.querySelectorAll("#photos .photo-card")].map(b=>b.dataset.outcome)'),
         ['reviewed', 'approve', 'reviewed', 'approve'], await page.evaluate('JSON.stringify({updated:__comparison.updated,photoReferee:__comparison.photoReferee,advice:__comparison.photoRecommendations,similarity:__comparison.similarity})'));
     }
     assert.equal(fixture.repo.curate.photo(fixture.contextId).state, 'approved');
@@ -221,7 +221,7 @@ test('grid suggestions: explicit keyboard acceptance, Undo, stale/partial fallba
   const fixture = track(await curatePreviewFixture({ stackSize: 4, singles: 1, metadataReady: true,
     prepare: data => seedAdvice(data, ['p2', 'p4']) }));
   const browser = track(await launchChrome()), page = await browser.newPage();
-  const click = selector => page.evaluate(`document.querySelector(${JSON.stringify(selector)}).click()`);
+  const click = selector => page.evaluate(`(()=>{const button=document.querySelector(${JSON.stringify(selector)}); const menu=button.closest("details.photo-options"); if(menu) menu.open=true; button.click();})()`);
   const operations = () => fixture.repo.db.prepare('SELECT COUNT(*) n FROM decision_operations').get().n;
   const ready = () => page.waitFor('document.querySelector(".stack-accept:not([hidden]):not(:disabled)")');
   const enter = async (autoRepeat = false, modifiers = 0) => {
@@ -242,7 +242,7 @@ test('grid suggestions: explicit keyboard acceptance, Undo, stale/partial fallba
   assert.deepEqual(await page.evaluate('[...document.querySelectorAll("#photos .photo-card")].map(c=>c.dataset.photoId)'), [1,2,3,4].map(fixture.id));
   assert.equal(await page.evaluate('document.querySelectorAll("#photos .photo-reason-inline").length'), 2);
   assert.equal(await page.evaluate('document.querySelector("#apply-next").textContent'), 'Keep 2 · Next');
-  await click('#select-all'); await click('#comparison-bulk [data-comparison-bulk="reviewed"]');
+  await click('#select-mode'); await click('#select-all'); await click('#comparison-bulk [data-comparison-bulk="reviewed"]');
   assert.equal(await page.evaluate('document.querySelector("#apply-next").textContent'), 'Skip all · Next');
   await click(`#photos [data-photo-id="${fixture.id(1)}"] [data-choice=reject]`);
   assert.equal(await page.evaluate('document.querySelector("#apply-next").textContent'), 'Save · Next');
@@ -281,7 +281,7 @@ test('grid suggestions: explicit keyboard acceptance, Undo, stale/partial fallba
     assert.match(await page.evaluate('document.querySelector("#comparison-state").textContent'), /Suggestions changed/);
     if (variant !== 'changed') {
       assert.equal(await page.evaluate('document.activeElement.dataset.photoId'), fixture.id(1));
-      assert.equal(await page.evaluate('document.querySelectorAll("#photos [data-choice=approve][aria-pressed=true]").length'), 0);
+      assert.equal(await page.evaluate('document.querySelectorAll("#photos [data-keep-toggle][aria-pressed=true]").length'), 0);
       assert.equal(await page.evaluate('document.querySelectorAll("#photos .photo-reason-inline").length'), 0);
     }
     await click('[data-close=comparison]'); await ready();
@@ -301,7 +301,7 @@ test('grid suggestions: explicit keyboard acceptance, Undo, stale/partial fallba
     await click('.is-stack .cover');
     await page.waitFor('document.querySelector("#comparison").open && !document.querySelector("#apply").disabled');
     assert.equal(await page.evaluate('document.activeElement.dataset.photoId'), fixture.id(2));
-    assert.ok(await page.evaluate(`(()=>{const c=document.activeElement.getBoundingClientRect();return c.bottom>0 && c.top<innerHeight})()`), 'suggested card visible on phone');
+    if (width < 600) assert.ok(await page.evaluate(`(()=>{const c=document.activeElement.getBoundingClientRect(),body=document.querySelector('#comparison .dialog-body').getBoundingClientRect();return c.top>=body.top&&c.top<=body.top+16&&c.bottom<=body.bottom;})()`), 'suggested card starts below the header with its Keep control visible');
     assert.ok(await page.evaluate(`document.querySelector('#comparison').scrollWidth<=document.querySelector('#comparison').clientWidth+1`));
     if (process.env.PICTARIA_TEST_SCREENSHOTS) {
       const shot=await page.send('Page.captureScreenshot',{format:'png'});
@@ -309,4 +309,84 @@ test('grid suggestions: explicit keyboard acceptance, Undo, stale/partial fallba
     }
     await click('[data-close=comparison]'); await ready();
   }
+});
+
+test('Keep toggles, optional Select mode and stack-only filmstrip/A-B preserve human drafts', { timeout: 45000 }, async t => {
+  if (!findChrome()) return t.skip('Chrome required');
+  const track = cleanupAfter(t);
+  const browser = track(await launchChrome()), page = await browser.newPage();
+  const previews = await page.evaluate(`[[900,1200],[1200,800]].map(([w,h],i)=>{
+    const canvas=document.createElement('canvas');canvas.width=w;canvas.height=h;const c=canvas.getContext('2d');
+    c.fillStyle=i?'#477a84':'#627da1';c.fillRect(0,0,w,h);c.fillStyle='#bddbd0';c.fillRect(w*.1,h*.15,w*.8,h*.7);
+    c.fillStyle='#31515a';c.font='70px sans-serif';c.fillText(i?'Landscape':'Portrait',w*.2,h*.55);
+    return canvas.toDataURL('image/png').split(',')[1];})`);
+  const fixture = track(await curatePreviewFixture({ stackSize: 4, singles: 1, metadataReady: true,
+    prepare: data => seedAdvice(data, ['p2', 'p4']),
+    thumbnail: id => Buffer.from(previews[id.endsWith('4') ? 1 : 0], 'base64') }));
+  const click = selector => page.evaluate(`document.querySelector(${JSON.stringify(selector)}).click()`);
+  const key = key => page.send('Input.dispatchKeyEvent', { type: 'keyDown', key });
+  const card = n => `#photos [data-photo-id="${fixture.id(n)}"]`;
+  const showing = n => page.waitFor(`document.querySelector('#photo-loading').hidden && document.querySelector('#photo-large').src.includes('${fixture.id(n)}')`);
+  const operations = () => fixture.repo.db.prepare('SELECT COUNT(*) n FROM decision_operations').get().n;
+  await page.navigate(`${fixture.base}/curate-preview.html`);
+  await page.waitFor('document.querySelector(".gate-backdrop input")');
+  await page.evaluate('document.querySelector(".gate-backdrop input").value="smoke-secret";document.querySelector(".gate-backdrop button").click()');
+  await page.waitFor('document.querySelector(".stack-accept:not([hidden]):not(:disabled)")');
+  await click('.is-stack .cover');
+  await page.waitFor('document.querySelectorAll("#photos .photo-card").length===4 && !document.querySelector("#apply").disabled');
+  assert.equal(await page.evaluate('getComputedStyle(document.querySelector(".photo-selection")).display'), 'none');
+  await click(`${card(2)} [data-keep-toggle]`);
+  assert.equal(await page.evaluate(`document.querySelector('${card(2)} .human-pick').hidden`), true);
+  assert.equal(await page.evaluate(`document.querySelector('${card(2)} .keeper-star').getAttribute('aria-label')`), 'Suggested keeper', 'AI suggestion does not change with the human toggle');
+  await click(`${card(1)} [data-keep-toggle]`);
+  assert.equal(await page.evaluate(`document.querySelector('${card(1)} .human-pick').hidden`), false);
+  assert.equal(await page.evaluate(`document.querySelector('${card(1)} .keeper-star')`), null);
+  await click('#select-mode'); await click('#select-all');
+  assert.equal(await page.evaluate('document.querySelectorAll("[data-compare-select]:checked").length'), 4);
+  await click('#select-mode');
+  assert.equal(await page.evaluate('document.querySelectorAll("[data-compare-select]:checked").length'), 0);
+  assert.equal(await page.evaluate(`document.querySelector('${card(1)}').dataset.outcome`), 'approve', 'leaving Select preserves choices');
+  await click(`${card(1)} summary`);
+  assert.equal(await page.evaluate(`document.querySelector('${card(1)} details').open`), true);
+  await page.evaluate(`document.querySelector('${card(1)} [data-choice=favorite]').focus()`);
+  await key('Escape');
+  assert.equal(await page.evaluate(`document.querySelector('${card(1)} details').open`), false);
+  assert.equal(await page.evaluate('document.querySelector("#comparison").open'), true);
+  await click(`${card(1)} summary`); await click(`${card(1)} [data-choice=favorite]`);
+  assert.equal(await page.evaluate(`document.querySelector('${card(1)} details').open`), false);
+  await click(`${card(2)} .photo-image`); await showing(2);
+  assert.equal(await page.evaluate('document.querySelectorAll("#photo-filmstrip button").length'), 5);
+  assert.equal(await page.evaluate('document.querySelector("#photo-keep").disabled'), false);
+  assert.equal(await page.evaluate('document.querySelector("#photo-flip").disabled'), true);
+  assert.equal(await page.evaluate(`document.querySelector('#photo-filmstrip [data-id="${fixture.id(2)}"] .filmstrip-star').hidden`), false);
+  assert.equal(await page.evaluate(`document.querySelector('#photo-filmstrip [data-id="${fixture.id(2)}"] .filmstrip-pick').hidden`), true);
+  assert.equal(await page.evaluate(`document.querySelector('#photo-filmstrip [data-id="${fixture.id(1)}"] .filmstrip-pick').hidden`), false);
+  assert.equal(await page.evaluate(`(()=>{const reason=document.querySelector('#photo-assessment').getBoundingClientRect();const choices=document.querySelector('#stack-actions').getBoundingClientRect();return reason.bottom<=choices.top;})()`), true, 'model and reason precede decisions');
+  await click(`#photo-filmstrip [data-id="${fixture.id(4)}"]`); await showing(4);
+  const viewport = () => page.evaluate(`(()=>{const r=document.querySelector('.lightbox-viewport').getBoundingClientRect();return [r.x,r.y,r.width,r.height];})()`);
+  const before = await viewport();
+  await key('c'); await showing(2); assert.deepEqual(await viewport(), before);
+  await key('c'); await showing(4); assert.deepEqual(await viewport(), before);
+  assert.equal(operations(), 0);
+  await click(`#photo-filmstrip [data-id="${fixture.contextId}"]`);
+  await page.waitFor('document.querySelector("#photo-loading").hidden && !document.querySelector("#photo-readonly").hidden');
+  assert.equal(await page.evaluate('document.querySelector("#stack-actions").hidden'), true);
+  await key('y'); await key('k');
+  assert.equal(fixture.repo.curate.photo(fixture.contextId).state, 'approved');
+  await key('c'); await showing(4);
+  for (const width of [1280, 390, 320]) {
+    await page.send('Emulation.setDeviceMetricsOverride', { width, height: 844, deviceScaleFactor: 1, mobile: width < 600 });
+    assert.equal(await page.evaluate('document.querySelector("#photo-view").scrollWidth<=document.querySelector("#photo-view").clientWidth'), true);
+    assert.equal(await page.evaluate(`(()=>{const image=document.querySelector('#photo-large').getBoundingClientRect(),box=document.querySelector('.lightbox-viewport').getBoundingClientRect();return image.width>0&&image.height>0&&image.width<=box.width+1&&image.height<=box.height+1;})()`), true, 'photo fits the viewport above the strip');
+    if (process.env.PICTARIA_TEST_SCREENSHOTS) {
+      const shot = await page.send('Page.captureScreenshot', { format: 'png' });
+      writeFileSync(join(process.env.PICTARIA_TEST_SCREENSHOTS, `filmstrip-${width}.png`), Buffer.from(shot.data, 'base64'));
+    }
+  }
+  await click('#back-comparison'); await click('[data-close=comparison]');
+  await click('.group-card:not(.is-stack) .cover');
+  await page.waitFor('document.querySelector("#photo-view").open && document.querySelector("#photo-loading").hidden');
+  assert.equal(await page.evaluate('document.querySelector("#photo-filmstrip").hidden'), true);
+  assert.equal(await page.evaluate('document.querySelector("#photo-flip").hidden'), true);
+  assert.equal(operations(), 0, 'inspection and draft changes never save');
 });
