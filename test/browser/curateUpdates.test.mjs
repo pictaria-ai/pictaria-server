@@ -28,7 +28,7 @@ async function open(t, singles) {
 }
 
 test(
-  'automatic updates wait for bulk selection, preserve loaded depth and anchor, and use one aligned Refresh menu',
+  'automatic updates wait for bulk selection, preserve loaded depth and anchor, without permanent Refresh or More controls',
   { timeout: 60000 },
   async (t) => {
     if (!findChrome()) return t.skip('Chrome required');
@@ -71,23 +71,14 @@ test(
       null,
     );
     await page.evaluate('scrollTo(0,0)');
-    await click('.page-tools summary');
-    const geometry = await page.evaluate(`(()=>{
-    const more=document.querySelector('.page-tools summary'), refresh=document.querySelector('#refresh');
-    const m=more.getBoundingClientRect(), r=refresh.getBoundingClientRect();
-    return {delta:Math.abs(m.y+m.height/2-r.y-r.height/2), display:getComputedStyle(more).display,
-      items:[...document.querySelectorAll('.page-tools a')].map(e=>({display:getComputedStyle(e).display,align:getComputedStyle(e).alignItems,decoration:getComputedStyle(e).textDecorationLine}))};
-  })()`);
-    assert.ok(geometry.delta < 1);
-    assert.equal(geometry.display, 'flex');
-    assert.ok(
-      geometry.items.every((i) => i.display === 'flex' && i.align === 'center' && i.decoration === 'none'),
-    );
+    assert.equal(await page.evaluate('document.querySelector(".page-tools")'), null);
+    assert.equal(await page.evaluate('document.querySelector("#refresh").hidden'), true);
+
   },
 );
 
 test(
-  'failed automatic replacement pauses rather than looping; explicit Refresh recovers',
+  'failed automatic replacement pauses rather than looping; contextual Retry updates recovers',
   { timeout: 45000 },
   async (t) => {
     if (!findChrome()) return t.skip('Chrome required');
@@ -99,17 +90,19 @@ test(
   };`);
     fixture.add(3000, 900000, 'new-arrival');
     await page.waitFor(
-      '!document.querySelector("#error").hidden && document.querySelector("#error").textContent.includes("Refresh to continue")',
+      '!document.querySelector("#error").hidden && document.querySelector("#error").textContent.includes("Retry updates to continue")',
     );
     const polls = await page.evaluate('window.statusPolls');
     await page.waitFor(`window.statusPolls>=${polls + 2}`);
     assert.equal(await page.evaluate('window.autoAttempts'), 1);
     assert.equal(await page.evaluate('document.querySelector(".group-card button").disabled'), true);
     assert.equal(await page.evaluate('document.querySelector("#refresh").disabled'), false);
+    assert.equal(await page.evaluate('document.querySelector("#refresh").hidden'), false);
     await click('#refresh');
     await page.waitFor(
       'document.querySelectorAll(".group-card").length===3 && !document.querySelector(".group-card button").disabled',
     );
     assert.equal(await page.evaluate('document.querySelector("#error").hidden'), true);
+    assert.equal(await page.evaluate('document.querySelector("#refresh").hidden'), true);
   },
 );

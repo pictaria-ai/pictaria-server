@@ -4,6 +4,7 @@ import { groupPhotos } from './grouping.mjs';
 import { applyStackChecks } from './stack-referee-results.mjs';
 import { settledCandidateGroups, rememberSettledGroups } from './settled-groups.mjs';
 import { CurateRefinement } from './refinement.mjs';
+import { CurateRefereeProgress } from './referee-progress.mjs';
 import { CurateError } from './contracts.mjs';
 import { CurateMetadataRefresher } from './metadata.mjs';
 import { StackingLab } from './lab.mjs';
@@ -35,6 +36,7 @@ export class CurateService {
     this.embeddingRecheckMs = candidateOptions.embeddingRecheckMs ?? CURATE_EMBEDDING_RECHECK_MS;
     this.embeddingState = null;
     this.refinement = this.candidateEnabled ? new CurateRefinement(this, candidateOptions) : null;
+    this.refereeProgress = new CurateRefereeProgress(this);
     if (this.candidateEnabled) this.repo.db.prepare(`INSERT OR IGNORE INTO curate_dirty(asset_id)
       SELECT asset_id FROM curate_photos WHERE json_type(evidence_json,'$.category') IS NULL`).run();
   }
@@ -224,6 +226,7 @@ export class CurateService {
       refinement,
       stackRefereeActivity: this.stackReferee?.activity() ?? null,
       photoRefereeActivity: this.photoReferee?.activity() ?? null,
+      refereeProgress: this.refereeProgress.status(),
       updatesAvailable:
         view.generation !== this.store.generation() ||
         Boolean(refinement?.ready) ||
@@ -380,6 +383,7 @@ export class CurateService {
       await this.stackReferee?.discover();
       await this.photoReferee?.discover();
       this.aiLifecycle?.tick();
+      await this.refereeProgress.refresh();
       if (Date.now() >= (this.nextAiMaintenance ?? 0)) {
         this.aiLifecycle?.maintain();
         this.nextAiMaintenance = Date.now() + 60_000;
@@ -396,6 +400,7 @@ export class CurateService {
     this.timer.unref();
   }
   settingsChanged() {
+    this.refereeProgress.invalidate();
     this.metadata.settingsChanged();
     this.similarity.settingsChanged();
     this.refinement?.settingsChanged();

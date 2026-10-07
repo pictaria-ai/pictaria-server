@@ -162,7 +162,7 @@ test(
       'desktop group tabs lead date, category and search on one row',
     );
     await screenshot(page, 'curate-toolbar-desktop.png');
-    const headerPositions = () => page.evaluate(`['#sections','#refresh','.page-tools','#check-activity','#search','#sort','#count','.view-summary','#groups'].map(selector=>{
+    const headerPositions = () => page.evaluate(`['#sections','.referee-progress','#check-activity','#search','#sort','#count','.view-summary','#groups'].map(selector=>{
       const {x,y}=document.querySelector(selector).getBoundingClientRect();return {selector,x,y};
     })`);
     const stableViews = async () => {

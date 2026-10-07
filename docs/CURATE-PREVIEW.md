@@ -22,20 +22,21 @@ visible. A small muted footer identifies the algorithm version and links to
 The stack lightbox exposes the same explanation through its badge.
 
 The current `/curate.html` remains the default during this staging step. The
-preview now includes **Pending** and **Decided**; **More → Production Curate**
-keeps the released page accessible during testing. This temporary entry
+preview now includes **Pending** and **Decided**. The released page remains
+accessible directly at `/curate.html` during testing. This temporary entry
 point allows human-flow review before production AI applicability, rollout and
 runtime acceptance are complete; it is not a second permanent Curate product.
 The eventual default-page cutover must consolidate these entry points and retire
 legacy grouping, rather than leaving both implementations active indefinitely.
 
-For composition experiments, the separate **Stacking lab** link opens a
+For composition experiments, `/curate-stacking-lab.html` opens a
 [temporary, read-only testing page](CURATE-STACKING-LAB.md). Unlike decisions
 in this preview, its proposed partitions are never saved.
 
 ## Review flow
 
-The header has three stable rows: Pending/Decided with activity, Refresh and More;
+The header has three stable rows: Pending/Decided with grouping activity and
+separate Stack Referee / Photo Referee progress bars;
 All/Stacks/Singles on the left with date order, category and Search on the right;
 then selection on the left with shown counts and active background progress
 aligned together on the right. The header checkbox appears in Singles and Decided;
@@ -57,7 +58,7 @@ change.** wording, readable without a hover tooltip.
 Search updates after a short typing pause and keeps focus and cursor position
 while loading results. Text entered during an active request becomes the next
 search, with only the latest draft submitted. A failed request leaves that draft
-editable; **Refresh** searches it again. Background regrouping waits while a
+editable; the contextual **Retry updates** button searches it again. Background regrouping waits while a
 search draft has not been applied.
 
 - **Pending** shows all pending photos by default. All, Stacks and Singles
@@ -116,7 +117,7 @@ search draft has not been applied.
   date order. It opens a fresh view after the save, so the next comparison uses
   the latest grouping, and loads more pages when needed. It does not wrap to
   earlier items. An accepted save remains saved if opening the next item fails;
-  Refresh and Undo remain available. Undo after continuation refreshes the grid.
+  Recovery and Undo remain available. Undo after continuation refreshes the grid.
   **Save & next** remains the primary button for every combination of outcomes,
   including Skip-all. The compact header reads **Compare stack · N photos**,
   with the stack status and Close on the right. A second toolbar holds checkbox
@@ -205,13 +206,39 @@ search draft has not been applied.
 those photos checked. The count distinguishes stacks and single photos. Beside
 it, counts of the loaded stacks that are checking, unsure or not fully checked
 use the cards' icons, without shifting the photo grid. A small spinner beside
-**Refresh** indicates background activity across the pending queue; its tooltip
+the referee progress rows indicates grouping activity across the pending queue; its tooltip
 reads **Checking stacks · N remaining**. This is the overall pending-check queue,
 including photos outside the current page or filters and while browsing Decided.
 It includes queued and in-progress checks; finished incomplete checks leave the
 remaining count. Each check covers a nearby group that may form several stacks,
 so it is not a count of final stack cards. Paused work has an attention
 indicator and a word in the header.
+
+The two referee progress rows count **stacks across the entire pending library**,
+not the displayed cards or the bounded AI request queue. They remain visible in
+Decided and under search, category and All/Stacks/Singles filters. A stack that
+needs several Photo Referee requests still counts once. Singles are excluded;
+Stack Referee also excludes stacks outside its selected scope.
+
+- **N stacks remaining · Working / Queued** covers outstanding work, including
+  work waiting to be discovered by the bounded worker queue.
+- **Waiting for grouping / Waiting for stack checks / Waiting for AI** explains
+  prerequisites or shared-provider scheduling; it does not assume Enrich is
+  always the other provider user. **Paused** retains work blocked by settings,
+  provider or preview problems in the remaining count.
+- **Up to date** means no automatic work remains for the current pending stacks.
+  Finished limited/failed checks count as finished, not endless pending work.
+  Hover, focus or tap a referee's name for successful/limited counts and details.
+  **Off** reflects Settings, even if older advice remains visible on cards.
+
+Each bar shows finished work (successful plus terminal limited outcomes) out of
+that role's current pending-stack scope. This is not a lifetime completion count
+or an ETA: Enrich arrivals, new evidence, splits and human decisions can change
+the denominator. Counts say **Counting stacks…** until a current summary exists.
+The server collects a shared, read-only summary in cooperative slices, normally
+at most once every four seconds for unchanged grouping/settings, and sends it
+through the existing status poll. A new grouping/settings generation invalidates
+old counts. It creates no AI calls, new retry work or persisted progress history.
 
 Cards and comparisons use the [stack status](#stack-status) badges: **Checking**
 while work is queued or running (reduced-motion preferences stop the spinner),
@@ -238,8 +265,8 @@ Photos with distant ThumbHashes stay together provisionally until search evidenc
 can resolve them; strong people differences and saved manual separations still
 apply immediately. Larger hash-supported groups also receive verification
 searches; small locally resolved comparisons and exact renditions can skip them. A completed check highlights
-affected cards; the grid adopts the result when browsing pauses. A single
-**Refresh** button remains available and is highlighted when updates are waiting.
+affected cards; the grid adopts the result when browsing pauses. No routine
+Refresh button or More menu occupies the header.
 Checks that leave grouping unchanged do not request a new view. Results are applied as a complete time-candidate
 pass, never one search at a time. Missing targets and successful empty results
 remain unknown unless repeated subgroup evidence resolves the relationship.
@@ -264,12 +291,12 @@ even when no grouping updates are waiting. Open drafts and checked selections
 remain intact until closed or cleared, with a brief notice that the view will
 refresh when reviewing finishes. An expiry response for an older, replaced view
 does not affect the current view. Comparison and save expiry guards still apply.
-A failed update stops automatic replacement and asks for **Refresh**, disabling decisions
+A failed update stops automatic replacement and reveals **Retry updates**, disabling decisions
 until the view is reconciled. A failed similarity search gets one retry within the current pass. If it fails
 again, that candidate finishes with limited evidence and leaves the pending
 count. Its existing grouping remains usable, and human decisions work normally.
-There is no long-term repair queue or Retry now control. **Refresh** reloads the
-view; it does not restart finished checks.
+There is no long-term repair queue or control to retry finished checks.
+**Retry updates** reloads a failed view; it does not restart finished checks.
 
 Limited evidence does not ask the user to repair a stack. The header shows active
 progress or paused work; once checks finish, it omits aggregate incomplete counts
@@ -346,9 +373,9 @@ when Curate refreshes." Work that produced the newer grouping no longer shows as
 
 The page header counts the **loaded** stacks that are checking, unsure or not
 fully checked, with the cards' icons, for example "12 checking · 6 unsure".
-Paused work and photo-information problems stay as words there. Library-wide
-progress, including checks outside the view, is in the activity spinner's
-tooltip. These badges describe the current membership and applicable inputs:
+Photo-information and grouping problems stay as words there. Library-wide
+grouping progress is in the activity spinner's tooltip; referee progress is
+visible in the two header rows. These badges describe the current membership and applicable inputs:
 changed photos or invalidated results never keep an AI badge, and open
 comparisons retain their photos and draft choices as status updates arrive.
 

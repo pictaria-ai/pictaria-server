@@ -7,6 +7,14 @@ All notable changes to Pictaria Server are documented here. This project follows
 
 ### Development
 
+- Replace Curate Preview's permanent Refresh and More buttons with separate
+  Stack Referee and Photo Referee progress bars (PIC-116 / PIC-371). Counts cover
+  all pending stacks, including outside the current filters/page and while in
+  Decided. Show remaining work, waiting/working/paused states, Off and Up to date;
+  completed limited checks leave the remaining count. Background summaries are
+  shared and collected in cooperative slices, without new AI requests or retries.
+  Automatic updates preserve open drafts; failed page updates expose Retry updates.
+
 - Simplify the Curate Preview stack comparison (PIC-116 / PIC-371): retain
   recommendation stars and filled decision buttons without duplicate colored
   outlines or per-photo Draft labels. Use one restrained focus border and photo

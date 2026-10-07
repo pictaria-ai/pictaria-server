@@ -187,8 +187,8 @@ test('background status markers and inline progress remain stable on desktop and
       const count = document.querySelector('#count').getBoundingClientRect();
       const status = document.querySelector('#refinement').getBoundingClientRect();
       const spinner = document.querySelector('#check-activity').getBoundingClientRect();
-      const refresh = document.querySelector('#refresh').getBoundingClientRect();
-      return Math.abs(count.top - status.top) < 2 && Math.abs((spinner.top+spinner.bottom)/2 - (refresh.top+refresh.bottom)/2) < 2;
+      const referees = document.querySelector('.referee-progress').getBoundingClientRect();
+      return Math.abs(count.top - status.top) < 2 && Math.abs((spinner.top+spinner.bottom)/2 - (referees.top+referees.bottom)/2) < 2;
     })()`), true);
 
     assert.deepEqual(await page.evaluate('[...document.querySelectorAll("#groups .group-card")].map(c=>c.dataset.badge)'), ['checking', ''],

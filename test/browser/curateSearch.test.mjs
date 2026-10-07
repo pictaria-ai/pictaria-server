@@ -54,9 +54,9 @@ test('Curate search keeps focus and caret, coalesces typing and clearing during 
     assert.equal(await page.evaluate('document.querySelectorAll(".group-card").length'), 4);
 
     await gate(); await replace('single-2'); await blocked();
-    await page.evaluate('document.querySelector(".page-tools summary").focus()');
+    await page.evaluate('document.querySelector(".p-gear").focus()');
     await release(); await ready('single-2');
-    assert.equal(await page.evaluate('document.activeElement.matches(".page-tools summary")'), true);
+    assert.equal(await page.evaluate('document.activeElement.matches(".p-gear")'), true);
 
     await gate(); await replace('single-'); await blocked();
     await page.evaluate('document.querySelector("#search").select()');

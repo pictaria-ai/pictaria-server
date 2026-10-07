@@ -80,6 +80,9 @@ for (const keepers of [[], ['p2'], ['p1', 'p3', 'p4']]) test(`background saves $
   f.provider.modelName = 'another-configured-model'; await f.run(); assert.equal(f.calls.length, 1);
   const page = await f.curate.openView();
   assert.equal(page.groups[0].photoReferee.state, 'complete');
+  await f.curate.refereeProgress.refresh();
+  assert.equal(f.curate.page(page.viewId).refereeProgress.photo.completed, 1);
+  assert.equal(f.curate.page(page.viewId).refereeProgress.photo.remaining, 0);
   const comparison = f.curate.comparison(page.viewId, page.groups[0].id);
   assert.deepEqual(comparison.photoRecommendations.keeperIds, f.advice.keeperIds);
   assert.doesNotMatch(JSON.stringify(comparison.photoRecommendations), /requestKey|inputKey|PRIVATE|http:/);
@@ -418,6 +421,9 @@ test('transient preview failures have two bounded attempts and a durable shared 
   f.advance(PHOTO_PREVIEW_PAUSE_MS); await f.run(); f.advance(); await f.run(); assert.equal(f.downloads.length, 2);
   assert.equal(f.calls.length, 0); assert.equal(f.advice, null);
   assert.equal(f.curate.photoReferee.status(f.group).reason, 'preparation-failed');
+  f.curate.refereeProgress.invalidate(); await f.curate.refereeProgress.refresh();
+  assert.equal(f.curate.refereeProgress.status().photo.incomplete, 1);
+  assert.equal(f.curate.refereeProgress.status().photo.remaining, 0, 'exhausted preview attempts leave progress');
 }));
 
 for (const type of ['oversize', 'mime', 'missing']) test(`${type} preview settles without automatic rediscovery`, async () => fixture(async f => {

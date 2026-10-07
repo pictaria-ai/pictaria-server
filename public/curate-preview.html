@@ -44,14 +44,16 @@
         </div>
         <div class="refresh-tools">
           <span id="check-activity" aria-live="polite"></span>
-          <button id="refresh" class="p-btn">Refresh</button>
-          <details class="page-tools">
-            <summary class="p-btn">More</summary>
-            <div>
-              <a class="p-btn" href="/curate-stacking-lab.html">Stacking lab</a>
-              <a class="p-btn" href="/curate.html">Production Curate</a>
+          <div class="referee-progress" aria-label="AI progress across all pending stacks">
+            <div id="stack-referee-progress" class="referee-progress-row" data-phase="counting">
+              <span class="referee-progress-label" title="">Stack Referee</span><progress max="1" aria-label="Stack Referee progress"></progress>
+              <span class="referee-progress-copy" role="status">Counting stacks…</span>
             </div>
-          </details>
+            <div id="photo-referee-progress" class="referee-progress-row" data-phase="counting">
+              <span class="referee-progress-label" title="">Photo Referee</span><progress max="1" aria-label="Photo Referee progress"></progress>
+              <span class="referee-progress-copy" role="status">Counting stacks…</span>
+            </div>
+          </div>
         </div>
       </div>
       <div class="toolbar">
@@ -95,6 +97,7 @@
         </div>
       </div>
       <div id="error" role="alert" hidden></div>
+      <button id="refresh" class="p-btn" hidden>Retry updates</button>
       <div id="recovery" class="notice" hidden role="status">
         <span>The last action’s response is uncertain. Retry it safely before continuing.</span
         ><button id="retry-action" class="p-btn">Retry last action</button>

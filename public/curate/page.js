@@ -5,7 +5,7 @@ import { comesAfter } from './order.js';
 import { explanation } from './explanation.js';
 import { PreviewImages } from './preview-images.js';
 import { node, thumbnail, photoCard, groupCard, savedOutcome, outcomeLabel, badgeNode, activityIndicator } from './photos.js';
-import { refereeActivity, photoRefereeActivity } from './referee-status.js';
+import { showRefereeProgress } from './referee-progress.js';
 import { initialPhotoChoices, photoAssessment, photoAdviceSummary } from './photo-advice.js';
 import { stackStatus, statusCounts, mergeStatus, BADGE_WORDS } from './stack-status.js';
 
@@ -67,6 +67,7 @@ function error(error) {
     : el('error');
   target.textContent = error.message || String(error);
   target.hidden = false;
+  if (target === el('error')) el('refresh').hidden = false;
   if (el('comparison').open && !state.comparison) {
     state.openFailed = true;
     el('comparison-state').textContent = '';
@@ -81,6 +82,7 @@ function clearErrors() {
     el(id).textContent = '';
   }
   el('comparison-refresh').hidden = el('photo-refresh').hidden = true;
+  el('refresh').hidden = true;
 }
 function run(work) {
   return Promise.resolve().then(work).catch(error);
@@ -172,6 +174,8 @@ async function refresh({ automatic = false, keepLightbox = false } = {}) {
   }
 }
 function showViewStatus(view) {
+  showRefereeProgress(el('stack-referee-progress'), view.refereeProgress?.stack, view.stackRefereeActivity, 'stack');
+  showRefereeProgress(el('photo-referee-progress'), view.refereeProgress?.photo, view.photoRefereeActivity, 'photo');
   el('enrich-note').hidden = !view.enrichRunning;
   const loadedStacks = state.groups.filter(g => g.memberCount > 1).length;
   const removedStacks = [...state.removed.values()].filter(g => g.memberCount > 1).length;
@@ -194,14 +198,10 @@ function showViewStatus(view) {
   }
   const paused = refinement?.state === 'paused' || refinement?.state === 'limited';
   const remaining = refinement?.remainingGroups ?? 0;
-  const referee = refereeActivity(view.stackRefereeActivity);
-  const photoReferee = photoRefereeActivity(view.photoRefereeActivity);
-  const activities = [referee, photoReferee].filter(Boolean);
   // Words for page-level work that needs attention, then counts for the stacks
   // loaded here with the cards' icons. Library-wide progress is the tooltip.
   const notices = [paused ? 'Checks paused' : '',
-    metadata?.problem ? 'Photo information paused' : metadata?.state === 'refreshing' ? 'Refreshing photo information' : '',
-    ...activities.filter(a => a.phase === 'attention').map(a => a.title)].filter(Boolean);
+    metadata?.problem ? 'Photo information paused' : metadata?.state === 'refreshing' ? 'Refreshing photo information' : ''].filter(Boolean);
   const counts = Object.entries(state.section === 'decided' ? {} : statusCounts(state.groups)).filter(([, n]) => n > 0);
   const summary = el('refinement'), signature = JSON.stringify([notices, counts]);
   if (summary.dataset.signature !== signature) {
@@ -215,15 +215,14 @@ function showViewStatus(view) {
       return item;
     })].flatMap((item, i) => i ? [' · ', item] : [item]));
   }
-  summary.title = [paused ? refinement?.problem : metadata?.problem, ...activities.filter(a => a.phase === 'attention').map(a => a.detail),
+  summary.title = [paused ? refinement?.problem : metadata?.problem,
     counts.length ? 'Counts cover the stacks loaded on this page.' : ''].filter(Boolean).join(' ');
-  const phase = paused || activities.some(a => a.phase === 'attention') ? 'attention'
-    : refinement?.state === 'searching' || metadata?.state === 'refreshing' || activities.some(a => a.phase === 'running') ? 'running'
-      : remaining > 0 || activities.some(a => a.phase === 'queued') ? 'queued' : null;
+  const phase = paused ? 'attention'
+    : refinement?.state === 'searching' || metadata?.state === 'refreshing' ? 'running'
+      : remaining > 0 ? 'queued' : null;
   const title = [paused ? refinement?.problem || 'Stack checks are paused.' : '',
     remaining > 0 ? `Checking stacks · ${remaining.toLocaleString()} remaining across all pending photos, including outside this view. Includes queued and in-progress checks. Each check covers nearby photos that may form more than one stack.` : '',
-    metadata?.state === 'refreshing' ? 'Refreshing photo information.' : '',
-    ...activities.map(a => `${a.title}. ${a.detail}`)].filter(Boolean).join(' ') || 'Checking pending stacks in the background';
+    metadata?.state === 'refreshing' ? 'Refreshing photo information.' : ''].filter(Boolean).join(' ') || 'Checking pending stacks in the background';
   const slot = el('check-activity');
   if (slot.firstChild?.dataset.phase !== (phase ?? undefined)) slot.replaceChildren(...(phase ? [activityIndicator(phase, title)] : []));
   else if (phase) slot.firstChild.title = slot.firstChild.ariaLabel = title;
@@ -727,17 +726,16 @@ let updateTimer, lastInteraction = 0, lastAutomatic = 0;
 function canUpdate() {
   return !document.hidden && !state.busy && !state.loading && !state.continuing && !client.saved.pending &&
     el('search').value.trim() === state.search &&
-    !state.selected.size && !document.querySelector('dialog[open], .page-tools[open], .card-menu[open]') &&
+    !state.selected.size && !document.querySelector('dialog[open], .card-menu[open]') &&
     !document.activeElement?.matches('input:not([type=checkbox]),select,textarea,[contenteditable=true]');
 }
 function updateHint() {
   const available = state.autoUpdateFailed || state.viewExpired || Boolean(state.updateStatus?.updatesAvailable);
   el('updates').hidden = !available;
-  el('updates-copy').textContent = state.autoUpdateFailed ? 'Refresh to load updates'
+  el('updates-copy').textContent = state.autoUpdateFailed ? 'Updates could not load'
     : state.viewExpired ? 'Photo view will refresh when you finish reviewing'
     : state.updateStatus?.refinement?.ready ? 'Updated stacks available' : 'Photo updates available';
-  el('refresh').classList.toggle('updates-ready', available);
-  el('refresh').title = available ? 'Load the latest photos and completed grouping checks' : 'Refresh photos';
+  el('refresh').hidden = !state.autoUpdateFailed && el('error').hidden;
 }
 function scheduleUpdates() {
   clearTimeout(updateTimer);
@@ -751,9 +749,9 @@ function scheduleUpdates() {
       try { await refresh({ automatic: true }); }
       catch {
         // Do not spin on a failed read or on an uncertain replacement view.
-        // Explicit Refresh safely reconciles the server's replacement lease.
+        // Retry updates safely reconciles the server's replacement lease.
         updateHint();
-        throw Error('Could not finish updating photos. Use Refresh to continue.');
+        throw Error('Could not finish updating photos. Use Retry updates to continue.');
       }
     });
   }, wait);

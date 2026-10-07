@@ -64,3 +64,27 @@ export function photoRefereeActivity(status) {
       : status.reason === 'model-failures' ? 'The selected model repeatedly failed photo comparisons. Choose another multi-image vision model in Settings. You can still curate.'
         : presentation.detail.replaceAll('Stack Referee', 'Photo Referee').replaceAll('stack checks', 'photo comparisons') };
 }
+
+// Progress counts come from all pending stacks, independently of the current
+// page. Queue lengths and batch counts are intentionally not used here.
+export function refereeProgress(counts, activity, role = 'stack') {
+  const label = role === 'photo' ? 'Photo Referee' : 'Stack Referee';
+  const details = (role === 'photo' ? photoRefereeActivity : refereeActivity)(activity);
+  if (counts?.state === 'off' || activity?.state === 'off')
+    return { phase: 'off', text: 'Off', detail: `${label} is turned off in Curate Settings.` };
+  if (counts?.state !== 'ready') return { phase: 'counting', text: 'Counting stacks…',
+    detail: `Counting ${label} work across all pending stacks.` };
+  const { total, completed, incomplete, remaining, waitingForGrouping, waitingForStack, paused } = counts;
+  const summary = `${completed} of ${total} pending stacks finished successfully.` +
+    (incomplete ? ` ${incomplete} finished without a full result and will not be retried automatically.` : '') +
+    ' Counts include photos outside this view and can change as photos arrive or stacks split. You can keep curating.';
+  if (!remaining) return { phase: 'idle', text: 'Up to date', value: 1, detail: summary };
+  let phase = 'queued', status = 'Queued';
+  if (details?.phase === 'running') { phase = 'running'; status = 'Working'; }
+  else if (paused === remaining || details?.phase === 'attention') { phase = 'attention'; status = 'Paused'; }
+  else if (waitingForGrouping === remaining) status = 'Waiting for grouping';
+  else if (waitingForGrouping + waitingForStack === remaining) status = 'Waiting for stack checks';
+  else if (activity?.reason === 'shared-provider') status = 'Waiting for AI';
+  return { phase, text: `${remaining.toLocaleString()} ${remaining === 1 ? 'stack' : 'stacks'} remaining · ${status}`,
+    value: (completed + incomplete) / total, detail: [summary, details?.detail].filter(Boolean).join(' ') };
+}
