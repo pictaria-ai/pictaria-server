@@ -1,4 +1,4 @@
-html.curate-preview { scrollbar-gutter: stable; }
+html.curate-preview { scrollbar-gutter: stable; --curate-referee-gold: #fbbf24; }
 main {
   max-width: 1500px;
   margin: auto;
@@ -53,12 +53,14 @@ button {
 .view-notices { grid-column: 2; min-width: 0; text-align: right; font-size: 12px; }
 #updates { display: block; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .status-slot { grid-column: 3; width: 340px; height: 40px; display: flex; align-items: center; justify-content: flex-end; }
-.curate-status-chip.why-trigger { display: inline-flex; align-items: center; justify-content: flex-end; gap: 8px; min-height: 36px; padding: 6px 10px; border: 1px solid var(--p-line); border-radius: 18px; text-decoration: none; font-size: 12px; color: var(--p-muted); cursor: pointer; }
-.curate-status-icon { display: inline-grid; place-items: center; width: 14px; height: 14px; flex-shrink: 0; font-weight: 700; }
+.curate-status-chip.why-trigger { --status-tint: var(--p-accent); display: inline-flex; align-items: center; justify-content: flex-end; gap: 8px; min-height: 36px; padding: 6px 10px; border: 1px solid color-mix(in srgb, var(--status-tint) 50%, var(--p-line)); border-radius: 18px; background: color-mix(in srgb, var(--status-tint) 16%, var(--p-panel)); text-decoration: none; font-size: 12px; font-weight: 600; color: var(--p-ink); cursor: pointer; }
+.curate-status-chip.why-trigger:hover { background: color-mix(in srgb, var(--status-tint) 24%, var(--p-panel)); }
+.curate-status-icon { display: inline-grid; place-items: center; width: 14px; height: 14px; flex-shrink: 0; font-weight: 700; color: var(--status-tint); }
 .curate-status-count { display: none; font-variant-numeric: tabular-nums; }
-.status-slot[data-phase=running] .curate-status-chip.why-trigger { color: var(--p-accent); }
+.status-slot:is([data-phase=waiting],[data-phase=counting]) .curate-status-chip.why-trigger { --status-tint: #60a5fa; }
+:root[data-theme='light'] .status-slot:is([data-phase=waiting],[data-phase=counting]) .curate-status-chip.why-trigger { --status-tint: #2563eb; }
 .status-slot:is([data-phase=running],[data-phase=grouping]) .curate-status-icon { box-sizing: border-box; border: 2px solid currentColor; border-right-color: transparent; border-radius: 50%; animation: similarity-spin .8s linear infinite; }
-.status-slot[data-phase=attention] .curate-status-chip.why-trigger { color: var(--p-warning, #a56709); }
+.status-slot[data-phase=attention] .curate-status-chip.why-trigger { --status-tint: var(--p-gold); }
 .status-slot[data-phase=attention] .curate-status-icon { border: 1px solid currentColor; border-radius: 50%; }
 .curate-status-details { width: min(390px,calc(100vw - 24px)); }
 .curate-status-roles { margin: 10px 0; }
@@ -214,7 +216,9 @@ button {
   border-radius: 50%;
   animation: similarity-spin .8s linear infinite;
 }
-.keeper-star { --badge: var(--p-gold); border-color: color-mix(in srgb, var(--p-gold) 55%, transparent); }
+/* Match production Curate's gold overlay in both themes, not the light
+   theme's darker gold used for text buttons. */
+.keeper-star { --badge: var(--curate-referee-gold); background: rgba(10, 13, 17, .82); border-color: color-mix(in srgb, var(--curate-referee-gold) 55%, transparent); }
 .keeper-star-icon { font-size: 14px; }
 .photo-image { position: relative; }
 .photo-image .keeper-star { position: absolute; top: 9px; right: 9px; }
@@ -532,7 +536,7 @@ dialog::backdrop {
 .cover-wrap { position: relative; }
 .stack-accept { position: absolute; right: 10px; bottom: 10px; min-height: 36px; background: var(--p-panel); box-shadow: 0 1px 6px #0003; }
 .stack-accept:focus-visible { outline: 3px solid var(--p-accent); outline-offset: 2px; }
-.stack-accept .keeper-star-icon { color: var(--p-gold); }
+.stack-accept .keeper-star-icon { color: var(--curate-referee-gold); text-shadow: 0 0 1px #805400; }
 .group-card.is-stack::before, .group-card.is-stack::after {
   content: ''; position: absolute; z-index: -1; pointer-events: none;
   height: 14px; border: 1px solid var(--p-strong-line, var(--p-line));
@@ -800,7 +804,7 @@ dialog::backdrop {
 .filmstrip-photo[aria-current=true] { border-color: var(--p-accent); }
 .filmstrip-photo:focus-visible { outline: 2px solid #fff; outline-offset: 1px; }
 .filmstrip-star,.filmstrip-pick { position: absolute; background: #161b21; border-radius: 3px; line-height: 16px; width: 16px; font-size: 12px; }
-.filmstrip-star { left: 1px; top: 1px; color: #fbbf24; }
+.filmstrip-star { left: 1px; top: 1px; color: var(--curate-referee-gold); }
 .filmstrip-pick { right: 1px; bottom: 1px; color: #5eead4; }
 .filmstrip-reference { font-size: 11px; color: #cbd5e1; max-width: 48px; }
 #photo-assessment { font-size: 12px; }

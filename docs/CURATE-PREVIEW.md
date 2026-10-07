@@ -225,7 +225,9 @@ search draft has not been applied.
 **Load more** only displays additional results; it is not needed to get those
 photos checked. There is no duplicate loaded-stack status count beside the photo
 counts. The right-aligned activity chip uses a reserved space so updates cannot
-shift the tabs, filters or grid. It has these states:
+shift the tabs, filters or grid. Soft teal fills highlight active and up-to-date
+states, blue marks waiting/counting, and amber marks work needing attention.
+Labels and icons distinguish each state in both light and dark themes:
 
 - **Picking best photos / Checking stacks · N stacks left** with an accent
   spinner while a referee is working. The count is the union of unfinished
@@ -248,9 +250,9 @@ shift the tabs, filters or grid. It has these states:
   Different or unknown blockers use **AI needs attention**, with separate
   details in each row. **Grouping paused** remains an amber grouping status.
   The popover includes **AI settings** in every state.
-- **Grouping photos…** with a gray spinner for deterministic grouping or photo
+- **Grouping photos…** with a teal spinner for deterministic grouping or photo
   information refreshes, including when both AI referees are Off.
-- **AI up to date** in quiet gray when enabled referees have no work left.
+- **AI up to date** with a teal checkmark when enabled referees have no work left.
   Finished limited checks count as finished, not endlessly pending work. When
   both roles are Off and grouping is idle, the chip is hidden.
 
@@ -409,7 +411,9 @@ comparisons retain their photos and draft choices as status updates arrive.
 
 The Photo Referee (PIC-116) adds a gold **★** beside any badge when it suggests
 keepers, with a count when more than one, a **Keepers** step in the strip, and
-stars on the suggested photos in the open stack. The page reads a group's
+stars on the suggested photos in the open stack. Badge, Keep-button and filmstrip
+stars use production Curate's bright gold in both themes; overlay badges retain
+a dark background for contrast. The page reads a group's
 `photoReferee` status (with `keepers` once complete) and the comparison's
 `photoRecommendations.keeperIds`. A keeper star does not imply that the Stack
 Referee ran. The lightbox shows per-photo reasons, and Why records batch

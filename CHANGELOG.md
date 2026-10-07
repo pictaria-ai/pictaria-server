@@ -7,6 +7,10 @@ All notable changes to Pictaria Server are documented here. This project follows
 
 ### Development
 
+- Match Curate Preview referee stars to production Curate's bright gold in both
+  themes (PIC-116). Add soft teal, blue and amber activity-chip fills to make
+  working/up-to-date, waiting and attention states easier to spot.
+
 - Add **Keep N ★** to eligible Curate Preview stack cards (PIC-116): one human
   action accepts saved Photo Referee suggestions and skips the rest, using the
   existing guarded decision and Undo. Recheck the displayed suggestion snapshot
