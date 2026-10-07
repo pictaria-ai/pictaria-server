@@ -37,24 +37,24 @@
         </nav>
         <div class="view-notices">
           <span id="updates" class="p-muted" hidden role="status"><span id="updates-copy"></span></span>
+          <span id="curate-activity-copy" hidden role="status"></span>
           <span id="enrich-note" hidden role="status">
             <span class="enrich-full">Enrich is running — Stacks may change as photos are added.</span>
             <span class="enrich-compact">Enrich running — stacks may change.</span>
           </span>
         </div>
         <div class="refresh-tools">
+          <span id="check-activity" aria-live="polite"></span>
           <div class="referee-progress" aria-label="AI progress across all pending stacks">
             <div id="stack-referee-progress" class="referee-progress-row" data-phase="counting">
-              <span class="referee-progress-label" title="">Stack Referee</span><progress max="1" value="0" aria-label="Stack Referee progress"></progress>
+              <span class="referee-progress-label">Stack Referee</span><span class="referee-progress-status" role="status"></span>
               <span class="referee-progress-copy" role="status">Counting…</span>
             </div>
             <div id="photo-referee-progress" class="referee-progress-row" data-phase="counting">
-              <span class="referee-progress-label" title="">Photo Referee</span><progress max="1" value="0" aria-label="Photo Referee progress"></progress>
+              <span class="referee-progress-label">Photo Referee</span><span class="referee-progress-status" role="status"></span>
               <span class="referee-progress-copy" role="status">Counting…</span>
             </div>
           </div>
-          <span id="check-activity" aria-live="polite"></span>
-          <span id="curate-activity-copy" role="status"></span>
         </div>
       </div>
       <div class="toolbar">

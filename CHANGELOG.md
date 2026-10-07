@@ -8,14 +8,16 @@ All notable changes to Pictaria Server are documented here. This project follows
 ### Development
 
 - Replace Curate Preview's permanent Refresh and More buttons with separate
-  Stack Referee and Photo Referee progress bars (PIC-116 / PIC-371). Counts cover
+  Stack Referee and Photo Referee status rows (PIC-116 / PIC-371). Counts cover
   all pending stacks, including outside the current filters/page and while in
   Decided. Show remaining work, waiting/working/paused states, Off and Up to date;
   completed limited checks leave the remaining count. Background summaries are
   shared and collected in cooperative slices, without new AI requests or retries.
-  A compact panel hugs the right edge, with fixed columns for labels, bars and
-  counts, gray Off tracks, and a reserved explanation line. One shared spinner
+  A compact panel hugs the right edge, with fixed columns for labels, activity
+  and counts. Off rows stay visible in gray. One shared spinner on the left
   covers grouping and both referees; paused work uses a stationary indicator.
+  The Enrich notice aligns with the Photo Referee row. Referee popovers show
+  current status and labeled counts rather than a paragraph of statistics.
   Automatic updates preserve open drafts; failed page updates expose Retry updates.
 
 - Simplify the Curate Preview stack comparison (PIC-116 / PIC-371): retain

@@ -36,7 +36,7 @@ in this preview, its proposed partitions are never saved.
 ## Review flow
 
 The header has three stable rows: Pending/Decided with grouping activity and
-separate Stack Referee / Photo Referee progress bars;
+separate Stack Referee / Photo Referee status rows;
 All/Stacks/Singles on the left with date order, category and Search on the right;
 then selection on the left with shown counts and active background progress
 aligned together on the right. The header checkbox appears in Singles and Decided;
@@ -205,7 +205,7 @@ search draft has not been applied.
 **Load more** only displays additional results; it is no longer needed to get
 those photos checked. The count distinguishes stacks and single photos. Beside
 it, counts of the loaded stacks that are checking, unsure or not fully checked
-use the cards' icons, without shifting the photo grid. One spinner to the right
+use the cards' icons, without shifting the photo grid. One spinner to the left
 of the referee progress rows covers grouping, photo-information refreshes and
 both AI referees across the pending queue. It spins slowly while queued, faster
 while working, and stops when idle or paused (or for reduced-motion preferences).
@@ -218,12 +218,17 @@ so it is not a count of final stack cards. Paused work has an attention
 indicator and a word in the header.
 
 The compact panel is anchored to the right edge, with fixed columns for each
-referee's label, short progress bar and right-aligned count. The spinner slot
-and a single explanation line below are always reserved, including when empty,
-so changing counts and states cannot move the controls or photo grid. The line
-prioritizes active work over queued work, then paused work; each referee's name
-still exposes its own details on hover, focus or tap. Disabled roles stay in
-place with a gray empty track and **Off**. Both rows remain visible on phones.
+referee's label, activity and right-aligned count. There are no progress bars or
+separate referee explanation line. The spinner slot stays on the left even
+when empty, so the counts always reach the same right edge. The Enrich notice
+aligns with the Photo Referee row; ordinary grouping activity uses the reserved
+notice line above it when no page-update message occupies that line. The spinner
+prioritizes active work over queued work, then paused work. Each referee's name
+opens a structured popover with its current status, Remaining, Completed,
+Limited result and Total pending counts, plus scope or limitation notes.
+Disabled roles stay in place in gray with **Off**. Both rows remain visible on
+phones, with activity below each label on the narrowest screens. Geometry stays
+fixed as states and counts change at each screen size.
 
 The two referee progress rows count **stacks across the entire pending library**,
 not the displayed cards or the bounded AI request queue. They remain visible in
@@ -232,9 +237,9 @@ needs several Photo Referee requests still counts once. Singles are excluded;
 Stack Referee also excludes stacks outside its selected scope.
 
 - **N stacks left** covers outstanding work, including work waiting to be
-  discovered by the bounded worker queue. The explanation line identifies the
-  active role and **Comparing photos / Queued** as appropriate.
-- **Waiting for grouping / Waiting for stack checks / Waiting for AI** explains
+  discovered by the bounded worker queue. Each row's activity column reads
+  **Comparing photos / Queued** as appropriate.
+- **Awaiting grouping / Awaiting stack check / Waiting for AI** explains
   prerequisites or shared-provider scheduling; it does not assume Enrich is
   always the other provider user. **Paused** retains work blocked by settings,
   provider or preview problems in the remaining count.
@@ -243,10 +248,9 @@ Stack Referee also excludes stacks outside its selected scope.
   Hover, focus or tap a referee's name for successful/limited counts and details.
   **Off** reflects Settings, even if older advice remains visible on cards.
 
-Each bar shows finished work (successful plus terminal limited outcomes) out of
-that role's current pending-stack scope. This is not a lifetime completion count
-or an ETA: Enrich arrivals, new evidence, splits and human decisions can change
-the denominator. Counts say **Counting…** until a current summary exists.
+Counts describe that role's current pending-stack scope. They are not lifetime
+completion counts or an ETA: Enrich arrivals, new evidence, splits and human
+decisions can change the totals. Counts say **Counting…** until a current summary exists.
 The server collects a shared, read-only summary in cooperative slices, normally
 at most once every four seconds for unchanged grouping/settings, and sends it
 through the existing status poll. A new grouping/settings generation invalidates

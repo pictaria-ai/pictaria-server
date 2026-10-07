@@ -5,7 +5,7 @@ import { join } from 'node:path';
 import { cleanupAfter, launchChrome, findChrome } from './harness.mjs';
 import { curatePreviewFixture } from './curatePreviewFixture.mjs';
 
-test('both referee bars show global stack work, keep their layout and expose details on mobile', { timeout: 45000 }, async t => {
+test('both referee rows show global stack work, keep their layout and expose details on mobile', { timeout: 45000 }, async t => {
   if (!findChrome()) return t.skip('Chrome required');
   const track = cleanupAfter(t), fixture = track(await curatePreviewFixture({ stackSize: 4, singles: 2, metadataReady: true }));
   const browser = track(await launchChrome()), page = await browser.newPage();
@@ -34,13 +34,13 @@ test('both referee bars show global stack work, keep their layout and expose det
   // A real filter change gets the next status payload; there is no permanent Refresh.
   await click('[data-kind=stacks]');
   await page.waitFor('document.querySelector("#stack-referee-progress").textContent.includes("12 stacks left")');
-  assert.equal(await page.evaluate('document.querySelector("#curate-activity-copy").textContent'), 'Stack Referee · Comparing photos');
-  assert.match(await page.evaluate('document.querySelector("#photo-referee-progress").title'), /Waiting for stack checks/);
+  assert.equal(await page.evaluate('document.querySelector("#stack-referee-progress .referee-progress-status").textContent'), 'Comparing photos');
+  assert.equal(await page.evaluate('document.querySelector("#photo-referee-progress .referee-progress-status").textContent'), 'Awaiting stack check');
   assert.equal(await page.evaluate('document.querySelector("#check-activity .activity-indicator").dataset.phase'), 'running');
-  assert.equal(await page.evaluate('document.querySelector("#stack-referee-progress progress").value'), 0.85);
+  assert.equal(await page.evaluate('document.querySelectorAll(".referee-progress progress").length'), 0);
   assert.equal(await page.evaluate('document.querySelector(".page-tools")'), null);
   assert.equal(await page.evaluate('document.querySelector("#refresh").hidden'), true);
-  const geometry = () => page.evaluate(`['#sections','.referee-progress','#check-activity','#curate-activity-copy','#groups'].map(s=>{
+  const geometry = () => page.evaluate(`['#sections','.referee-progress','#check-activity','.view-notices','#groups'].map(s=>{
     const r=document.querySelector(s).getBoundingClientRect();return [r.x,r.y,r.width,r.height];})`);
   const before = await geometry();
   for (const s of ['[data-kind=singles]', '[data-section=decided]', '[data-section=pending]', '[data-kind=all]']) {
@@ -55,14 +55,24 @@ test('both referee bars show global stack work, keep their layout and expose det
   };
   assert.equal(await page.evaluate(`(()=>{const panel=document.querySelector('.refresh-tools').getBoundingClientRect();
     const row=document.querySelector('.view-controls').getBoundingClientRect();return panel.right===row.right;})()`), true, 'panel hugs the right edge');
+  assert.equal(await page.evaluate(`(()=>{const notice=document.querySelector('#enrich-note').getBoundingClientRect();
+    const photo=document.querySelector('#photo-referee-progress').getBoundingClientRect();return notice.top===photo.top&&notice.height===photo.height;})()`), true, 'Enrich is aligned with the Photo Referee row');
+  assert.equal(await page.evaluate(`(()=>{const icon=document.querySelector('#check-activity').getBoundingClientRect();
+    const rows=document.querySelector('.referee-progress').getBoundingClientRect();return icon.right<rows.left;})()`), true, 'spinner sits to the left, preserving the right edge when idle');
   await screenshot('referee-progress-desktop.png');
+  await click('#photo-referee-progress .why-trigger');
+  assert.deepEqual(await page.evaluate('[...document.querySelectorAll("#photo-progress-help dl>*")].map(e=>e.textContent)'),
+    ['Remaining', '12', 'Completed', '60', 'Limited result', '8', 'Total pending', '80']);
+  await screenshot('referee-progress-details-desktop.png');
+  await click('#photo-referee-progress .why-trigger');
   await page.send('Emulation.setDeviceMetricsOverride', { width: 390, height: 844, deviceScaleFactor: 1, mobile: true });
   assert.equal(await page.evaluate('document.documentElement.scrollWidth<=innerWidth'), true);
   assert.equal(await page.evaluate('[...document.querySelectorAll(".referee-progress-copy")].every(e=>e.scrollHeight<=e.clientHeight && e.scrollWidth<=e.clientWidth)'), true);
   await screenshot('referee-progress-mobile.png');
   await click('#stack-referee-progress .why-trigger');
-  assert.match(await page.evaluate('document.querySelector("#stack-progress-help").textContent'), /8 finished without a full result/);
+  assert.match(await page.evaluate('document.querySelector("#stack-progress-help").textContent'), /Limited result8/);
   assert.equal(await page.evaluate('(()=>{const r=document.querySelector("#stack-progress-help").getBoundingClientRect();return r.left>=0&&r.right<=innerWidth;})()'), true);
+  await screenshot('referee-progress-details-mobile.png');
   await click('#stack-referee-progress .why-trigger');
   const off = { state: 'off' }, done = { state: 'ready', total: 80, completed: 60, incomplete: 20, remaining: 0 };
   const work = { ...done, incomplete: 8, remaining: 12, waitingForGrouping: 0, waitingForStack: 0, paused: 0 };
@@ -81,11 +91,13 @@ test('both referee bars show global stack work, keep their layout and expose det
       await page.evaluate(`window.headerOverride=${JSON.stringify(payload)}`);
       await click('#refresh'); await page.waitFor('!document.querySelector("#refresh").disabled');
       assert.equal(await page.evaluate('document.querySelector("#check-activity .activity-indicator")?.dataset.phase ?? null'), phase);
-      assert.equal(await page.evaluate('document.querySelector("#curate-activity-copy").textContent'), text);
+      assert.equal(await page.evaluate('document.querySelector("#curate-activity-copy").textContent'), payload.refinement ? text : '');
+      if (text.startsWith('Photo Referee')) assert.equal(await page.evaluate('document.querySelector("#photo-referee-progress .referee-progress-status").textContent'), text.split(' · ')[1]);
       assert.deepEqual(await geometry(), layout, `header and cards stay anchored at ${width}px: ${text || 'idle'}`);
       assert.equal(await page.evaluate('document.documentElement.scrollWidth<=innerWidth'), true);
-      assert.equal(await page.evaluate('[...document.querySelectorAll(".referee-progress-copy,#curate-activity-copy")].every(e=>e.scrollWidth<=e.clientWidth)'), true, 'compact counts and explanations fit');
-      assert.equal(await page.evaluate('[...document.querySelectorAll(".referee-progress-row[data-phase=off] progress")].every(e=>e.value===0 && getComputedStyle(e).visibility==="visible")'), true);
+      assert.deepEqual(await page.evaluate('[...document.querySelectorAll(".referee-progress-copy,.referee-progress-status")].filter(e=>e.scrollWidth>e.clientWidth).map(e=>e.textContent)'), [], `counts and activity fit at ${width}px`);
+      assert.equal(await page.evaluate('[...document.querySelectorAll(".referee-progress-row[data-phase=off] .referee-progress-copy")].every(e=>e.textContent==="Off")'), true);
+      if (text === 'Photo Referee · Waiting for AI') await screenshot(`referee-progress-waiting-${width}.png`);
     }
     await screenshot(`referee-progress-off-${width}.png`);
   }

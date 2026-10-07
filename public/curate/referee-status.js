@@ -98,6 +98,7 @@ export function curateActivity(view) {
   const remaining = refinement?.remainingGroups ?? 0;
   const paused = ['paused', 'limited'].includes(refinement?.state);
   const grouping = {
+    kind: 'grouping',
     phase: paused ? 'attention' : refinement?.state === 'searching' ? 'running' : remaining > 0 ? 'queued' : 'idle',
     text: paused ? 'Grouping paused' : 'Grouping nearby photos',
     detail: [paused ? refinement?.problem || 'Stack checks are paused.' : '',
@@ -110,14 +111,16 @@ export function curateActivity(view) {
   }
   if (stack.phase === 'attention' && photo.status === 'Waiting for stack checks') photo.phase = 'attention';
   const candidates = [
-    { phase: metadata?.state === 'refreshing' ? 'running' : metadata?.problem ? 'attention' : 'idle',
+    { kind: 'metadata', phase: metadata?.state === 'refreshing' ? 'running' : metadata?.problem ? 'attention' : 'idle',
       text: metadata?.state === 'refreshing' ? 'Refreshing photo information' : 'Photo information paused',
       detail: metadata?.problem || 'Refreshing photo information.' },
     grouping,
-    { ...stack, text: stack.status ? `Stack Referee · ${stack.status}` : '' },
-    { ...photo, text: photo.status ? `Photo Referee · ${photo.status}` : '' },
+    { ...stack, kind: 'stack', text: stack.status ? `Stack Referee · ${stack.status}` : '',
+      detail: `Stack Referee · ${stack.text}${stack.status ? ` · ${stack.status}` : ''}` },
+    { ...photo, kind: 'photo', text: photo.status ? `Photo Referee · ${photo.status}` : '',
+      detail: `Photo Referee · ${photo.text}${photo.status ? ` · ${photo.status}` : ''}` },
   ];
   const active = ['running', 'queued', 'attention', 'counting'].map(phase => candidates.find(c => c.phase === phase)).find(Boolean);
-  return { phase: active?.phase === 'counting' ? null : active?.phase ?? null, text: active?.text ?? '',
+  return { phase: active?.phase === 'counting' ? null : active?.phase ?? null, text: active?.text ?? '', kind: active?.kind ?? null,
     detail: candidates.filter(c => !['off', 'idle'].includes(c.phase)).map(c => c.detail).filter(Boolean).join(' ') };
 }

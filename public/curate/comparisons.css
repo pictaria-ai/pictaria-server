@@ -55,11 +55,13 @@ button {
   display: grid;
   grid-template-columns: minmax(0,1fr);
   grid-template-rows: repeat(2,18px);
+  row-gap: 6px;
   min-width: 0;
-  min-height: 36px;
+  min-height: 42px;
   text-align: right;
 }
 .view-notices > span {
+  grid-column: 1;
   min-width: 0;
   overflow: hidden;
   white-space: nowrap;
@@ -107,17 +109,20 @@ button {
 #refinement { flex: 0 1 auto; text-align: right; }
 #refinement:not(:empty) { margin-left: 12px; }
 #refinement:not(:empty)::before { content: "·"; margin-right: 12px; }
-.refresh-tools { display: grid; grid-template-columns: minmax(0,1fr) 24px; align-items: center; gap: 4px 12px; width: 348px; max-width: 100%; min-width: 0; justify-self: end; }
+.refresh-tools { display: grid; grid-template-columns: 24px minmax(0,1fr); align-items: center; column-gap: 10px; width: 384px; max-width: 100%; min-width: 0; justify-self: end; }
 .referee-progress { display: grid; gap: 6px; min-width: 0; font-size: 12px; }
-.referee-progress-row { display: grid; grid-template-columns: 88px 60px minmax(0,1fr); align-items: center; gap: 8px; height: 18px; }
+.referee-progress-row { display: grid; grid-template-columns: 88px minmax(0,1fr) 108px; align-items: center; gap: 8px; height: 18px; line-height: 18px; }
 .referee-progress-copy { color: var(--p-muted); text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.referee-progress progress { appearance: none; width: 100%; height: 5px; border: 0; border-radius: 4px; overflow: hidden; background: var(--p-line); accent-color: var(--p-accent); }
-.referee-progress progress::-webkit-progress-bar { background: var(--p-line); border-radius: 4px; }
-.referee-progress progress::-webkit-progress-value { background: var(--p-accent); border-radius: 4px; }
-.referee-progress progress::-moz-progress-bar { background: var(--p-accent); border-radius: 4px; }
+.referee-progress-status { color: var(--p-muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .referee-progress-row[data-phase=off] .why-trigger { color: var(--p-muted); }
-.referee-progress-row[data-phase=attention] .referee-progress-copy { color: var(--p-warning, #a56709); }
+.referee-progress-row[data-phase=attention] .referee-progress-status { color: var(--p-warning, #a56709); }
 .referee-progress-label .why-trigger { font-size: inherit; white-space: nowrap; }
+.referee-progress-details .referee-detail-status { margin: 8px 0; font-weight: 600; }
+.referee-progress-details dl { display: grid; grid-template-columns: minmax(0,1fr) auto; gap: 6px 20px; margin: 12px 0; }
+.referee-progress-details dt { color: var(--p-muted); }
+.referee-progress-details dd { margin: 0; text-align: right; font-variant-numeric: tabular-nums; }
+.referee-progress-details .referee-detail-total { border-top: 1px solid var(--p-line); padding-top: 6px; }
+.referee-progress-details .referee-detail-note { margin: 10px 0 0; color: var(--p-muted); font-size: 12px; }
 #check-activity {
   display: inline-flex;
   align-items: center;
@@ -126,8 +131,9 @@ button {
   height: 24px;
 }
 #check-activity .activity-indicator:not([data-phase=attention]) { color: var(--p-accent); }
-/* Always reserve one detail line, including when both roles are idle or Off. */
-#curate-activity-copy { grid-column: 1 / -1; height: 18px; line-height: 18px; text-align: right; color: var(--p-muted); font-size: 12px; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+/* Ordinary grouping shares the reserved notice row; referee activity is inline. */
+#curate-activity-copy { grid-row: 1; color: var(--p-muted); font-size: 12px; }
+.view-notices:has(#updates:not([hidden])) #curate-activity-copy { visibility: hidden; }
 .search-label {
   min-width: 0;
 }
@@ -822,10 +828,16 @@ dialog::backdrop {
   .view-controls { gap: 4px; }
   .refresh-tools { column-gap: 8px; }
   .view-controls .p-tab { padding: 7px 8px; font-size: 12px; }
-  .referee-progress-row { grid-template-columns: 82px 36px minmax(0,1fr); gap: 6px; }
+  .referee-progress-row { grid-template-columns: 82px minmax(0,1fr) 108px; gap: 6px; }
   .referee-progress { font-size: 11px; }
   #curate-activity-copy { font-size: 11px; }
   .view-notices { grid-column: 1 / -1; grid-row: 3; }
+}
+@media (max-width: 380px) {
+  .referee-progress-row { grid-template-columns: minmax(0,1fr) auto; grid-template-rows: repeat(2,18px); height: 36px; row-gap: 0; }
+  .referee-progress-label { grid-column: 1; grid-row: 1; }
+  .referee-progress-copy { grid-column: 2; grid-row: 1; }
+  .referee-progress-status { grid-column: 1 / -1; grid-row: 2; }
 }
 
 .comparison-receipt { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; margin-left: auto; font-size: 12px; color: var(--p-muted); }

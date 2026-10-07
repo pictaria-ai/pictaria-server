@@ -109,7 +109,7 @@ test('one header activity slot follows grouping and independent referees, includ
   const off = { state: 'off' }, work = { state: 'ready', total: 20, completed: 17, incomplete: 0, remaining: 3,
     waitingForGrouping: 0, waitingForStack: 0, paused: 0 };
   const view = { refereeProgress: { stack: off, photo: off }, refinement: { state: 'idle', remainingGroups: 0 } };
-  assert.deepEqual(curateActivity(view), { phase: null, text: '', detail: '' });
+  assert.deepEqual(curateActivity(view), { phase: null, text: '', detail: '', kind: null });
   view.refinement = { state: 'waiting', remainingGroups: 2 };
   assert.equal(curateActivity(view).phase, 'queued', 'grouping remains visible with AI off');
   assert.equal(curateActivity(view).text, 'Grouping nearby photos');
@@ -127,7 +127,7 @@ test('one header activity slot follows grouping and independent referees, includ
   assert.equal(curateActivity(view).phase, 'queued');
   view.photoRefereeActivity = status('paused', { reason: 'configuration' });
   assert.equal(curateActivity(view).phase, 'attention', 'paused work does not spin');
-  assert.match(curateActivity(view).detail, /Settings/);
+  assert.match(curateActivity(view).detail, /Photo Referee.*Paused/);
   view.refereeProgress.photo = { ...work, remaining: 0, incomplete: 3 };
   view.photoRefereeActivity = status('idle');
   assert.equal(curateActivity(view).phase, null, 'terminal incomplete checks are finished');

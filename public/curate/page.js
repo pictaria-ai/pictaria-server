@@ -217,9 +217,12 @@ function showViewStatus(view) {
   }
   summary.title = [paused ? refinement?.problem : metadata?.problem,
     counts.length ? 'Counts cover the stacks loaded on this page.' : ''].filter(Boolean).join(' ');
-  const { phase, text, detail: title } = curateActivity(view);
-  el('curate-activity-copy').textContent = text;
-  el('curate-activity-copy').title = title;
+  const { phase, text, detail: title, kind } = curateActivity(view);
+  const activityCopy = el('curate-activity-copy');
+  const notice = ['grouping', 'metadata'].includes(kind) ? text : '';
+  if (activityCopy.textContent !== notice) activityCopy.textContent = notice;
+  activityCopy.hidden = !notice;
+  activityCopy.title = title;
   const slot = el('check-activity');
   if (slot.firstChild?.dataset.phase !== (phase ?? undefined)) slot.replaceChildren(...(phase ? [activityIndicator(phase, title)] : []));
   else if (phase) slot.firstChild.title = slot.firstChild.ariaLabel = title;
