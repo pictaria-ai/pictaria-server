@@ -38,7 +38,7 @@ test('Settings resolves the actual shared model without returning credentials or
 
 test('configuration blockers appear at page level without giving every card a failure badge', () => {
   const status = { state: 'paused', reason: 'configuration', scope: 'configuration' };
-  assert.equal(refereeActivity(status).title, 'Stack Referee paused');
+  assert.equal(refereeActivity(status).title, 'Stack Referee: setup needed');
   const stack = { memberCount: 3, route: 'candidate-supported', similarity: { state: 'checked' } };
   assert.equal(stackStatus({ ...stack, stackReferee: { ...status, state: 'incomplete' } }).badge, 'checked');
   assert.deepEqual(stackStatus({ ...stack, stackReferee: status }).steps[1],

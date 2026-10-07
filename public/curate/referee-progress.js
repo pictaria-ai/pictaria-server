@@ -52,7 +52,7 @@ export function showCurateStatus(root, view) {
     row.querySelector('.role-status').textContent = role.status ?? role.text;
     row.querySelector('.role-count').textContent = role.phase === 'off' ? '' : role.counts?.state === 'ready' ? `${role.counts.remaining.toLocaleString()} left` : 'Counting…';
     const details = (role.role === 'photo' ? photoRefereeActivity : refereeActivity)(role.activity);
-    row.querySelector('.role-detail').textContent = role.phase === 'attention' || role.activity?.state === 'paused' ? details?.detail ?? 'Check the AI settings.'
+    row.querySelector('.role-detail').textContent = role.blocker ? details?.detail ?? 'Checks cannot run yet. You can still curate these photos.'
       : role.counts?.incomplete ? `${role.counts.incomplete.toLocaleString()} limited results. You can still curate these photos; checks will not retry automatically.` : '';
   }
   const grouping = root.querySelector('.status-grouping');

@@ -233,9 +233,21 @@ shift the tabs, filters or grid. It has these states:
 - **Waiting for Enrich / Waiting for AI / Waiting for grouping / Waiting for
   stack checks · N stacks left** with a quiet clock for queued work. Enrich is
   named only when it is running and the referee reports a shared-provider wait.
-- **Photo Referee paused / Stack Referee paused / Grouping paused** with an amber
-  indicator when settings, model, provider, preview or grouping problems block
-  work. The popover explains the pause and includes **AI settings**.
+- **AI setup needed** with an amber indicator for missing or unusable provider,
+  model or credentials. The affected popover rows say **Can’t run: check AI
+  settings** and explain what to check.
+- **AI model needs attention** in amber after repeated model failures. The
+  popover recommends a multi-image vision model; it does not claim the current
+  model can never work.
+- **Temporarily paused** with a quiet clock for provider or preview cooldowns.
+  The popover gives the cause and known retry eligibility time, when available,
+  without promising when work will resume. It displays the existing cooldown;
+  viewing status does not schedule retries or extend it.
+- Shared blockers use one message for both referees. If only one is affected,
+  the chip names that referee (for example, **Photo Referee: setup needed**).
+  Different or unknown blockers use **AI needs attention**, with separate
+  details in each row. **Grouping paused** remains an amber grouping status.
+  The popover includes **AI settings** in every state.
 - **Grouping photos…** with a gray spinner for deterministic grouping or photo
   information refreshes, including when both AI referees are Off.
 - **AI up to date** in quiet gray when enabled referees have no work left.
@@ -270,7 +282,7 @@ distinguishable from failed searches in the explanation.
 The open comparison keeps the badge beside Close in the header; narrow screens
 show its icon with the full accessible label. The stack lightbox uses the same
 labels and reasons. Manual choices remain available in every status. Per-stack limitations do not use an
-amber warning; the header retains that treatment for overall paused work.
+amber warning; the header reserves that treatment for work needing attention.
 
 Searches stay sequential but can start two seconds apart, up to 30 new automatic
 requests per minute. Slow responses add breathing room. The open comparison gets

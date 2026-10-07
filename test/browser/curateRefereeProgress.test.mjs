@@ -35,10 +35,15 @@ test('one stable activity chip shows global work, accessible breakdown and mobil
     ['running', 'Checking stacks · 12 stacks left', payload(work, work, 12, { state: 'checking' })],
     ['running', 'Picking best photos · 10,932 stacks left', payload(off, { ...work, total: 11000, remaining: 10932 }, 10932, off, { state: 'checking' })],
     ['waiting', 'Waiting for Enrich · 12 stacks left', payload(done, work, 12, idle, { state: 'waiting', reason: 'shared-provider' })],
-    ['attention', 'Photo Referee paused', payload(off, work, 12, off, { state: 'paused', reason: 'model-failures' })],
+    ['attention', 'Photo Referee: model needs attention', payload(off, work, 12, off, { state: 'paused', reason: 'model-failures' })],
     ['idle', 'AI up to date', payload(done, off, 0, idle, off)],
     ['grouping', 'Grouping photos…', payload(off, off, 0, off, off, { refinement: { state: 'searching', remainingGroups: 3 } })],
     ['hidden', 'AI up to date', payload(off, off, 0, off, off)],
+    ['attention', 'AI setup needed', payload(work, work, 12, { state: 'paused', reason: 'configuration' }, { state: 'paused', reason: 'provider-auth' })],
+    ['attention', 'AI model needs attention', payload(work, work, 12, { state: 'paused', reason: 'model-failures' }, { state: 'paused', reason: 'model-failures' })],
+    ['waiting', 'Temporarily paused', payload(work, work, 12,
+      { state: 'paused', reason: 'provider-cooldown', retryAt: Date.UTC(2026, 9, 8, 12, 30) },
+      { state: 'paused', reason: 'preview-cooldown', retryAt: Date.UTC(2026, 9, 8, 12, 32) })],
   ];
   const apply = async data => {
     await page.evaluate(`window.headerOverride=${JSON.stringify(data)}`);
@@ -72,6 +77,16 @@ test('one stable activity chip shows global work, accessible breakdown and mobil
         assert.equal(await page.evaluate('document.querySelector(".curate-status-count").textContent'), '12', 'no double counting');
       await screenshot(`curate-chip-${width}-${theme}-${phase}.png`);
     }
+    // Both temporary pauses retain distinct causes and known eligibility times.
+    await click('.curate-status-chip');
+    await page.waitFor('!document.querySelector("#curate-status-details").hidden');
+    assert.equal(await page.evaluate(`Array.from(document.querySelectorAll('.role-status')).every(el=>el.textContent==='Temporarily paused')`), true);
+    assert.equal(await page.evaluate(`Array.from(document.querySelectorAll('.role-detail')).every(el=>el.textContent.includes('Retry eligible after'))`), true);
+    assert.match(await page.evaluate('document.querySelector("[data-role=stack] .role-detail").textContent'), /AI provider/);
+    assert.match(await page.evaluate('document.querySelector("[data-role=photo] .role-detail").textContent'), /Immich/);
+    assert.equal(await page.evaluate(`(()=>{const r=document.querySelector('#curate-status-details').getBoundingClientRect();return r.left>=0&&r.right<=innerWidth&&r.bottom<=innerHeight;})()`), true);
+    await screenshot(`curate-chip-cooldown-details-${width}-${theme}.png`);
+    await page.send('Input.dispatchKeyEvent', { type: 'keyDown', key: 'Escape' });
     await apply(scenarios[2][2]);
     await page.evaluate('document.querySelector(".curate-status-chip").focus()');
     await page.send('Input.dispatchKeyEvent', { type: 'keyDown', key: 'Enter', code: 'Enter', text: '\r', unmodifiedText: '\r', windowsVirtualKeyCode: 13 });

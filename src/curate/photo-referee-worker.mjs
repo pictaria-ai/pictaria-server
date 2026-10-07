@@ -25,9 +25,8 @@ export class PhotoRefereeWorker {
     return { capability, key: fingerprint({ promptRevision: PHOTO_REFEREE_PROMPT_REVISION, provider: enrichmentProviderConfiguration(provider), capability,
       timeoutMs: provider.timeoutMs ?? null, immich: [this.curate.immich?.baseUrl, this.curate.immich?.apiKey] }) };
   }
-  previewsReady() {
-    return this.lifecycle.now() >= (this.curate.store.prepare("SELECT value FROM curate_meta WHERE key='photo-preview-retry-at'").get()?.value ?? 0);
-  }
+  previewRetryAt() { return this.curate.store.prepare("SELECT value FROM curate_meta WHERE key='photo-preview-retry-at'").get()?.value ?? 0; }
+  previewsReady() { return this.lifecycle.now() >= this.previewRetryAt(); }
   modelFailurePrefix(provider) {
     return MODEL_FAILURE_PREFIX + fingerprint({ provider: enrichmentProviderConfiguration(provider),
       backend: aiBackendKey(provider), contract: PHOTO_REFEREE_CONTRACT, capability: this.capability(provider) }) + ':';
@@ -141,10 +140,11 @@ export class PhotoRefereeWorker {
   }
   blockingStatus(provider) {
     if (this.modelBlocked(provider)) return { state: 'paused', reason: 'model-failures', scope: 'configuration' };
-    if (!this.previewsReady()) return { state: 'paused', reason: 'preview-cooldown' };
+    const retryAt = this.previewRetryAt();
+    if (this.lifecycle.now() < retryAt) return { state: 'paused', reason: 'preview-cooldown', retryAt };
     const guard = this.curate.store.aiLimits.providerStatus(aiBackendKey(provider));
     if (guard.state === 'paused') return { state: 'paused', reason: `provider-${guard.reason}` };
-    if (guard.state === 'cooldown') return { state: 'paused', reason: 'provider-cooldown' };
+    if (guard.state === 'cooldown') return { state: 'paused', reason: 'provider-cooldown', retryAt: guard.retryAt };
     if (guard.state === 'busy') return { state: 'waiting', reason: 'shared-provider' };
     return null;
   }

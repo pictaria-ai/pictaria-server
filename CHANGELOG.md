@@ -26,6 +26,9 @@ All notable changes to Pictaria Server are documented here. This project follows
   accessible label. Reuse the existing cooperative summary and status poll.
   Move remaining photo counts into the filter row and remove duplicate grid
   status counts. Automatic updates preserve drafts; failures expose Retry updates.
+  Distinguish AI setup problems, repeated model failures and temporary cooldowns;
+  combine shared blockers and name a referee only when it alone is blocked.
+  Show known retry eligibility in the popover without changing retry behavior.
 
 - Simplify stack decisions to a **Keep** toggle and secondary Skip/Fav/No menu;
   reveal batch checkboxes only in **Select** mode. Preserve four-way shortcuts,

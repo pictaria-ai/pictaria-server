@@ -6,10 +6,32 @@ const reasons = {
   'provider-configuration': 'Check the AI provider configuration in Settings.',
   'provider-interrupted': 'The previous AI request was interrupted. Verify the connection in Settings.',
   'configuration': 'Check the Curate AI provider configuration in Settings.',
+  'stack-configuration': 'Stack checks need a valid AI configuration in Settings.',
   'model-failures': 'The selected model repeatedly failed stack checks. Choose a vision model that compares multiple images in Settings.',
   'unknown-capability': 'Configure a Curate provider and multi-image vision model in Settings.',
   'unsupported-provider': 'This provider cannot compare stack photos.',
 };
+
+const blockers = {
+  setup: { phase: 'attention', text: 'AI setup needed', label: 'setup needed', status: 'Can’t run: check AI settings' },
+  model: { phase: 'attention', text: 'AI model needs attention', label: 'model needs attention', status: 'Model needs attention' },
+  temporary: { phase: 'paused', text: 'Temporarily paused', label: 'temporarily paused', status: 'Temporarily paused' },
+  unknown: { phase: 'attention', text: 'AI needs attention', label: 'needs attention', status: 'Needs attention' },
+};
+function blockerKind(reason) {
+  if (['configuration', 'stack-configuration', 'provider-auth', 'provider-configuration', 'unknown-capability', 'unsupported-provider'].includes(reason)) return 'setup';
+  if (reason === 'model-failures') return 'model';
+  if (['preview-cooldown', 'provider-cooldown'].includes(reason)) return 'temporary';
+  return 'unknown';
+}
+
+function retryDetail(status) {
+  if (blockerKind(status.reason) !== 'temporary' || !Number.isSafeInteger(status.retryAt) || status.retryAt <= 0) return '';
+  const time = new Date(status.retryAt);
+  // This is eligibility, not a promise of an immediate retry or recovery.
+  return Number.isFinite(time.getTime()) ? ` Retry eligible after ${time.toLocaleString()}.` : '';
+}
+
 // Short forms for a process step, after "not possible," or "paused,".
 const short = {
   'preview-cooldown': 'previews are paused after an Immich error',
@@ -51,8 +73,11 @@ export function refereeActivity(status) {
     detail: 'The AI is comparing photos to check stack composition.' };
   if (status.state === 'waiting') return { title: 'Stack Referee queued', phase: 'queued',
     detail: reasons[status.reason] ?? 'Waiting for a Stack Referee check.' };
-  if (['paused', 'incomplete'].includes(status.state)) return { title: 'Stack Referee paused', phase: 'attention',
-    detail: `${reasons[status.reason] ?? 'The Stack Referee could not finish its checks.'} You can still curate these photos.` };
+  if (['paused', 'incomplete'].includes(status.state)) {
+    const blocker = blockerKind(status.reason), presentation = blockers[blocker];
+    return { title: `Stack Referee: ${presentation.label}`, phase: presentation.phase, status: presentation.status, blocker,
+      detail: `${reasons[status.reason] ?? 'The Stack Referee could not finish its checks.'}${retryDetail(status)} You can still curate these photos.` };
+  }
   return null;
 }
 
@@ -72,21 +97,24 @@ export function refereeProgress(counts, activity, role = 'stack') {
   const details = (role === 'photo' ? photoRefereeActivity : refereeActivity)(activity);
   if (counts?.state === 'off' || activity?.state === 'off')
     return { phase: 'off', text: 'Off', value: 0, detail: `${label} is turned off in Curate Settings.` };
-  if (counts?.state !== 'ready') return { phase: details?.phase ?? 'counting', text: 'Counting…', value: 0,
-    status: details?.phase === 'running' ? 'Comparing photos' : details?.phase === 'attention' ? 'Paused' : 'Counting stacks…',
+  if (counts?.state !== 'ready') return { phase: details?.phase ?? 'counting', blocker: details?.blocker, text: 'Counting…', value: 0,
+    status: details?.status ?? (details?.phase === 'running' ? 'Comparing photos' : 'Counting stacks…'),
     detail: [`Counting ${label} work across all pending stacks.`, details?.detail].filter(Boolean).join(' ') };
   const { total, completed, incomplete, remaining, waitingForGrouping, waitingForStack, paused } = counts;
   const summary = `${completed} of ${total} pending stacks finished successfully.` +
     (incomplete ? ` ${incomplete} finished without a full result and will not be retried automatically.` : '') +
     ' Counts include photos outside this view and can change as photos arrive or stacks split. You can keep curating.';
-  if (!remaining && !['running', 'attention'].includes(details?.phase)) return { phase: 'idle', text: 'Up to date', value: 1, detail: summary };
-  let phase = 'queued', status = 'Queued';
+  if (!remaining && !details?.blocker && details?.phase !== 'running') return { phase: 'idle', text: 'Up to date', value: 1, detail: summary };
+  let phase = 'queued', status = 'Queued', blocker;
   if (details?.phase === 'running') { phase = 'running'; status = 'Comparing photos'; }
-  else if (paused === remaining || details?.phase === 'attention') { phase = 'attention'; status = 'Paused'; }
+  else if (details?.blocker || (remaining > 0 && paused === remaining)) {
+    blocker = details?.blocker ?? 'unknown';
+    ({ phase, status } = blockers[blocker]);
+  }
   else if (waitingForGrouping === remaining) status = 'Waiting for grouping';
   else if (waitingForGrouping + waitingForStack === remaining) status = 'Waiting for stack checks';
   else if (activity?.reason === 'shared-provider') status = 'Waiting for AI';
-  return { phase, status, text: remaining ? `${remaining.toLocaleString()} ${remaining === 1 ? 'stack' : 'stacks'} left` : 'Checking…',
+  return { phase, status, blocker, text: remaining ? `${remaining.toLocaleString()} ${remaining === 1 ? 'stack' : 'stacks'} left` : 'Checking…',
     value: total ? (completed + incomplete) / total : 0,
     detail: [summary, `${label} · ${status}.`, details?.detail].filter(Boolean).join(' ') };
 }
@@ -102,8 +130,13 @@ export function curateStatus(view) {
   const remaining = Number.isSafeInteger(progress.remaining) ? progress.remaining : null;
   const make = (phase, text, count = remaining) => ({ phase, text, count, roles });
   const suffix = remaining > 0 ? ` · ${remaining.toLocaleString()} ${remaining === 1 ? 'stack' : 'stacks'} left` : '';
-  const paused = enabled.find(r => r.activity?.state === 'paused' || r.phase === 'attention');
-  if (paused) return make('attention', `${paused.role === 'photo' ? 'Photo' : 'Stack'} Referee paused`);
+  const blocked = enabled.filter(r => r.blocker);
+  if (blocked.length) {
+    const shared = blocked.every(r => r.blocker === blocked[0].blocker), kind = shared ? blocked[0].blocker : 'unknown';
+    const presentation = blockers[kind];
+    const text = blocked.length === 1 ? `${blocked[0].role === 'photo' ? 'Photo' : 'Stack'} Referee: ${presentation.label}` : presentation.text;
+    return make(presentation.phase === 'paused' ? 'waiting' : 'attention', text);
+  }
   if (view.metadata?.problem) return make('attention', 'Photo information paused');
   if (['paused', 'limited'].includes(view.refinement?.state)) return make('attention', 'Grouping paused');
   const active = enabled.find(r => r.phase === 'running');

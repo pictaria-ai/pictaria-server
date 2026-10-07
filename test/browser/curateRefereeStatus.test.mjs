@@ -100,12 +100,12 @@ test('referee status updates cards and open comparisons without moving photos or
   assert.doesNotMatch(await page.evaluate('document.querySelector("#stack-reason").textContent'), /AI checked|Same composition/);
   await click('#comparison-similarity .why-trigger');
   await page.evaluate("window.refereeState={state:'incomplete',reason:'configuration',scope:'configuration'};window.refereeActivity={state:'paused',reason:'configuration',scope:'configuration'}");
-  await page.waitFor("document.querySelector('[data-role=stack] .role-status').textContent.includes('Paused') && document.querySelector('#comparison-similarity .why-trigger')?.getAttribute('aria-label').startsWith('Unsure')");
+  await page.waitFor("document.querySelector('[data-role=stack] .role-status').textContent.includes('check AI settings') && document.querySelector('#comparison-similarity .why-trigger')?.getAttribute('aria-label').startsWith('Unsure')");
   assert.equal(await page.evaluate('document.querySelector(".is-stack .stack-badge").dataset.badge'), 'unsure', 'configuration problems belong to the header');
   assert.equal(await page.evaluate('document.querySelector("[data-role=stack]").dataset.phase'), 'attention');
   await page.evaluate("window.refereeState={state:'paused',reason:'model-failures',scope:'configuration'};window.refereeActivity={...window.refereeState}");
   await page.waitFor("document.querySelector('#curate-status-details').textContent.includes('Choose a vision model that compares multiple images')");
-  assert.match(await page.evaluate('document.querySelector("[data-role=stack] .role-status").textContent'), /Paused/);
+  assert.match(await page.evaluate('document.querySelector("[data-role=stack] .role-status").textContent'), /Model needs attention/);
   assert.doesNotMatch(await page.evaluate('document.querySelector(".is-stack .stack-badge").title'), /paused|not possible/);
   await page.evaluate("window.refereeState={state:'updated'};window.refereeActivity={state:'idle'}");
   await page.waitFor('document.querySelector("#comparison-similarity .why-trigger")?.getAttribute("aria-label").startsWith("Unsure") && document.querySelector("#curate-status").dataset.phase === "idle"');

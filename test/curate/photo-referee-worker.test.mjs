@@ -16,6 +16,7 @@ import { ImmichApiError } from '../../src/immich.mjs';
 import { ProviderRequestError } from '../../src/enrich/providers.mjs';
 import { readPhotoRefereeRecord } from '../../src/curate/photo-referee-results.mjs';
 import { CURATE_AI_AVAILABILITY } from '../../src/curate/ai-policy.mjs';
+import { aiBackendKey } from '../../src/curate/ai-limits.mjs';
 
 const png = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=', 'base64');
 const response = (ids, keepers = [ids[0]], groups = [{ ids, keepers, reason: 'Same subject.' }]) => ({ groups,
@@ -423,11 +424,15 @@ test('transient preview failures have two bounded attempts and a durable shared 
   f.download = () => { throw new ImmichApiError('PRIVATE ERROR', 503); };
   await f.run(); f.advance(); await f.run(); assert.equal(f.downloads.length, 1);
   assert.equal(f.curate.photoReferee.activity().reason, 'preview-cooldown');
+  const retryAt = f.curate.aiLifecycle.now() + PHOTO_PREVIEW_PAUSE_MS;
+  assert.equal((await f.curate.openView()).photoRefereeActivity.retryAt, retryAt);
   await f.restart(); f.advance(); await f.run(); assert.equal(f.downloads.length, 1);
+  assert.equal(f.curate.photoReferee.activity().retryAt, retryAt, 'restart preserves the original retry eligibility');
   f.advance(PHOTO_PREVIEW_PAUSE_MS); await f.run(); f.advance(); await f.run(); assert.equal(f.downloads.length, 2);
   f.advance(PHOTO_PREVIEW_PAUSE_MS); await f.run(); f.advance(); await f.run(); assert.equal(f.downloads.length, 2);
   assert.equal(f.calls.length, 0); assert.equal(f.advice, null);
   assert.equal(f.curate.photoReferee.status(f.group).reason, 'preparation-failed');
+  assert.equal(f.curate.photoReferee.activity().retryAt, undefined);
   f.curate.refereeProgress.invalidate(); await f.curate.refereeProgress.refresh();
   assert.equal(f.curate.refereeProgress.status().photo.incomplete, 1);
   assert.equal(f.curate.refereeProgress.status().photo.remaining, 0, 'exhausted preview attempts leave progress');
@@ -546,6 +551,25 @@ test('provider authentication pause blocks every remaining batch before download
   assert.equal(f.curate.photoReferee.activity().reason, 'provider-auth');
   assert.equal(f.advice, null);
 }, { count: 11 }));
+
+test('Photo Referee exposes the existing provider cooldown without rescheduling or spending requests', async () => fixture(async f => {
+  await f.run();
+  const guard = f.repo.curate.aiLimits, backend = aiBackendKey(f.provider);
+  guard.finish(guard.startProvider(backend), new ProviderRequestError('PRIVATE OUTAGE', { status: 503 }));
+  const retryAt = guard.providerStatus(backend).retryAt;
+  assert.ok(retryAt > f.curate.aiLifecycle.now());
+  for (let i = 0; i < 3; i++) {
+    const activity = (await f.curate.openView()).photoRefereeActivity;
+    assert.equal(activity.reason, 'provider-cooldown');
+    assert.equal(activity.retryAt, retryAt);
+    assert.doesNotMatch(JSON.stringify(activity), /PRIVATE/);
+  }
+  await f.restart();
+  assert.equal(f.curate.photoReferee.activity().retryAt, retryAt);
+  f.advance(retryAt - f.curate.aiLifecycle.now());
+  assert.equal(f.curate.photoReferee.activity().retryAt, undefined);
+  assert.equal(f.calls.length, 0); assert.equal(f.downloads.length, 0);
+}));
 
 test('unknown model capability neither downloads nor blocks discovery of future configured work', async () => fixture(async f => {
   await f.run(); f.advance(); await f.run(); assert.equal(f.downloads.length, 0); assert.equal(f.calls.length, 0);

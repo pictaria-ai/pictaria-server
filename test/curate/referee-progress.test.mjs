@@ -98,7 +98,7 @@ test('progress copy distinguishes prerequisites, provider waits, pauses, Off and
   assert.match(present({ waitingForGrouping: 4, waitingForStack: 8 }).status, /Waiting for stack checks/);
   assert.match(present({}, status('waiting', { reason: 'shared-provider' })).status, /Waiting for AI/);
   assert.match(present({}, status('checking')).status, /Comparing photos/);
-  assert.match(present({ paused: 12 }).status, /Paused/);
+  assert.equal(present({ paused: 12 }).status, 'Needs attention');
   assert.match(present({}, status('paused', { reason: 'model-failures' })).detail, /photo comparisons/);
   assert.equal(present({ remaining: 0 }).text, 'Up to date');
   assert.match(present({ remaining: 0 }).detail, /3 finished without a full result/);
@@ -131,9 +131,9 @@ test('one chip represents global activity, terminal completion, disabled roles a
   assert.equal(curateStatus(view).phase, 'waiting');
   view.photoRefereeActivity = status('paused', { reason: 'configuration' });
   assert.equal(curateStatus(view).phase, 'attention');
-  assert.equal(curateStatus(view).text, 'Photo Referee paused');
+  assert.equal(curateStatus(view).text, 'Photo Referee: setup needed');
   view.refereeProgress.photo = { ...work, remaining: 0, incomplete: 3 };
-  assert.equal(curateStatus(view).roles[1].status, 'Paused', 'a stale count cannot hide a live pause');
+  assert.equal(curateStatus(view).roles[1].status, 'Can’t run: check AI settings', 'a stale count cannot hide a live pause');
   view.photoRefereeActivity = status('idle');
   view.refereeProgress.remaining = 0;
   assert.equal(curateStatus(view).phase, 'idle', 'terminal incomplete checks are finished');
@@ -148,4 +148,52 @@ test('one chip represents global activity, terminal completion, disabled roles a
   view.refinement = { state: 'paused', remainingGroups: 1 };
   assert.equal(curateStatus(view).text, 'Grouping paused');
   assert.equal(curateStatus(view).roles[1].phase, 'running', 'independent work remains visible in the breakdown');
+});
+
+test('blockers distinguish setup, model failures and cooldowns without claiming automatic recovery for unknown failures', () => {
+  const work = { state: 'ready', total: 3, completed: 0, incomplete: 0, remaining: 3, paused: 3 };
+  for (const [reason, text, phase, row] of [
+    ...['configuration', 'stack-configuration', 'provider-auth', 'provider-configuration', 'unknown-capability', 'unsupported-provider']
+      .map(reason => [reason, 'AI setup needed', 'attention', 'Can’t run: check AI settings']),
+    ['model-failures', 'AI model needs attention', 'attention', 'Model needs attention'],
+    ['preview-cooldown', 'Temporarily paused', 'waiting', 'Temporarily paused'],
+    ['provider-cooldown', 'Temporarily paused', 'waiting', 'Temporarily paused'],
+    ['provider-interrupted', 'AI needs attention', 'attention', 'Needs attention'],
+    ['PRIVATE UNKNOWN ERROR', 'AI needs attention', 'attention', 'Needs attention'],
+  ]) {
+    const view = { refereeProgress: { stack: work, photo: work, remaining: 3 },
+      stackRefereeActivity: status('paused', { reason }), photoRefereeActivity: status('paused', { reason }) };
+    const result = curateStatus(view);
+    assert.equal(result.text, text, reason);
+    assert.equal(result.phase, phase, reason);
+    assert.equal(result.count, 3);
+    assert.ok(result.roles.every(r => r.status === row));
+    assert.doesNotMatch(JSON.stringify(result.roles.map(r => r.detail)), /PRIVATE|resumes shortly/);
+    view.refereeProgress.photo = { state: 'counting' };
+    assert.equal(curateStatus(view).text, text, 'live blockers also apply before the scan finishes');
+    view.photoRefereeActivity = status('checking');
+    assert.match(curateStatus(view).text, /^Stack Referee:/, 'only name the blocked role');
+    assert.equal(curateStatus(view).roles[1].status, 'Comparing photos');
+    view.refereeProgress.stack = { state: 'off' };
+    assert.equal(curateStatus(view).phase, 'running', 'Off ignores stale blocker activity');
+  }
+  const mixed = { refereeProgress: { stack: work, photo: work, remaining: 3 },
+    stackRefereeActivity: status('paused', { reason: 'provider-auth' }), photoRefereeActivity: status('paused', { reason: 'model-failures' }) };
+  assert.equal(curateStatus(mixed).text, 'AI needs attention', 'different blockers do not imply one shared cause');
+  assert.deepEqual(curateStatus(mixed).roles.map(r => r.status), ['Can’t run: check AI settings', 'Model needs attention']);
+  mixed.photoRefereeActivity.reason = 'configuration';
+  assert.equal(curateStatus(mixed).text, 'AI setup needed', 'related setup blockers share a concise message');
+});
+
+test('cooldown details show only known retry eligibility, not a recovery promise', () => {
+  const retryAt = Date.UTC(2026, 9, 8, 12, 30);
+  for (const role of ['stack', 'photo']) for (const reason of ['preview-cooldown', 'provider-cooldown']) {
+    const present = retryAt => refereeProgress({ state: 'counting' }, status('paused', { reason, retryAt }), role);
+    assert.match(present(retryAt).detail, /Retry eligible after/);
+    assert.ok(present(retryAt).detail.includes(new Date(retryAt).toLocaleString()));
+    assert.doesNotMatch(present(retryAt).detail, /resumes shortly|will resume/);
+    for (const invalid of [undefined, null, 0, -1, 'tomorrow', NaN, Infinity, Number.MAX_SAFE_INTEGER])
+      assert.doesNotMatch(present(invalid).detail, /Retry eligible|Invalid Date/);
+  }
+  assert.doesNotMatch(refereeProgress(null, status('paused', { reason: 'provider-auth', retryAt })).detail, /Retry eligible/);
 });

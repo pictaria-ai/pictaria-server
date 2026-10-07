@@ -228,6 +228,8 @@ test('an Immich outage pauses queued stacks and discovery across restart, then t
   await f.run(); assert.equal(f.curate.aiLifecycle.pending.size, 8);
   f.advance(); assert.equal((await f.run()).reason, 'preparation-failed');
   assert.equal(f.curate.aiLifecycle.pending.size, 7, 'already queued work exists');
+  const retryAt = f.curate.aiLifecycle.now() + STACK_PREVIEW_PAUSE_MS;
+  assert.equal((await f.curate.openView()).stackRefereeActivity.retryAt, retryAt);
   for (let i = 0; i < 3; i++) { f.advance(); await f.run(); }
   assert.equal(f.downloads.length, 1, 'queued work cannot drain during the pause');
   assert.ok(f.curate.current.groups.every(g => f.curate.stackReferee.status(g).reason === 'preview-cooldown'));
@@ -237,12 +239,14 @@ test('an Immich outage pauses queued stacks and discovery across restart, then t
   assert.doesNotMatch(row, /PRIVATE|http:/);
   await f.restart(); await f.run();
   assert.equal(f.downloads.length, 1, 'restart preserves the original pause');
+  assert.equal(f.curate.stackReferee.activity().retryAt, retryAt, 'status reads and restart do not extend the pause');
   f.download = () => ({ data: png, contentType: 'image/png' });
   f.advance(STACK_PREVIEW_PAUSE_MS);
   for (let i = 0; i < 10; i++) { await f.run(); f.advance(); }
   await f.curate.refresh();
   assert.equal(f.calls.length, 8); assert.equal(f.downloads.length, 17);
   assert.ok(f.curate.current.groups.every(g => g.stackCheck?.state === 'checked'));
+  assert.equal(f.curate.stackReferee.activity().retryAt, undefined);
   await f.restart(); f.advance(STACK_PREVIEW_PAUSE_MS); await f.run();
   assert.equal(f.calls.length, 8, 'successful checks do not repeat');
 }, { count: 0 }));
@@ -518,6 +522,25 @@ test('provider pauses and request allowances have honest card and global status 
   const captured = f.curate.stackReferee.capture(f.curate.current.groups[0]);
   f.repo.db.prepare('INSERT INTO curate_ai_skipped_inputs VALUES(?,?,?)').run('stack', captured.snapshot.inputKey, Date.now());
   assert.equal(f.curate.stackReferee.status(f.curate.current.groups[0]).reason, 'photo-limit');
+}));
+
+test('Stack Referee exposes the existing provider cooldown without rescheduling or spending requests', async () => fixture(async f => {
+  await f.run();
+  const guard = f.repo.curate.aiLimits, backend = aiBackendKey(f.provider);
+  guard.finish(guard.startProvider(backend), new ProviderRequestError('PRIVATE OUTAGE', { status: 503 }));
+  const retryAt = guard.providerStatus(backend).retryAt;
+  assert.ok(retryAt > f.curate.aiLifecycle.now());
+  for (let i = 0; i < 3; i++) {
+    const activity = (await f.curate.openView()).stackRefereeActivity;
+    assert.equal(activity.reason, 'provider-cooldown');
+    assert.equal(activity.retryAt, retryAt);
+    assert.doesNotMatch(JSON.stringify(activity), /PRIVATE/);
+  }
+  await f.restart();
+  assert.equal(f.curate.stackReferee.activity().retryAt, retryAt);
+  f.advance(retryAt - f.curate.aiLifecycle.now());
+  assert.equal(f.curate.stackReferee.activity().retryAt, undefined, 'expired cooldown does not imply current work');
+  assert.equal(f.calls.length, 0); assert.equal(f.downloads.length, 0);
 }));
 
 test('a successful badge is withheld during source rebuild and is absent from Decided comparisons', async () => fixture(async f => {
