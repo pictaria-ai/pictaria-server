@@ -65,7 +65,7 @@ for (const { keepers, legacyGrouped } of [{ keepers: [] }, { keepers: ['p2', 'p4
   assert.equal(await page.evaluate('document.querySelectorAll(".is-stack").length'), 1);
   assert.equal(await page.evaluate('document.querySelectorAll(".group-card:not(.is-stack)").length'), 1,
     'Photo Referee must not create additional singles');
-  assert.equal(await page.evaluate('document.querySelector(".is-stack .keeper-star")?.textContent ?? null'), keepers.length ? '★2' : null);
+  assert.equal(await page.evaluate('document.querySelector(".is-stack .keeper-star")'), null);
   await page.evaluate(`const fetchBefore=fetch; window.fetch=async(...a)=>{const r=await fetchBefore(...a);if(String(a[0]).endsWith('/comparisons'))window.__comparison=await r.clone().json();return r;}`);
   assert.equal(await page.evaluate('!document.querySelector(".is-stack .stack-accept").hidden'), keepers.length > 0);
   assert.equal(await page.evaluate('document.querySelector(".is-stack .cover img").src.split("/").pop()'), fixture.id(keepers.length ? 2 : 1));
@@ -135,7 +135,7 @@ for (const { keepers, legacyGrouped } of [{ keepers: [] }, { keepers: ['p2', 'p4
   assert.equal(operations(), 2);
   // Undo commits tags immediately; the derived Curate projection can lag.
   assert.deepEqual(fixture.repo.loadAssetTagsFor([1, 2, 3, 4].map(fixture.id)), originalTags);
-  assert.equal(await page.evaluate('document.querySelector(".is-stack .keeper-star")?.textContent ?? null'), keepers.length ? '★2' : null);
+  assert.equal(await page.evaluate('document.querySelector(".is-stack .keeper-star")'), null);
   // Advice survives immediately; wait for a fresh poll confirming that normal
   // deterministic prerequisites have settled before expecting preselection.
   await page.evaluate('window.__lastStatus=null');
@@ -202,9 +202,9 @@ for (const keepers of [[], ['p2', 'p4']]) test(
       await page.send('Input.dispatchKeyEvent', { type: 'keyUp', key: 'z', code: 'KeyZ' });
       await page.waitFor('document.querySelector(".is-stack") && !document.querySelector("#refresh").disabled && document.querySelector("#receipt-text").textContent.startsWith("Undid choices")');
       assert.equal(operations(), 2);
-      assert.equal(await page.evaluate('document.querySelector(".is-stack .keeper-star")?.textContent'), '★2');
-      // The retained star is immediate. Normal deterministic prerequisite work
-      // can still gate preselection; restoring advice must not bypass it.
+      assert.equal(await page.evaluate('document.querySelector(".is-stack .keeper-star")'), null);
+      // Normal deterministic prerequisite work can still gate preselection;
+      // restoring advice must not bypass it.
       await page.waitFor('document.querySelector(".is-stack").dataset.badge!=="checking" && !document.querySelector("#refresh").disabled');
       await click('.is-stack .cover');
       await page.waitFor('document.querySelectorAll("#photos .photo-card").length===4 && !document.querySelector("#apply-next").disabled');

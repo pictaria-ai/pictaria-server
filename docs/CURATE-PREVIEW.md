@@ -409,9 +409,10 @@ applicable inputs:
 changed photos or invalidated results never keep an AI badge, and open
 comparisons retain their photos and draft choices as status updates arrive.
 
-The Photo Referee (PIC-116) adds a gold **★** beside any badge when it suggests
-keepers, with a count when more than one, a **Keepers** step in the strip, and
-stars on the suggested photos in the open stack. Badge, Keep-button and filmstrip
+The Photo Referee (PIC-116) shows the suggested count in the grid's **Keep N ★**
+button, a **Keepers** step in the strip, and stars on suggested photos in the
+open stack. Grid cards have no duplicate top-right star badge; the grouping
+badge remains independent. Individual-photo badges, Keep-button and filmstrip
 stars use production Curate's bright gold in both themes; overlay badges retain
 a dark background for contrast. The page reads a group's
 `photoReferee` status (with `keepers` once complete) and the comparison's

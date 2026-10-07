@@ -228,7 +228,9 @@ decision authority or overwrite open memberships and draft choices.
 ## Recommendations in Curate Preview
 
 The PIC-371 grouping badge remains independent of the Photo Referee. Complete
-advice supplies a gold star with the number suggested. A valid empty set reads
+applicable advice supplies **Keep N ★** on grid stack cards, without a duplicate
+top-right star badge. Suggested photos retain their stars inside the comparison
+and lightbox filmstrip. A valid empty set reads
 “none suggested”; missing, invalid or historical mixed batch output never means
 none. The Why panel includes the comparison coverage, concise group reasons and
 saved provider/model. Every inspected valid batch provides per-photo reasons;

@@ -40,10 +40,9 @@ test('a kept-apart single and suggested keepers show in the grid, the open stack
       return new Response(JSON.stringify(body),{status:response.status,headers:{'content-type':'application/json'}});
     };`);
   await click('#refresh');
-  await page.waitFor('document.querySelector(".is-stack .keeper-star") && document.querySelector(".group-card:not(.is-stack)")?.dataset.badge==="apart"');
+  await page.waitFor('document.querySelector(".is-stack")?.dataset.badge==="checked" && document.querySelector(".group-card:not(.is-stack)")?.dataset.badge==="apart"');
   assert.equal(await page.evaluate('document.querySelector(".is-stack").dataset.badge'), 'checked');
-  assert.equal(await page.evaluate('document.querySelector(".is-stack .keeper-star").getAttribute("aria-label")'), '2 keepers suggested');
-  assert.equal(await text('.is-stack .keeper-star'), '★2');
+  assert.equal(await page.evaluate('document.querySelector(".is-stack .keeper-star")'), null, 'no duplicate recommendation badge on the grid card');
   assert.equal(await text('.is-stack .stack-count'), '4 photos');
   assert.equal(await text('.group-card:not(.is-stack) .p-chip'), null);
   assert.equal(await page.evaluate('document.querySelector(".group-card:not(.is-stack) .stack-badge").getAttribute("aria-label")'), 'Kept apart');

@@ -13,7 +13,9 @@ All notable changes to Pictaria Server are documented here. This project follows
 
 - Add **Keep N ★** to eligible Curate Preview stack cards (PIC-116): one human
   action accepts saved Photo Referee suggestions and skips the rest, using the
-  existing guarded decision and Undo. Recheck the displayed suggestion snapshot
+  existing guarded decision and Undo. Remove the duplicate top-right star badge
+  from grid cards; keep grouping badges and individual-photo recommendation
+  stars inside comparisons. Recheck the displayed suggestion snapshot
   before saving; changed advice opens manual comparison. Suggested photos become
   covers and initial comparison focus without reordering stacks or photos.
   Show suggested reasons inline, label the footer **Your picks**, describe the

@@ -240,11 +240,13 @@ export function groupCard(group, open, { decide, keepSuggestions, select, select
     }
     const status = stackStatus(group, { decided });
     cover.setAttribute('aria-label', status?.word ? `${status.word}. ${coverLabel}` : coverLabel);
-    const badge = badgeNode(status), star = keeperStar(status?.keepers);
-    const signature = JSON.stringify([badge?.title, status?.keepers]);
+    // The Keep button carries the suggestion count; only grouping status
+    // belongs in the card's top-right corner.
+    const badge = badgeNode(status);
+    const signature = badge?.title ?? '';
     if (marker.dataset.signature !== signature) {
       marker.dataset.signature = signature;
-      marker.replaceChildren(...[badge, star].filter(Boolean));
+      marker.replaceChildren(...[badge].filter(Boolean));
     }
     card.dataset.badge = status?.badge ?? '';
     card.dataset.similarity = status?.updated ? 'updated' : group.similarity?.state ?? '';

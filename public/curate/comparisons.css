@@ -166,7 +166,7 @@ button {
   top: 10px;
   background: var(--p-panel);
 }
-/* Stack status (PIC-371): one badge per stack, a keeper star beside it. Icon
+/* Stack status (PIC-371): one grouping badge per stack. Icon
    shapes differ and every badge has words, so color is never the only signal. */
 .status-marker {
   position: absolute;

@@ -5,7 +5,7 @@ import { refereeReasonShort } from './referee-status.js';
 // badge, highest first: Checking, AI checked, Unsure, Not fully checked, then
 // Checked. A single photo shows Kept apart only when it was actively separated
 // from photos taken at the same time; plain singles and decided photos show
-// none. The Photo Referee's keeper star (PIC-116) can appear beside any badge.
+// none. Photo Referee recommendations (PIC-116) are independent of this badge.
 // Server states in, words out: rendering lives in photos.js and explanation.js.
 export const BADGE_WORDS = Object.freeze({
   checking: 'Checking', 'ai-checked': 'AI checked', unsure: 'Unsure',
