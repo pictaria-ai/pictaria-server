@@ -224,7 +224,12 @@ search draft has not been applied.
 
 **Load more** only displays additional results; it is not needed to get those
 photos checked. There is no duplicate loaded-stack status count beside the photo
-counts. The right-aligned activity chip uses a reserved space so updates cannot
+counts. The filter row starts with **All / Stacks / Singles**, followed by its
+photo count and, in Singles, the check-shown checkbox. No space is reserved for
+a hidden checkbox. Decided shows its count at the left with its bulk checkbox.
+Date, category and search remain on the right; phones put the count and checkbox
+directly below the tabs and collapse the secondary filters.
+The right-aligned activity chip uses a reserved space so updates cannot
 shift the tabs, filters or grid. Soft teal fills highlight active and up-to-date
 states, blue marks waiting/counting, and amber marks work needing attention.
 Labels and icons distinguish each state in both light and dark themes:
@@ -413,8 +418,8 @@ The Photo Referee (PIC-116) shows the suggested count in the grid's **Keep N ★
 button, a **Keepers** step in the strip, and stars on suggested photos in the
 open stack. Grid cards have no duplicate top-right star badge; the grouping
 badge remains independent. Individual-photo badges, Keep-button and filmstrip
-stars use production Curate's bright gold in both themes; overlay badges retain
-a dark background for contrast. The page reads a group's
+stars use production Curate's bright gold in both themes; individual-photo star
+badges have white backgrounds. The page reads a group's
 `photoReferee` status (with `keepers` once complete) and the comparison's
 `photoRecommendations.keeperIds`. A keeper star does not imply that the Stack
 Referee ran. The lightbox shows per-photo reasons, and Why records batch

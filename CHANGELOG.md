@@ -7,6 +7,11 @@ All notable changes to Pictaria Server are documented here. This project follows
 
 ### Development
 
+- Align Curate Preview's All/Stacks/Singles tabs at the left, followed by counts
+  and the Singles check-shown checkbox, without a hidden-checkbox spacer.
+  Keep secondary filters on the right and use white individual-photo star
+  badges inside comparisons (PIC-116).
+
 - Match Curate Preview referee stars to production Curate's bright gold in both
   themes (PIC-116). Add soft teal, blue and amber activity-chip fills to make
   working/up-to-date, waiting and attention states easier to spot.

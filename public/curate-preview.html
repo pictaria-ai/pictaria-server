@@ -39,15 +39,17 @@
         <div id="curate-status" class="status-slot"></div>
       </div>
       <div class="toolbar">
-        <div class="filter-summary">
-          <label id="bulk-label" hidden title="Check shown photos"><input id="select-shown" type="checkbox" /><span id="bulk-label-text" class="sr-only">Check shown photos</span></label>
-          <span id="count" class="p-muted" aria-live="polite">Loading photos…</span>
+        <div class="primary-filters">
+          <nav id="filters" class="p-tabs" aria-label="Photo groups">
+            <button class="p-tab active" data-kind="all">All</button
+            ><button class="p-tab" data-kind="stacks">Stacks</button
+            ><button class="p-tab" data-kind="singles">Singles</button>
+          </nav>
+          <div class="filter-summary">
+            <span id="count" class="p-muted" aria-live="polite">Loading photos…</span>
+            <label id="bulk-label" hidden title="Check shown photos"><input id="select-shown" type="checkbox" /><span id="bulk-label-text" class="sr-only">Check shown photos</span></label>
+          </div>
         </div>
-        <nav id="filters" class="p-tabs" aria-label="Photo groups">
-          <button class="p-tab active" data-kind="all">All</button
-          ><button class="p-tab" data-kind="stacks">Stacks</button
-          ><button class="p-tab" data-kind="singles">Singles</button>
-        </nav>
         <button id="toggle-filters" class="p-btn" aria-expanded="false" aria-controls="secondary-filters">Filters</button>
         <div id="secondary-filters" class="secondary-filters">
           <label class="sort-label" title="Stacks use their earliest photo. Unknown capture dates appear last.">
