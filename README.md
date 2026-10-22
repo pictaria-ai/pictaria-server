@@ -78,7 +78,9 @@ upgrading Immich.
 
 Requires Node 22.16+ on the 22 line, or 23.8+ beyond it (`node:sqlite`
 and its online-backup API; earlier builds fail at boot — `engines` says
-`^22.16.0 || >=23.8.0`). The production container and CI suite use Node 22;
+`^22.16.0 || >=23.8.0`). Use the latest patched Node 24 LTS release
+(24.22.1 or newer); these API minimums are not security-update recommendations.
+The production container and CI suite use Node 24;
 newer supported versions work as well.
 
 ```sh

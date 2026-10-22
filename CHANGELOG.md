@@ -5,6 +5,14 @@ All notable changes to Pictaria Server are documented here. This project follows
 
 ## Unreleased
 
+### Runtime and security
+
+- Move the container to Node 24.22.1 LTS, pinned to the official multi-platform
+  image digest, and run CI and release validation on Node 24. This includes
+  the October 21, 2026 Node.js security fixes. Bare Node installations should
+  use the latest patched Node 24 release. This runtime change alone does not
+  change Pictaria's persistent-state contracts or database schemas.
+
 ### Development
 
 - Curate Preview Stacks now use Pictaria image embeddings when Image embeddings

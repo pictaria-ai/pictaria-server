@@ -1,6 +1,6 @@
 # Pictaria Server — single-container bundle.
 # No runtime npm dependencies: the image is Node + the source tree.
-FROM node:22.23.2-alpine3.24@sha256:c610fcdfb1d5b4740dd70c284ed3cb16bb857e0f7166196e36a5501df7a3aa32
+FROM node:24.22.1-alpine3.24@sha256:feb76650b7195319268c59cb2d419c732d6c499b13bf5296f16ab59eb1f0a4f3
 
 WORKDIR /app
 
