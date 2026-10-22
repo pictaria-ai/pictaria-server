@@ -76,12 +76,18 @@ upgrading Immich.
 
 ## Quick start (bare Node)
 
-Requires Node 22.16+ on the 22 line, or 23.8+ beyond it (`node:sqlite`
-and its online-backup API; earlier builds fail at boot — `engines` says
-`^22.16.0 || >=23.8.0`). Use the latest patched Node 24 LTS release
-(24.22.1 or newer); these API minimums are not security-update recommendations.
-The production container and CI suite use Node 24;
-newer supported versions work as well.
+Use the latest patched Node 24 LTS release (**24.22.1 or later 24.x**),
+matching the container and CI runtime recorded in `.node-version`.
+Node 22 remains supported until April 30, 2027; use **22.23.4 or later 22.x**
+for the [October 2026 security fixes](https://nodejs.org/en/blog/vulnerability/october-2026-security-releases).
+The odd-numbered Node 23 and 25 lines are end-of-life and no longer receive
+security fixes. Evaluate newer **LTS** lines with the tests and upgrade
+rehearsal in [Upgrading](docs/UPGRADING.md#upgrade--bare-node).
+
+The package's `engines` range, `^22.16.0 || >=23.8.0`, describes only API
+compatibility (`node:sqlite` and its online-backup API); earlier builds fail
+at boot. Its inclusion of older patches and odd-numbered lines is not a
+security-update recommendation.
 
 ```sh
 PICTARIA_RELEASE=v1.2.1 # replace with the release you are installing

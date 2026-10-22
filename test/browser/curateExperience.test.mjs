@@ -19,7 +19,7 @@ test(
     const key = async (key, more = {}) =>
       page.send('Input.dispatchKeyEvent', { type: 'keyDown', key, ...more });
     const photo = (id) =>
-      `document.querySelector('#photo-large').getAttribute('src').includes('${fixture.id(id)}')`;
+      `document.querySelector('#photo-loading').hidden && document.querySelector('#photo-large').getAttribute('src').includes('${fixture.id(id)}')`;
     const ready = () => wait('!document.querySelector("#refresh").disabled');
     await page.navigate(`${fixture.base}/curate-preview.html`);
     await wait('document.querySelector(".gate-backdrop input")');
@@ -39,11 +39,14 @@ test(
     await wait('document.querySelector("#photo-view").open && document.querySelector("#photo-loading").hidden');
     assert.equal(await page.evaluate('document.querySelectorAll("#photos [data-keeper][aria-pressed=true]").length'), 0);
     await key('y');
+    await wait('document.querySelector("#photo-loading").hidden');
     assert.equal(fixture.repo.db.prepare('SELECT COUNT(*) n FROM decision_operations').get().n, 0);
     assert.equal(await page.evaluate('document.querySelector("#photo-undo-hint").hidden'), true, 'drafts never announce a save');
     assert.equal(await page.evaluate('document.querySelectorAll("#photos [data-keeper][aria-pressed=true]").length'), 1); // Y changes only the draft
     await key('ArrowLeft'); // Y advanced; browse back before changing that draft.
+    await wait('document.querySelector("#photo-loading").hidden');
     await key('s');
+    await wait('document.querySelector("#photo-loading").hidden');
     assert.equal(await page.evaluate('document.querySelectorAll("#photos [data-keeper][aria-pressed=true]").length'), 0);
     await click('#back-comparison');
     await click('[data-close=comparison]');
@@ -216,14 +219,15 @@ test(
     );
     await click('.group-card .cover');
     await page.waitFor(
-      'document.querySelector("#photo-view").open && !document.querySelector("#photo-context").hidden',
+      'document.querySelector("#photo-view").open && !document.querySelector("#photo-context").hidden && document.querySelector("#photo-loading").hidden',
     );
     await click('.reference-photo');
-    await page.waitFor('!document.querySelector("#back-pending-photo").hidden');
+    await page.waitFor('!document.querySelector("#back-pending-photo").hidden && document.querySelector("#photo-loading").hidden');
     assert.equal(await page.evaluate('document.querySelector("#single-actions").hidden'), true);
     await page.send('Input.dispatchKeyEvent', { type: 'keyDown', key: 'n' });
     assert.equal(fixture.repo.db.prepare('SELECT COUNT(*) n FROM decision_operations').get().n, 0);
     await click('#back-pending-photo');
+    await page.waitFor('document.querySelector("#photo-loading").hidden');
     await page.send('Input.dispatchKeyEvent', { type: 'keyDown', key: 's' });
     await page.waitFor(
       '!document.querySelector("#photo-view").open && document.querySelectorAll(".group-card").length===0 && !document.querySelector("#refresh").disabled',
