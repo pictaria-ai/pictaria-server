@@ -113,6 +113,7 @@ export class StackRefereeWorker {
       const provider = this.lifecycle.resolveProvider(), { key, capability } = this.configuration(provider);
       const support = stackRefereeSupport(provider, capability, snapshot.ids.length);
       if (support.state !== 'ready') return { state: 'incomplete', reason: support.state,
+        ...(support.maxImages ?? support.limit ? { limit: support.maxImages ?? support.limit } : {}),
         ...(['unknown-capability', 'unsupported-provider'].includes(support.state) ? { scope: 'configuration' } : {}) };
       if (this.lifecycle.inputs.preparationFailures(snapshot) >= 2) return { state: 'incomplete', reason: 'preparation-failed' };
       const reason = this.lifecycle.inputs.outcome(snapshot, key);

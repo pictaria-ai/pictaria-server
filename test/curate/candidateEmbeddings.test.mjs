@@ -29,7 +29,7 @@ test('very similar embeddings stack photos with no Immich search', () => {
   assert.equal(result.groups[0].route, 'candidate-supported');
   assert.deepEqual(result.scopes[0].referenceIds, []);
   assert.equal(result.scopes[0].needsRanks, false);
-  assert.match(reasons(result), /Very similar Pictaria image embeddings/);
+  assert.match(reasons(result), /\bembedding-near\b/);
   const before = candidateGroups(rows);
   assert.equal(before.method, CANDIDATE_METHOD);
   assert.equal(before.groups[0].route, 'candidate-unconfirmed', 'candidate-3 waits for searches');
@@ -42,7 +42,7 @@ test('clearly different embeddings separate photos, unless the same people or a 
   const separated = candidateGroups(close, { embeddings: embeddings({ '1-2': 0.6 }) });
   assert.deepEqual(partition(separated), [['1'], ['2']]);
   assert.deepEqual(separated.scopes[0].referenceIds, [], 'never searched');
-  assert.match(reasons(separated), /Clearly different image embeddings separate/);
+  assert.match(reasons(separated), /\bembedding-apart\b/);
   assert.deepEqual(partition(candidateGroups(close)), [['1', '2']], 'candidate-3 groups them on the ThumbHash');
 
   const veryClose = [photo('1', { thumbhash: hash(0) }), photo('2', { thumbhash: hash(3) })];
@@ -52,7 +52,8 @@ test('clearly different embeddings separate photos, unless the same people or a 
   const kept = candidateGroups(samePeople, { embeddings: embeddings({ '1-2': 0.6 }) });
   assert.deepEqual(partition(kept), [['1', '2']]);
   assert.equal(kept.groups[0].route, 'candidate-unconfirmed', 'neither separated nor supported: uncertain');
-  assert.match(reasons(kept), /stays uncertain/);
+  assert.match(reasons(kept), /\bembedding-undecided\b/);
+  assert.doesNotMatch(reasons(kept), /\bprovisional\b/, 'the embedding reason already names what is unsettled');
 });
 
 test('middle-band embeddings need the same people or a similar ThumbHash; search ranks never decide them', () => {
@@ -60,7 +61,7 @@ test('middle-band embeddings need the same people or a similar ThumbHash; search
   const ones = [photo('1', { peopleCategory: 'one' }), photo('2', { peopleCategory: 'one' })];
   const corroborated = candidateGroups(ones, { embeddings: emb });
   assert.equal(corroborated.groups[0].route, 'candidate-supported');
-  assert.match(reasons(corroborated), /corroborated by the same people or a similar ThumbHash/);
+  assert.match(reasons(corroborated), /\bembedding-corroborated\b/);
 
   const scenery = ones.map(p => ({ ...p, peopleCategory: 'none' }));
   const uncertain = candidateGroups(scenery, { embeddings: emb });
@@ -86,8 +87,8 @@ test('groups join on their average similarity; a clearly different pair blocks t
   const joined = candidateGroups(rows, { embeddings: embeddings(halves) });
   assert.deepEqual(partition(joined), [['1', '2', '3', '4']]);
   assert.equal(joined.groups[0].route, 'candidate-supported');
-  assert.match(reasons(joined), /joined on their average image embedding similarity/);
-  assert.doesNotMatch(reasons(joined), /stays uncertain/);
+  assert.match(reasons(joined), /\bembedding-average\b/);
+  assert.doesNotMatch(reasons(joined), /\bembedding-undecided\b/);
   const blocked = candidateGroups(rows, { embeddings: embeddings({ ...halves, '2-4': 0.7 }) });
   assert.deepEqual(partition(blocked), [['1', '2'], ['3', '4']]);
 
@@ -123,7 +124,7 @@ test('photos without an embedding keep candidate-3 evidence and searches', () =>
   const ranked = candidateGroups(rows, { embeddings: emb, ranks: { [scope]: { rows: allRanks(rows, 0) } } });
   assert.deepEqual(partition(ranked), [['1', '2', '3']]);
   assert.equal(ranked.groups[0].route, 'candidate-supported');
-  assert.match(reasons(ranked), /Reciprocal nearby Immich search ranks/);
+  assert.match(reasons(ranked), /(^| )ranks( |$)/);
 });
 
 test('with mixed coverage, ranks of embedded pairs never settle them through rank recovery', () => {
@@ -156,9 +157,9 @@ test('two photos recovered by ranks keep an unresolved embedding relation betwee
   const result = candidateGroups(rows, { embeddings: emb, ranks: { [scope.id]: { rows: matrix } } });
   assert.deepEqual(partition(result), [['0', '1', '2', '3', '4']]);
   const [group] = result.groups;
-  assert.match(group.reasons.join(' '), /asymmetric search match/);
+  assert.match(group.reasons.join(' '), /\brank-recovered\b/);
   assert.equal(group.route, 'candidate-unconfirmed');
-  assert.match(group.reasons.join(' '), /stays uncertain/);
+  assert.match(group.reasons.join(' '), /\bembedding-undecided\b/);
   assert.equal(selectStackReferee({ curateBurstGrouping: true, curateStackRefereeEnabled: true },
     { memberCount: 5, pending: true, deterministicSettled: true, route: group.route }, { stack: true, keeper: false }).reason,
   'uncertain-composition');

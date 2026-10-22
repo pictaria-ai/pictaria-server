@@ -67,11 +67,15 @@ export function applyStackChecks(store, result, stacks = true) {
       const selected = new Set(group.ids);
       const parts = record.result.groups.map(part => ({ ids: part.ids.filter(id => selected.has(id)), reason: part.reason }))
         .filter(part => part.ids.length);
+      // Each part keeps the deterministic reasons; the model's reason stays
+      // with the check (stack-status.js). `split` says whether the answer
+      // divided the photos it compared, which later decisions cannot change:
+      // a confirmed stack that decisions shrink to one photo was not split.
+      const split = record.result.groups.length > 1;
       const checked = parts.map(part => ({ ...group, ids: part.ids,
         id: same(part.ids, group.ids) ? group.id : fingerprint({ method: result.method, check: row.input_key, ids: part.ids }),
         capturedMs: store.photo(part.ids[0]).time,
-        reasons: [...(group.reasons ?? []), part.reason],
-        stackCheck: { state: 'checked', inputKey: row.input_key, reason: part.reason },
+        stackCheck: { state: 'checked', inputKey: row.input_key, reason: part.reason, split },
       }));
       replacements.set(group.id, checked);
     }

@@ -32,6 +32,32 @@ The optional Stack Referee and Photo Referee remain separate future integrations
 “Supported” below describes this rule's evidence, **not** an AI check or permission
 to bypass one. The preview's keeper decisions are still entirely human.
 
+## How stacks work
+
+These rules hold for every grouping, so **Why?** in Curate Preview links here
+instead of repeating them:
+
+- **Time first.** Only photos taken close together are compared: each photo
+  within 90 seconds of the previous one, and at most 3 minutes from the first.
+  A photo with no capture time stays single.
+- **Missing evidence is unknown.** A different-looking ThumbHash, a missing
+  search match or a missing image embedding does not prove a different subject.
+  Photos with unknown evidence stay together for now, and the stack is marked
+  **Unsure**.
+- **Separations win.** Clearly different image embeddings, supported people
+  differences, contrasting Immich searches and your earlier splits keep photos
+  apart, and a stack never joins across them.
+- **Limits are stated.** More than 40 photos taken together, or too much work
+  for one rebuild, are grouped by time only and marked **Not fully checked**.
+- **AI checks are separate.** The optional Stack Referee checks uncertain stacks,
+  or every stack if you choose, after these rules; a stack it checked shows
+  **AI checked**. Keeper choices stay yours.
+
+Each grouping records short reason codes (`src/curate/reasons.mjs`) that the
+page words as evidence rows. A code keeps its meaning; a changed meaning gets a
+new code. Groupings saved before codes keep their sentences, which the page
+translates to the same rows.
+
 ## Candidate 3: precise rules
 
 Membership rules live in `src/curate/candidate.mjs`, with subgroup contrast in
@@ -282,14 +308,14 @@ provisional; a failed pass finishes with **Similarity not fully checked**. Succe
 leave membership uncertain say **Check complete · similarity uncertain**, retain
 the provisional grouping, and do not automatically retry or fragment it. An
 unconfigured or unavailable search service also leaves time groups provisional.
-Photo cards show a muted spinner for queued work, a blue spinner while checking,
-an amber **!** for incomplete or unavailable checks, and a muted **i** for
-successfully completed but inconclusive checks. Neither status blocks curation. Completed
-supported work is quiet on cards. The open comparison retains the complete
+Photo cards show one [status badge](CURATE-PREVIEW.md#stack-status) (PIC-371):
+**Checking** while queued or running, **Unsure** for inconclusive checks,
+**Not fully checked** for incomplete or limited ones, and **Checked** once
+settled. No status blocks curation. The open comparison retains the complete
 status and explanation, including when no search was needed; unconfigured checks
 are not shown as completed. Text/accessible labels accompany color and animation;
-reduced-motion preferences disable spinning. Updated views with pending checks
-keep a pending indicator, rather than claiming completion.
+reduced-motion preferences disable spinning. A card whose newer grouping is
+ready keeps its badge and gains an outline, rather than claiming completion.
 
 `refinement.metrics` on the groups/status response exposes only in-memory
 aggregate measurements since service start: search attempts/completions, cache
@@ -299,9 +325,11 @@ retry delays). Search measurements include the shared lab lane; direct lab-cache
 reads do not increment `cacheHits`. No photo IDs or responses are included.
 These are diagnostic counters, not persistent performance history or a new UI.
 
-The page shows global background progress beside the stack/single-photo counts
-in a reserved status row, plus an activity spinner beside Refresh. After work
-finishes, the header stays quiet even when some checks finished incomplete.
+The page shows counts of the loaded stacks that are checking, unsure or not
+fully checked beside the stack/single-photo counts in a reserved status row,
+plus an activity spinner beside Refresh whose tooltip gives global background
+progress. After work finishes, the spinner stays quiet even when some checks
+finished incomplete.
 An affected card and its comparison’s Why explanation retain the status and
 reason, and make clear that human choices are available. There is no repair action
 or next-retry time. Cards still show their own status and highlight changed grouping.
@@ -320,7 +348,7 @@ existing membership checks require a refresh in that case. Human decisions,
 revisions, whole-group application and Undo keep their existing contracts. No
 ranking changes human tags by itself. See [preview behavior](CURATE-PREVIEW.md).
 
-**Why?** beside the similarity status shows the rules that supported the current
+**Why?**, opened from the status badge, shows the recorded evidence for the current
 comparison, with its algorithm version. Hover, focus or tap opens a read-only
 overlay without reflowing the photos. If the opened view predates the applicable calculation,
 the explanation says membership was preserved rather than inventing historical
@@ -363,6 +391,7 @@ and decision contract, not create a permanent second Curate pipeline.
 | `candidate-3` background processing | 2026-09-23 | Process all pending candidates without browser demand; persist complete evidence, drain bounded active slots and retry failures with backoff. Compact global progress, Pending label and direct stack opening. Membership rules and search limits are unchanged. | PIC-385 |
 | `candidate-3` bounded checks | 2026-09-23 | One retry during a pass, then settle an incomplete check as usable for human curation. Preserve only finished outcomes, with distinct incomplete/inconclusive indicators. Supersedes the draft deferred-recovery queue. No grouping or search-limit change. | PIC-387 |
 | `candidate-4` | 2026-10-01 | Pictaria image embeddings decide pairs where both photos have one. ≥ 0.90 supports a pair and ≤ 0.75 separates it; a middle-band pair needs corroborating people or ThumbHash, or it stays uncertain. Groups merge on a 0.80 average, and embedded pairs are not searched. Judged-group replay: 81.6% of pairs as judged, against 55.6% for candidate 3 without other evidence. Turned off, or without embeddings, the result is candidate 3. | PIC-392 |
+| `candidate-4` reason codes | 2026-10-02 | Record short reason codes instead of English sentences, and name what separated photos: clearly different embeddings, different people (new), contrasting searches or a saved split that applies within the time candidate. Rules that never change are documented under [How stacks work](#how-stacks-work) instead of recorded. Stack Referee checks record whether they split a group. No membership, threshold or search change. | PIC-371 |
 
 When membership rules, thresholds or interpretation of signals change, increment
 the implementation identifier and add a row describing the behavioral change and

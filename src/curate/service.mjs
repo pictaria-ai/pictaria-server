@@ -9,6 +9,7 @@ import { CurateMetadataRefresher } from './metadata.mjs';
 import { StackingLab } from './lab.mjs';
 import { CurateSimilaritySearch } from './similarity.mjs';
 import { embeddingEvidence, stackEmbeddingPolicy } from './embedding-evidence.mjs';
+import { REASON } from './reasons.mjs';
 
 // Newly stored image embeddings regroup Curate at most this often, so a
 // backfill or Enrich run regroups in batches rather than once per photo.
@@ -228,6 +229,8 @@ export class CurateService {
         view.stacks !== (this.config.curateBurstGrouping !== false) ||
         Boolean(this.repo.db.prepare('SELECT 1 FROM curate_dirty LIMIT 1').get()),
       groups: groups.map((g) => ({ id: g.id, memberCount: g.ids.length, route: g.route,
+          // What kept a single photo apart, for its badge (public/curate/stack-status.js).
+          reasons: view.section === 'decided' || g.ids.length > 1 ? undefined : this.current?.byId.get(g.id)?.reasons,
           similarity: view.section === 'decided' ? null : this.refinement?.groupStatus(g) ?? null,
           stackReferee: view.section === 'decided' ? null : this.stackReferee?.status(g) ?? null,
           photos: this.store.covers(g.ids.slice(0, 3)) })),
@@ -263,11 +266,14 @@ export class CurateService {
       contextReadOnly: true,
       automaticKeeperEligible: group.ids.length >= 2,
       algorithm: view.method,
+      route: group.route,
+      // Other pending photos taken at the same time, for Why.
+      nearby: Math.max(0, (this.current?.scopeByMember?.get(group.ids[0])?.ids.length ?? 0) - group.ids.length),
       similarity: this.refinement?.groupStatus(group) ?? null,
       stackReferee: reviewState === 'decided' ? null : this.stackReferee?.status(group) ?? null,
       // Reasons use the applicable current calculation. Old view membership is
       // never replaced by a newer machine proposal when a comparison opens.
-      reasons: this.current?.byId.get(groupId)?.reasons ?? ['Membership preserved from the opened Curate view.'],
+      reasons: this.current?.byId.get(groupId)?.reasons ?? [REASON.preserved],
     };
   }
   comparisonPhotos(comparisonId, offset = 0, limit = 50) {
