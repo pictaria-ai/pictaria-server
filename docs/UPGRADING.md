@@ -31,7 +31,7 @@ Pictaria backups do not include Immich's data.
 ## Upgrade — Docker
 
 ```sh
-PICTARIA_RELEASE=v1.2.1 # replace with the release you are installing
+PICTARIA_RELEASE=v1.2.2 # replace with the release you are installing
 curl -fsSL -o docker-compose.release.yml \
   "https://raw.githubusercontent.com/pictaria-ai/pictaria-server/${PICTARIA_RELEASE}/docker-compose.yml"
 diff -u docker-compose.yml docker-compose.release.yml
@@ -52,7 +52,7 @@ docker compose -f docker-compose.release.yml config --images
 ```
 
 The printed image must end in the numeric image version corresponding to the
-source release you selected (`v1.2.1` uses image tag `1.2.1`). Next, make a
+source release you selected (`v1.2.2` uses image tag `1.2.2`). Next, make a
 rollback definition from the currently running Compose file. It should already
 resolve to the version you noted under Settings → Server; verify it before
 replacing the active definition:
@@ -79,7 +79,7 @@ test -z "$(git status --porcelain)" || {
   echo "Stop: preserve or reconcile local changes before upgrading."
   exit 1
 }
-PICTARIA_RELEASE=v1.2.1 # replace with the release you are installing
+PICTARIA_RELEASE=v1.2.2 # replace with the release you are installing
 git fetch --tags --prune
 git switch --detach "$PICTARIA_RELEASE"
 docker compose up -d --build
@@ -121,7 +121,7 @@ test -z "$(git status --porcelain)" || {
   echo "Stop: preserve or reconcile local changes before upgrading."
   exit 1
 }
-PICTARIA_RELEASE=v1.2.1 # replace with the release you are installing
+PICTARIA_RELEASE=v1.2.2 # replace with the release you are installing
 git fetch --tags --prune
 git switch --detach "$PICTARIA_RELEASE"
 ```
@@ -282,6 +282,28 @@ pre-flight checklist — see
 
 Do not upgrade both on the same day. If something breaks afterwards, you want
 to know which upgrade caused it.
+
+## Upgrading to v1.2.2
+
+v1.2.2 fixes startup on Unraid when the data folder is on the user share
+(`/mnt/user`, the template's default). Pictaria Server could start once and
+then refuse later starts with a false "Persistent-state path collision"
+error. No new setting or data-folder change is needed, and no Immich or
+Pictaria Frame upgrade is required.
+
+From **v1.2.1**, this is a code-only update: **persistent-state contract 15,
+Enrich schema 12, and settings version 7 remain unchanged**. Create a complete
+backup, then install the matching v1.2.2 source or container image. If needed,
+stop the server and return to v1.2.1 without restoring data, provided no other
+migration occurred. On affected Unraid storage, v1.2.1 still has the startup
+bug. Switching code does not undo changes already made in Immich.
+
+Older v1.0.x and v1.1.0 installations can upgrade directly to v1.2.2. They
+still perform the [v1.2 data migrations](#upgrading-to-v120) described below;
+rollback to those older versions requires the complete pre-migration snapshot.
+
+After updating, confirm Settings → Server shows v1.2.2, then restart the
+container and confirm it stays healthy without a path-collision error.
 
 ## Upgrading to v1.2.1
 

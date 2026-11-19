@@ -43,7 +43,7 @@ deliberately testing another published tag.
 
 | Variable | Default | Notes |
 | --- | --- | --- |
-| `PICTARIA_IMAGE_TAG` | `1.2.1` | Published container image tag selected by `docker-compose.yml`. Image tags omit the `v` used by Git release refs (`1.2.1` versus `v1.2.1`). |
+| `PICTARIA_IMAGE_TAG` | `1.2.2` | Published container image tag selected by `docker-compose.yml`. Image tags omit the `v` used by Git release refs (`1.2.2` versus `v1.2.2`). |
 
 ## Required
 

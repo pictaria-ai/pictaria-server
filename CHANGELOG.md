@@ -450,16 +450,6 @@ All notable changes to Pictaria Server are documented here. This project follows
 
 ### Fixed
 
-- **Pictaria Server starts again on Unraid** when its data folder is on the
-  user share (`/mnt/user`, the Unraid template's default). It started once
-  and then refused every later start with "Persistent-state path collision:
-  DATABASE_PATH and the generated persistent-state inventory both resolve
-  to …/persistent-state.json". Unraid's user share reports very large file
-  numbers (inode numbers), and the startup check rounded them, so two
-  different files looked like one. The check now compares them exactly. It
-  still refuses two paths that really are the same file. The refused starts
-  changed no data, and no setup change is needed (GitHub #83).
-
 - The stacking lab's **Check selected group** pass no longer stops early with
   "Please wait 1 seconds before another similarity search." Its wait between
   searches could end a fraction of a millisecond before the next search was
@@ -469,6 +459,31 @@ All notable changes to Pictaria Server are documented here. This project follows
 - Immich metadata ingestion now clears cached thumbnail and duplicate-group
   fields when Immich explicitly returns `null`, preventing stale grouping evidence.
   Fields absent from a partial response still preserve their cached values.
+
+## 1.2.2 - 2026-11-18
+
+This patch fixes repeated startup failures on Unraid's default user-share
+storage.
+
+### Fixed
+
+- **Startup on Unraid:** Pictaria Server now starts again when its data folder
+  is on the user share (`/mnt/user`, the template's default). Previously, it
+  could start once and then refuse every later start with a false
+  "Persistent-state path collision" error. The startup check now compares
+  file identities exactly, including the large inode numbers used by Unraid,
+  while still refusing paths that really refer to the same file.
+
+### Upgrade notes
+
+- No new setting, data-folder change, or persisted-state migration from
+  v1.2.1: persistent-state contract 15, Enrich schema 12, and settings version 7
+  are unchanged. Earlier releases still perform the v1.2 migrations when
+  upgrading directly to v1.2.2.
+- Node requirements, the Pictaria Frame protocol, and the Immich compatibility
+  floor are unchanged. No Immich or Pictaria Frame upgrade is required.
+- After updating, restart the container and confirm it stays healthy. See
+  [Upgrading](docs/UPGRADING.md#upgrading-to-v122).
 
 ## 1.2.1 - 2026-09-12
 
