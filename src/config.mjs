@@ -291,7 +291,8 @@ function normalizeTimeZone(value, fallback) {
   }
 }
 
-export function validatePersistentStatePaths(config) {
+// Tests pass statPath to stand in for filesystems the test host lacks.
+export function validatePersistentStatePaths(config, statPath = statSync) {
   const generated = [
     { label: 'persistent-state inventory', path: config.persistentState.inventoryPath },
     { label: 'persistent-state marker', path: config.persistentState.markerPath },
@@ -307,7 +308,7 @@ export function validatePersistentStatePaths(config) {
     { label: 'BACKUP_DIR/BACKUP_DIR_DEFAULT', path: config.backup.dir },
   ];
   for (const generatedPath of generated) {
-    const collision = configured.find((target) => pathsCollide(target.path, generatedPath.path));
+    const collision = configured.find((target) => pathsCollide(target.path, generatedPath.path, statPath));
     if (collision) {
       throw new Error(
         `Persistent-state path collision: ${collision.label} and the generated `
@@ -319,16 +320,19 @@ export function validatePersistentStatePaths(config) {
   return config;
 }
 
-function pathsCollide(left, right) {
+// File identity is read as bigint: some filesystems, such as Unraid's user
+// share, report inode numbers above 2^53, where Numbers round and two
+// different files created close together can look like one file.
+function pathsCollide(left, right, statPath) {
   if (canonicalPathKey(left) === canonicalPathKey(right)) {
     return true;
   }
   try {
-    const leftStat = statSync(left);
-    const rightStat = statSync(right);
+    const leftStat = statPath(left, { bigint: true });
+    const rightStat = statPath(right, { bigint: true });
     return leftStat.dev === rightStat.dev
       && leftStat.ino === rightStat.ino
-      && (leftStat.dev !== 0 || leftStat.ino !== 0);
+      && (leftStat.dev !== 0n || leftStat.ino !== 0n);
   } catch {
     return false;
   }
