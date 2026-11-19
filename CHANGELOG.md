@@ -5,6 +5,31 @@ All notable changes to Pictaria Server are documented here. This project follows
 
 ## Unreleased
 
+## 1.2.2 - 2026-11-18
+
+This patch fixes repeated startup failures on Unraid's default user-share
+storage.
+
+### Fixed
+
+- **Startup on Unraid:** Pictaria Server now starts again when its data folder
+  is on the user share (`/mnt/user`, the template's default). Previously, it
+  could start once and then refuse every later start with a false
+  "Persistent-state path collision" error. The startup check now compares
+  file identities exactly, including the large inode numbers used by Unraid,
+  while still refusing paths that really refer to the same file.
+
+### Upgrade notes
+
+- No new setting, data-folder change, or persisted-state migration from
+  v1.2.1: persistent-state contract 15, Enrich schema 12, and settings version 7
+  are unchanged. Earlier releases still perform the v1.2 migrations when
+  upgrading directly to v1.2.2.
+- Node requirements, the Pictaria Frame protocol, and the Immich compatibility
+  floor are unchanged. No Immich or Pictaria Frame upgrade is required.
+- After updating, restart the container and confirm it stays healthy. See
+  [Upgrading](docs/UPGRADING.md#upgrading-to-v122).
+
 ## 1.2.1 - 2026-09-12
 
 This patch improves Smart Album compatibility with older Immich versions and
