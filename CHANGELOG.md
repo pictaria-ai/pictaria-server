@@ -450,6 +450,16 @@ All notable changes to Pictaria Server are documented here. This project follows
 
 ### Fixed
 
+- **Pictaria Server starts again on Unraid** when its data folder is on the
+  user share (`/mnt/user`, the Unraid template's default). It started once
+  and then refused every later start with "Persistent-state path collision:
+  DATABASE_PATH and the generated persistent-state inventory both resolve
+  to …/persistent-state.json". Unraid's user share reports very large file
+  numbers (inode numbers), and the startup check rounded them, so two
+  different files looked like one. The check now compares them exactly. It
+  still refuses two paths that really are the same file. The refused starts
+  changed no data, and no setup change is needed (GitHub #83).
+
 - The stacking lab's **Check selected group** pass no longer stops early with
   "Please wait 1 seconds before another similarity search." Its wait between
   searches could end a fraction of a millisecond before the next search was

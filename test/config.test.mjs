@@ -9,6 +9,7 @@ import {
   loadConfig,
   normalizeBaseUrl,
   normalizeHttpUrl,
+  validatePersistentStatePaths,
   validateServerAuthConfig,
 } from '../src/config.mjs';
 
@@ -178,6 +179,100 @@ test('generated persistent-state paths cannot collide with configured targets', 
     }),
     /DATABASE_PATH.*legacy settings marker.*both resolve/s,
   );
+});
+
+// Stands in for a filesystem that reports the given device and inode numbers,
+// such as Unraid's user share, whose inode numbers can exceed 2^53. Like Node,
+// it returns them exactly only when asked for bigint stats; ordinary stats
+// carry them as Numbers, rounded. Paths it does not know do not exist.
+function statWithIdentities(identities) {
+  return (path, options) => {
+    const identity = identities.get(path);
+    if (!identity) {
+      throw Object.assign(new Error(`ENOENT: no such file or directory, stat '${path}'`), { code: 'ENOENT' });
+    }
+    return options?.bigint
+      ? { dev: identity.dev, ino: identity.ino }
+      : { dev: Number(identity.dev), ino: Number(identity.ino) };
+  };
+}
+
+test('persistent-state collision checks compare large inode numbers exactly', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'pictaria-config-inodes-'));
+  try {
+    const dataDir = join(dir, 'data');
+    mkdirSync(dataDir);
+    const config = loadConfig({
+      SETTINGS_PATH: join(dataDir, 'settings.json'),
+      DATABASE_PATH: join(dataDir, 'enrichment.sqlite'),
+    });
+    const databasePath = config.databasePath;
+    const inventoryPath = config.persistentState.inventoryPath;
+    writeFileSync(databasePath, '');
+    writeFileSync(inventoryPath, '{}');
+
+    // Two different files, created one after the other on an Unraid array
+    // disk. Both inode numbers round to the same Number.
+    assert.equal(Number(649081296301245283n), Number(649081296301245284n));
+    assert.doesNotThrow(() => validatePersistentStatePaths(config, statWithIdentities(new Map([
+      [databasePath, { dev: 45n, ino: 649081296301245283n }],
+      [inventoryPath, { dev: 45n, ino: 649081296301245284n }],
+    ]))));
+
+    // The same file under both names, as a hard link there would report.
+    assert.throws(
+      () => validatePersistentStatePaths(config, statWithIdentities(new Map([
+        [databasePath, { dev: 45n, ino: 649081296301245283n }],
+        [inventoryPath, { dev: 45n, ino: 649081296301245283n }],
+      ]))),
+      /DATABASE_PATH.*persistent-state inventory.*both resolve/s,
+    );
+
+    // The same inode number on different devices is two files.
+    assert.doesNotThrow(() => validatePersistentStatePaths(config, statWithIdentities(new Map([
+      [databasePath, { dev: 45n, ino: 649081296301245283n }],
+      [inventoryPath, { dev: 46n, ino: 649081296301245283n }],
+    ]))));
+
+    // A filesystem that reports no identity at all proves nothing.
+    assert.doesNotThrow(() => validatePersistentStatePaths(config, statWithIdentities(new Map([
+      [databasePath, { dev: 0n, ino: 0n }],
+      [inventoryPath, { dev: 0n, ino: 0n }],
+    ]))));
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('persistent-state collision checks still catch real aliases of existing files', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'pictaria-config-aliases-'));
+  try {
+    const dataDir = join(dir, 'data');
+    const aliasDir = join(dir, 'alias');
+    mkdirSync(dataDir);
+    symlinkSync(dataDir, aliasDir, 'dir');
+    const settingsPath = join(dataDir, 'settings.json');
+    const inventoryPath = join(dataDir, 'persistent-state.json');
+    const hardLinkPath = join(dir, 'inventory-hard-link');
+    const otherPath = join(dataDir, 'enrichment.sqlite');
+    writeFileSync(inventoryPath, '{}');
+    writeFileSync(otherPath, '');
+    linkSync(inventoryPath, hardLinkPath);
+
+    for (const databasePath of [
+      hardLinkPath,
+      join(aliasDir, 'persistent-state.json'),
+      join(dataDir, '..', 'data', '.', 'persistent-state.json'),
+    ]) {
+      assert.throws(
+        () => loadConfig({ SETTINGS_PATH: settingsPath, DATABASE_PATH: databasePath }),
+        /DATABASE_PATH.*persistent-state inventory.*both resolve/s,
+      );
+    }
+    assert.doesNotThrow(() => loadConfig({ SETTINGS_PATH: settingsPath, DATABASE_PATH: otherPath }));
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
 });
 
 test('persistent-state collision checks resolve symlink aliases and existing file identity', () => {
