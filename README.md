@@ -76,10 +76,12 @@ upgrading Immich.
 
 ## Quick start (bare Node)
 
-Use the latest patched Node 24 LTS release (**24.22.1 or later 24.x**),
+Use the latest patched Node 24 LTS release (**24.22.3 or later 24.x**),
 matching the container and CI runtime recorded in `.node-version`.
-Node 22 remains supported until April 30, 2027; use **22.23.4 or later 22.x**
-for the [October 2026 security fixes](https://nodejs.org/en/blog/vulnerability/october-2026-security-releases).
+Node 22 remains supported until April 30, 2027; use **22.23.5 or later 22.x**
+for the [October](https://nodejs.org/en/blog/vulnerability/october-2026-security-releases)
+and [November 2026](https://nodejs.org/en/blog/vulnerability/november-2026-security-releases)
+security fixes.
 The odd-numbered Node 23 and 25 lines are end-of-life and no longer receive
 security fixes. Evaluate newer **LTS** lines with the tests and upgrade
 rehearsal in [Upgrading](docs/UPGRADING.md#upgrade--bare-node).
