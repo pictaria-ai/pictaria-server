@@ -31,7 +31,7 @@ Pictaria backups do not include Immich's data.
 ## Upgrade — Docker
 
 ```sh
-PICTARIA_RELEASE=v1.2.2 # replace with the release you are installing
+PICTARIA_RELEASE=v1.2.3 # replace with the release you are installing
 curl -fsSL -o docker-compose.release.yml \
   "https://raw.githubusercontent.com/pictaria-ai/pictaria-server/${PICTARIA_RELEASE}/docker-compose.yml"
 diff -u docker-compose.yml docker-compose.release.yml
@@ -52,7 +52,7 @@ docker compose -f docker-compose.release.yml config --images
 ```
 
 The printed image must end in the numeric image version corresponding to the
-source release you selected (`v1.2.2` uses image tag `1.2.2`). Next, make a
+source release you selected (`v1.2.3` uses image tag `1.2.3`). Next, make a
 rollback definition from the currently running Compose file. It should already
 resolve to the version you noted under Settings → Server; verify it before
 replacing the active definition:
@@ -79,7 +79,7 @@ test -z "$(git status --porcelain)" || {
   echo "Stop: preserve or reconcile local changes before upgrading."
   exit 1
 }
-PICTARIA_RELEASE=v1.2.2 # replace with the release you are installing
+PICTARIA_RELEASE=v1.2.3 # replace with the release you are installing
 git fetch --tags --prune
 git switch --detach "$PICTARIA_RELEASE"
 docker compose up -d --build
@@ -99,12 +99,22 @@ Both paths recreate the container. Your data survives because it lives on the
 
 ## Upgrade — bare Node
 
+Run **Node 22.23.5 or a later 22.x release**, the Node 22 line the container
+uses. It includes the
+[October](https://nodejs.org/en/blog/vulnerability/october-2026-security-releases)
+and [November 2026](https://nodejs.org/en/blog/vulnerability/november-2026-security-releases)
+Node.js security fixes. Node 22 reaches end-of-life on April 30, 2027; Node 23
+and 25 are already end-of-life and receive no security fixes. The package's
+broader `engines` range describes API compatibility only, including those
+odd-numbered lines; it is not a security-update recommendation. Updating Node
+within the 22 line does not change Pictaria's persisted state.
+
 ```sh
 test -z "$(git status --porcelain)" || {
   echo "Stop: preserve or reconcile local changes before upgrading."
   exit 1
 }
-PICTARIA_RELEASE=v1.2.2 # replace with the release you are installing
+PICTARIA_RELEASE=v1.2.3 # replace with the release you are installing
 git fetch --tags --prune
 git switch --detach "$PICTARIA_RELEASE"
 ```
@@ -265,6 +275,31 @@ pre-flight checklist — see
 
 Do not upgrade both on the same day. If something breaks afterwards, you want
 to know which upgrade caused it.
+
+## Upgrading to v1.2.3
+
+v1.2.3 moves the container image from Node.js 22.23.2 to 22.23.5, which
+includes the October and November 2026 Node.js security fixes. Pictaria
+Server's own code is unchanged from v1.2.2. No new setting or data-folder
+change is needed, and no Immich or Pictaria Frame upgrade is required.
+
+From **v1.2.2**, this is a runtime-only update: **persistent-state contract 15,
+Enrich schema 12, and settings version 7 remain unchanged**. Create a complete
+backup, then install the matching v1.2.3 container image. For a bare-Node
+installation, switch to the v1.2.3 tag and update Node to 22.23.5 or a later
+22.x release; see [Upgrade — bare Node](#upgrade--bare-node). If needed, stop
+the server and return to v1.2.2 without restoring data, provided no other
+migration occurred; that image runs Node 22.23.2, without these fixes.
+
+v1.2.0 and v1.2.1 installations share the same contracts and can also update
+directly; they gain the fixes described in the notes below. Older v1.0.x and
+v1.1.0 installations can upgrade directly to v1.2.3. They still perform the
+[v1.2 data migrations](#upgrading-to-v120) described below; rollback to those
+older versions requires the complete pre-migration snapshot.
+
+After updating, confirm Settings → Server shows v1.2.3, then restart the
+container and confirm it stays healthy. With Docker Compose,
+`docker compose exec pictaria node --version` prints `v22.23.5`.
 
 ## Upgrading to v1.2.2
 
