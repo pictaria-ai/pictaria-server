@@ -52,7 +52,7 @@ Production installs should select an explicit reviewed release. The source
 tag and matching versioned GHCR image keep the deployment inputs aligned.
 
 ```sh
-PICTARIA_RELEASE=v1.2.2 # replace with the release you are installing
+PICTARIA_RELEASE=v1.2.3 # replace with the release you are installing
 mkdir pictaria-server && cd pictaria-server
 curl -fsSLO \
   "https://raw.githubusercontent.com/pictaria-ai/pictaria-server/${PICTARIA_RELEASE}/docker-compose.yml"
@@ -76,13 +76,21 @@ upgrading Immich.
 
 ## Quick start (bare Node)
 
-Requires Node 22.16+ on the 22 line, or 23.8+ beyond it (`node:sqlite`
-and its online-backup API; earlier builds fail at boot — `engines` says
-`^22.16.0 || >=23.8.0`). The production container and CI suite use Node 22;
-newer supported versions work as well.
+Use **Node 22.23.5 or a later 22.x release**, the Node 22 line the
+production container and CI suite use. It includes the
+[October](https://nodejs.org/en/blog/vulnerability/october-2026-security-releases)
+and [November 2026](https://nodejs.org/en/blog/vulnerability/november-2026-security-releases)
+Node.js security fixes. Node 22 reaches end-of-life on April 30, 2027. The
+odd-numbered Node 23 and 25 lines are already end-of-life and receive no
+security fixes.
+
+The package's `engines` range, `^22.16.0 || >=23.8.0`, describes only API
+compatibility (`node:sqlite` and its online-backup API); earlier builds fail
+at boot. Its inclusion of older patches and odd-numbered lines is not a
+security-update recommendation.
 
 ```sh
-PICTARIA_RELEASE=v1.2.2 # replace with the release you are installing
+PICTARIA_RELEASE=v1.2.3 # replace with the release you are installing
 git clone --branch "$PICTARIA_RELEASE" --depth 1 \
   https://github.com/pictaria-ai/pictaria-server.git
 cd pictaria-server
