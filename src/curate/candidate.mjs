@@ -4,6 +4,7 @@ import { thumbhashDistance } from '../enrich/reviewService.mjs';
 import { recognizedIds } from './evidence.mjs';
 import { rankContrasts } from './rank-contrast.mjs';
 import { STACK_EMBEDDING_LIMITS } from './embedding-evidence.mjs';
+import { REASON } from './reasons.mjs';
 
 // Membership-affecting changes require a new version and a docs/CURATE-ALGORITHM.md entry.
 // CANDIDATE_METHOD also versions the saved search evidence, which does not
@@ -47,7 +48,7 @@ export function candidateGroups(rows, { stacks = true, separations = [], ranks =
   for (const cohort of cohorts) {
     if (cohort.length === 1) {
       emit(cohort, cohort[0].availability === 'unavailable' ? 'unavailable' : 'single',
-        [!stacks ? 'Stacking is off.' : 'No other pending photo within the time limits.']);
+        [!stacks ? REASON.stacksOff : REASON.alone]);
       continue;
     }
     const bounded = cohort.length <= limits.photos &&
@@ -60,10 +61,9 @@ export function candidateGroups(rows, { stacks = true, separations = [], ranks =
         spanMs: limits.spanMs, candidates: 32, pairs: 0, comparisons: 0 } });
       const byId = new Map(cohort.map(p => [p.id, p]));
       for (const g of fallback.groups) {
-        emit(g.ids.map(id => byId.get(id)), 'manual-budget',
-          ['Grouped by capture time; similarity not established.',
-            'Automatic composition checks are limited to 40 photos and a bounded rebuild budget.',
-            'Saved human separations were respected.']);
+        const inside = new Set(g.ids);
+        const split = labels.size > 0 && g.ids.some(id => cohort.some(q => !inside.has(q.id) && separated(byId.get(id), q)));
+        emit(g.ids.map(id => byId.get(id)), 'manual-budget', [REASON.budget, ...(split ? [REASON.savedSplit] : [])]);
         metrics.limitedGroups++;
       }
       continue;
@@ -187,7 +187,6 @@ export function candidateGroups(rows, { stacks = true, separations = [], ranks =
       needsRanks: referenceIds.length > 0 && !complete,
       // Saved groupings stay valid only while every member's embedding does.
       ...(embeddings ? { embeddingKey: embeddings.signature(ids) } : {}) });
-    const reasons = ['Time candidates use a 90-second gap and a 3-minute total span.'];
     // Build fully supported cores first, with deterministic tie-breaking.
     // A single bridge must not merge two already established cores.
     const degree = p => members.filter(q => q !== p && at(p, q).supported).length;
@@ -262,27 +261,24 @@ export function candidateGroups(rows, { stacks = true, separations = [], ranks =
       // An embedded relation that nothing settled keeps the whole group
       // uncertain, however its photos were joined (rank recovery included).
       const uncertain = provisional || pairs.some(p => p.undecided);
-      const why = [...reasons];
-      if (provisional) why.push('Provisional time group: similarity evidence is pending or incomplete.',
-        'Saved human separations and supported people differences were respected.');
-      if (g.length === 1) why.push('No sufficiently supported group found; this photo remains separate for review.');
-      if (pairs.some(p => p.exact)) why.push('Matching original checksums and compatible renditions support grouping.');
-      if (pairs.some(p => p.hashClose)) why.push('Close ThumbHash descriptors support visual similarity.');
-      if (pairs.some(p => p.embeddingSupported && !p.corroborated)) why.push('Very similar Pictaria image embeddings support this composition.');
-      if (pairs.some(p => p.embeddingSupported && p.corroborated))
-        why.push('Moderately similar image embeddings, corroborated by the same people or a similar ThumbHash, support this composition.');
-      if (pairs.some(p => p.reciprocal)) why.push('Reciprocal nearby Immich search ranks support this composition.');
-      if (recovered) why.push('An asymmetric search match was retained through strong support from the established core.');
-      if (joined) why.push('Groups were joined on their average image embedding similarity.');
-      if (pairs.some(p => p.undecided))
-        why.push('Image embeddings and the other evidence do not settle every pair here, so this composition stays uncertain.');
-      if (g.some(p => members.some(q => q !== p && at(p, q).embeddingConflict)))
-        why.push('Clearly different image embeddings separate photos taken at the same time.');
-      if (g.some(p => members.some(q => q !== p && at(p, q).rankConflict)))
-        why.push('Repeated Immich searches favor separate subgroups; this contrast outweighs ThumbHash similarity and provisional joins.');
-      if (g.some(p => labels.has(p.id))) why.push('Saved human separations were respected.');
-      why.push(embeddings ? 'Distant ThumbHash values or missing search results alone are not evidence of a different subject; missing image embeddings are unknown.'
-        : 'Distant ThumbHash values or missing search results alone are not evidence of a different subject.');
+      // Photos in this group kept apart from others taken at the same time.
+      const apart = key => g.some(p => members.some(q => q !== p && at(p, q)[key]));
+      const why = [];
+      // An unsettled embedded pair is named by embedding-undecided instead.
+      if (provisional && pairs.some(p => p.unknown && !p.undecided)) why.push(REASON.provisional);
+      if (pairs.some(p => p.exact)) why.push(REASON.exact);
+      if (pairs.some(p => p.hashClose)) why.push(REASON.thumbhash);
+      if (pairs.some(p => p.embeddingSupported && !p.corroborated)) why.push(REASON.embeddingNear);
+      if (pairs.some(p => p.embeddingSupported && p.corroborated)) why.push(REASON.embeddingCorroborated);
+      if (pairs.some(p => p.reciprocal)) why.push(REASON.ranks);
+      if (recovered) why.push(REASON.rankRecovered);
+      if (joined) why.push(REASON.embeddingAverage);
+      if (pairs.some(p => p.undecided)) why.push(REASON.embeddingUndecided);
+      if (apart('embeddingConflict')) why.push(REASON.embeddingApart);
+      if (apart('peopleConflict')) why.push(REASON.peopleApart);
+      if (apart('rankConflict')) why.push(REASON.rankContrast);
+      if (apart('human')) why.push(REASON.savedSplit);
+      if (g.length === 1 && !why.length) why.push(REASON.unlinked);
       emit(g, uncertain ? 'candidate-unconfirmed' : g.length > 1 ? 'candidate-supported' : 'single', why);
     }
   }
