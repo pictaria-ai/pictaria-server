@@ -460,6 +460,34 @@ All notable changes to Pictaria Server are documented here. This project follows
   fields when Immich explicitly returns `null`, preventing stale grouping evidence.
   Fields absent from a partial response still preserve their cached values.
 
+## 1.2.3 - 2026-11-19
+
+This patch updates the Node.js runtime in the container to pick up Node's
+October and November 2026 security fixes. Pictaria Server's own code is
+unchanged.
+
+### Security
+
+- **Node.js 22.23.5:** The container image now runs Node.js 22.23.5 instead of
+  22.23.2. It includes the Node.js security releases of October 21 and
+  November 11, 2026, and stays on Node 22 and the same Alpine base, pinned to
+  the official multi-platform image digest.
+- **Bare-Node installations** should run Node.js 22.23.5 or a later 22.x
+  release. Node 22 reaches end-of-life on April 30, 2027; Node 23 and 25 are
+  already end-of-life and receive no security fixes.
+
+### Upgrade notes
+
+- No new setting, data-folder change, or persisted-state migration from
+  v1.2.2: persistent-state contract 15, Enrich schema 12, and settings
+  version 7 are unchanged. Earlier releases still perform the v1.2 migrations
+  when upgrading directly to v1.2.3.
+- The `engines` range, the Pictaria Frame protocol, and the Immich
+  compatibility floor are unchanged. No Immich or Pictaria Frame upgrade is
+  required.
+- After updating, restart the container and confirm it stays healthy. See
+  [Upgrading](docs/UPGRADING.md#upgrading-to-v123).
+
 ## 1.2.2 - 2026-11-18
 
 This patch fixes repeated startup failures on Unraid's default user-share
