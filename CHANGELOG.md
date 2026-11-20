@@ -7,12 +7,12 @@ All notable changes to Pictaria Server are documented here. This project follows
 
 ### Runtime and security
 
-- Move the container to Node 24.22.1 LTS, pinned to the official multi-platform
+- Move the container to Node 24.22.3 LTS, pinned to the official multi-platform
   image digest, and run CI and release validation on the exact Node version
-  recorded in `.node-version`. This includes
-  the October 21, 2026 Node.js security fixes. Bare Node installations should
-  use Node 24.22.1 or later 24.x. Node 22 installations need 22.23.4 or later
-  22.x and must migrate before that line's April 30, 2027 end-of-life;
+  recorded in `.node-version`. This includes the October 21 and November 11,
+  2026 Node.js security fixes. Bare Node installations should use Node 24.22.3
+  or later 24.x. Node 22 installations need 22.23.5 or later 22.x and must
+  migrate before that line's April 30, 2027 end-of-life;
   Node 23 and 25 are already end-of-life. This runtime change alone does not
   change Pictaria's persistent-state contracts or database schemas.
 

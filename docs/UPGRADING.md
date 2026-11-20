@@ -99,14 +99,15 @@ Both paths recreate the container. Your data survives because it lives on the
 
 ## Upgrade — bare Node
 
-Use the latest patched Node 24 LTS release (**24.22.1 or later 24.x**),
+Use the latest patched Node 24 LTS release (**24.22.3 or later 24.x**),
 matching the container and CI runtime recorded in `.node-version`.
-If staying on Node 22, use **22.23.4 or later 22.x** for the
-[October 2026 security fixes](https://nodejs.org/en/blog/vulnerability/october-2026-security-releases);
-Node 22 reaches end-of-life on April 30, 2027. Node 23 and 25 are already
-end-of-life and receive no security fixes. The package's broader `engines`
-range describes API compatibility only, including those odd-numbered lines;
-it is not a security-update recommendation.
+If staying on Node 22, use **22.23.5 or later 22.x** for the
+[October](https://nodejs.org/en/blog/vulnerability/october-2026-security-releases)
+and [November 2026](https://nodejs.org/en/blog/vulnerability/november-2026-security-releases)
+security fixes; Node 22 reaches end-of-life on April 30, 2027. Node 23 and
+25 are already end-of-life and receive no security fixes. The package's
+broader `engines` range describes API compatibility only, including those
+odd-numbered lines; it is not a security-update recommendation.
 
 For a runtime upgrade, including a newer **LTS** line, run the test suite
 with the new Node version and rehearse startup,
