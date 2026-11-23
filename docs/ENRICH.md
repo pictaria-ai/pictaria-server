@@ -208,9 +208,9 @@ errors pause the AI connection without spending a photo's failure allowance.
 An HTTP 400 that identifies a specific image block instead counts as a content
 failure for that photo, allowing other photos to continue; other 400s pause for
 configuration. The legacy keeper referee defers a group with an unusable Claude
-image for the current server process and continues later groups, just as it
-does for groups that cannot fit its download budget. These deferrals appear in
-its diagnostics and can be retried after restart. Choosing previews avoids
+image while its provider, model and image-source settings stay the same, and
+continues later groups. These deferrals appear in its diagnostics; changing
+those settings or restarting permits a retry. Choosing previews avoids
 large original dimensions; byte-based fallback does not measure pixel dimensions.
 Temporary rate limits and service failures use the existing bounded recovery
 policy and honor `retry-after`; an explicitly reported spend limit pauses for
@@ -226,7 +226,8 @@ connection test, one Enrich photo, a multi-image keeper and Stack Referee
 request (including ten images), WebP input, and both voice commands. Check
 Interesting and Tell Me on Opus 5.5 at their unchanged 420/600-token budgets,
 including truncation and latency. Confirm account model access, costs/usage,
-rate-limit recovery, billing/key-scope errors and any Fable account conditions
+rate-limit recovery, billing/key-scope errors, actual image-error messages
+(only 400s identifying an image block bypass the connection pause), and any Fable account conditions
 in the Console. These live checks have not been performed by the fixture suite.
 
 ### OpenAI-compatible endpoints and llama.cpp

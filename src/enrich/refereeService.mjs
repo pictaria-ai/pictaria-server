@@ -7,7 +7,7 @@ import { MAX_STACK_MEMBERS } from './reviewService.mjs';
 import { fetchImage, PROVIDER_RETRY_AFTER_CAP_MS } from './runner.mjs';
 import { buildRefereeRequest, normalizePicks } from './referee-contract.mjs';
 import { createCurateAiProvider } from '../curate/ai-config.mjs';
-import { ProviderRequestError } from './providers.mjs';
+import { enrichmentProviderConfiguration, ProviderRequestError } from './providers.mjs';
 import { configuredSecrets, sanitizeDiagnostic } from '../diagnostics.mjs';
 
 export { REFEREE_PROMPT_VERSION, buildRefereeUserPrompt, refereeJsonSchema, normalizePicks } from './referee-contract.mjs';
@@ -88,7 +88,7 @@ export class RefereeService {
     // skipped for this process lifetime so one pathological group can't
     // head-of-line block the queue; retried after a restart (or a budget
     // change, which implies one).
-    this._deferredGroups = new Map(); // key → { at, reason }
+    this._deferredGroups = new Map(); // key → { at, reason, imageConfigurationKey? }
   }
 
   start() {
@@ -183,6 +183,7 @@ export class RefereeService {
     let remaining = null;
     try {
       if (this.enabled()) {
+        this.clearChangedImageDeferrals();
         const pending = this.pendingGroups();
         // A deferred key that is no longer pending — its members decided by
         // hand, or its membership changed (which mints a new key) — is done
@@ -246,6 +247,7 @@ export class RefereeService {
       // request at a time and yields between groups; preparation rechecks the
       // live controls, including waiting for Enrich to finish.
       while (this.canStartWork()) {
+        this.clearChangedImageDeferrals();
         const group = this.pendingGroups().find(
           (g) => !this.repo.refereeHasGroup(g.key) && !this._deferredGroups.has(g.key),
         );
@@ -289,6 +291,23 @@ export class RefereeService {
 
   makeProvider() {
     return createCurateAiProvider(this.config, { minimumTimeoutMs: REFEREE_TIMEOUT_MS });
+  }
+
+  imageConfigurationKey(provider = this.makeProvider()) {
+    // No credentials or image data belong in a deferral's identity.
+    return createHash('sha256').update(JSON.stringify({
+      provider: enrichmentProviderConfiguration(provider), imageSource: this.config.imageSource ?? 'preview',
+    })).digest('hex');
+  }
+
+  clearChangedImageDeferrals() {
+    if (![...this._deferredGroups.values()].some(entry => entry.imageConfigurationKey)) return;
+    let current;
+    try { current = this.imageConfigurationKey(); }
+    catch { return; } // An incomplete new connection cannot submit yet.
+    for (const [key, entry] of this._deferredGroups) {
+      if (entry.imageConfigurationKey && entry.imageConfigurationKey !== current) this._deferredGroups.delete(key);
+    }
   }
 
   // The configured aggregate ceiling for one group's images, every source
@@ -392,6 +411,9 @@ export class RefereeService {
     this._currentStartedAt = Date.now();
     const started = Date.now();
     const budget = this.groupByteBudget();
+    // Capture alongside the source chain: Settings may change during downloads
+    // or inference, and a stale failure must not defer the new configuration.
+    const imageConfigurationKey = provider.providerName === 'cloud_anthropic' ? this.imageConfigurationKey(provider) : null;
     const maxImageBytes = Math.min(REFEREE_MAX_IMAGE_BYTES, provider.maxImageBytes ?? Infinity);
     const chain = this.memberSourceChain();
     // fetchImage returns { data, contentType }; providers expect mimeType
@@ -450,10 +472,10 @@ export class RefereeService {
       if (provider.providerName !== 'cloud_anthropic' || !(error instanceof ProviderRequestError)
           || error.infrastructure || ![400, 413].includes(error.status)) throw error;
       // The legacy keeper has no per-photo retry ledger. Use its existing
-      // process-lifetime deferral for an unusable rendition, allowing later
-      // groups to progress instead of retrying this one every five minutes.
+      // deferral for an unusable rendition, allowing later groups to progress.
+      // A provider/model/image-source change or restart permits another try.
       const reason = sanitizeDiagnostic(error.message, { secrets: configuredSecrets(this.config, this.immich) });
-      this._deferredGroups.set(group.key, { at: new Date().toISOString(), reason });
+      this._deferredGroups.set(group.key, { at: new Date().toISOString(), reason, imageConfigurationKey });
       this._recentErrors.unshift({ at: new Date().toISOString(), message: `deferred: ${reason}` });
       this._recentErrors.length = Math.min(this._recentErrors.length, 50);
       this.log(`referee: deferred — ${reason}`);

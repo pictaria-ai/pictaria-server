@@ -508,6 +508,50 @@ test('Claude keeper defers an unusable image group and continues later groups wi
   assert.match(service.activity().errors[0].message, /deferred:.*400/);
 }));
 
+test('Claude image deferrals expire after changing source, provider or model without restarting the keeper', async () => {
+  for (const change of ['source', 'provider', 'model', 'source-during-request']) await withRepo(async repo => {
+    const calls = [];
+    const config = { enrichEnabled: true, curateRefereeEnabled: true, imageSource: 'original', defaultProvider: 'cloud_anthropic',
+      providers: {
+        cloud_anthropic: { apiKey: 'synthetic-credential', modelName: 'claude-haiku-5-5', fetchImpl: async (_url, options) => {
+          const body = JSON.parse(options.body); calls.push(['claude', body.model]);
+          if (calls.length === 1) {
+            if (change === 'source-during-request') config.imageSource = 'preview';
+            return Response.json({ error: { type: 'invalid_request_error',
+              message: 'messages.0.content.0.image.source: image dimensions exceed 8000 pixels' } }, { status: 400 });
+          }
+          return claudeRefereeReply(3);
+        } },
+        cloud_openai: { apiKey: 'synthetic-other-credential', modelName: 'gpt-5.5', fetchImpl: async () => {
+          calls.push(['openai', 'gpt-5.5']);
+          const reply = await claudeRefereeReply(3).json();
+          return Response.json({ output_text: reply.content[0].text });
+        } },
+      } };
+    const service = new RefereeService({ repo, config, review: fakeReview(makeRows()), enrichRunner: { isRunning: () => false }, immich: {
+      getAssetOriginal: async id => ({ data: Buffer.from(id), contentType: 'image/jpeg' }),
+      getAssetThumbnail: async id => ({ data: Buffer.from(id), contentType: 'image/webp' }),
+    } });
+    await service.tick();
+    if (change !== 'source-during-request') {
+      assert.equal(service.status().remaining, 0);
+      assert.equal(service.status().deferredGroups, 1);
+      await service.tick(); assert.equal(calls.length, 1, 'unchanged settings must not resubmit');
+      if (change === 'source') config.imageSource = 'preview';
+      if (change === 'provider') config.curateRefereeProvider = 'cloud_openai';
+      if (change === 'model') config.curateRefereeModel = 'claude-sonnet-5-5';
+      if (change === 'source') assert.equal(service.status().remaining, 1, 'Settings change is visible before the next tick');
+      await service.tick();
+    }
+    assert.equal(calls.length, 2, change);
+    assert.deepEqual(calls[1], change === 'provider' ? ['openai', 'gpt-5.5']
+      : ['claude', change === 'model' ? 'claude-sonnet-5-5' : 'claude-haiku-5-5']);
+    assert.equal(service.status().deferredGroups, 0);
+    assert.equal(repo.refereeStats().groups, 1);
+    assert.equal(service.status().lastError, null);
+  });
+});
+
 // One burst of `count` undecided members, 5s apart (inside the chain window).
 function makeBurstRows(count) {
   const start = Date.parse('2026-07-01T10:00:00.000Z');
