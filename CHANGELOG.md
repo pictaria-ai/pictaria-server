@@ -448,6 +448,14 @@ All notable changes to Pictaria Server are documented here. This project follows
   Retrying after a lost replacement response resolves the current successor,
   including after restart, so abandoned views do not retain obsolete snapshots.
 
+### Changed
+
+- When the Immich API key lacks permissions Pictaria needs, the home page now
+  names them, for example "Immich key is missing permissions: tag.create,
+  tag.asset", so you can tell which boxes the key is missing without comparing
+  it to the setup guide. A long list wraps inside the status panel on a phone.
+  Other Immich statuses are unchanged (GitHub #88).
+
 ### Fixed
 
 - The stacking lab's **Check selected group** pass no longer stops early with
