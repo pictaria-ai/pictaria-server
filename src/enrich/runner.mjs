@@ -85,7 +85,8 @@ class RetryWaitCancelledError extends Error {
 }
 
 function isRetryableProviderOverload(error) {
-  return error?.name === 'ProviderRequestError' && (error.status === 429 || error.status === 503);
+  return error?.name === 'ProviderRequestError' && error.connectionReason !== 'configuration'
+    && (error.status === 429 || error.status === 503);
 }
 
 function overloadRetryDelay(error, retryIndex) {

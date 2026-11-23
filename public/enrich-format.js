@@ -1,6 +1,6 @@
 /* Shared display conventions for Enrich history and performance. */
 const enrichFormat = (() => {
-  const provider = value => ({ local_lmstudio: 'LM Studio', local_ollama: 'Ollama (local)', cloud_ollama: 'Ollama (cloud)', cloud_openai: 'OpenAI', openai: 'OpenAI', openrouter: 'OpenRouter', venice: 'Venice', openai_compatible: 'OpenAI-compatible' }[value] ?? value);
+  const provider = value => ({ local_lmstudio: 'LM Studio', local_ollama: 'Ollama (local)', cloud_ollama: 'Ollama (cloud)', cloud_openai: 'OpenAI', openai: 'OpenAI', openrouter: 'OpenRouter', venice: 'Venice', openai_compatible: 'OpenAI-compatible', cloud_anthropic: 'Claude (Anthropic)' }[value] ?? value);
   const status = value => ({ finished: 'Completed', succeeded: 'Enriched', running: 'In progress' }[value]
     ?? (value ? value.charAt(0).toUpperCase() + value.slice(1).replaceAll('_', ' ') : 'Unknown'));
   const when = (value, dateOnly = false) => {

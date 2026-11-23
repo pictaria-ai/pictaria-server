@@ -42,6 +42,11 @@ test('Settings verifies a paused saved AI connection through authenticated sched
   await page.waitFor('document.querySelector(".gate-backdrop input")');
   await page.evaluate('document.querySelector(".gate-backdrop input").value="smoke-secret";document.querySelector(".gate-backdrop button").click()');
   await page.waitFor('document.querySelector("#ai-connection-enrich")?.textContent.includes("API key")');
+  assert.equal(await page.evaluate('document.querySelector("#f2-providers-anthropicApiKey").type'), 'password');
+  assert.equal(await page.evaluate('document.querySelector("#f2-providers-anthropicModel").value'), '');
+  assert.match(await page.evaluate('document.querySelector("#fields-providers").textContent'), /Claude Console.*API billing/);
+  assert.equal(await page.evaluate('document.querySelectorAll("#f-proseProvider option[value=cloud_anthropic]").length'), 1);
+  assert.equal(await page.evaluate('document.querySelectorAll("#f2-curate-refereeProvider option[value=cloud_anthropic]").length'), 1);
   assert.equal(requests.length, 0, 'page/status read must not test the model');
   assert.equal(await page.evaluate(`fetch('/api/ai/connections/verify',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({target:'enrich',baseUrl:'http://forbidden.test'})}).then(r=>r.status)`), 400);
   await page.evaluate('document.querySelector("#verify-ai-enrich").click()');

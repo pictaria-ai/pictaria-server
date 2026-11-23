@@ -150,6 +150,74 @@ or that it necessarily creates a continuous loop.
 | `openrouter` | Cloud | API key + model under Settings → AI Providers |
 | `cloud_ollama` | Cloud | API key + model under Settings → AI Providers |
 | `venice` | Cloud | API key + a vision-capable model under Settings → AI Providers (no default) |
+| `cloud_anthropic` | Cloud | Workspace-scoped Claude Console API key + model under Settings → AI Providers (no default) |
+
+### Claude (Anthropic)
+
+Enter a **workspace-scoped API key** from the [Claude Console](https://platform.claude.com/)
+and an exact model ID under **Settings → AI Providers → Claude (Anthropic)**.
+The Console account needs **API billing**; a Claude.ai Pro or Max subscription
+does not include API usage. There is no model default: enter a model before
+selecting Claude on Enrich, for the Curate referees, or under Voice → AI provider.
+Voice's per-command model overrides also apply. There is no Workspace ID field;
+a key not tied to one workspace produces a configuration error. Use a
+workspace-scoped key and verify the saved connection after replacing it.
+
+This provider sends photo renditions and prompts directly to Anthropic's
+Messages API. JPEG, PNG, GIF and WebP are accepted without the WebP conversion
+used for LM Studio; animated images use their first frame. HEIC/RAW originals
+need an Immich preview or thumbnail instead. Images must fit Anthropic's
+10 MB encoded-image limit. Curate retains its ten-image application ceiling
+and its existing, tighter rendition limits. Embeddings, speech recognition,
+speech synthesis and access through Bedrock, Vertex or Foundry are not included.
+
+Enrich and referee requests use structured JSON outputs. Claude's generation
+schema omits unsupported numeric, string-length and array-size limits and
+describes them in words; the original schema and Pictaria's domain checks still
+validate the answer locally. Refusals become recorded photo failures, subject
+to the existing failure allowance (two by default). Truncated answers are
+rejected, even if their text happens to parse. Voice uses a short fixed refusal
+sentence and rejects truncated speech. Pictaria does not opt into Anthropic's
+server-side fallback to another model.
+
+The adapter pins API version `2026-10-21`, omits sampling parameters and uses
+low effort. For the exact current IDs, `claude-haiku-5-5` disables thinking;
+`claude-sonnet-5-5` uses between-tools thinking (these requests have no tools);
+`claude-opus-5-5` and `claude-fable-5-2` use mandatory adaptive thinking with its
+display omitted. Other model IDs omit the thinking parameter and retain low
+effort; choose a model that accepts structured outputs for Enrich and Curate.
+Thinking is billed even when hidden and shares the output-token budget. Opus
+and Fable can exhaust a small voice budget before producing speech; increasing
+the budget can increase cost and latency. Enrich/referees have an 8,192-token
+budget. Interesting and Tell Me keep their existing 420/600-token defaults.
+
+Anthropic's [Fable 5.2 conditions](https://platform.claude.com/docs/en/models/fable-5-2/overview)
+include 30-day retention, additional refusal categories, and no structured
+outputs under customer-managed encryption keys. The adapter does not bypass
+these conditions or implement a separate Fable flow. Such an account cannot
+use Fable's structured outputs for Enrich/referees. Check the current
+[model documentation](https://platform.claude.com/docs/en/models/overview)
+and [pricing](https://platform.claude.com/docs/en/about-claude/pricing)
+before choosing a model.
+
+Authentication, permission, billing, missing-model and workspace-configuration
+errors pause the AI connection without spending a photo's failure allowance.
+Temporary rate limits and service failures use the existing bounded recovery
+policy and honor `retry-after`; an explicitly reported spend limit pauses for
+configuration instead. The shared transport caps responses at 2 MB, supports
+cancellation and scrubs configured keys from diagnostics. Keys saved in Settings
+use the existing private settings file and backups; backups are not encrypted
+by Pictaria. Settings/API responses never return a saved key to the browser.
+See [upgrade and rollback guidance](UPGRADING.md#claude-provider-settings).
+
+Fixture tests cover the request and failure contracts without paid calls.
+Before operational acceptance, check a real workspace key with a synthetic
+connection test, one Enrich photo, a multi-image keeper and Stack Referee
+request (including ten images), WebP input, and both voice commands. Check
+Interesting and Tell Me on Opus 5.5 at their unchanged 420/600-token budgets,
+including truncation and latency. Confirm account model access, costs/usage,
+rate-limit recovery, billing/key-scope errors and any Fable account conditions
+in the Console. These live checks have not been performed by the fixture suite.
 
 ### OpenAI-compatible endpoints and llama.cpp
 

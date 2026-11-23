@@ -5,6 +5,8 @@ import { STACK_REFEREE_SCOPES } from './curate/ai-policy.mjs';
 import { HISTORY_LIMITS } from './enrich/historyRetention.mjs';
 import { DEFAULT_EMBEDDING_MODEL, normalizeEmbeddingModel, validEmbeddingModel } from './embeddings/models.mjs';
 
+import { ANTHROPIC_DEFAULT_MODEL } from './enrich/anthropicContract.mjs';
+
 const ROOT_DIR = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 
 export function loadConfig(env = process.env) {
@@ -267,6 +269,10 @@ export function loadConfig(env = process.env) {
         // models accept images — the user picks a vision-capable model.
         modelName: env.VENICE_MODEL || '',
         baseUrl: normalizeHttpUrl(env.VENICE_BASE_URL || 'https://api.venice.ai/api/v1'),
+      },
+      cloud_anthropic: {
+        apiKey: env.ANTHROPIC_API_KEY || '',
+        modelName: env.ANTHROPIC_MODEL || ANTHROPIC_DEFAULT_MODEL,
       },
     },
   };

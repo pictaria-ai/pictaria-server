@@ -88,6 +88,34 @@ function withStore(work, env = { TTS_PROVIDER: 'openai', OPENAI_API_KEY: 'env-ke
   }
 }
 
+test('Claude selections and private credentials persist; browser/API settings never return the key', () => withStore((store, config, dir) => {
+  const described = store.update({ enrich: { anthropicApiKey: 'synthetic-credential', anthropicModel: 'claude-sonnet-5-5', defaultProvider: 'cloud_anthropic' }, curate: { refereeProvider: 'cloud_anthropic' }, voice: { proseProvider: 'cloud_anthropic' } });
+  assert.equal(described.enrich.anthropicApiKey.value, '');
+  assert.equal(described.enrich.anthropicApiKey.configured, true);
+  assert.doesNotMatch(JSON.stringify(described), /synthetic-credential/);
+  assert.equal(config.providers.cloud_anthropic.apiKey, 'synthetic-credential');
+  const path = join(dir, 'settings.json');
+  assert.equal(statSync(path).mode & 0o777, 0o600);
+  const restoredConfig = makeConfig();
+  const restored = new SettingsStore({ filePath: path, config: restoredConfig, env: {} }).load();
+  assert.equal(restoredConfig.defaultProvider, 'cloud_anthropic');
+  assert.equal(restoredConfig.curateRefereeProvider, 'cloud_anthropic');
+  assert.equal(restoredConfig.voice.proseProvider, 'cloud_anthropic');
+  assert.equal(restoredConfig.providers.cloud_anthropic.modelName, 'claude-sonnet-5-5');
+  assert.doesNotMatch(JSON.stringify(restored.describe()), /synthetic-credential/);
+}));
+
+test('v10 settings migrate without altering existing selections or adding a Claude default', () => {
+  const legacy = { version: 10, credentialBindings: {}, server: {},
+    enrich: { veniceModel: 'existing-model', defaultProvider: 'venice' }, curate: { refereeProvider: 'cloud_openai' }, voice: { proseProvider: 'local_ollama' } };
+  const before = structuredClone(legacy);
+  const result = migrateSettingsState(legacy);
+  assert.equal(result.state.version, 11);
+  for (const section of ['server', 'enrich', 'curate', 'voice']) assert.deepEqual(result.state[section], before[section]);
+  assert.deepEqual(legacy, before);
+  assert.throws(() => migrateSettingsState({ version: SETTINGS_VERSION + 1 }), /newer than/);
+});
+
 test('a fresh store materializes private versioned state before any override is saved', () => {
   const dir = mkdtempSync(join(tmpdir(), 'pictaria-settings-'));
   try {
@@ -210,7 +238,7 @@ test('an existing settings file is loaded without being rewritten or gaining a s
   const dir = mkdtempSync(join(tmpdir(), 'pictaria-settings-'));
   try {
     const path = join(dir, 'settings.json');
-    const original = '{"version":10,"credentialBindings":{},"voice":{"openAiTtsVoice":"ash"}}\n';
+    const original = '{"version":11,"credentialBindings":{},"voice":{"openAiTtsVoice":"ash"}}\n';
     writeFileSync(path, original, { mode: 0o600 });
 
     const config = makeConfig();
@@ -1307,8 +1335,8 @@ test('unknown same-version fields fail with downgrade-safe guidance', () => {
   );
 });
 
-test('the persisted settings contract matches the frozen version 10 snapshot', () => {
-  const expected = JSON.parse(readFileSync(new URL('./fixtures/upgrades/settings-contract-v10.json', import.meta.url), 'utf8'));
+test('the persisted settings contract matches the frozen version 11 snapshot', () => {
+  const expected = JSON.parse(readFileSync(new URL('./fixtures/upgrades/settings-contract-v11.json', import.meta.url), 'utf8'));
   assert.deepEqual(settingsContract(), expected);
 });
 

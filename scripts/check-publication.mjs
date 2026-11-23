@@ -253,6 +253,7 @@ const serverEnvironmentKeys = new Set(
 const providerEnvironmentPrefixes = [
   // Add a provider's prefix here when its first env-backed configuration is
   // introduced; prefix-based discovery keeps later knobs self-maintaining.
+  'ANTHROPIC_',
   'CURATE_',
   'ELEVENLABS_',
   'ENRICH_',

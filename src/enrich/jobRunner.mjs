@@ -666,6 +666,7 @@ function availableProviders(config) {
     local_ollama: (options) => Boolean(options.modelName),
     // No default model ships for Venice, so both halves are required.
     venice: (options) => Boolean(options.apiKey && options.modelName),
+    cloud_anthropic: (options) => Boolean(options.apiKey && options.modelName?.trim()),
   };
   return Object.entries(config.providers).map(([name, options]) => ({
     name,

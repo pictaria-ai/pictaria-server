@@ -7,7 +7,7 @@ import { createCurateAiProvider } from './ai-config.mjs';
 // PIC-366), not a promise that every configured model accepts ten images.
 export const STACK_REFEREE_REQUEST_IMAGES = 10;
 const adapters = new Set(['cloud_openai', 'openrouter', 'venice', 'local_lmstudio',
-  'local_ollama', 'cloud_ollama', 'openai_compatible']);
+  'local_ollama', 'cloud_ollama', 'openai_compatible', 'cloud_anthropic']);
 
 export function refereeCapability(provider) {
   if (!adapters.has(provider?.providerName) || typeof provider.analyzeImages !== 'function' ||

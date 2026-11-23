@@ -132,6 +132,8 @@ export class AiConnections {
         if (error instanceof AiConnectionPaused) return { verified: false, message: error.message };
         if (error?.invalidResponse) return { verified: false, message: 'The provider answered, but not in the requested format. The connection remains paused; check that the model supports images and structured output, then verify again.' };
         if (controller.signal.aborted || !current()) return { verified: false, message: 'Verification timed out, was interrupted, or the saved settings changed.' };
+        if (error?.configurationCode === 'anthropic_workspace_required') return { verified: false,
+          message: 'Use a workspace-scoped Claude Console API key, then verify the connection again.' };
         const status = this.status(provider);
         return { verified: false, message: status.state === 'ready'
           ? 'The provider rejected the verification request. Check the saved provider and model settings.'

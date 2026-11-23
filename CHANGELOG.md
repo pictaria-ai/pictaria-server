@@ -18,6 +18,15 @@ All notable changes to Pictaria Server are documented here. This project follows
 
 ### Development
 
+- Add Claude (Anthropic) for Enrich, Curate referees and voice answers (PIC-448).
+  Configure a workspace-scoped Claude Console API key with API billing and an
+  explicit model under Settings → AI Providers. Speech and embeddings keep
+  their existing providers. Claude uses structured outputs with local schema
+  validation, records refusals and truncation, and participates in shared AI
+  connection recovery. Settings contract 11 and persistent-state contract 28
+  preserve existing selections and require a full pre-upgrade snapshot restore
+  to downgrade. See [Claude setup and limits](docs/ENRICH.md#claude-anthropic).
+
 - Curate Preview Stacks now use Pictaria image embeddings when Image embeddings
   is on (candidate 4, PIC-392). For a pair of photos that both have an
   embedding:

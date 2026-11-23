@@ -343,7 +343,7 @@
       if (state.providersLoaded || !status.available) return;
       state.providersLoaded = true;
       state.providerConfigured = new Map(status.available.map((provider) => [provider.name, provider.configured]));
-      const providerNames = { openai_compatible: 'OpenAI-compatible' };
+      const providerNames = { openai_compatible: 'OpenAI-compatible', cloud_anthropic: 'Claude (Anthropic)' };
       el('enrichProvider').replaceChildren(...status.available.map((provider) => {
         const option = document.createElement('option');
         option.value = provider.name;

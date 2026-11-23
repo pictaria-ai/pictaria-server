@@ -92,7 +92,7 @@ else waits on them.
   remembered across visits and server restarts and apply to library sweeps,
   queued jobs, and Daily Enrich when they start. Running work keeps its saved
   inputs. Ollama and LM Studio keep everything on your own hardware;
-  OpenAI, OpenRouter, Venice, and Ollama's cloud models are the cloud routes.
+  OpenAI, OpenRouter, Venice, Ollama's cloud models, and Claude (Anthropic) are the cloud routes.
   Start with a small library sweep. Newly successful photos automatically
   sync their `ai/*` tags to Immich, even with **Send to Curate** off; that
   checkbox only controls whether photos enter human review. Pictaria manages
