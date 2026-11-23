@@ -91,6 +91,28 @@ test('Claude configuration faults pause the saved connection without charging ph
   });
 });
 
+test('a Claude image-specific 400 leaves the connection ready, processes the next photo and exhausts only its own allowance', async () => fixture(async f => {
+  const seen = [];
+  f.config.defaultProvider = 'cloud_anthropic';
+  f.config.providers.cloud_anthropic = { apiKey: 'synthetic-credential', modelName: 'claude-haiku-5-5', fetchImpl: async (_url, options) => {
+    const sent = JSON.parse(options.body).messages[0].content[0].source.data;
+    const id = Buffer.from(sent, 'base64').toString(); seen.push(id);
+    return id === 'panorama' ? Response.json({ error: { type: 'invalid_request_error',
+      message: 'messages.0.content.0.image.source: image dimensions exceed 8000 pixels' } }, { status: 400 })
+      : Response.json({ stop_reason: 'end_turn', content: [{ type: 'text', text: JSON.stringify(sampleOutput()) }] });
+  } };
+  const photoClient = { ...immich, getAssetThumbnail: async id => ({ data: Buffer.from(id), contentType: 'image/jpeg' }) };
+  for (let i = 0; i < 3; i++) {
+    const run = f.runner({ immich: photoClient }); run.start({ assetIds: ['panorama', 'ordinary'] }); await run.runPromise;
+    assert.equal(run.status().error, null);
+    assert.equal(f.connections.status(f.connections.provider('enrich')).state, 'ready');
+  }
+  assert.deepEqual(seen, ['panorama', 'ordinary', 'panorama']);
+  assert.equal(f.repo.db.prepare("SELECT COUNT(*) n FROM processing_runs WHERE status='failed'").get().n, 2);
+  assert.equal(f.repo.db.prepare("SELECT COUNT(*) n FROM processing_runs WHERE status='failed_infra'").get().n, 0);
+  assert.equal(f.repo.hasAnySuccessfulRun('ordinary'), true);
+}));
+
 test('first authentication failure stops Enrich, preserves the queue and blocks affected Curate without charging it', async () => fixture(async f => {
   let calls = 0, finished = 0;
   f.config.providers.local_lmstudio.fetchImpl = async () => { calls++; return rejected(401); };

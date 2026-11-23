@@ -7,6 +7,8 @@ import { join } from 'node:path';
 import { Repository } from '../../src/enrich/repository.mjs';
 import { analyzeWithValidationRetry, buildUserPrompt, runBatch } from '../../src/enrich/runner.mjs';
 import { loadV1Taxonomy, sampleOutput } from './helpers.mjs';
+import { AnthropicProvider } from '../../src/enrich/providers.mjs';
+import { ResponseTooLargeError } from '../../src/fetchWithTimeout.mjs';
 
 const taxonomy = loadV1Taxonomy();
 
@@ -60,6 +62,33 @@ const baseOptions = {
   userTemplate: 'Approved tags:\n{approved_tags}',
   promptVersion: 'v1',
 };
+
+test('Claude bounds original downloads at its encoded limit and degrades before inference without charging a failure', async () => {
+  for (const previewFits of [true, false]) await withRepo(async repo => {
+    const downloads = [], requests = [];
+    const provider = new AnthropicProvider({ apiKey: 'synthetic-credential', modelName: 'claude-haiku-5-5', fetchImpl: async (_url, options) => {
+      requests.push(JSON.parse(options.body));
+      return Response.json({ stop_reason: 'end_turn', content: [{ type: 'text', text: JSON.stringify(sampleOutput()) }] });
+    } });
+    const immich = { ...fakeImmich([{ id: 'large' }]),
+      getAssetOriginal: async (_id, { maxBytes }) => {
+        downloads.push(['original', maxBytes]);
+        if (maxBytes < 9_000_000) throw new ResponseTooLargeError('Immich', maxBytes);
+        return { data: Buffer.alloc(9_000_000), contentType: 'image/jpeg' };
+      },
+      getAssetThumbnail: async (_id, source, { maxBytes }) => {
+        downloads.push([source, maxBytes]);
+        if (source === 'preview' && !previewFits) throw new ResponseTooLargeError('Immich', maxBytes);
+        return { data: Buffer.from(source), contentType: 'image/webp' };
+      },
+    };
+    const { counters } = await runBatch({ ...baseOptions, repo, provider, immich, imageSource: 'original', limit: 1 });
+    assert.equal(counters.succeeded, 1); assert.equal(counters.failed, 0);
+    assert.deepEqual(downloads, (previewFits ? ['original', 'preview'] : ['original', 'preview', 'thumbnail']).map(source => [source, 7_500_000]));
+    assert.equal(requests.length, 1);
+    assert.equal(Buffer.from(requests[0].messages[0].content[0].source.data, 'base64').toString(), previewFits ? 'preview' : 'thumbnail');
+  });
+});
 
 test('buildUserPrompt embeds the approved model tags', () => {
   const prompt = buildUserPrompt('tags:\n{approved_tags}', taxonomy);

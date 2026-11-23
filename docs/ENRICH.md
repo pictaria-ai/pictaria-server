@@ -167,8 +167,11 @@ This provider sends photo renditions and prompts directly to Anthropic's
 Messages API. JPEG, PNG, GIF and WebP are accepted without the WebP conversion
 used for LM Studio; animated images use their first frame. HEIC/RAW originals
 need an Immich preview or thumbnail instead. Images must fit Anthropic's
-10 MB encoded-image limit. Curate retains its ten-image application ceiling
-and its existing, tighter rendition limits. Embeddings, speech recognition,
+10 MB encoded-image limit (7.5 MB raw) and 8000×8000 pixel limit. Enrich and the
+keeper referee bound downloads to the byte limit and fall back from oversized
+originals to previews, then thumbnails if needed, before calling Claude.
+The Stack Referee retains its ten-image ceiling and tighter 2 MB rendition
+limit. Embeddings, speech recognition,
 speech synthesis and access through Bedrock, Vertex or Foundry are not included.
 
 Enrich and referee requests use structured JSON outputs. Claude's generation
@@ -202,6 +205,13 @@ before choosing a model.
 
 Authentication, permission, billing, missing-model and workspace-configuration
 errors pause the AI connection without spending a photo's failure allowance.
+An HTTP 400 that identifies a specific image block instead counts as a content
+failure for that photo, allowing other photos to continue; other 400s pause for
+configuration. The legacy keeper referee defers a group with an unusable Claude
+image for the current server process and continues later groups, just as it
+does for groups that cannot fit its download budget. These deferrals appear in
+its diagnostics and can be retried after restart. Choosing previews avoids
+large original dimensions; byte-based fallback does not measure pixel dimensions.
 Temporary rate limits and service failures use the existing bounded recovery
 policy and honor `retry-after`; an explicitly reported spend limit pauses for
 configuration instead. The shared transport caps responses at 2 MB, supports

@@ -10,7 +10,7 @@ import { parseJsonContent } from './jsonUtils.mjs';
 import { readBodyBounded } from '../fetchWithTimeout.mjs';
 import { appendHttpUrlPath, normalizeHttpUrl } from '../config.mjs';
 import { sanitizeDiagnostic, structuredUpstreamDiagnostic } from '../diagnostics.mjs';
-import { ANTHROPIC_API_VERSION, ANTHROPIC_BASE_URL, ANTHROPIC_MAX_TOKENS,
+import { ANTHROPIC_API_VERSION, ANTHROPIC_BASE_URL, ANTHROPIC_MAX_TOKENS, ANTHROPIC_MAX_IMAGE_BYTES,
   anthropicThinking, anthropicJsonSchema, validateAnthropicOutput } from './anthropicContract.mjs';
 
 // Vision providers. Each analyzeImage(image, { systemPrompt, userPrompt,
@@ -53,6 +53,7 @@ export function enrichmentProviderConfiguration(provider) {
       schemaProjectionVersion: 1,
       thinking: anthropicThinking(provider.modelName),
       effort: 'low',
+      maxImageBytes: provider.maxImageBytes,
     } : {}),
     ...(provider.providerName === 'venice' ? {
       includeVeniceSystemPrompt: false,
@@ -178,6 +179,7 @@ export class AnthropicProvider {
   baseUrl = ANTHROPIC_BASE_URL;
   temperature = null;
   maxTokens = ANTHROPIC_MAX_TOKENS;
+  maxImageBytes = ANTHROPIC_MAX_IMAGE_BYTES;
 
   constructor({ apiKey, modelName, timeoutMs = 180000, fetchImpl = fetch } = {}) {
     if (!apiKey) throw new Error('ANTHROPIC_API_KEY is required for Claude (Anthropic).');
@@ -230,6 +232,10 @@ export class AnthropicProvider {
 
   httpErrorOptions(status, body) {
     const error = body?.error;
+    // A validation error pinned to an image block belongs to that photo,
+    // not the shared connection (for example dimensions or decoding).
+    if (status === 400 && error?.type === 'invalid_request_error'
+        && /^messages\.\d+\.content\.\d+\.image(?:[.:\s]|$)/.test(error.message ?? '')) return {};
     // Documented Authentication error; a 400 alone does not imply key scope.
     if (status === 400 && error?.type === 'invalid_request_error'
         && typeof error.message === 'string' && error.message.startsWith('This API key is not scoped to a workspace')) {
@@ -251,7 +257,7 @@ function anthropicImage(image) {
     throw new ProviderRequestError('Claude requires a JPEG, PNG, GIF or WebP image. Use an Immich preview for HEIC/RAW originals.', { status: 400 });
   }
   // The documented ceiling is 10 MB *encoded*, not raw bytes.
-  if (4 * Math.ceil(image.data.byteLength / 3) > 10 * 1000 * 1000) {
+  if (image.data.byteLength > ANTHROPIC_MAX_IMAGE_BYTES) {
     throw new ProviderRequestError('Claude image exceeds 10 MB after encoding. Use a preview or thumbnail.', { status: 413 });
   }
   return { type: 'image', source: { type: 'base64', media_type: mediaType, data: Buffer.from(image.data).toString('base64') } };

@@ -4,6 +4,8 @@ export const ANTHROPIC_DEFAULT_MODEL = '';
 export const ANTHROPIC_BASE_URL = 'https://api.anthropic.com/v1';
 export const ANTHROPIC_API_VERSION = '2026-10-21';
 export const ANTHROPIC_MAX_TOKENS = 8192;
+// 10 MB base64-encoded is exactly 7.5 MB of raw image bytes.
+export const ANTHROPIC_MAX_IMAGE_BYTES = 7_500_000;
 
 export function anthropicThinking(model) {
   switch (model) {

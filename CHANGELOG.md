@@ -23,7 +23,9 @@ All notable changes to Pictaria Server are documented here. This project follows
   explicit model under Settings → AI Providers. Speech and embeddings keep
   their existing providers. Claude uses structured outputs with local schema
   validation, records refusals and truncation, and participates in shared AI
-  connection recovery. Settings contract 11 and persistent-state contract 28
+  connection recovery. Oversized originals fall back to smaller renditions;
+  errors about individual images do not pause the shared connection.
+  Settings contract 11 and persistent-state contract 28
   preserve existing selections and require a full pre-upgrade snapshot restore
   to downgrade. See [Claude setup and limits](docs/ENRICH.md#claude-anthropic).
 

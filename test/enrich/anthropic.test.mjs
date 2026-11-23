@@ -146,6 +146,19 @@ test('documented errors retain HTTP status, safe details and retry hints; spend 
   await assert.rejects(provider.analyzeImage(image, prompts), err => { assert.doesNotMatch(err.message, /synthetic-credential/); return true; });
 });
 
+test('400s pinned to an image block are content failures while other validation errors pause configuration', async () => {
+  for (const message of ['messages.0.content.0.image.source: image dimensions exceed 8000 pixels',
+    'messages.0.content.2.image: Could not decode image', 'messages.12.content.0.image.source.data: invalid base64']) {
+    await assert.rejects(fixture({ error: { type: 'invalid_request_error', message } }, 400).provider.analyzeImage(image, prompts),
+      { status: 400, infrastructure: false, connectionReason: null });
+  }
+  for (const message of ['output_config.format.schema: unsupported constraint', 'model: unavailable model',
+    'You have reached your specified API usage limits.', 'Unrecognized request validation error']) {
+    await assert.rejects(fixture({ error: { type: 'invalid_request_error', message } }, 400).provider.analyzeImage(image, prompts),
+      { status: 400, infrastructure: true, connectionReason: 'configuration' });
+  }
+});
+
 test('images accept the four documented media types, reject originals and encoded oversize before network', async () => {
   const { provider, calls } = fixture();
   for (const mimeType of ['image/jpeg', 'image/png', 'image/gif', 'image/webp']) await provider.analyzeImage({ ...image, mimeType }, prompts);
@@ -185,6 +198,8 @@ test('default Node transport applies Claude error classification, response cap a
   t.after(async () => { https.request = original; syncBuiltinESMExports(); server.closeAllConnections(); await new Promise(resolve => server.close(resolve)); });
   const provider = new AnthropicProvider({ apiKey: 'synthetic-credential', modelName: 'claude-haiku-5-5' });
   await assert.rejects(provider.analyzeImage(image, prompts), { status: 400, connectionReason: 'configuration' });
+  responseBody = JSON.stringify({ error: { type: 'invalid_request_error', message: 'messages.0.content.0.image.source: image dimensions exceed 8000 pixels' } });
+  await assert.rejects(provider.analyzeImage(image, prompts), { status: 400, infrastructure: false, connectionReason: null });
   status = 200; responseBody = JSON.stringify({ excess: 'x'.repeat(2 * 1024 * 1024) });
   await assert.rejects(provider.analyzeImage(image, prompts), /limit/);
   hold = true; const started = Promise.withResolvers(); onRequest = started.resolve;
