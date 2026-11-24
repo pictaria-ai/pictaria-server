@@ -1,4 +1,4 @@
-import { stackRefereePresentation } from './referee-status.js';
+import { stackStatus, mergeStatus } from './stack-status.js';
 
 export function node(tag, text, className) {
   const element = document.createElement(tag);
@@ -23,7 +23,7 @@ export const outcomeLabel = (value) => choices.find(([key]) => key === value)?.[
 export function photoCard(
   photo,
   { readOnly = false, label = 'Photo', outcome = () => 'reviewed', change, open,
-    selected = () => false, select, imageState = () => {} },
+    selected = () => false, select, imageState = () => {}, suggested = false },
 ) {
   const card = node('article', undefined, 'photo-card');
   card.dataset.photoId = photo.id;
@@ -35,8 +35,10 @@ export function photoCard(
   img.src = thumbnail(photo.id); img.alt = photo.caption || label; img.loading = 'lazy';
   imageButton.append(img);
   imageButton.dataset.view = photo.id;
-  imageButton.setAttribute('aria-label', `View ${label}`);
+  imageButton.setAttribute('aria-label', `View ${label}${suggested ? ', suggested keeper' : ''}`);
   imageButton.onclick = () => open(photo);
+  // A Photo Referee suggestion (PIC-116) puts the gold star on the photo itself.
+  if (suggested) { imageButton.append(keeperStar(1, 'Suggested keeper')); card.classList.add('suggested'); }
   const info = node('div', undefined, 'photo-info');
   let checkbox;
   if (readOnly) {
@@ -76,65 +78,47 @@ export function photoCard(
   return card;
 }
 
-export function groupSimilarity(group, status = group?.similarity) {
-  return status ?? (group?.route === 'candidate-unconfirmed' ? { state: 'unavailable' }
-    : group?.route === 'manual-budget' ? { state: 'limited' }
-    : ['candidate-supported', 'single'].includes(group?.route) ? { state: 'local' } : null);
-}
-function similarityPhase(status) {
-  if (!status) return null;
-  if (status.paused || ['incomplete', 'paused', 'limited', 'unavailable'].includes(status.state)) return 'limited';
-  if (status.state === 'checking' || status.checking) return 'checking';
-  if (status.state === 'waiting' || status.state === 'updated' && status.pending) return 'waiting';
-  return status.uncertain ? 'limited' : null;
-}
-export function similarityLabel(status) {
-  switch (similarityPhase(status)) {
-    case 'limited': return 'Grouped with limited evidence';
-    case 'waiting': return 'Checking similarity · queued';
-    case 'checking': return 'Checking similarity' + (Number.isFinite(status.done) && Number.isFinite(status.total)
-      ? ` · ${status.done} of ${status.total}` : '');
-    default: return ['checked', 'local'].includes(status?.state) ? 'Ready to curate'
-      : status?.state === 'updated' ? 'Updated grouping available' : '';
+// A status badge (stack-status.js); comparisons.css draws each badge's icon.
+// Icon-only badges carry their word as an accessible name and tooltip, so
+// color is never the only signal.
+export function badgeNode(status, { word = false } = {}) {
+  if (!status?.badge) return null;
+  const badge = node('span', undefined, 'stack-badge');
+  badge.dataset.badge = status.badge;
+  const icon = node('span', undefined, 'stack-badge-icon');
+  icon.setAttribute('aria-hidden', 'true');
+  badge.append(icon);
+  if (word) badge.append(node('span', status.word, 'stack-badge-word'));
+  else {
+    if (status.badge === 'ai-checked') badge.append(node('span', 'AI', 'stack-badge-ai'));
+    badge.setAttribute('role', 'img');
+    badge.setAttribute('aria-label', status.word);
   }
+  // The tooltip adds why a step is waiting or limited.
+  const notes = (status.steps ?? []).filter(item => ['running', 'queued', 'limited'].includes(item.state))
+    .map(item => `${item.name}: ${item.text}.${item.detail ? ` ${item.detail}` : ''}`);
+  badge.title = [`${status.word}.`, status.detail, ...notes].filter(Boolean).join(' ');
+  return badge;
 }
-export function similarityDetail(status) {
-  let detail = '';
-  switch (status?.state) {
-    case 'waiting': detail = 'These nearby photos are waiting for a check slot.'; break;
-    case 'checking': detail = 'Similarity searches are running for these nearby photos.'; break;
-    case 'incomplete': detail = 'Similarity checking could not finish.'; break;
-    case 'paused': detail = 'Similarity checking is paused.'; break;
-    case 'limited': detail = status.total ? 'Saved check storage is full.' : 'These photos reached an automatic checking limit.'; break;
-    case 'unavailable': detail = 'Similarity searches are unavailable for this group.'; break;
-    case 'checked': detail = status.uncertain
-      ? 'Similarity searches finished, but the evidence was inconclusive.' : 'Similarity checking finished.'; break;
-    case 'local': detail = 'No similarity search was needed.'; break;
-    case 'updated': detail = 'An updated grouping is available. This view keeps its current photos.'; break;
-  }
-  return [detail, status?.problem].filter(Boolean).join(' ');
+// The Photo Referee's gold star (PIC-116), with a count when more than one.
+export function keeperStar(count, label = count > 1 ? `${count} keepers suggested` : 'Keeper suggested') {
+  if (!(count > 0)) return null;
+  const star = node('span', undefined, 'keeper-star');
+  star.append(node('span', '★', 'keeper-star-icon'));
+  if (count > 1) star.append(node('span', String(count)));
+  star.setAttribute('role', 'img');
+  star.setAttribute('aria-label', label);
+  star.title = label;
+  return star;
 }
-
-export function similarityIndicator(status, { warning = false } = {}) {
-  const label = similarityLabel(status);
-  // Per-stack limitations are quiet information. Only overall paused work uses a warning.
-  const phase = warning ? 'attention' : similarityPhase(status);
-  return statusIndicator({ title: label, detail: similarityDetail(status), phase });
-}
-
-export function groupPresentation(group) {
-  const similarity = groupSimilarity(group);
-  const referee = stackRefereePresentation(group?.stackReferee);
-  return referee ?? { title: similarityLabel(similarity), detail: similarityDetail(similarity), phase: similarityPhase(similarity) };
-}
-
-export function statusIndicator({ title, detail, phase }) {
-  if (!title || !phase) return null;
-  const indicator = node('span', phase === 'attention' ? '!' : phase === 'limited' ? 'i' : phase === 'ai-checked' ? 'AI' : '', 'similarity-indicator');
+// The header's library-wide activity: a spinner while working, or a warning.
+export function activityIndicator(phase, title) {
+  if (!phase) return null;
+  const indicator = node('span', phase === 'attention' ? '!' : '', 'activity-indicator');
   indicator.dataset.phase = phase;
   indicator.setAttribute('role', 'img');
-  indicator.title = [title, detail].filter(Boolean).join('. ');
-  indicator.setAttribute('aria-label', indicator.title);
+  indicator.title = title;
+  indicator.setAttribute('aria-label', title);
   return indicator;
 }
 
@@ -144,10 +128,10 @@ export function groupCard(group, open, { decide, select, selected = false, decid
   const photo = group.photos[0];
   const cover = node('button', undefined, 'cover');
   cover.type = 'button';
-  cover.setAttribute('aria-label', group.memberCount > 1 ? `Compare ${group.memberCount} photos: ${photo.caption || label}` : `View ${photo.caption || label}`);
+  const coverLabel = group.memberCount > 1 ? `Compare ${group.memberCount} photos: ${photo.caption || label}` : `View ${photo.caption || label}`;
   const img = node('img'); img.src = thumbnail(photo.id); img.alt = ''; img.loading = 'lazy';
   const chip = node('span', undefined, 'p-chip');
-  const marker = node('span', undefined, 'similarity-marker');
+  const marker = node('span', undefined, 'status-marker');
   cover.append(img, chip, marker);
   const caption = node('div', undefined, 'group-caption');
   if (photo.caption) {
@@ -159,8 +143,7 @@ export function groupCard(group, open, { decide, select, selected = false, decid
   const date = node('small', photo.capturedAt
     ? new Date(photo.capturedAt).toLocaleString([], { dateStyle: 'medium', timeStyle: 'short' }) : '', 'capture-date');
   date.title = date.textContent;
-  const status = node('small', undefined, 'similarity-status');
-  meta.append(date, status);
+  meta.append(date);
   caption.append(meta);
   const actions = node('div', undefined, 'card-actions');
   if (group.memberCount > 1) {
@@ -187,30 +170,26 @@ export function groupCard(group, open, { decide, select, selected = false, decid
     check.onchange = () => select?.(group,check.checked); selection.append(check); card.append(selection);
   }
   if (actions.childElementCount) caption.append(actions);
-  card.updateSimilarity = (value, referee = group.stackReferee) => {
-    if (decided) {
-      chip.hidden = true;
-      date.hidden = false;
-      status.hidden = true; return;
+  // Status refreshes in place: the badge, star and chip words change, while
+  // the date, the chip's position and the card's size stay put.
+  card.updateStatus = (patch = {}) => {
+    mergeStatus(group, patch);
+    const status = stackStatus(group, { decided });
+    const count = group.memberCount > 1 ? `${group.memberCount} photos` : 'Single photo';
+    chip.hidden = decided;
+    chip.textContent = status?.word ? `${status.word} · ${count}` : count;
+    cover.setAttribute('aria-label', status?.word ? `${status.word}. ${coverLabel}` : coverLabel);
+    const badge = badgeNode(status), star = keeperStar(status?.keepers);
+    const signature = JSON.stringify([badge?.title, status?.keepers]);
+    if (marker.dataset.signature !== signature) {
+      marker.dataset.signature = signature;
+      marker.replaceChildren(...[badge, star].filter(Boolean));
     }
-    group.similarity = value;
-    group.stackReferee = referee;
-    value = groupSimilarity(group, value);
-    chip.textContent = group.memberCount > 1 ? `${group.memberCount} photos` : 'Single photo';
-    const presentation = groupPresentation(group), label = presentation.title;
-    const indicator = statusIndicator(presentation);
-    if (status.textContent !== label) status.textContent = label;
-    status.title = label;
-    // Progress temporarily replaces the date. Settled/incomplete details stay
-    // on the cover icon, so neither status changes nor long labels grow cards.
-    const active = indicator && ['waiting', 'checking'].includes(indicator.dataset.phase);
-    date.hidden = Boolean(active);
-    status.hidden = !active;
-    if (marker.firstChild?.title !== indicator?.title || marker.firstChild?.dataset.phase !== indicator?.dataset.phase)
-      marker.replaceChildren(...(indicator ? [indicator] : []));
-    card.dataset.similarity = value?.state ?? '';
+    card.dataset.badge = status?.badge ?? '';
+    card.dataset.similarity = status?.updated ? 'updated' : group.similarity?.state ?? '';
+    card.toggleAttribute('data-updated', Boolean(status?.updated));
   };
-  card.updateSimilarity(group.similarity);
+  card.updateStatus();
   cover.onclick = () => open(group);
   card.append(cover, caption);
   // The article itself remains a convenient programmatic entry point; child

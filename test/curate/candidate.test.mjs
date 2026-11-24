@@ -18,7 +18,7 @@ test('owner-confirmed landscape: strong core retains an asymmetric fifth photo',
   // Outside-candidate counts derived from the owner's anonymized raw-rank table.
   const matrix = [[null,0,1,0,0], [0,null,0,0,0], [6,1,null,19,6], [0,0,1,null,0], [0,2,2,0,null]];
   assert.deepEqual(partition(ranked(rows, matrix)), [['1','2','3','4','5']]);
-  assert.match(ranked(rows, matrix).groups[0].reasons.join(' '), /established core/);
+  assert.match(ranked(rows, matrix).groups[0].reasons.join(' '), /\brank-recovered\b/);
   const waiting = candidateGroups(rows);
   assert.deepEqual(partition(waiting), [['1','2','3','4','5']]);
   assert.equal(waiting.groups[0].route, 'candidate-unconfirmed', 'far descriptors cannot establish or reject composition alone');
@@ -94,7 +94,7 @@ test('search pruning preserves locally supported references needed for asymmetri
   assert.deepEqual(initial.scopes[0].referenceIds, ['0','1','2','3']);
   const result = ranked(rows, [[null,0,0,0],[0,null,0,0],[0,0,null,0],[0,6,8,null]]);
   assert.deepEqual(partition(result), [['0','1','2','3']]);
-  assert.match(result.groups[0].reasons.join(' '), /established core/);
+  assert.match(result.groups[0].reasons.join(' '), /\brank-recovered\b/);
 });
 
 test('bounded time-only fallback is honest; missing timestamps and stacking off remain singles', () => {
