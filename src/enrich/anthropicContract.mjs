@@ -1,6 +1,6 @@
 // Direct Claude API contract, checked against platform.claude.com/docs.
-// Keep the model default in one place: an empty value requires an explicit choice.
-export const ANTHROPIC_DEFAULT_MODEL = '';
+// Shared by environment configuration and the Settings baseline; owners can override it.
+export const ANTHROPIC_DEFAULT_MODEL = 'claude-haiku-5-5';
 export const ANTHROPIC_BASE_URL = 'https://api.anthropic.com/v1';
 export const ANTHROPIC_API_VERSION = '2026-10-21';
 export const ANTHROPIC_MAX_TOKENS = 8192;

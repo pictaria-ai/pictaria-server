@@ -43,7 +43,8 @@ test('Settings verifies a paused saved AI connection through authenticated sched
   await page.evaluate('document.querySelector(".gate-backdrop input").value="smoke-secret";document.querySelector(".gate-backdrop button").click()');
   await page.waitFor('document.querySelector("#ai-connection-enrich")?.textContent.includes("API key")');
   assert.equal(await page.evaluate('document.querySelector("#f2-providers-anthropicApiKey").type'), 'password');
-  assert.equal(await page.evaluate('document.querySelector("#f2-providers-anthropicModel").value'), '');
+  assert.equal(await page.evaluate('document.querySelector("#f2-providers-anthropicModel").value'), 'claude-haiku-5-5');
+  assert.equal(await page.evaluate('document.querySelector("#f2-providers-anthropicModel").readOnly'), false);
   assert.match(await page.evaluate('document.querySelector("#fields-providers").textContent'), /Claude Console.*API billing/);
   assert.equal(await page.evaluate('document.querySelectorAll("#f-proseProvider option[value=cloud_anthropic]").length'), 1);
   assert.equal(await page.evaluate('document.querySelectorAll("#f2-curate-refereeProvider option[value=cloud_anthropic]").length'), 1);

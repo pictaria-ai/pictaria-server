@@ -165,7 +165,8 @@ It does make the connections needed for features you choose:
   cloud model receives them through your own provider account (OpenAI, OpenRouter,
   Venice, Ollama cloud or Anthropic). Claude needs a workspace-scoped Claude
   Console API key with API billing; a Claude.ai subscription does not include
-  API usage. See [Claude setup and limits](docs/ENRICH.md#claude-anthropic).
+  API usage. Claude defaults to Haiku 5.5; you can change the model in Settings.
+  See [Claude setup and limits](docs/ENRICH.md#claude-anthropic).
 - Weather sends the requested city or US ZIP to Open-Meteo for geocoding and
   the resulting coordinates for the forecast. Optional Geoapify place naming
   sends photo or calculated home coordinates to your configured account.

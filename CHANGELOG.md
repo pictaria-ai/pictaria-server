@@ -19,8 +19,9 @@ All notable changes to Pictaria Server are documented here. This project follows
 ### Development
 
 - Add Claude (Anthropic) for Enrich, Curate referees and voice answers (PIC-448).
-  Configure a workspace-scoped Claude Console API key with API billing and an
-  explicit model under Settings → AI Providers. Speech and embeddings keep
+  Configure a workspace-scoped Claude Console API key with API billing under
+  Settings → AI Providers. Claude defaults to Haiku 5.5; the model remains
+  editable. Speech and embeddings keep
   their existing providers. Claude uses structured outputs with local schema
   validation, records refusals and truncation, and participates in shared AI
   connection recovery. Oversized originals fall back to smaller renditions;

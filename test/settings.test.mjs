@@ -4,6 +4,8 @@ import { generateKeyPairSync, sign } from 'node:crypto';
 import { existsSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { loadConfig } from '../src/config.mjs';
+import { createProvider } from '../src/enrich/providers.mjs';
 
 import {
   MAX_SETTINGS_STATE_BYTES,
@@ -105,7 +107,33 @@ test('Claude selections and private credentials persist; browser/API settings ne
   assert.doesNotMatch(JSON.stringify(restored.describe()), /synthetic-credential/);
 }));
 
-test('v10 settings migrate without altering existing selections or adding a Claude default', () => {
+test('Claude settings inherit Haiku by default, preserve model overrides and reset to the baseline', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'pictaria-claude-default-'));
+  try {
+    const filePath = join(dir, 'settings.json');
+    const config = loadConfig({});
+    const store = new SettingsStore({ filePath, config, env: {} }).load();
+    const described = store.update({ enrich: { anthropicApiKey: 'synthetic-credential' } });
+    assert.equal(described.enrich.anthropicModel.value, 'claude-haiku-5-5');
+    assert.equal(described.enrich.anthropicModel.source, 'default');
+    assert.equal(createProvider('cloud_anthropic', config.providers.cloud_anthropic).modelName, 'claude-haiku-5-5');
+    assert.equal(Object.hasOwn(JSON.parse(readFileSync(filePath, 'utf8')).enrich, 'anthropicModel'), false);
+    store.update({ enrich: { anthropicModel: 'claude-sonnet-5-5' } });
+    const restoredConfig = loadConfig({});
+    const restored = new SettingsStore({ filePath, config: restoredConfig, env: {} }).load();
+    assert.equal(restoredConfig.providers.cloud_anthropic.modelName, 'claude-sonnet-5-5');
+    restored.update({ enrich: { anthropicModel: '' } });
+    assert.throws(() => createProvider('cloud_anthropic', restoredConfig.providers.cloud_anthropic), /Choose a Claude model/);
+    restored.update({ enrich: { anthropicModel: null } });
+    assert.equal(restoredConfig.providers.cloud_anthropic.modelName, 'claude-haiku-5-5');
+    const env = { ANTHROPIC_MODEL: 'claude-opus-5-5' };
+    const fromEnv = new SettingsStore({ filePath, config: loadConfig(env), env }).load();
+    assert.equal(fromEnv.describe().enrich.anthropicModel.value, 'claude-opus-5-5');
+    assert.equal(fromEnv.describe().enrich.anthropicModel.source, 'environment');
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+});
+
+test('v10 settings migrate without altering existing selections or adding a Claude model override', () => {
   const legacy = { version: 10, credentialBindings: {}, server: {},
     enrich: { veniceModel: 'existing-model', defaultProvider: 'venice' }, curate: { refereeProvider: 'cloud_openai' }, voice: { proseProvider: 'local_ollama' } };
   const before = structuredClone(legacy);

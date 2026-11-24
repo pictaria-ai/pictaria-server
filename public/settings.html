@@ -829,7 +829,7 @@
         { key: 'veniceModel', sourceSection: 'enrich', type: 'text', placeholder: 'e.g. qwen3-vl-235b-a22b' },
         { head: 'Claude (Anthropic)' },
         { key: 'anthropicApiKey', sourceSection: 'enrich', type: 'secret', desc: 'Use a Claude Console API key scoped to one workspace, with API billing enabled. A Claude.ai Pro or Max subscription does not include API usage. Anthropic receives the prompts and images you send.', docs: 'https://platform.claude.com/docs/en/manage-claude/authentication' },
-        { key: 'anthropicModel', sourceSection: 'enrich', type: 'text', placeholder: 'Enter a Claude model ID', desc: 'No default. Choose a model that supports images and structured output; see the Claude model documentation.', docs: 'https://platform.claude.com/docs/en/models/overview' },
+        { key: 'anthropicModel', sourceSection: 'enrich', type: 'text', placeholder: 'Enter a Claude model ID', desc: 'Defaults to Claude Haiku 5.5. You can enter another model ID that supports images and structured output; see the Claude model documentation.', docs: 'https://platform.claude.com/docs/en/models/overview' },
         { head: 'ElevenLabs' },
         { key: 'elevenLabsApiKey', sourceSection: 'voice', type: 'secret', desc: 'Used for text-to-speech in Pictaria Frame. Select ElevenLabs as the TTS provider under Voice TTS.' },
       ],

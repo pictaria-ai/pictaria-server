@@ -150,16 +150,19 @@ or that it necessarily creates a continuous loop.
 | `openrouter` | Cloud | API key + model under Settings → AI Providers |
 | `cloud_ollama` | Cloud | API key + model under Settings → AI Providers |
 | `venice` | Cloud | API key + a vision-capable model under Settings → AI Providers (no default) |
-| `cloud_anthropic` | Cloud | Workspace-scoped Claude Console API key + model under Settings → AI Providers (no default) |
+| `cloud_anthropic` | Cloud | Workspace-scoped Claude Console API key under Settings → AI Providers; defaults to Claude Haiku 5.5, with an editable model ID |
 
 ### Claude (Anthropic)
 
 Enter a **workspace-scoped API key** from the [Claude Console](https://platform.claude.com/)
-and an exact model ID under **Settings → AI Providers → Claude (Anthropic)**.
+under **Settings → AI Providers → Claude (Anthropic)**. A new connection uses
+**Claude Haiku 5.5** (`claude-haiku-5-5`); enter another exact model ID to change it.
 The Console account needs **API billing**; a Claude.ai Pro or Max subscription
-does not include API usage. There is no model default: enter a model before
-selecting Claude on Enrich, for the Curate referees, or under Voice → AI provider.
-Voice's per-command model overrides also apply. There is no Workspace ID field;
+does not include API usage. After saving the key, select Claude on Enrich,
+for the Curate referees, or under Voice → AI provider. Existing model selections
+and per-command overrides are preserved. Explicitly saving an empty model still
+requires a model before use; resetting the field restores the environment value
+or Haiku default. There is no Workspace ID field;
 a key not tied to one workspace produces a configuration error. Use a
 workspace-scoped key and verify the saved connection after replacing it.
 
@@ -221,7 +224,7 @@ by Pictaria. Settings/API responses never return a saved key to the browser.
 See [upgrade and rollback guidance](UPGRADING.md#claude-provider-settings).
 
 Fixture tests cover the request and failure contracts without paid calls.
-Before operational acceptance, check a real workspace key with a synthetic
+Before release and operational acceptance, check a real workspace key with a synthetic
 connection test, one Enrich photo, a multi-image keeper and Stack Referee
 request (including ten images), WebP input, and both voice commands. Check
 Interesting and Tell Me on Opus 5.5 at their unchanged 420/600-token budgets,
