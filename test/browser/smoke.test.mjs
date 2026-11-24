@@ -1559,7 +1559,7 @@ test('admin UI smoke: gate, Insights lens, Curate, Smart Albums', { timeout: 120
     );
     assert.equal(
       await page.evaluate('document.querySelectorAll("#fields-providers .field").length'),
-      16,
+      18,
       'all provider key/model/URL fields live in AI Providers',
     );
     assert.ok(
@@ -1572,8 +1572,8 @@ test('admin UI smoke: gate, Insights lens, Curate, Smart Albums', { timeout: 120
     );
     assert.equal(
       await page.evaluate('document.querySelectorAll("#fields-providers > .sub-head").length'),
-      8,
-      'all eight providers have headings',
+      9,
+      'all AI providers and ElevenLabs have headings',
     );
     assert.deepEqual(
       await page.evaluate('[...document.querySelectorAll("#fields-providers > .provider-division > .provider-division-title")].map((node) => node.textContent)'),

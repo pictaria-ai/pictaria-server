@@ -7,6 +7,19 @@ installations receive a verified snapshot before any migration that changes
 persisted state. A fresh, complete backup is still a prerequisite for every
 upgrade.
 
+## Claude provider settings
+
+The unreleased Claude provider adds settings contract **11** and persistent-state
+contract **28**. Existing provider selections, models and keys are preserved;
+the migration does not select Claude or supply a Claude model. Established
+installations get the normal verified recovery snapshot before migration.
+
+An older Server refuses this newer state, even if Claude has not been selected.
+To downgrade, stop the Server and restore the complete pre-upgrade snapshot
+using the rollback procedure below. Do not lower version numbers or remove
+individual settings to bypass the guard. Backups include saved provider keys
+in the same private, unencrypted settings file as before; protect the snapshot.
+
 ## Before you upgrade
 
 1. **Read the release notes.** [CHANGELOG.md](../CHANGELOG.md) lists new

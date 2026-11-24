@@ -7,7 +7,7 @@ Use it as a standalone Immich application or pair it with [Pictaria Frame](https
 Pictaria Server includes:
 
 - **Insights** — understand your collection (`/insights.html`): photos per year with a person/place/tag lens, a "where you were" timeline with auto-detected trips, a people constellation (faces linked by shared photos), records (busiest day, home base, furthest from home), and leaderboards for people, places, cameras, and tags. Every number is clickable — browse the photos behind it, open the same view in Immich, or turn it into an album. Everything is computed by Pictaria from a periodic Immich sweep; optional Geoapify place naming sends coordinates to the provider you configured.
-- **Enrich** — AI photo classification into a controlled taxonomy (`/enrich.html`), with reusable prompt/taxonomy profiles and automatic AI-tag sync to Immich. Inspect run and photo timings and compare setups on **Enrich performance** (`/enrich-performance.html`). Works with operator-hosted Ollama, LM Studio, llama.cpp and other OpenAI-compatible endpoints, or through the cloud with OpenAI, OpenRouter, Venice, or Ollama's cloud models.
+- **Enrich** — AI photo classification into a controlled taxonomy (`/enrich.html`), with reusable prompt/taxonomy profiles and automatic AI-tag sync to Immich. Inspect run and photo timings and compare setups on **Enrich performance** (`/enrich-performance.html`). Works with operator-hosted Ollama, LM Studio, llama.cpp and other OpenAI-compatible endpoints, or through the cloud with OpenAI, OpenRouter, Venice, Ollama's cloud models, or Claude (Anthropic).
 - **Curate** — the human review workflow that decides what your frame shows (`/curate.html`). Same-moment photos collapse into **Stacks** with a suggested keeper: a silver ★ from frame-worthiness scores, or a gold ★ when the optional AI referee has compared the group side by side.
 - **Smart Albums** — saved Immich searches (people, tags, places, dates, cameras, or free-text ranked search) that keep real Immich albums up to date on a schedule (`/albums.html`). A free-text rule can run in **Best of** mode: each search hit is double-checked against your own enrichment data and the keepers are ranked by your Curate decisions and photo scores — a "Top 50" that is your best 50, not Immich's first 50. Each run re-syncs the album to its rule, and deleting a rule never deletes the Immich album itself. ([Rules, Best of, the sync.](docs/ALBUMS.md))
 - **Frame Remote** — see what each frame is showing and control it live from your phone (`/remote.html`). Multiple frames run off one server: each device reports under its own name, and a device picker appears when more than one is known so commands reach only the frame you chose. Retired or re-onboarded devices are cleaned up under Settings → Devices.
@@ -134,7 +134,7 @@ See [docs/CONFIGURATION.md](docs/CONFIGURATION.md) for the complete reference an
 | `IMMICH_API_KEY` | yes (env or Settings) | An Immich API key for your account — full access not required; see the least-privilege checklist in [Getting started](docs/GETTING-STARTED.md) |
 | `APP_PASSWORD` | strongly recommended | Protects the API and web UI (env-only). Blank or missing refuses startup unless `ALLOW_INSECURE_OPEN=true`. |
 | `ALLOW_INSECURE_OPEN` | no | Dangerous explicit opt-in to run without authentication. Anyone who can reach the server can browse photos and perform Immich-backed mutations. |
-| `OPENAI_API_KEY` / `OPENAI_COMPATIBLE_*` / `LMSTUDIO_*` / `OPENROUTER_*` / `OLLAMA_*` / `VENICE_*` | for Enrich | Provider connections and vision-model identifiers; configure the same values under Settings → AI Providers |
+| `OPENAI_API_KEY` / `OPENAI_COMPATIBLE_*` / `LMSTUDIO_*` / `OPENROUTER_*` / `OLLAMA_*` / `VENICE_*` / `ANTHROPIC_*` | for Enrich | Provider connections and vision-model identifiers; configure the same values under Settings → AI Providers |
 | `DEFAULT_PROVIDER` | no | Initial/infrastructure fallback for Enrich; choosing a provider on the Enrich page saves the active choice for future runs |
 | `INFERENCE_HOST_LABEL` | no | Optional operator-authored label saved with new Enrich run summaries for comparing inference machines; editable under Settings → Enrich |
 | `TTS_PROVIDER` + keys | for Voice | `openai` or `elevenlabs` text-to-speech |
@@ -162,7 +162,11 @@ It does make the connections needed for features you choose:
   **Interesting** command independently sends an Immich preview plus the
   photo's date, location, and filename to the voice-answer model you selected.
   A local model keeps those requests within infrastructure you operate; a
-  cloud model receives them through your own provider account.
+  cloud model receives them through your own provider account (OpenAI, OpenRouter,
+  Venice, Ollama cloud or Anthropic). Claude needs a workspace-scoped Claude
+  Console API key with API billing; a Claude.ai subscription does not include
+  API usage. Claude defaults to Haiku 5.5; you can change the model in Settings.
+  See [Claude setup and limits](docs/ENRICH.md#claude-anthropic).
 - Weather sends the requested city or US ZIP to Open-Meteo for geocoding and
   the resulting coordinates for the forecast. Optional Geoapify place naming
   sends photo or calculated home coordinates to your configured account.

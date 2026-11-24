@@ -10,6 +10,8 @@ import { parseJsonContent } from './jsonUtils.mjs';
 import { readBodyBounded } from '../fetchWithTimeout.mjs';
 import { appendHttpUrlPath, normalizeHttpUrl } from '../config.mjs';
 import { sanitizeDiagnostic, structuredUpstreamDiagnostic } from '../diagnostics.mjs';
+import { ANTHROPIC_API_VERSION, ANTHROPIC_BASE_URL, ANTHROPIC_MAX_TOKENS, ANTHROPIC_MAX_IMAGE_BYTES,
+  anthropicThinking, anthropicJsonSchema, validateAnthropicOutput } from './anthropicContract.mjs';
 
 // Vision providers. Each analyzeImage(image, { systemPrompt, userPrompt,
 // jsonSchema, signal? }) returns { rawOutput, normalizedOutput }. An image is
@@ -46,6 +48,13 @@ export function enrichmentProviderConfiguration(provider) {
     temperature: 'temperature' in provider ? provider.temperature : provider.providerName === 'cloud_openai' ? null : 0,
     maxTokens: provider.providerName === 'cloud_openai' ? OPENAI_MAX_OUTPUT_TOKENS : provider.maxTokens ?? null,
     retryValidationOnce: provider.providerName?.startsWith('local_') || provider.retryValidationOnce === true,
+    ...(provider.providerName === 'cloud_anthropic' ? {
+      apiVersion: ANTHROPIC_API_VERSION,
+      schemaProjectionVersion: 1,
+      thinking: anthropicThinking(provider.modelName),
+      effort: 'low',
+      maxImageBytes: provider.maxImageBytes,
+    } : {}),
     ...(provider.providerName === 'venice' ? {
       includeVeniceSystemPrompt: false,
       disableThinking: true,
@@ -92,7 +101,7 @@ const GEMINI_JSON_SCHEMA_KEYWORDS = new Set([
 // 5xx) from "the provider judged this request's content" — the runner only
 // charges an asset's permanent failure allowance for the latter.
 export class ProviderRequestError extends Error {
-  constructor(message, { status = null, timeout = false, cancelled = false, invalidResponse = false, retryAfterMs = null } = {}) {
+  constructor(message, { status = null, timeout = false, cancelled = false, invalidResponse = false, retryAfterMs = null, connectionReason = null, configurationCode = null } = {}) {
     super(message);
     this.name = 'ProviderRequestError';
     this.status = status;
@@ -110,8 +119,11 @@ export class ProviderRequestError extends Error {
     // timeout, but is kept distinct so Enrich can stop immediately without
     // presenting the request as a provider failure.
     this.cancelled = cancelled;
+    // Optional adapter classification. Existing adapters keep status-based handling.
+    this.connectionReason = ['configuration', 'unavailable'].includes(connectionReason) ? connectionReason : null;
+    this.configurationCode = configurationCode === 'anthropic_workspace_required' ? configurationCode : null;
     this.infrastructure =
-      cancelled || status === null || status === 401 || status === 403 || status === 429 || status >= 500;
+      this.connectionReason !== null || cancelled || status === null || status === 401 || status === 403 || status === 429 || status >= 500;
   }
 }
 
@@ -156,7 +168,116 @@ export function createProvider(name, options) {
   if (name === 'venice') {
     return new VeniceProvider(options);
   }
+  if (name === 'cloud_anthropic') {
+    return new AnthropicProvider(options);
+  }
   throw new Error(`Unsupported provider: ${name}`);
+}
+
+export class AnthropicProvider {
+  providerName = 'cloud_anthropic';
+  baseUrl = ANTHROPIC_BASE_URL;
+  temperature = null;
+  maxTokens = ANTHROPIC_MAX_TOKENS;
+  maxImageBytes = ANTHROPIC_MAX_IMAGE_BYTES;
+
+  constructor({ apiKey, modelName, timeoutMs = 180000, fetchImpl = fetch } = {}) {
+    if (!apiKey) throw new Error('ANTHROPIC_API_KEY is required for Claude (Anthropic).');
+    if (!modelName?.trim()) throw new Error('Choose a Claude model in Settings → AI Providers (ANTHROPIC_MODEL).');
+    Object.assign(this, { apiKey, modelName, timeoutMs, fetchImpl });
+  }
+
+  async analyzeImage(image, options) { return this.analyzeImages([image], options); }
+
+  async analyzeImages(images, { systemPrompt, userPrompt, jsonSchema, signal = null }) {
+    let schema;
+    try { schema = anthropicJsonSchema(jsonSchema); }
+    catch {
+      throw new ProviderRequestError('Claude does not support this Pictaria response schema.', { status: 400, connectionReason: 'configuration' });
+    }
+    const rawOutput = await this.request({ systemPrompt, userPrompt, images, maxOutputTokens: this.maxTokens, schema, signal });
+    const text = anthropicAnswer(rawOutput);
+    const parsed = parseProviderAnswer(text, JSON.parse);
+    try { validateAnthropicOutput(parsed, jsonSchema); }
+    catch {
+      throw new ProviderRequestError('Claude returned an answer that did not match the requested schema.', { status: 200, invalidResponse: true });
+    }
+    return { rawOutput, normalizedOutput: parsed };
+  }
+
+  async generateProse({ systemPrompt, userPrompt, images = [], maxOutputTokens, signal = null }) {
+    const rawOutput = await this.request({ systemPrompt, userPrompt, images, maxOutputTokens, signal });
+    return { rawOutput, text: anthropicAnswer(rawOutput, { prose: true }) };
+  }
+
+  async request({ systemPrompt, userPrompt, images, maxOutputTokens, schema, signal }) {
+    const thinking = anthropicThinking(this.modelName);
+    const body = {
+      model: this.modelName,
+      system: systemPrompt,
+      max_tokens: maxOutputTokens,
+      ...(thinking ? { thinking } : {}),
+      output_config: { effort: 'low', ...(schema ? { format: { type: 'json_schema', schema } } : {}) },
+      messages: [{ role: 'user', content: [...images.map(anthropicImage), { type: 'text', text: userPrompt }] }],
+    };
+    // Below the API's 128 MB request ceiling, including base64 and prompt/schema.
+    if (Buffer.byteLength(JSON.stringify(body)) > 120 * 1000 * 1000) {
+      throw new ProviderRequestError('Claude request is too large. Use smaller image renditions or a smaller comparison.', { status: 413 });
+    }
+    return postJson(this, `${ANTHROPIC_BASE_URL}/messages`, body, {
+      Authorization: `Bearer ${this.apiKey}`,
+      'anthropic-version': ANTHROPIC_API_VERSION,
+    }, { signal });
+  }
+
+  httpErrorOptions(status, body) {
+    const error = body?.error;
+    // A validation error pinned to an image block belongs to that photo,
+    // not the shared connection (for example dimensions or decoding).
+    if (status === 400 && error?.type === 'invalid_request_error'
+        && /^messages\.\d+\.content\.\d+\.image(?:[.:\s]|$)/.test(error.message ?? '')) return {};
+    // Documented Authentication error; a 400 alone does not imply key scope.
+    if (status === 400 && error?.type === 'invalid_request_error'
+        && typeof error.message === 'string' && error.message.startsWith('This API key is not scoped to a workspace')) {
+      return { connectionReason: 'configuration', configurationCode: 'anthropic_workspace_required',
+        detail: 'Use a Claude Console API key scoped to one workspace. This provider has no Workspace ID field.' };
+    }
+    if ([400, 402, 404, 405].includes(status)
+        || (status === 429 && error?.type === 'rate_limit_error' && error?.details?.error_code === 'enforced_spend_limit_reached')) {
+      return { connectionReason: 'configuration' };
+    }
+    return [408, 409].includes(status) ? { connectionReason: 'unavailable' } : {};
+  }
+}
+
+function anthropicImage(image) {
+  const mediaType = String(image.mimeType ?? '').toLowerCase().split(';')[0].trim();
+  if (!(image.data instanceof Uint8Array) || !image.data.byteLength
+      || !['image/jpeg', 'image/png', 'image/gif', 'image/webp'].includes(mediaType)) {
+    throw new ProviderRequestError('Claude requires a JPEG, PNG, GIF or WebP image. Use an Immich preview for HEIC/RAW originals.', { status: 400 });
+  }
+  // The documented ceiling is 10 MB *encoded*, not raw bytes.
+  if (image.data.byteLength > ANTHROPIC_MAX_IMAGE_BYTES) {
+    throw new ProviderRequestError('Claude image exceeds 10 MB after encoding. Use a preview or thumbnail.', { status: 413 });
+  }
+  return { type: 'image', source: { type: 'base64', media_type: mediaType, data: Buffer.from(image.data).toString('base64') } };
+}
+
+function anthropicAnswer(response, { prose = false } = {}) {
+  if (response?.stop_reason === 'refusal') {
+    if (prose) return 'I cannot answer that request.';
+    throw new ProviderRequestError('Claude declined this request (refusal).', { status: 200 });
+  }
+  if (['max_tokens', 'model_context_window_exceeded'].includes(response?.stop_reason)) {
+    throw new ProviderRequestError('Claude answer was truncated by its token or context limit. Choose another model or increase the voice token budget for voice answers.', { status: 200, invalidResponse: true });
+  }
+  if (response?.stop_reason !== 'end_turn' || !Array.isArray(response.content)) {
+    throw new ProviderRequestError('Claude returned an unexpected stop reason or answer envelope.', { status: 200, invalidResponse: true });
+  }
+  const text = response.content.filter(block => block?.type === 'text' && typeof block.text === 'string')
+    .map(block => block.text).join(prose ? '\n' : '').trim();
+  if (!text) throw new ProviderRequestError('Claude response did not include text.', { status: 200, invalidResponse: true });
+  return text;
 }
 
 export class OpenAiProvider {
@@ -944,11 +1065,8 @@ async function postJsonTransport(provider, url, payload, extraHeaders, { signal,
 
   onResponse(response.status);
   if (!response.ok) {
-    const detail = await readErrorDetail(response, provider);
-    throw new ProviderRequestError(providerStatusMessage(provider.providerName, response.status, detail), {
-      status: response.status,
-      retryAfterMs: parseRetryAfterMs(response.headers?.get?.('retry-after')),
-    });
+    throw providerHttpError(provider, response.status, await readErrorText(response),
+      parseRetryAfterMs(response.headers?.get?.('retry-after')));
   }
   try {
     if (typeof response.body?.getReader !== 'function' && typeof response.text !== 'function') {
@@ -981,17 +1099,13 @@ async function postJsonTransport(provider, url, payload, extraHeaders, { signal,
 // bounded, and degrade to no detail rather than throw — the status-coded
 // error we are building is the failure that matters.
 const ERROR_DETAIL_MAX_BYTES = 64 * 1024;
-async function readErrorDetail(response, provider) {
+async function readErrorText(response) {
   try {
     // Injected doubles without a body stream (tests) read whole.
     if (typeof response.body?.getReader === 'function') {
-      return providerErrorDetail(
-        (await readBodyBounded(response, ERROR_DETAIL_MAX_BYTES, 'Provider')).toString('utf8'),
-        provider.providerName,
-        provider.apiKey,
-      );
+      return (await readBodyBounded(response, ERROR_DETAIL_MAX_BYTES, 'Provider')).toString('utf8');
     }
-    return providerErrorDetail(await response.text(), provider.providerName, provider.apiKey);
+    return await response.text();
   } catch {
     return '';
   }
@@ -1054,11 +1168,7 @@ function nodePostJson(provider, url, headers, payload, { signal = null, onRespon
         cleanup();
         const text = Buffer.concat(chunks).toString('utf8');
         if (response.statusCode < 200 || response.statusCode >= 300) {
-          const detail = providerErrorDetail(text, provider.providerName, provider.apiKey);
-          reject(new ProviderRequestError(providerStatusMessage(provider.providerName, response.statusCode, detail), {
-            status: response.statusCode,
-            retryAfterMs: parseRetryAfterMs(response.headers['retry-after']),
-          }));
+          reject(providerHttpError(provider, response.statusCode, text, parseRetryAfterMs(response.headers['retry-after'])));
           return;
         }
         try {
@@ -1088,6 +1198,21 @@ function nodePostJson(provider, url, headers, payload, { signal = null, onRespon
 }
 
 const OPENROUTER_RAW_ERROR_MAX_BYTES = 16 * 1024;
+
+function providerHttpError(provider, status, text, retryAfterMs) {
+  let classification = {};
+  if (provider.httpErrorOptions) {
+    let body = null;
+    try { body = JSON.parse(text); } catch { /* Status classification still applies. */ }
+    classification = provider.httpErrorOptions(status, body);
+  }
+  const detail = classification.detail
+    ? sanitizeDiagnostic(classification.detail, { secrets: [provider.apiKey] })
+    : providerErrorDetail(text, provider.providerName, provider.apiKey);
+  return new ProviderRequestError(providerStatusMessage(provider.providerName, status, detail), {
+    status, retryAfterMs, connectionReason: classification.connectionReason, configurationCode: classification.configurationCode,
+  });
+}
 
 function providerErrorDetail(text, providerName, apiKey) {
   try {

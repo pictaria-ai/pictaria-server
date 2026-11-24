@@ -23,9 +23,8 @@ export function loadPrompts(promptsDir, promptVersion = 'v1') {
   };
 }
 
-// maxBytes tightens the download cap for original-class fetches only (the
-// referee's per-image ceiling); thumbnails and previews are small and keep
-// the Immich client's default.
+// maxBytes can tighten the download cap for every rendition, for example a
+// provider's encoded-image limit or the referee's remaining group budget.
 export async function fetchImage(immich, assetId, imageSource, { maxBytes = null, signal = null } = {}) {
   const options = { ...(maxBytes === null ? {} : { maxBytes }), ...(signal ? { signal } : {}) };
   const extra = Object.keys(options).length ? options : undefined;
@@ -85,7 +84,8 @@ class RetryWaitCancelledError extends Error {
 }
 
 function isRetryableProviderOverload(error) {
-  return error?.name === 'ProviderRequestError' && (error.status === 429 || error.status === 503);
+  return error?.name === 'ProviderRequestError' && error.connectionReason !== 'configuration'
+    && (error.status === 429 || error.status === 503);
 }
 
 function overloadRetryDelay(error, retryIndex) {
@@ -456,19 +456,24 @@ async function executeBatch({
       const overloadRetryLimit = overloadRetriesSuppressed ? 0 : PROVIDER_OVERLOAD_RETRY_LIMIT;
       try {
         let image;
-        let previewDownloaded = imageSource === 'preview';
-        try {
-          image = await fetchImage(immich, assetId, imageSource);
-        } catch (fetchError) {
-          // An original past the download cap is still enrichable — degrade
-          // to the preview (same fallback the referee uses) instead of
-          // burning the asset's failure allowance on its file size.
-          if (fetchError?.name === 'ResponseTooLargeError' && imageSource === 'original') {
-            log(`${position} original for ${assetId} exceeds the download cap; using preview`);
-            image = await fetchImage(immich, assetId, 'preview');
-            previewDownloaded = true;
-          } else {
-            throw fetchError;
+        let previewDownloaded = false;
+        // Preserve the existing original → preview fallback. A provider with
+        // a tighter image-byte ceiling also bounds previews and may degrade
+        // once more to thumbnail, before any paid request is made.
+        const sources = imageSource === 'original' ? ['original', 'preview'] : [imageSource];
+        if (provider.maxImageBytes && imageSource !== 'thumbnail') sources.push('thumbnail');
+        for (const [rung, source] of sources.entries()) {
+          if (shouldStop()) break;
+          try {
+            image = await fetchImage(immich, assetId, source, { maxBytes: provider.maxImageBytes ?? null });
+            previewDownloaded = source === 'preview';
+            break;
+          } catch (fetchError) {
+            // Size alone should not consume an allowance when a smaller
+            // rendition is available. Never retry other download failures.
+            const next = sources[rung + 1];
+            if (fetchError?.name !== 'ResponseTooLargeError' || !next) throw fetchError;
+            log(`${position} ${source} for ${assetId} exceeds the download cap; using ${next}`);
           }
         }
         // Immich calls do not yet take the run's abort signal. If Cancel

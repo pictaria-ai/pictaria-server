@@ -76,8 +76,9 @@ model override. Turning Enrich off does not turn this role off. The selection is
 resolved when a job starts and pinned for that call. There is no automatic
 fallback to Venice or any other provider.
 
-All seven existing multi-image adapters are available: OpenAI, OpenRouter,
-Venice, LM Studio, local Ollama, cloud Ollama and OpenAI-compatible endpoints.
+All eight multi-image adapters are available: OpenAI, OpenRouter,
+Venice, LM Studio, local Ollama, cloud Ollama, OpenAI-compatible endpoints and
+Claude (Anthropic). Claude setup and model limits are in [Enrich](ENRICH.md#claude-anthropic).
 The selected model must accept multiple images and produce the requested JSON.
 Pictaria does not require each model name or custom endpoint to appear in an
 allowlist. Adapter support permits a bounded attempt; it does not certify that

@@ -15,7 +15,7 @@ import {
 } from '../../src/enrich/refereeService.mjs';
 import { annotateBursts } from '../../src/enrich/reviewService.mjs';
 import { Repository } from '../../src/enrich/repository.mjs';
-import { LmStudioProvider, OpenAiCompatibleProvider, ProviderRequestError } from '../../src/enrich/providers.mjs';
+import { AnthropicProvider, LmStudioProvider, OpenAiCompatibleProvider, ProviderRequestError } from '../../src/enrich/providers.mjs';
 import { ResponseTooLargeError } from '../../src/fetchWithTimeout.mjs';
 
 test('refereeGroupKey is order-insensitive and membership-sensitive', () => {
@@ -444,6 +444,111 @@ test('an oversized original degrades to its preview without buffering', async ()
     assert.deepEqual(fetchedSizes, ['g1-preview', 'g2-original', 'g3-original']);
     // The degrade lands in the status diagnostics, not just the log.
     assert.deepEqual(service.status().previewFallbacks, { oversized: 1, budget: 0, thumbnail: 0 });
+  });
+});
+
+function claudeRefereeReply(count) {
+  return Response.json({ stop_reason: 'end_turn', content: [{ type: 'text', text: JSON.stringify({
+    same_subject: true, photos: Array.from({ length: count }, (_, index) => ({
+      photo: index + 1, rank: index + 1, keep: index === 0, eyes_closed: 'no', note: 'Synthetic.', subject_group: 1,
+    })),
+  }) }] });
+}
+
+test('Claude keeper bounds originals at 7.5 MB and sends a smaller rendition without blocking the group', async () => withRepo(async repo => {
+  const downloads = [], sent = [];
+  const provider = new AnthropicProvider({ apiKey: 'synthetic-credential', modelName: 'claude-haiku-5-5', fetchImpl: async (_url, options) => {
+    const images = JSON.parse(options.body).messages[0].content.filter(block => block.type === 'image');
+    sent.push(...images.map(block => Buffer.from(block.source.data, 'base64').toString()));
+    return claudeRefereeReply(images.length);
+  } });
+  const service = new RefereeService({ repo, review: fakeReview(makeRows()), enrichRunner: { isRunning: () => false },
+    config: { enrichEnabled: true, curateRefereeEnabled: true, imageSource: 'original' }, immich: {
+      getAssetOriginal: async (id, { maxBytes }) => {
+        downloads.push([id, 'original', maxBytes]);
+        if (id === 'g1') {
+          if (maxBytes < 9_000_000) throw new ResponseTooLargeError('Immich', maxBytes);
+          return { data: Buffer.alloc(9_000_000), contentType: 'image/jpeg' };
+        }
+        return { data: Buffer.from(`${id}-original`), contentType: 'image/jpeg' };
+      },
+      getAssetThumbnail: async (id, source, { maxBytes }) => {
+        downloads.push([id, source, maxBytes]);
+        return { data: Buffer.from(`${id}-${source}`), contentType: 'image/webp' };
+      },
+    } });
+  service.makeProvider = () => provider;
+  await service.tick();
+  assert.deepEqual(sent, ['g1-preview', 'g2-original', 'g3-original']);
+  assert.ok(downloads.every(([, , cap]) => cap === 7_500_000));
+  assert.equal(repo.refereeStats().groups, 1);
+  assert.equal(service.status().lastError, null);
+  assert.deepEqual(service.status().previewFallbacks, { oversized: 1, budget: 0, thumbnail: 0 });
+}));
+
+test('Claude keeper defers an unusable image group and continues later groups without a five-minute retry loop', async () => withRepo(async repo => {
+  const sent = [];
+  const provider = new AnthropicProvider({ apiKey: 'synthetic-credential', modelName: 'claude-haiku-5-5', fetchImpl: async (_url, options) => {
+    const images = JSON.parse(options.body).messages[0].content.filter(block => block.type === 'image');
+    const ids = images.map(block => Buffer.from(block.source.data, 'base64').toString()); sent.push(ids);
+    return ids.includes('g1') ? Response.json({ error: { type: 'invalid_request_error',
+      message: 'messages.0.content.0.image.source: image dimensions exceed 8000 pixels' } }, { status: 400 }) : claudeRefereeReply(ids.length);
+  } });
+  const rows = makeRows().map(row => row.assetId.startsWith('d') ? { ...row, state: 'undecided' } : row);
+  const service = new RefereeService({ repo, review: fakeReview(rows), enrichRunner: { isRunning: () => false },
+    config: { enrichEnabled: true, curateRefereeEnabled: true }, immich: {
+      getAssetThumbnail: async id => ({ data: Buffer.from(id), contentType: 'image/jpeg' }),
+    } });
+  service.makeProvider = () => provider;
+  await service.tick(); await service.tick();
+  assert.deepEqual(sent, [['g1', 'g2', 'g3'], ['d1', 'd2']]);
+  assert.equal(repo.refereeStats().groups, 1);
+  assert.equal(service.status().lastError, null);
+  assert.equal(service.status().deferredGroups, 1);
+  assert.match(service.activity().errors[0].message, /deferred:.*400/);
+}));
+
+test('Claude image deferrals expire after changing source, provider or model without restarting the keeper', async () => {
+  for (const change of ['source', 'provider', 'model', 'source-during-request']) await withRepo(async repo => {
+    const calls = [];
+    const config = { enrichEnabled: true, curateRefereeEnabled: true, imageSource: 'original', defaultProvider: 'cloud_anthropic',
+      providers: {
+        cloud_anthropic: { apiKey: 'synthetic-credential', modelName: 'claude-haiku-5-5', fetchImpl: async (_url, options) => {
+          const body = JSON.parse(options.body); calls.push(['claude', body.model]);
+          if (calls.length === 1) {
+            if (change === 'source-during-request') config.imageSource = 'preview';
+            return Response.json({ error: { type: 'invalid_request_error',
+              message: 'messages.0.content.0.image.source: image dimensions exceed 8000 pixels' } }, { status: 400 });
+          }
+          return claudeRefereeReply(3);
+        } },
+        cloud_openai: { apiKey: 'synthetic-other-credential', modelName: 'gpt-5.5', fetchImpl: async () => {
+          calls.push(['openai', 'gpt-5.5']);
+          const reply = await claudeRefereeReply(3).json();
+          return Response.json({ output_text: reply.content[0].text });
+        } },
+      } };
+    const service = new RefereeService({ repo, config, review: fakeReview(makeRows()), enrichRunner: { isRunning: () => false }, immich: {
+      getAssetOriginal: async id => ({ data: Buffer.from(id), contentType: 'image/jpeg' }),
+      getAssetThumbnail: async id => ({ data: Buffer.from(id), contentType: 'image/webp' }),
+    } });
+    await service.tick();
+    if (change !== 'source-during-request') {
+      assert.equal(service.status().remaining, 0);
+      assert.equal(service.status().deferredGroups, 1);
+      await service.tick(); assert.equal(calls.length, 1, 'unchanged settings must not resubmit');
+      if (change === 'source') config.imageSource = 'preview';
+      if (change === 'provider') config.curateRefereeProvider = 'cloud_openai';
+      if (change === 'model') config.curateRefereeModel = 'claude-sonnet-5-5';
+      if (change === 'source') assert.equal(service.status().remaining, 1, 'Settings change is visible before the next tick');
+      await service.tick();
+    }
+    assert.equal(calls.length, 2, change);
+    assert.deepEqual(calls[1], change === 'provider' ? ['openai', 'gpt-5.5']
+      : ['claude', change === 'model' ? 'claude-sonnet-5-5' : 'claude-haiku-5-5']);
+    assert.equal(service.status().deferredGroups, 0);
+    assert.equal(repo.refereeStats().groups, 1);
+    assert.equal(service.status().lastError, null);
   });
 });
 

@@ -52,6 +52,25 @@ test('voice resolves the generic OpenAI-compatible provider without requiring a 
   assert.equal(provider.apiKey, '');
 });
 
+test('Claude voice resolves saved and per-command models and never retries a refusal or truncated answer', async () => {
+  let calls = 0, stop = 'refusal';
+  const config = configWith({ proseProvider: 'cloud_anthropic' }, { cloud_anthropic: {
+    apiKey: 'synthetic-credential', modelName: 'claude-haiku-5-5', fetchImpl: async () => {
+      calls++;
+      return Response.json({ stop_reason: stop, content: [{ type: 'text', text: 'partial text' }] });
+    },
+  } });
+  assert.equal(resolveProseProvider(config).modelName, 'claude-haiku-5-5');
+  const provider = resolveProseProvider(config, { model: 'claude-opus-5-5', openAiDefaultModel: 'gpt-5.5' });
+  assert.equal(provider.modelName, 'claude-opus-5-5');
+  assert.equal(provider.timeoutMs, 25000);
+  assert.equal((await generateProse({ provider, prompt: 'question', maxOutputTokens: 600 })).text, 'I cannot answer that request.');
+  assert.equal(calls, 1);
+  stop = 'max_tokens';
+  await assert.rejects(generateProse({ provider, prompt: 'question', maxOutputTokens: 600 }), { status: 502 });
+  assert.equal(calls, 2);
+});
+
 test('voice gets its own short timeout, not the enrichment budget', () => {
   const fast = resolveProseProvider(configWith({ proseProvider: 'local_ollama' }), { timeoutMs: 9000 });
   assert.equal(fast.timeoutMs, 9000);

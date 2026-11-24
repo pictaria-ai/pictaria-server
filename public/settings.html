@@ -584,6 +584,7 @@
             <option value="local_lmstudio">LM Studio (local — macOS only for "interesting")</option>
             <option value="local_ollama">Ollama (local)</option>
             <option value="openai_compatible">OpenAI-compatible (image support varies)</option>
+            <option value="cloud_anthropic">Claude (Anthropic)</option>
           </select>
           <div class="setting-desc">Uses the connection configured under <a href="#sec-providers" style="color: var(--p-accent)">AI Providers</a>.</div>
         </div>
@@ -785,6 +786,7 @@
       cloud_openai: 'OpenAI',
       openrouter: 'OpenRouter',
       venice: 'Venice',
+      cloud_anthropic: 'Claude (Anthropic)',
     };
 
     // Field layout for the generated sections. Labels come from the server;
@@ -825,6 +827,9 @@
         { head: 'Venice' },
         { key: 'veniceApiKey', sourceSection: 'enrich', type: 'secret', desc: 'Venice offers private models. Choose one marked “private” for contractual zero retention; “anonymized” only removes your identity.', docs: 'https://docs.venice.ai/overview/privacy' },
         { key: 'veniceModel', sourceSection: 'enrich', type: 'text', placeholder: 'e.g. qwen3-vl-235b-a22b' },
+        { head: 'Claude (Anthropic)' },
+        { key: 'anthropicApiKey', sourceSection: 'enrich', type: 'secret', desc: 'Use a Claude Console API key scoped to one workspace, with API billing enabled. A Claude.ai Pro or Max subscription does not include API usage. Anthropic receives the prompts and images you send.', docs: 'https://platform.claude.com/docs/en/manage-claude/authentication' },
+        { key: 'anthropicModel', sourceSection: 'enrich', type: 'text', placeholder: 'Enter a Claude model ID', desc: 'Defaults to Claude Haiku 5.5. You can enter another model ID that supports images and structured output; see the Claude model documentation.', docs: 'https://platform.claude.com/docs/en/models/overview' },
         { head: 'ElevenLabs' },
         { key: 'elevenLabsApiKey', sourceSection: 'voice', type: 'secret', desc: 'Used for text-to-speech in Pictaria Frame. Select ElevenLabs as the TTS provider under Voice TTS.' },
       ],
@@ -858,7 +863,7 @@
         { key: 'stackRefereeScope', type: 'select', labels: { uncertain: 'Uncertain stacks (recommended)', all: 'All stacks' }, desc: 'Uncertain stacks: check compositions that remain unresolved after similarity checks finish. All stacks: also check supported compositions; uses more AI calls. Applies to pending stacks without a current AI check.' },
         { key: 'keeperRefereeEnabled', type: 'switch', desc: 'Suggests the best photos within each stack. You can accept or change the suggestions, including choosing more than one photo.' },
         { division: 'Shared AI model', divisionDesc: 'Used by Stack Referee, the current-page referee and the upcoming Photo Referee. Configure connections under AI Providers. Stack Referee does not require Enrich to be on.' },
-        { key: 'refereeProvider', type: 'select', labels: { '': 'Follow Enrich provider', local_lmstudio: 'LM Studio (local)', local_ollama: 'Ollama (local)', openai_compatible: 'OpenAI-compatible', cloud_ollama: 'Ollama (cloud)', cloud_openai: 'OpenAI (cloud)', openrouter: 'OpenRouter (cloud)', venice: 'Venice (cloud)' }, desc: 'Follow Enrich provider uses the provider currently selected on the Enrich page; a change there applies when the next check starts. Choose a specific provider here to keep Curate independent.' },
+        { key: 'refereeProvider', type: 'select', labels: { '': 'Follow Enrich provider', local_lmstudio: 'LM Studio (local)', local_ollama: 'Ollama (local)', openai_compatible: 'OpenAI-compatible', cloud_ollama: 'Ollama (cloud)', cloud_openai: 'OpenAI (cloud)', openrouter: 'OpenRouter (cloud)', venice: 'Venice (cloud)', cloud_anthropic: 'Claude (Anthropic)' }, desc: 'Follow Enrich provider uses the provider currently selected on the Enrich page; a change there applies when the next check starts. Choose a specific provider here to keep Curate independent.' },
         { key: 'refereeModel', type: 'text', placeholder: 'empty = the provider’s usual model', desc: 'Optional. Leave blank to use the chosen provider’s configured model. If the referee follows Enrich, this override must also be valid for every provider you select there; clear it or choose a fixed referee provider when switching providers. A smaller vision model works well here, but it must accept multiple images.', docs: 'https://github.com/pictaria-ai/pictaria-server/blob/main/docs/CURATE-STACK-REFEREE.md#request-and-response-boundary' },
         { group: 'Current Curate page', groupDesc: 'Applies only to the existing Curate page, not Curate Preview.' },
         { key: 'refereeEnabled', type: 'switch', desc: 'Recommends a keeper and shows a gold star. Requires Stacks and Enrich to be on; waits for the current Enrich run to finish.' },
@@ -1751,6 +1756,7 @@
           settings.enrich.openRouterApiKey?.configured,
           settings.enrich.veniceApiKey?.configured,
           settings.voice.elevenLabsApiKey?.configured,
+          settings.enrich.anthropicApiKey?.configured && settings.enrich.anthropicModel?.value,
         ].filter(Boolean).length;
         el('sub-providers').textContent = configuredProviders
           ? `${configuredProviders} configured`

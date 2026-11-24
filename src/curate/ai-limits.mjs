@@ -158,7 +158,7 @@ export class CurateAiLimits {
       let state = 'ready', reason = null, retryAt = null;
       if (error instanceof ProviderRequestError) {
         if ([401, 403].includes(error.status)) { state = 'paused'; reason = 'auth'; }
-        else if ([404, 405].includes(error.status)) { state = 'paused'; reason = 'configuration'; }
+        else if (error.connectionReason === 'configuration' || [404, 405].includes(error.status)) { state = 'paused'; reason = 'configuration'; }
         else if (error.invalidResponse) { /* Answer failure, not an outage. */ }
         else if (error.cancelled) {
           if (row.state === 'paused' && row.reason !== 'unavailable') {

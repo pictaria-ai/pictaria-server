@@ -171,7 +171,7 @@ const ENRICH_FIELDS = {
     label: 'Selected provider',
     // Enum order is dropdown order: local options first, then cloud,
     // alphabetical within each group.
-    enum: ['local_lmstudio', 'local_ollama', 'openai_compatible', 'cloud_ollama', 'cloud_openai', 'openrouter', 'venice'],
+    enum: ['local_lmstudio', 'local_ollama', 'openai_compatible', 'cloud_ollama', 'cloud_openai', 'openrouter', 'venice', 'cloud_anthropic'],
     read: (config) => config.defaultProvider,
     apply: (config, value) => {
       config.defaultProvider = value;
@@ -315,6 +315,23 @@ const ENRICH_FIELDS = {
       config.providers.venice.modelName = value;
     },
   },
+  anthropicApiKey: {
+    env: 'ANTHROPIC_API_KEY',
+    label: 'Claude API key',
+    secret: true,
+    read: (config) => config.providers.cloud_anthropic?.apiKey ?? '',
+    apply: (config, value) => {
+      (config.providers.cloud_anthropic ??= {}).apiKey = value;
+    },
+  },
+  anthropicModel: {
+    env: 'ANTHROPIC_MODEL',
+    label: 'Claude model',
+    read: (config) => config.providers.cloud_anthropic?.modelName ?? '',
+    apply: (config, value) => {
+      (config.providers.cloud_anthropic ??= {}).modelName = value;
+    },
+  },
   // Prompt overrides. Empty means the built-in prompt files (prompts/ dir)
   // are used; a run with either override set records prompt version
   // "<version>-custom" so history stays honest.
@@ -388,7 +405,7 @@ const VOICE_FIELDS = {
   proseProvider: {
     env: 'VOICE_PROSE_PROVIDER',
     label: 'Voice answer provider',
-    enum: ['cloud_openai', 'local_lmstudio', 'local_ollama', 'openai_compatible', 'cloud_ollama', 'openrouter', 'venice'],
+    enum: ['cloud_openai', 'local_lmstudio', 'local_ollama', 'openai_compatible', 'cloud_ollama', 'openrouter', 'venice', 'cloud_anthropic'],
   },
   interestingModel: { env: 'VOICE_INTERESTING_MODEL', label: 'Interesting model' },
   askModel: { env: 'VOICE_ASK_MODEL', label: 'Ask model' },
@@ -581,7 +598,7 @@ const CURATE_FIELDS = {
   refereeProvider: {
     env: 'CURATE_REFEREE_PROVIDER',
     label: 'Curate AI provider',
-    enum: ['', 'local_lmstudio', 'local_ollama', 'openai_compatible', 'cloud_ollama', 'cloud_openai', 'openrouter', 'venice'],
+    enum: ['', 'local_lmstudio', 'local_ollama', 'openai_compatible', 'cloud_ollama', 'cloud_openai', 'openrouter', 'venice', 'cloud_anthropic'],
     read: (config) => config.curateRefereeProvider,
     apply: (config, value) => {
       config.curateRefereeProvider = value;
@@ -634,7 +651,7 @@ const SECTIONS = {
 
 const PROTOTYPE_SPECIAL_KEYS = new Set(['__proto__', 'prototype', 'constructor']);
 
-export const SETTINGS_VERSION = 10;
+export const SETTINGS_VERSION = 11;
 
 // Only credentials whose destination authority can vary belong here. Fixed
 // public APIs (OpenAI, ElevenLabs, Geoapify) do not need a stored binding.
@@ -759,6 +776,8 @@ const SETTINGS_MIGRATIONS = new Map([
   [8, (state) => ({ ...structuredClone(state), version: 9 })],
   // Version 10 adds curate.embeddingStacks (PIC-392); nothing to convert.
   [9, (state) => ({ ...structuredClone(state), version: 10 })],
+  // Adds the optional Claude connection and provider choices without selecting it.
+  [10, (state) => ({ ...structuredClone(state), version: 11 })],
 ]);
 
 // The persisted contract intentionally excludes labels and help copy: those

@@ -44,6 +44,75 @@ function executor(f) { return new CurateAiExecution({ attempts: f.repo.curate.ai
 function job(provider, submit = async () => ({})) { return { role: 'stack', provider, backendKey: aiBackendKey(provider), inputKey: 'a'.repeat(64),
   photoIds: ['a', 'b'], isCurrent: () => true, prepare: async check => check(), submit, validate: x => x, accept: () => {} }; }
 
+test('Claude refusal and truncation charge only the bounded photo allowance and leave the connection ready', async () => {
+  for (const stop_reason of ['refusal', 'max_tokens']) await fixture(async f => {
+    let calls = 0;
+    f.config.defaultProvider = 'cloud_anthropic';
+    f.config.providers.cloud_anthropic = { apiKey: 'synthetic-credential', modelName: 'claude-haiku-5-5', fetchImpl: async () => {
+      calls++; return Response.json({ stop_reason, content: [{ type: 'text', text: JSON.stringify(sampleOutput()) }] });
+    } };
+    for (let i = 0; i < 3; i++) { const run = f.runner(); run.start({ assetIds: ['declined'] }); await run.runPromise; }
+    assert.equal(calls, 2);
+    assert.equal(f.repo.db.prepare("SELECT COUNT(*) n FROM processing_runs WHERE status='failed'").get().n, 2);
+    const records = f.repo.db.prepare('SELECT status,error FROM processing_runs').all();
+    assert.equal(records.length, 2);
+    assert.ok(records.every(row => row.status === 'failed'));
+    assert.match(records[0].error, stop_reason === 'refusal' ? /declined.*refusal/ : /truncated/);
+    assert.equal(f.connections.status(f.connections.provider('enrich')).state, 'ready');
+    assert.doesNotMatch(JSON.stringify(records), /synthetic-credential/);
+  });
+});
+
+test('Claude configuration faults pause the saved connection without charging photos or retrying spend caps', async () => {
+  for (const [status, error] of [
+    [400, { type: 'invalid_request_error', message: 'This API key is not scoped to a workspace.' }],
+    [402, { type: 'billing_error', message: 'Billing required' }],
+    [404, { type: 'not_found_error', message: 'Unknown model' }],
+    [429, { type: 'rate_limit_error', details: { error_code: 'enforced_spend_limit_reached' } }],
+  ]) await fixture(async f => {
+    let calls = 0;
+    f.config.defaultProvider = 'cloud_anthropic';
+    f.config.providers.cloud_anthropic = { apiKey: 'synthetic-credential', modelName: 'claude-haiku-5-5', fetchImpl: async () => {
+      calls++; return Response.json({ error }, { status });
+    } };
+    const run = f.runner(); run.start({ assetIds: ['first', 'untouched'] }); await run.runPromise;
+    assert.equal(calls, 1);
+    assert.equal(f.repo.db.prepare("SELECT COUNT(*) n FROM processing_runs WHERE status='failed'").get().n, 0);
+    assert.equal(f.repo.db.prepare('SELECT status FROM processing_runs').get().status, 'failed_infra');
+    assert.equal(f.connections.status(f.connections.provider('enrich')).reason, 'configuration');
+    assert.equal(f.connections.describe()[0].state, 'paused');
+    assert.doesNotMatch(JSON.stringify(f.connections.describe()), /synthetic-credential/);
+    if (status === 400) {
+      const checked = await f.connections.verify('enrich');
+      assert.equal(checked.verified, false);
+      assert.match(checked.message, /workspace-scoped Claude Console API key/);
+      assert.doesNotMatch(JSON.stringify(checked), /synthetic-credential/);
+    }
+  });
+});
+
+test('a Claude image-specific 400 leaves the connection ready, processes the next photo and exhausts only its own allowance', async () => fixture(async f => {
+  const seen = [];
+  f.config.defaultProvider = 'cloud_anthropic';
+  f.config.providers.cloud_anthropic = { apiKey: 'synthetic-credential', modelName: 'claude-haiku-5-5', fetchImpl: async (_url, options) => {
+    const sent = JSON.parse(options.body).messages[0].content[0].source.data;
+    const id = Buffer.from(sent, 'base64').toString(); seen.push(id);
+    return id === 'panorama' ? Response.json({ error: { type: 'invalid_request_error',
+      message: 'messages.0.content.0.image.source: image dimensions exceed 8000 pixels' } }, { status: 400 })
+      : Response.json({ stop_reason: 'end_turn', content: [{ type: 'text', text: JSON.stringify(sampleOutput()) }] });
+  } };
+  const photoClient = { ...immich, getAssetThumbnail: async id => ({ data: Buffer.from(id), contentType: 'image/jpeg' }) };
+  for (let i = 0; i < 3; i++) {
+    const run = f.runner({ immich: photoClient }); run.start({ assetIds: ['panorama', 'ordinary'] }); await run.runPromise;
+    assert.equal(run.status().error, null);
+    assert.equal(f.connections.status(f.connections.provider('enrich')).state, 'ready');
+  }
+  assert.deepEqual(seen, ['panorama', 'ordinary', 'panorama']);
+  assert.equal(f.repo.db.prepare("SELECT COUNT(*) n FROM processing_runs WHERE status='failed'").get().n, 2);
+  assert.equal(f.repo.db.prepare("SELECT COUNT(*) n FROM processing_runs WHERE status='failed_infra'").get().n, 0);
+  assert.equal(f.repo.hasAnySuccessfulRun('ordinary'), true);
+}));
+
 test('first authentication failure stops Enrich, preserves the queue and blocks affected Curate without charging it', async () => fixture(async f => {
   let calls = 0, finished = 0;
   f.config.providers.local_lmstudio.fetchImpl = async () => { calls++; return rejected(401); };

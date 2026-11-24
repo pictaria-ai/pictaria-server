@@ -21,6 +21,7 @@ import {
 } from '../../src/backup.mjs';
 import { loadConfig } from '../../src/config.mjs';
 import { Repository } from '../../src/enrich/repository.mjs';
+import { SettingsStore } from '../../src/settings.mjs';
 import { tableExists } from '../../src/migrations.mjs';
 import { PersistentStateGuard } from '../../src/persistentState.mjs';
 import {
@@ -58,6 +59,30 @@ test('a new installation records the current state baseline without creating an 
   });
 });
 
+test('contract 28 snapshots v10 settings before adding Claude and refuses a contract 27 downgrade', async () => {
+  await withInstallation(async ({ config, guard: initialGuard }) => {
+    const legacy = { version: 10, credentialBindings: {}, enrich: { defaultProvider: 'venice', veniceModel: 'existing-model' } };
+    writeFileSync(config.settingsPath, JSON.stringify(legacy));
+    initialGuard.preflight();
+    initialGuard.seal({ successfulStateVersion: 27, successfulServerVersion: '1.2.3' });
+    const upgrade = upgradeGuard(config, '2026-11-22T02:00:00Z'); upgrade.preflight();
+    const prepared = await preparePersistentStateUpgrade({ guard: upgrade, config,
+      currentServerVersion: '1.2.3', now: new Date('2026-11-22T02:00:00Z') });
+    assert.equal(prepared.action, 'create');
+    assert.equal(prepared.fromStateVersion, 27); assert.equal(prepared.toStateVersion, 28);
+    const saved = JSON.parse(readFileSync(join(config.backup.dir, prepared.snapshotName, 'settings.json'), 'utf8'));
+    assert.deepEqual(saved, legacy);
+    const settings = new SettingsStore({ filePath: config.settingsPath, config, env: {} }).load();
+    assert.equal(config.defaultProvider, 'venice');
+    settings.update({ enrich: { anthropicApiKey: 'synthetic-credential', anthropicModel: 'claude-sonnet-5-5', defaultProvider: 'cloud_anthropic' } });
+    upgrade.seal({ successfulStateVersion: 28, successfulServerVersion: '1.2.3' });
+    const downgrade = upgradeGuard(config, '2026-11-22T03:00:00Z'); downgrade.preflight();
+    await assert.rejects(preparePersistentStateUpgrade({ guard: downgrade, config, currentStateVersion: 27,
+      currentServerVersion: '1.2.3' }), { code: 'persistent_state_downgrade_refused' });
+    assert.equal(JSON.parse(readFileSync(config.settingsPath, 'utf8')).enrich.defaultProvider, 'cloud_anthropic');
+  });
+});
+
 test('the activity schema contract creates a recovery point before changing an existing v1 installation', async () => {
   await withInstallation(async ({ config, guard: initialGuard }) => {
     // Reproduce the earlier production shape: enrichment schema v5 without
@@ -79,7 +104,7 @@ test('the activity schema contract creates a recovery point before changing an e
       currentServerVersion: '0.1.0-with-activity',
       now: new Date('2026-08-08T02:00:00Z'),
     });
-    assert.equal(PERSISTENT_STATE_VERSION, 27);
+    assert.equal(PERSISTENT_STATE_VERSION, 28);
     assert.equal(prepared.action, 'create');
 
     const snapshot = new DatabaseSync(join(config.backup.dir, prepared.snapshotName, 'enrichment.sqlite'), {
@@ -96,7 +121,7 @@ test('the activity schema contract creates a recovery point before changing an e
       successfulStateVersion: PERSISTENT_STATE_VERSION,
       successfulServerVersion: '0.1.0-with-activity',
     });
-    assert.equal(sealed.upgrade.stateVersion, 27);
+    assert.equal(sealed.upgrade.stateVersion, 28);
     assert.equal(sealed.upgrade.recoveryPoint.snapshotName, prepared.snapshotName);
   });
 });
@@ -116,7 +141,7 @@ test('a zero-model v2 installation creates a complete schedule-confirmation reco
       now: new Date('2026-08-08T02:00:00Z'),
     });
 
-    assert.equal(PERSISTENT_STATE_VERSION, 27);
+    assert.equal(PERSISTENT_STATE_VERSION, 28);
     assert.deepEqual({
       action: prepared.action,
       fromStateVersion: prepared.fromStateVersion,
@@ -124,7 +149,7 @@ test('a zero-model v2 installation creates a complete schedule-confirmation reco
     }, {
       action: 'create',
       fromStateVersion: 2,
-      toStateVersion: 27,
+      toStateVersion: 28,
     });
     assert.equal(
       readFileSync(join(config.backup.dir, prepared.snapshotName, 'smart-albums.json'), 'utf8'),
@@ -146,7 +171,7 @@ test('a zero-model v2 installation creates a complete schedule-confirmation reco
       purpose: {
         type: 'pre-migration',
         fromStateVersion: 2,
-        toStateVersion: 27,
+        toStateVersion: 28,
         fromServerVersion: '0.1.0-before-schedule-confirmation',
         toServerVersion: '0.1.0-with-schedule-confirmation',
       },

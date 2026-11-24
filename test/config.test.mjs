@@ -12,6 +12,20 @@ import {
   validatePersistentStatePaths,
   validateServerAuthConfig,
 } from '../src/config.mjs';
+import { ANTHROPIC_DEFAULT_MODEL } from '../src/enrich/anthropicContract.mjs';
+
+test('Claude configuration defaults to Haiku 5.5 and leaves other providers unchanged', () => {
+  const defaults = loadConfig({});
+  assert.equal(ANTHROPIC_DEFAULT_MODEL, 'claude-haiku-5-5');
+  assert.deepEqual(defaults.providers.cloud_anthropic, { apiKey: '', modelName: ANTHROPIC_DEFAULT_MODEL });
+  assert.equal(loadConfig({ ANTHROPIC_MODEL: '' }).providers.cloud_anthropic.modelName, 'claude-haiku-5-5', 'empty Compose forwarding retains the default');
+  const configured = loadConfig({ ANTHROPIC_API_KEY: 'synthetic-credential', ANTHROPIC_MODEL: 'claude-sonnet-5-5' });
+  assert.deepEqual(configured.providers.cloud_anthropic, { apiKey: 'synthetic-credential', modelName: 'claude-sonnet-5-5' });
+  for (const name of Object.keys(defaults.providers).filter(name => name !== 'cloud_anthropic')) {
+    assert.deepEqual(configured.providers[name], defaults.providers[name]);
+  }
+  assert.equal(configured.defaultProvider, defaults.defaultProvider);
+});
 
 test('service URLs reject query and fragment delimiters and append endpoint paths structurally', () => {
   for (const delimiter of ['?', '?target=internal', '#', '#fragment']) {

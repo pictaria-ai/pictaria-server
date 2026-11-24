@@ -7,6 +7,7 @@ import { MAX_STACK_MEMBERS } from './reviewService.mjs';
 import { fetchImage, PROVIDER_RETRY_AFTER_CAP_MS } from './runner.mjs';
 import { buildRefereeRequest, normalizePicks } from './referee-contract.mjs';
 import { createCurateAiProvider } from '../curate/ai-config.mjs';
+import { enrichmentProviderConfiguration, ProviderRequestError } from './providers.mjs';
 import { configuredSecrets, sanitizeDiagnostic } from '../diagnostics.mjs';
 
 export { REFEREE_PROMPT_VERSION, buildRefereeUserPrompt, refereeJsonSchema, normalizePicks } from './referee-contract.mjs';
@@ -87,7 +88,7 @@ export class RefereeService {
     // skipped for this process lifetime so one pathological group can't
     // head-of-line block the queue; retried after a restart (or a budget
     // change, which implies one).
-    this._deferredGroups = new Map(); // key → { at, reason }
+    this._deferredGroups = new Map(); // key → { at, reason, imageConfigurationKey? }
   }
 
   start() {
@@ -182,6 +183,7 @@ export class RefereeService {
     let remaining = null;
     try {
       if (this.enabled()) {
+        this.clearChangedImageDeferrals();
         const pending = this.pendingGroups();
         // A deferred key that is no longer pending — its members decided by
         // hand, or its membership changed (which mints a new key) — is done
@@ -245,6 +247,7 @@ export class RefereeService {
       // request at a time and yields between groups; preparation rechecks the
       // live controls, including waiting for Enrich to finish.
       while (this.canStartWork()) {
+        this.clearChangedImageDeferrals();
         const group = this.pendingGroups().find(
           (g) => !this.repo.refereeHasGroup(g.key) && !this._deferredGroups.has(g.key),
         );
@@ -290,6 +293,23 @@ export class RefereeService {
     return createCurateAiProvider(this.config, { minimumTimeoutMs: REFEREE_TIMEOUT_MS });
   }
 
+  imageConfigurationKey(provider = this.makeProvider()) {
+    // No credentials or image data belong in a deferral's identity.
+    return createHash('sha256').update(JSON.stringify({
+      provider: enrichmentProviderConfiguration(provider), imageSource: this.config.imageSource ?? 'preview',
+    })).digest('hex');
+  }
+
+  clearChangedImageDeferrals() {
+    if (![...this._deferredGroups.values()].some(entry => entry.imageConfigurationKey)) return;
+    let current;
+    try { current = this.imageConfigurationKey(); }
+    catch { return; } // An incomplete new connection cannot submit yet.
+    for (const [key, entry] of this._deferredGroups) {
+      if (entry.imageConfigurationKey && entry.imageConfigurationKey !== current) this._deferredGroups.delete(key);
+    }
+  }
+
   // The configured aggregate ceiling for one group's images, every source
   // counted. REFEREE_GROUP_BUDGET_MB lowers it for small containers.
   groupByteBudget() {
@@ -319,7 +339,7 @@ export class RefereeService {
   // a later member whose thumbnail would have fit had everyone degraded).
   // Degrade counters accumulate in `stats`, not on the instance, so a
   // discarded attempt never pollutes the diagnostics.
-  async attemptGroupFetch(group, chain, startRung, budget) {
+  async attemptGroupFetch(group, chain, startRung, budget, maxImageBytes = REFEREE_MAX_IMAGE_BYTES) {
     const images = [];
     const stats = { oversized: 0, budget: 0, thumbnail: 0 };
     let groupBytes = 0;
@@ -330,7 +350,7 @@ export class RefereeService {
         // Stop before another fetch (including a smaller-rendition fallback).
         if (!this.canStartWork()) return { cancelled: true };
         const source = chain[rung];
-        const cap = Math.min(REFEREE_MAX_IMAGE_BYTES, budget - groupBytes);
+        const cap = Math.min(maxImageBytes, budget - groupBytes);
         if (cap <= 0) return null;
         try {
           fetched = await fetchImage(this.immich, member.assetId, source, { maxBytes: cap });
@@ -339,15 +359,15 @@ export class RefereeService {
             throw error;
           }
           const next = chain[rung + 1];
-          const cause = cap < REFEREE_MAX_IMAGE_BYTES
+          const cause = cap < maxImageBytes
             ? `would push the group past its ${Math.round(budget / 1024 / 1024)}MB byte budget`
-            : `exceeds ${Math.round(REFEREE_MAX_IMAGE_BYTES / 1024 / 1024)}MB`;
+            : `exceeds ${Math.round(maxImageBytes / 1024 / 1024)}MB`;
           if (!next) {
             this.log(`referee: ${member.assetId} ${source} ${cause}; nothing smaller to try`);
             return null;
           }
           if (source === 'original') {
-            stats[cap < REFEREE_MAX_IMAGE_BYTES ? 'budget' : 'oversized'] += 1;
+            stats[cap < maxImageBytes ? 'budget' : 'oversized'] += 1;
           } else {
             stats.thumbnail += 1;
           }
@@ -391,6 +411,10 @@ export class RefereeService {
     this._currentStartedAt = Date.now();
     const started = Date.now();
     const budget = this.groupByteBudget();
+    // Capture alongside the source chain: Settings may change during downloads
+    // or inference, and a stale failure must not defer the new configuration.
+    const imageConfigurationKey = provider.providerName === 'cloud_anthropic' ? this.imageConfigurationKey(provider) : null;
+    const maxImageBytes = Math.min(REFEREE_MAX_IMAGE_BYTES, provider.maxImageBytes ?? Infinity);
     const chain = this.memberSourceChain();
     // fetchImage returns { data, contentType }; providers expect mimeType
     // (same remap the enrich runner does — without it the data URL comes
@@ -411,7 +435,7 @@ export class RefereeService {
       if (startRung > 0) {
         this.log(`referee: group won't fit with per-member degradation; retrying every member at ${chain[startRung]} size`);
       }
-      result = await this.attemptGroupFetch(group, chain, startRung, budget);
+      result = await this.attemptGroupFetch(group, chain, startRung, budget, maxImageBytes);
       if (result?.cancelled) return false;
       if (result && startRung > 0) {
         // A whole-tier restart degraded every member below the configured
@@ -441,7 +465,22 @@ export class RefereeService {
     this._previewFallbacks.thumbnail += result.stats.thumbnail;
     const images = result.images;
     const submit = () => provider.analyzeImages(images, buildRefereeRequest(group.members));
-    const { normalizedOutput } = await (this.aiConnections ? this.aiConnections.run(provider, submit) : submit());
+    let normalizedOutput;
+    try {
+      ({ normalizedOutput } = await (this.aiConnections ? this.aiConnections.run(provider, submit) : submit()));
+    } catch (error) {
+      if (provider.providerName !== 'cloud_anthropic' || !(error instanceof ProviderRequestError)
+          || error.infrastructure || ![400, 413].includes(error.status)) throw error;
+      // The legacy keeper has no per-photo retry ledger. Use its existing
+      // deferral for an unusable rendition, allowing later groups to progress.
+      // A provider/model/image-source change or restart permits another try.
+      const reason = sanitizeDiagnostic(error.message, { secrets: configuredSecrets(this.config, this.immich) });
+      this._deferredGroups.set(group.key, { at: new Date().toISOString(), reason, imageConfigurationKey });
+      this._recentErrors.unshift({ at: new Date().toISOString(), message: `deferred: ${reason}` });
+      this._recentErrors.length = Math.min(this._recentErrors.length, 50);
+      this.log(`referee: deferred — ${reason}`);
+      return false;
+    }
     const picks = normalizePicks(normalizedOutput, group.members);
     this.repo.refereeRecordGroup({
       groupKey: group.key,
