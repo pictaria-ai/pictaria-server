@@ -31,7 +31,13 @@
       color: var(--p-muted);
       margin: 0 0 7px;
     }
-    .server-line { display: flex; align-items: center; gap: 8px; font-size: 13px; color: var(--p-ink); flex-wrap: wrap; }
+    /* The text wraps beside its dot, which stays centered on the first line,
+       so a long message (a list of missing Immich permissions) never drops
+       below the dot or runs past the panel at phone width. One-line rows
+       look as before. */
+    .server-line { display: flex; align-items: flex-start; gap: 8px; font-size: 13px; line-height: 1.45; color: var(--p-ink); }
+    .server-line > .p-dot { flex: none; margin-top: calc((1.45em - 8px) / 2); }
+    .server-line > :last-child { flex: 1; min-width: 0; overflow-wrap: anywhere; }
     .server-line + .server-line { margin-top: 6px; }
     .cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 14px; }
     .feature { display: block; text-decoration: none; color: var(--p-ink); padding: 16px; transition: border-color 120ms, transform 120ms; }
@@ -280,11 +286,17 @@
         const version = health.immichVersion ? `v${health.immichVersion}` : '';
         const connectedVersion = version ? ` · ${version}` : '';
         const immichVersion = version ? `Immich ${version}` : 'Immich';
+        // Named in the Server's order, so the person knows which boxes to
+        // tick on the Immich key without comparing it to the setup guide.
+        const missing = Array.isArray(health.immichMissingPermissions)
+          ? health.immichMissingPermissions : [];
         const immich = {
           connected: ['ok', `Immich connected${connectedVersion}`],
           unreachable: ['bad', 'Immich unreachable'],
           unauthorized: ['bad', 'Immich rejected the API key'],
-          missing_permissions: ['warn', 'Immich key is missing permissions'],
+          missing_permissions: ['warn', missing.length
+            ? `Immich key is missing permissions: ${missing.join(', ')}`
+            : 'Immich key is missing permissions'],
           incompatible_version: ['bad', `${immichVersion} is unsupported — requires 2.0 or newer`],
           incompatible_api: ['bad', `${immichVersion} has an incompatible API`],
           not_configured: ['warn', 'Immich not configured'],
