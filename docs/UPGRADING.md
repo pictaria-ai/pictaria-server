@@ -31,7 +31,7 @@ Pictaria backups do not include Immich's data.
 ## Upgrade — Docker
 
 ```sh
-PICTARIA_RELEASE=v1.2.3 # replace with the release you are installing
+PICTARIA_RELEASE=v1.2.4 # replace with the release you are installing
 curl -fsSL -o docker-compose.release.yml \
   "https://raw.githubusercontent.com/pictaria-ai/pictaria-server/${PICTARIA_RELEASE}/docker-compose.yml"
 diff -u docker-compose.yml docker-compose.release.yml
@@ -52,7 +52,7 @@ docker compose -f docker-compose.release.yml config --images
 ```
 
 The printed image must end in the numeric image version corresponding to the
-source release you selected (`v1.2.3` uses image tag `1.2.3`). Next, make a
+source release you selected (`v1.2.4` uses image tag `1.2.4`). Next, make a
 rollback definition from the currently running Compose file. It should already
 resolve to the version you noted under Settings → Server; verify it before
 replacing the active definition:
@@ -79,7 +79,7 @@ test -z "$(git status --porcelain)" || {
   echo "Stop: preserve or reconcile local changes before upgrading."
   exit 1
 }
-PICTARIA_RELEASE=v1.2.3 # replace with the release you are installing
+PICTARIA_RELEASE=v1.2.4 # replace with the release you are installing
 git fetch --tags --prune
 git switch --detach "$PICTARIA_RELEASE"
 docker compose up -d --build
@@ -114,7 +114,7 @@ test -z "$(git status --porcelain)" || {
   echo "Stop: preserve or reconcile local changes before upgrading."
   exit 1
 }
-PICTARIA_RELEASE=v1.2.3 # replace with the release you are installing
+PICTARIA_RELEASE=v1.2.4 # replace with the release you are installing
 git fetch --tags --prune
 git switch --detach "$PICTARIA_RELEASE"
 ```
@@ -275,6 +275,32 @@ pre-flight checklist — see
 
 Do not upgrade both on the same day. If something breaks afterwards, you want
 to know which upgrade caused it.
+
+## Upgrading to v1.2.4
+
+v1.2.4 names the missing Immich API-key permissions on the home page, so you
+can see which permissions to add. Long lists wrap inside the status panel on
+a phone. No new setting or data-folder change is needed, and no Immich or
+Pictaria Frame upgrade is required.
+
+From **v1.2.3**, this is a code-only update: **persistent-state contract 15,
+Enrich schema 12, and settings version 7 remain unchanged**. Create a complete
+backup, then install the matching v1.2.4 source or container image. If needed,
+stop the server and return to v1.2.3 without a snapshot restore, provided no
+other migration occurred. The container still runs Node.js 22.23.5; CI and
+publication checks now use that exact version too.
+
+v1.2.0 through v1.2.2 installations share the same contracts and can also
+update directly; they gain the fixes described in the notes below. Older
+v1.0.x and v1.1.0 installations can upgrade directly to v1.2.4. They still
+perform the [v1.2 data migrations](#upgrading-to-v120) described below;
+rollback to those older versions requires the complete pre-migration snapshot.
+
+After updating, confirm Settings → Server shows v1.2.4, then restart the
+container and confirm it stays healthy. If the home page reports missing
+Immich permissions, add the named permissions to the key in Immich. With
+Docker Compose, `docker compose exec pictaria node --version` still prints
+`v22.23.5`.
 
 ## Upgrading to v1.2.3
 

@@ -24,7 +24,7 @@ jobs:
           fetch-depth: 0
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
-          node-version: 22
+          node-version-file: .node-version
       - name: Verify commit sign-offs
         env:
           DCO_BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.before }}
@@ -39,7 +39,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
-          node-version: 22
+          node-version-file: .node-version
       - run: npm run check:publication
       - run: npm test
 
@@ -51,7 +51,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
-          node-version: 22
+          node-version-file: .node-version
       - name: Verify settings, migrations, persistent state, and backups
         run: node --test test/settings.test.mjs test/migrations.test.mjs test/persistentState.test.mjs test/backup.test.mjs test/upgrade/upgrade-safety.test.mjs test/upgrade/whole-install.test.mjs
 
@@ -91,6 +91,11 @@ jobs:
           touch prompts/publication-probe.sqlite
       - name: Build image (no push)
         run: docker build -t pictaria-server:ci .
+      - name: Verify container Node security release
+        run: |
+          docker run --rm --network none --entrypoint node \
+            -e EXPECTED_NODE_VERSION="$(cat .node-version)" pictaria-server:ci \
+            -e 'console.log(`Container Node: ${process.versions.node}`); if (process.versions.node !== process.env.EXPECTED_NODE_VERSION) throw new Error(`Unexpected Node version: ${process.versions.node}`)'
       - name: Verify nested local files stay out of the image
         run: |
           docker run --rm --entrypoint sh pictaria-server:ci -c '

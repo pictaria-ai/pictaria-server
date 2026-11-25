@@ -18,7 +18,7 @@ among:
 
 - a working connection, including the detected Immich version;
 - an API key that Immich rejects;
-- a key missing permissions Pictaria needs;
+- a key missing permissions Pictaria needs, naming each missing permission;
 - an Immich version below 2.0;
 - an endpoint response that does not provide the compatible API contract; and
 - a server that cannot be reached.
