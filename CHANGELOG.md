@@ -460,14 +460,6 @@ All notable changes to Pictaria Server are documented here. This project follows
   Retrying after a lost replacement response resolves the current successor,
   including after restart, so abandoned views do not retain obsolete snapshots.
 
-### Changed
-
-- When the Immich API key lacks permissions Pictaria needs, the home page now
-  names them, for example "Immich key is missing permissions: tag.create,
-  tag.asset", so you can tell which boxes the key is missing without comparing
-  it to the setup guide. A long list wraps inside the status panel on a phone.
-  Other Immich statuses are unchanged (GitHub #88).
-
 ### Fixed
 
 - The stacking lab's **Check selected group** pass no longer stops early with
@@ -479,6 +471,34 @@ All notable changes to Pictaria Server are documented here. This project follows
 - Immich metadata ingestion now clears cached thumbnail and duplicate-group
   fields when Immich explicitly returns `null`, preventing stale grouping evidence.
   Fields absent from a partial response still preserve their cached values.
+
+## 1.2.4 - 2026-11-24
+
+This patch makes missing Immich API-key permissions visible on the home page
+and aligns release checks with the Node.js version in the container.
+
+### Changed
+
+- When the Immich API key lacks permissions Pictaria needs, the home page now
+  names them, for example "Immich key is missing permissions: tag.create,
+  tag.asset", so you can tell which boxes the key is missing without comparing
+  it to the setup guide. A long list wraps inside the status panel on a phone.
+  Other Immich statuses are unchanged (GitHub #88).
+- Release tests and publication checks now use Node.js 22.23.5, matching the
+  container exactly. Automated checks catch a mismatch between the selected
+  Node version and the image. The container runtime itself is unchanged.
+
+### Upgrade notes
+
+- No new setting, data-folder change, or persisted-state migration from
+  v1.2.3: persistent-state contract 15, Enrich schema 12, and settings version 7
+  are unchanged. Returning to v1.2.3 needs no snapshot restore if no other
+  migration occurred. Earlier releases still perform the v1.2 migrations
+  when upgrading directly to v1.2.4.
+- Node requirements, the Pictaria Frame protocol, and the Immich compatibility
+  floor are unchanged. No Immich or Pictaria Frame upgrade is required.
+- After updating, restart the container and confirm it stays healthy. See
+  [Upgrading](docs/UPGRADING.md#upgrading-to-v124).
 
 ## 1.2.3 - 2026-11-19
 
